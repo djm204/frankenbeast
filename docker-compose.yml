@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # ChromaDB — vector store for franken-brain episodic memory
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - '8000:8000'
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v1/heartbeat']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Grafana — dashboards for observability
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    depends_on:
+      - tempo
+
+  # Tempo — distributed tracing backend for franken-observer
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - '3200:3200'   # Tempo query API
+      - '4317:4317'   # OTLP gRPC
+      - '4318:4318'   # OTLP HTTP
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - tempo-data:/tmp/tempo
+
+  # Frankenfirewall — guardrails-as-a-service proxy
+  firewall:
+    build:
+      context: ./frankenfirewall
+      dockerfile: Dockerfile
+    ports:
+      - '9090:9090'
+    environment:
+      - PORT=9090
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9090/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  chromadb-data:
+  grafana-data:
+  tempo-data:
