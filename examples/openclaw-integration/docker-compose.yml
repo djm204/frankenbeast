@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  firewall:
+    build: ../../frankenfirewall
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - FIREWALL_PORT=3000
+    volumes:
+      - ./guardrails.config.json:/app/guardrails.config.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  openclaw:
+    image: your-openclaw-image:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - LLM_PROXY_URL=http://firewall:3000/v1/chat/completions
+    depends_on:
+      firewall:
+        condition: service_healthy
