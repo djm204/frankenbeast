@@ -1,0 +1,26 @@
+{
+  "name": "frankenbeast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic guardrails framework for AI agents",
+  "type": "module",
+  "scripts": {
+    "build": "for d in franken-types franken-brain franken-critique franken-governor franken-heartbeat franken-observer franken-planner franken-skills frankenfirewall franken-orchestrator; do echo \"Building $d...\" && cd $d && npm run build && cd ..; done",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:all": "for d in franken-types franken-brain franken-critique franken-governor franken-heartbeat franken-observer franken-planner franken-skills frankenfirewall franken-orchestrator; do echo \"Testing $d...\" && cd $d && npm test && cd ..; done && vitest run"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "better-sqlite3": "^12.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

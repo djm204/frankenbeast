@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "@franken/firewall": ["./frankenfirewall/src/index.ts"],
+      "@franken/skills": ["./franken-skills/src/index.ts"],
+      "franken-brain": ["./franken-brain/src/index.ts"],
+      "franken-planner": ["./franken-planner/src/index.ts"],
+      "@frankenbeast/observer": ["./franken-observer/src/index.ts"],
+      "@franken/critique": ["./franken-critique/src/index.ts"],
+      "@franken/governor": ["./franken-governor/src/index.ts"],
+      "franken-heartbeat": ["./franken-heartbeat/src/index.ts"],
+      "@franken/types": ["./franken-types/src/index.ts"],
+      "franken-orchestrator": ["./franken-orchestrator/src/index.ts"]
+    }
+  },
+  "include": [],
+  "exclude": ["node_modules"]
+}
