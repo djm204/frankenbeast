@@ -74,7 +74,7 @@ Each iteration is a **fresh Claude context** (new `claude --print` process). Sel
 ## Success Criteria
 
 - [ ] `build-runner.ts` is a standalone TypeScript script runnable via `npx tsx plan-2026-03-05/build-runner.ts`
-- [ ] Accepts CLI flags: `--reset` (clear checkpoint + DB), `--budget <usd>` (default: $10), `--port <n>` (trace viewer port, default: 4040), `--no-viewer` (skip trace server), `--max-iterations <n>` (default: 10 per loop)
+- [ ] Accepts CLI flags: `--reset` (clear checkpoint + DB), `--budget <usd>` (default: $10), `--port <n>` (trace viewer port, default: 4040), `--no-viewer` (skip trace server), `--max-iterations <n>` (default: 10 per loop), `--verbose` (show debug-level logs on console)
 - [ ] Creates a root trace: `TraceContext.createTrace('RALPH Build: close-execution-gap')`
 - [ ] For each chunk file (sorted): creates a parent span `chunk:<chunk_id>`
 - [ ] **Ralph loop for impl**: runs `claude --print` with the SAME prompt repeatedly until `<promise>IMPL_<CHUNK_ID>_DONE</promise>` detected in stdout
@@ -84,8 +84,8 @@ Each iteration is a **fresh Claude context** (new `claude --print` process). Sel
 - [ ] Max iterations per loop (default: 10) — if promise not found after max iterations, fail the stage
 - [ ] Captures Claude's stdout/stderr and estimates token usage from output character count (rough heuristic: ~4 chars per token)
 - [ ] `SpanLifecycle.recordTokenUsage()` called after each iteration with estimated tokens
-- [ ] `TokenCounter` accumulates across all iterations and chunks — logged after each chunk
-- [ ] `CostCalculator` computes running cost — logged after each chunk
+- [ ] `TokenCounter` accumulates across all iterations and chunks — logged after each chunk (per-iteration with `--verbose`)
+- [ ] `CostCalculator` computes running cost — logged after each chunk (per-iteration with `--verbose`)
 - [ ] `CircuitBreaker` checked after each iteration — if budget exceeded, stops build gracefully
 - [ ] `LoopDetector` tracks iteration span names — detects if same iteration pattern repeats without progress
 - [ ] `SQLiteAdapter` persists trace to `plan-2026-03-05/build-traces.db` after each chunk
@@ -176,9 +176,22 @@ npx tsx plan-2026-03-05/build-runner.ts --help
 - Stop server on build completion or SIGINT
 
 ### Logging
-- Use console output with prefixes matching the bash version: `[beast]`, `[beast:debug]`, `[beast:warn]`, `[beast:error]`
-- Log to both console and `plan-2026-03-05/build.log`
-- Log after each chunk: chunk ID, status, tokens used, cost, duration
+- All logs go to both console and `plan-2026-03-05/build.log`
+- Use prefixes: `[beast]` (info), `[beast:debug]` (debug), `[beast:warn]`, `[beast:error]`
+- **Default (info level):** chunk start/end, phase transitions (impl→harden→merge), promise detected, rate limit events, budget warnings (50%/75%/90%), final summary
+- **`--verbose` (debug level):** additionally shows per-iteration token estimates, running cost after every iteration, git commands, checkpoint writes, observer span details, Claude stdout streaming
+- Info-level examples:
+  - `[beast] chunk 03_execution_logic: starting impl loop (max 10 iters)`
+  - `[beast] impl:03_execution_logic iter 2/10 — promise detected`
+  - `[beast:warn] Rate limited. Reset in 60s. Sleeping until 2026-03-05T02:15:00...`
+  - `[beast] chunk 03_execution_logic: PASS — 3 iters, ~12k tokens, $0.42, 4m32s`
+- Debug-level examples (`--verbose`):
+  - `[beast:debug] impl:03_execution_logic iter 1/10 — exit code 0, no promise, duration: 87s`
+  - `[beast:debug] tokens this iter: ~3200 prompt, ~1800 completion`
+  - `[beast:debug] running cost: $0.42 / $10.00`
+  - `[beast:debug] git checkout -b feat/03_execution_logic`
+  - `[beast:debug] checkpoint saved: 03_execution_logic:impl_done`
+- Log final summary as a table: per-chunk breakdown (status, iters, tokens, cost, duration) + totals
 
 ### Dependencies
 - Import from `@frankenbeast/observer` (already installed as gitlink)
