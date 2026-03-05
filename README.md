@@ -1,5 +1,9 @@
 # Frankenbeast
 
+<p align="center">
+  <img src="assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
+</p>
+
 **Deterministic guardrails for AI agents.**
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
@@ -49,6 +53,7 @@ User Input
 | 08 | [franken-heartbeat](https://github.com/djm204/franken-heartbeat) | Proactive reflection — scheduled pulse checks, self-improvement task injection. |
 | — | [franken-types](https://github.com/djm204/franken-types) | Shared type definitions — TaskId, Severity, Result, RationaleBlock, TokenSpend. |
 | — | [franken-orchestrator](https://github.com/djm204/franken-orchestrator) | The Beast Loop — wires all modules into a 4-phase agent pipeline with circuit breakers. |
+| — | [franken-mcp](https://github.com/djm204/franken-mcp) | MCP (Model Context Protocol) server — tool discovery, constraint resolution, JSON-RPC transport. |
 
 ### Core Principles
 
@@ -222,6 +227,45 @@ Your Agent → Frankenbeast Firewall Proxy → LLM Provider
 
 Safety constraints live in the proxy pipeline, not in the agent's prompt — so they survive context-window compression. See [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) and the [OpenClaw integration example](examples/openclaw-integration/).
 
+## Examples
+
+The [examples/](examples/) directory contains working integrations organized by complexity:
+
+**Quickstart** — minimal hello-world for each provider:
+- [claude-hello](examples/quickstart/claude-hello/) — Anthropic Claude via `@anthropic-ai/sdk`
+- [openai-hello](examples/quickstart/openai-hello/) — OpenAI via `openai` SDK
+- [ollama-hello](examples/quickstart/ollama-hello/) — Local Ollama models
+
+**Patterns** — production-ready integration patterns:
+- [cost-aware-routing](examples/patterns/cost-aware-routing/) — complexity-based provider selection
+- [multi-provider-fallback](examples/patterns/multi-provider-fallback/) — automatic failover between providers
+- [tool-calling](examples/patterns/tool-calling/) — structured tool use with validation
+- [local-model-gallery](examples/patterns/local-model-gallery/) — running local models through the firewall
+
+**Scenarios** — complete agent setups:
+- [code-review-agent](examples/scenarios/code-review-agent/) — automated code review with HITL gates
+- [research-agent-hitl](examples/scenarios/research-agent-hitl/) — research agent with human approval checkpoints
+- [privacy-first-local](examples/scenarios/privacy-first-local/) — fully local pipeline with PII masking
+
+## RALPH Loop Build System
+
+Frankenbeast includes an observer-powered autonomous build runner based on the [Ralph Wiggum technique](https://ghuntley.com/ralph/) — iterative AI loops that process chunk files with deterministic completion detection.
+
+```bash
+# Run a plan's chunk files autonomously
+./plan-beast-runner/run-build.sh feat/my-feature --budget 10 --verbose
+```
+
+Features:
+- **Observer tracing** — TraceContext spans per iteration, TokenCounter + CostCalculator per chunk
+- **Budget enforcement** — CircuitBreaker stops execution when spend exceeds limit
+- **Loop detection** — LoopDetector identifies stuck sessions
+- **Checkpoint/resume** — crash recovery via checkpoint file
+- **Rate limit handling** — automatic provider fallback (Claude ↔ Codex)
+- **Git isolation** — per-chunk branches, auto-commit, merge back to base
+
+See [docs/beast-loop-explained.md](docs/beast-loop-explained.md) for the full iteration mechanics.
+
 ## Project Status
 
 | Phase | Description | Status |
@@ -238,10 +282,9 @@ Safety constraints live in the proxy pipeline, not in the agent's prompt — so 
 
 See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
 
-### Known Limitations
+### In Progress
 
-- **Orchestrator execution is stub-level** — `executeTask()` records success without invoking a real skill. Requires concrete skill implementations to wire.
-- **CLI requires `--dry-run`** — no concrete module implementations wired for live execution yet.
+- **CLI skill execution** — integrating the RALPH loop build runner into the Beast Loop as a first-class `executionType: 'cli'` skill. This enables BeastLoop to spawn CLI tools (Claude, Codex) with observer-powered tracing, budget enforcement, and git branch isolation. See [plan-beast-runner/](plan-beast-runner/) for the implementation chunks.
 
 ## Development
 
@@ -270,22 +313,30 @@ All modules follow the same patterns:
 
 ```
 frankenbeast/
-├── README.md                    # This file
+├── README.md
 ├── package.json                 # Root build/test scripts
 ├── docker-compose.yml           # Local dev stack (ChromaDB, Grafana, Tempo)
 ├── frankenbeast.config.example.json
+├── assets/img/                  # Project logos
 ├── docs/
 │   ├── ARCHITECTURE.md          # Module interconnection diagram (Mermaid)
 │   ├── PROGRESS.md              # PR-by-PR implementation tracker
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
+│   ├── beast-loop-explained.md  # Iteration mechanics deep dive
 │   ├── adr/                     # Architecture Decision Records (6)
 │   ├── guides/                  # Quickstart, add-provider, wrap-agent
-│   └── plain-language-overview.md
+│   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
-│   ├── helpers/                 # Shared stubs and test factories
-│   └── integration/             # Cross-module integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
-├── examples/                    # OpenClaw integration example
+├── examples/
+│   ├── quickstart/              # claude-hello, openai-hello, ollama-hello
+│   ├── patterns/                # cost-aware-routing, tool-calling, fallback
+│   ├── scenarios/               # code-review-agent, research-agent-hitl
+│   └── openclaw-integration/    # External agent wrapping example
+├── plan-beast-runner/           # RALPH loop build chunks + runner
+│   ├── build-runner.ts          # Observer-powered TypeScript build runner
+│   ├── run-build.sh             # Entry point for autonomous execution
+│   └── 01-08_*.md               # Implementation chunk files
 ├── frankenfirewall/             # MOD-01: Firewall/Guardrails
 ├── franken-skills/              # MOD-02: Skill Registry
 ├── franken-brain/               # MOD-03: Memory Systems
@@ -295,17 +346,20 @@ frankenbeast/
 ├── franken-governor/            # MOD-07: HITL & Governance
 ├── franken-heartbeat/           # MOD-08: Proactive Reflection
 ├── franken-types/               # Shared type definitions
-└── franken-orchestrator/        # The Beast Loop
+├── franken-orchestrator/        # The Beast Loop
+└── franken-mcp/                 # MCP server (Model Context Protocol)
 ```
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — system overview with Mermaid diagrams
+- [Beast Loop Explained](docs/beast-loop-explained.md) — the 5 interlocking loops and their mechanics
 - [Quickstart Guide](docs/guides/quickstart.md) — get running in 7 steps
 - [Add an LLM Provider](docs/guides/add-llm-provider.md) — implement `IAdapter` in 4 steps
 - [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
 - [ADRs](docs/adr/) — architectural decisions and rationale
+- [Design Plans](docs/plans/) — design docs and implementation plans
 
 ## License
 
