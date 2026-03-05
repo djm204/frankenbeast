@@ -49,3 +49,5 @@ cd franken-orchestrator && npx vitest run tests/unit/skills/cli-skill-executor.t
 - Token estimation: delegate to RalphLoop result (already computed in chunk 02)
 - The `chunkId` for git isolation should come from the skillId (e.g., skillId `'cli:01_types'` → chunkId `'01_types'`)
 - If `git.merge()` fails (merge conflict), still return `SkillResult` with the output but mark as incomplete
+- This class is the productized version of `plan-2026-03-05/build-runner.ts` — it must support the same observer features: TraceContext spans per iteration, TokenCounter + CostCalculator per chunk, CircuitBreaker for budget, LoopDetector for stuck loops, and per-chunk cost snapshots (diff pre/post tokens)
+- Accept `planDir` and `baseBranch` as config — chunk branches derive as `feat/{chunkId}` from the base branch (matching the build-runner.ts pattern)

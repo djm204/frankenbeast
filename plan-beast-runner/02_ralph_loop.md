@@ -29,6 +29,9 @@ Implement the RalphLoop class — the core loop that spawns a CLI tool (claude/c
 - [ ] Detects `<promise>TAG</promise>` in stdout via regex
 - [ ] Returns `completed: true` when promise detected, `completed: false` when max iterations hit
 - [ ] Estimates tokens: `stdout.length / 4` for claude, `stdout.length / 16` for codex
+- [ ] Rate limit detection: pattern matching on stderr/stdout for 429, "rate limit", "too many requests", etc. (port from build-runner.ts line 166-171)
+- [ ] Rate-limited iterations don't count against maxIterations (decrement counter)
+- [ ] Provider fallback: on rate limit, switch to alternate provider if available (callback `onRateLimit?: (provider: string) => string | undefined` on config)
 - [ ] All tests pass
 
 ## Verification Command
