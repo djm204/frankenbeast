@@ -1,0 +1,11 @@
+{
+  "name": "@franken/example-custom-adapter",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/main.ts",
+    "test": "npx vitest run src/groq-adapter.test.ts"
+  },
+  "dependencies": {}
+}
