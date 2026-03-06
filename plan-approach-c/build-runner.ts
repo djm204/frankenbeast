@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     trace, counter, costCalc, breaker, loopDetector: loopDet,
     startSpan: TraceContext.startSpan, endSpan: TraceContext.endSpan,
     recordTokenUsage: SpanLifecycle.recordTokenUsage, setMetadata: SpanLifecycle.setMetadata,
-  } as never);
+  } as never, undefined, logger);
 
   const finalize = async () => { TraceContext.endTrace(trace); await sqlite.flush(trace); if (server) await server.stop(); sqlite.close(); for (const e of logger.getLogEntries()) appendFileSync(logFile, e + '\n'); };
 
