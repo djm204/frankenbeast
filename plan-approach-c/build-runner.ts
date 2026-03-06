@@ -4,7 +4,7 @@
  * Constructs BeastLoopDeps and calls BeastLoop.run().
  */
 import { resolve } from 'node:path';
-import { mkdirSync, existsSync, unlinkSync, appendFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, unlinkSync, appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import {
   BeastLoop, BeastLogger, BANNER, ANSI, budgetBar, statusBadge, logHeader,
@@ -72,7 +72,18 @@ const stubPlanner: IPlannerModule = { createPlan: async () => { throw new Error(
 const stubCritique: ICritiqueModule = { reviewPlan: async () => ({ verdict: 'pass', findings: [], score: 1.0 }) };
 const stubGovernor: IGovernorModule = { requestApproval: async () => ({ decision: 'approved' }) };
 const stubHeartbeat: IHeartbeatModule = { pulse: async () => ({ improvements: [], techDebt: [], summary: '' }) };
-const stubSkills: ISkillsModule = { hasSkill: () => false, getAvailableSkills: () => [], execute: async () => { throw new Error('No skills in CLI mode'); } };
+const stubSkills: ISkillsModule = {
+  hasSkill: (id: string) => id.startsWith('cli:'),
+  getAvailableSkills: () => {
+    const chunkDir = resolve(process.argv.find((_, i, a) => a[i - 1] === '--plan-dir') ?? '.');
+    try {
+      return readdirSync(chunkDir)
+        .filter((f) => f.endsWith('.md') && !f.startsWith('00_') && /^\d{2}/.test(f))
+        .map((f) => ({ id: `cli:${f.replace('.md', '')}`, name: f.replace('.md', ''), executionType: 'cli' as const, requiresHitl: false }));
+    } catch { return []; }
+  },
+  execute: async () => { throw new Error('No skills in CLI mode'); },
+};
 
 // ── Summary Display ──
 function displaySummary(result: BeastResult, budget: number): void {
@@ -83,11 +94,20 @@ function displaySummary(result: BeastResult, budget: number): void {
   console.log(`  ${A.dim}Status:${A.reset}    ${statusBadge(result.status === 'completed')}`);
   if (result.taskResults?.length) {
     console.log(`\n  ${A.dim}Chunks:${A.reset}`);
-    for (const t of result.taskResults) console.log(`    ${statusBadge(t.status === 'success')} ${A.bold}${t.taskId}${A.reset}`);
+    for (const t of result.taskResults) {
+      if (t.status === 'skipped') {
+        console.log(`    ${A.dim} SKIP ${A.reset} ${A.dim}${t.taskId}${A.reset}`);
+      } else {
+        console.log(`    ${statusBadge(t.status === 'success')} ${A.bold}${t.taskId}${A.reset}`);
+      }
+    }
   }
   const passed = result.taskResults?.filter(t => t.status === 'success').length ?? 0;
-  const failed = result.taskResults?.filter(t => t.status !== 'success').length ?? 0;
-  console.log(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${passed} passed, ${failed} failed${A.reset}\n`);
+  const skipped = result.taskResults?.filter(t => t.status === 'skipped').length ?? 0;
+  const failed = result.taskResults?.filter(t => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
+  const parts = [`${passed} passed`, `${failed} failed`];
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  console.log(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
 }
 
 // ── Main ──
