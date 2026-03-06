@@ -39,6 +39,61 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 **Resilience**: Context serialization to disk, graceful SIGTERM/SIGINT handling, module health checks on startup.
 
+### CLI Skill Execution Path
+
+The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (e.g., `claude --print`, `codex exec`) as child processes. This absorbs the RALPH loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
+
+**Components:**
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs ralph loop, returns `SkillResult`. |
+| `RalphLoop` | `franken-orchestrator/src/skills/ralph-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
+| `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
+
+**Execution flow:**
+
+```mermaid
+sequenceDiagram
+    participant BL as BeastLoop
+    participant ET as executeTask()
+    participant CSE as CliSkillExecutor
+    participant RL as RalphLoop
+    participant CLI as CLI Process (claude/codex)
+    participant GBI as GitBranchIsolator
+    participant OB as Observer (TraceContext)
+
+    BL->>ET: task with requiredSkills: ['cli:claude']
+    ET->>CSE: skills.execute(skillInput)
+    CSE->>GBI: isolate(chunkId, baseBranch)
+    GBI-->>CSE: branch created
+    CSE->>OB: startSpan('cli-skill')
+
+    loop Until <promise>TAG</promise> or maxIters
+        CSE->>RL: run(prompt, promiseTag, maxIters)
+        RL->>OB: startSpan('ralph-iteration')
+        RL->>CLI: spawn claude --print (chunk prompt)
+        CLI-->>RL: stdout stream
+        RL->>OB: recordTokenUsage()
+        RL->>OB: circuitBreaker.check()
+        alt Promise detected
+            RL-->>CSE: success + output
+        else Max iterations
+            RL-->>CSE: failure
+        end
+    end
+
+    CSE->>GBI: merge()
+    GBI-->>CSE: merged to base
+    CSE->>OB: endSpan()
+    CSE-->>ET: SkillResult { output, tokensUsed }
+    ET-->>BL: TaskOutcome
+```
+
+**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures.
+
+**Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
+
 ## HTTP Services (Hono)
 
 Three modules expose HTTP servers:

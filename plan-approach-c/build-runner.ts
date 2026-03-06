@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
 /**
- * Frankenbeast RALPH Loop — Observer-Powered Build Runner
+ * Approach C Build Runner — RALPH Loop Autonomous Execution
  *
- * Processes chunk files 01-12 via Ralph loops (same prompt repeated until
+ * Processes chunk files via Ralph loops (same prompt repeated until
  * <promise>TAG</promise> detected). Uses @frankenbeast/observer for token
  * tracking, budget enforcement, loop detection, and trace persistence.
  */
@@ -39,6 +39,8 @@ interface CliArgs {
   help: boolean;
   planDir: string;
   baseBranch: string;
+  noPr: boolean;
+  prBase: string;
 }
 
 interface RalphLoopResult {
@@ -60,17 +62,15 @@ interface ChunkResult {
 
 // ── Constants ──
 
-const SELF_DIR = resolve(import.meta.dirname || __dirname, '.');
-
-let PLAN_DIR = SELF_DIR;
+let PLAN_DIR = resolve(import.meta.dirname || __dirname, '.');
 let BUILD_DIR = resolve(PLAN_DIR, '.build');
 let CHECKPOINT_FILE = resolve(BUILD_DIR, '.checkpoint');
 let LOG_FILE = resolve(BUILD_DIR, 'build.log');
 let DB_FILE = resolve(BUILD_DIR, 'build-traces.db');
-let BASE_BRANCH = 'feat/close-execution-gap';
+let BASE_BRANCH = 'feat/approach-c-pipeline';
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_CODEX_MODEL = 'codex';
-const ITERATION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const ITERATION_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_CODEX_CMD = 'codex';
 const DEFAULT_CODEX_ARGS: string[] = ['exec', '--full-auto', '--json', '--color', 'never'];
 
@@ -89,8 +89,10 @@ function parseArgs(argv: string[]): CliArgs {
     codexArgs: [...DEFAULT_CODEX_ARGS],
     verbose: false,
     help: false,
-    planDir: SELF_DIR,
+    planDir: PLAN_DIR,
     baseBranch: '',
+    noPr: false,
+    prBase: 'main',
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -117,6 +119,8 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       }
       case '--verbose': args.verbose = true; break;
+      case '--no-pr': args.noPr = true; break;
+      case '--pr-base': args.prBase = argv[++i]; break;
       case '--help': case '-h': args.help = true; break;
     }
   }
@@ -125,11 +129,13 @@ function parseArgs(argv: string[]): CliArgs {
 
 function showHelp(): void {
   console.log(`
-Frankenbeast RALPH Build Runner — Observer-Powered
+Approach C Build Runner — Observer-Powered RALPH Loop
 
-Usage: npx tsx plan-2026-03-05/build-runner.ts [options]
+Usage: npx tsx plan-approach-c/build-runner.ts [options]
 
 Options:
+  --plan-dir <dir>     Directory containing chunk .md files (default: script dir)
+  --base-branch <name> Git base branch name (REQUIRED)
   --reset              Clear checkpoint, traces DB, and start fresh
   --budget <usd>       Budget limit in USD (default: 10)
   --port <n>           Trace viewer port (default: 4040)
@@ -139,21 +145,10 @@ Options:
   --claude-cmd <cmd>   Claude CLI command (default: claude)
   --codex-cmd <cmd>    Codex CLI command (default: codex)
   --codex-args "<args>" Extra codex args (default: "exec --full-auto --json --color never")
-  --plan-dir <dir>     Directory containing chunk .md files (default: script dir)
-  --base-branch <name> Git base branch name (REQUIRED). Chunk branches derive as feat/<chunkId>
-  --verbose            Show debug-level logs (per-iteration tokens, cost, git ops)
+  --no-pr              Skip PR creation after build
+  --pr-base <branch>   PR target branch (default: main)
+  --verbose            Show debug-level logs
   -h, --help           Show this help message
-
-The runner processes numbered chunk .md files from the plan directory using
-Ralph loops: same prompt fed to 'claude --print' repeatedly until a
-<promise>TAG</promise> is detected in stdout.
-
-Each chunk gets two loops:
-  1. Implementation: build the feature described in the chunk
-  2. Hardening: review, test, fix issues
-
-Observer tracks tokens, cost, and provides a live trace viewer at
-http://localhost:<port> (default 4040).
 `);
 }
 
@@ -173,11 +168,8 @@ const ANSI = {
   gray: '\x1b[90m',
   bgRed: '\x1b[41m',
   bgGreen: '\x1b[42m',
-  bgYellow: '\x1b[43m',
-  bgCyan: '\x1b[46m',
 } as const;
 
-// Strip ANSI codes for log file (plain text)
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
@@ -185,55 +177,27 @@ function stripAnsi(s: string): string {
 // ── Logging ──
 
 let verboseMode = false;
-
 type LogLevel = 'info' | 'debug' | 'warn' | 'error';
-
-const LEVEL_BADGE: Record<LogLevel, string> = {
-  debug: `${ANSI.gray}DEBUG${ANSI.reset}`,
-  info:  `${ANSI.cyan}${ANSI.bold} INFO${ANSI.reset}`,
-  warn:  `${ANSI.yellow}${ANSI.bold} WARN${ANSI.reset}`,
-  error: `${ANSI.red}${ANSI.bold}ERROR${ANSI.reset}`,
-};
-
-/** Highlight known service/tool patterns in verbose messages */
-function highlightServices(msg: string): string {
-  return msg
-    // Provider tags
-    .replace(/\[claude\]/g, `${ANSI.magenta}${ANSI.bold}[claude]${ANSI.reset}${ANSI.gray}`)
-    .replace(/\[codex\]/g, `${ANSI.blue}${ANSI.bold}[codex]${ANSI.reset}${ANSI.gray}`)
-    // Tool call arrows
-    .replace(/→ (\w+):/g, `${ANSI.cyan}→${ANSI.reset} ${ANSI.cyan}$1${ANSI.reset}:`)
-    // Result arrows
-    .replace(/← result:/g, `${ANSI.green}← result:${ANSI.reset}`)
-    // Git commands
-    .replace(/^(git .+)$/gm, `${ANSI.green}$1${ANSI.reset}`);
-}
 
 function log(level: LogLevel, msg: string): void {
   if (level === 'debug' && !verboseMode) return;
-
   const now = new Date();
   const ts = `${ANSI.gray}${now.toTimeString().slice(0, 8)}${ANSI.reset}`;
-  const badge = LEVEL_BADGE[level];
-
+  const badge: Record<LogLevel, string> = {
+    debug: `${ANSI.gray}DEBUG${ANSI.reset}`,
+    info:  `${ANSI.cyan}${ANSI.bold} INFO${ANSI.reset}`,
+    warn:  `${ANSI.yellow}${ANSI.bold} WARN${ANSI.reset}`,
+    error: `${ANSI.red}${ANSI.bold}ERROR${ANSI.reset}`,
+  };
   let colored = msg;
-  if (level === 'debug') {
-    colored = `${ANSI.gray}${highlightServices(msg)}${ANSI.reset}`;
-  } else if (level === 'warn') {
-    colored = `${ANSI.yellow}${msg}${ANSI.reset}`;
-  } else if (level === 'error') {
-    colored = `${ANSI.red}${msg}${ANSI.reset}`;
-  }
-
-  const display = `${ts} ${badge} ${colored}`;
-  console.log(display);
-
-  // Plain-text for log file
+  if (level === 'debug') colored = `${ANSI.gray}${msg}${ANSI.reset}`;
+  else if (level === 'warn') colored = `${ANSI.yellow}${msg}${ANSI.reset}`;
+  else if (level === 'error') colored = `${ANSI.red}${msg}${ANSI.reset}`;
+  console.log(`${ts} ${badge[level]} ${colored}`);
   const plain = `[${now.toISOString().replace('T', ' ').slice(0, 19)}] [${level.toUpperCase().padStart(5)}] ${msg}`;
   try { appendFileSync(LOG_FILE, plain + '\n'); } catch {}
 }
 
-/** Print a boxed header (no timestamp) */
 function logHeader(title: string): void {
   const w = 60;
   const pad = Math.max(0, w - title.length - 4);
@@ -242,30 +206,20 @@ function logHeader(title: string): void {
   const line = `${ANSI.cyan}${'─'.repeat(w)}${ANSI.reset}`;
   const mid = `${ANSI.cyan}│${ANSI.reset} ${' '.repeat(left)}${ANSI.bold}${ANSI.white}${title}${ANSI.reset}${' '.repeat(right)} ${ANSI.cyan}│${ANSI.reset}`;
   console.log(`\n${line}\n${mid}\n${line}`);
-
-  try {
-    const plain = `\n${'─'.repeat(w)}\n│ ${' '.repeat(left)}${title}${' '.repeat(right)} │\n${'─'.repeat(w)}`;
-    appendFileSync(LOG_FILE, plain + '\n');
-  } catch {}
+  try { appendFileSync(LOG_FILE, `\n${'─'.repeat(w)}\n│ ${' '.repeat(left)}${title}${' '.repeat(right)} │\n${'─'.repeat(w)}\n`); } catch {}
 }
 
-/** Format a budget bar: [$$$$$-----] 50% */
 function budgetBar(spent: number, limit: number): string {
   const pct = Math.min(spent / limit, 1);
   const width = 20;
   const filled = Math.round(pct * width);
   const empty = width - filled;
-  const pctNum = Math.round(pct * 100);
-
   let barColor = ANSI.green;
+  if (pct >= 0.75) barColor = ANSI.yellow;
   if (pct >= 0.9) barColor = ANSI.red;
-  else if (pct >= 0.75) barColor = ANSI.yellow;
-  else if (pct >= 0.5) barColor = ANSI.yellow;
-
-  return `${barColor}[${'█'.repeat(filled)}${ANSI.gray}${'░'.repeat(empty)}${barColor}]${ANSI.reset} ${pctNum}% ($${spent.toFixed(2)}/$${limit.toFixed(0)})`;
+  return `${barColor}[${'█'.repeat(filled)}${ANSI.gray}${'░'.repeat(empty)}${barColor}]${ANSI.reset} ${Math.round(pct * 100)}% ($${spent.toFixed(2)}/$${limit.toFixed(0)})`;
 }
 
-/** Color PASS/FAIL status */
 function statusBadge(pass: boolean): string {
   return pass
     ? `${ANSI.bgGreen}${ANSI.bold} PASS ${ANSI.reset}`
@@ -282,15 +236,11 @@ function isRateLimited(stderr: string, stdout: string, exitCode: number): boolea
 }
 
 function parseResetSeconds(stderr: string): number {
-  // Look for "Retry-After: <N>" or "retry after <N> seconds"
   const retryAfterMatch = stderr.match(/retry.?after:?\s*(\d+)/i);
   if (retryAfterMatch) return parseInt(retryAfterMatch[1], 10);
-
-  // Look for "try again in <N> minutes"
   const minutesMatch = stderr.match(/try again in (\d+) minute/i);
   if (minutesMatch) return parseInt(minutesMatch[1], 10) * 60;
-
-  return 60; // default fallback
+  return 60;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -302,16 +252,17 @@ function sleep(ms: number): Promise<void> {
 function readCheckpoint(): Set<string> {
   if (!existsSync(CHECKPOINT_FILE)) return new Set();
   return new Set(
-    readFileSync(CHECKPOINT_FILE, 'utf-8')
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean)
+    readFileSync(CHECKPOINT_FILE, 'utf-8').split('\n').map(l => l.trim()).filter(Boolean)
   );
 }
 
 function writeCheckpoint(entry: string): void {
   appendFileSync(CHECKPOINT_FILE, entry + '\n');
   log('debug', `Checkpoint saved: ${entry}`);
+}
+
+function recordCommitCheckpoint(chunkId: string, stage: string, iteration: number, commitHash: string): void {
+  writeCheckpoint(`${chunkId}:${stage}:iter_${iteration}:commit_${commitHash}`);
 }
 
 function isChunkDone(checkpoint: Set<string>, chunkId: string): boolean {
@@ -321,10 +272,9 @@ function isChunkDone(checkpoint: Set<string>, chunkId: string): boolean {
 // ── Chunk Discovery ──
 
 function discoverChunks(): string[] {
-  const files = readdirSync(PLAN_DIR)
+  return readdirSync(PLAN_DIR)
     .filter(f => f.endsWith('.md') && !f.startsWith('00_') && /^\d{2}/.test(f))
     .sort();
-  return files;
 }
 
 // ── Git Operations ──
@@ -334,11 +284,10 @@ function git(cmd: string): string {
   return execSync(`git ${cmd}`, { encoding: 'utf-8', cwd: PLAN_DIR + '/..' }).trim();
 }
 
-// ── Spawn Claude (stream-json for real-time visibility) ──
+// ── Spawn Claude ──
 
 function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
-    // Strip CLAUDECODE env var to prevent nested-session detection
     const env = { ...process.env };
     delete env['CLAUDECODE'];
 
@@ -354,62 +303,43 @@ function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ s
       env,
     });
 
-    let fullText = '';  // accumulated text for promise detection
+    let fullText = '';
     let stderr = '';
     let lineBuffer = '';
 
     child.stdout.on('data', (chunk: Buffer) => {
       const raw = chunk.toString();
       lineBuffer += raw;
-
-      // Process complete JSON lines
       const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop() ?? '';  // keep incomplete line in buffer
-
+      lineBuffer = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
-
         try {
           const event = JSON.parse(line);
-          // Extract text content from assistant messages
           if (event.type === 'assistant' && event.message?.content) {
             for (const block of event.message.content) {
               if (block.type === 'text' && block.text) {
                 fullText += block.text;
-                if (verboseMode) {
-                  log('debug', `[claude] ${block.text.slice(0, 200)}${block.text.length > 200 ? '...' : ''}`);
-                }
+                if (verboseMode) log('debug', `[claude] ${block.text.slice(0, 200)}${block.text.length > 200 ? '...' : ''}`);
               }
               if (block.type === 'tool_use') {
-                const name = block.name ?? 'tool';
-                const inputPreview = JSON.stringify(block.input ?? {}).slice(0, 120);
-                log('debug', `  → ${name}: ${inputPreview}`);
+                log('debug', `  → ${block.name ?? 'tool'}: ${JSON.stringify(block.input ?? {}).slice(0, 120)}`);
               }
             }
           }
-          // Content block deltas (streaming text)
           if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
             fullText += event.delta.text;
           }
-          // Tool use events at top level
-          if (event.type === 'tool_use') {
-            const name = event.tool_use?.name ?? event.name ?? 'tool';
-            const inputPreview = JSON.stringify(event.tool_use?.input ?? event.input ?? {}).slice(0, 120);
-            log('debug', `  → ${name}: ${inputPreview}`);
-          }
-          // Result event
           if (event.type === 'result') {
             const resultText = event.result?.text ?? event.text ?? '';
             if (resultText) fullText += resultText;
             log('debug', `  ← result: ${resultText.slice(0, 200)}`);
           }
         } catch {
-          // Not valid JSON — treat as plain text
           fullText += line + '\n';
           if (verboseMode) process.stdout.write(line + '\n');
         }
       }
-
       try { appendFileSync(LOG_FILE, raw); } catch {}
     });
 
@@ -419,7 +349,6 @@ function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ s
       if (verboseMode) process.stderr.write(text);
     });
 
-    // Timeout
     const timer = setTimeout(() => {
       log('warn', `Iteration timed out after ${ITERATION_TIMEOUT_MS / 1000}s. Killing...`);
       child.kill('SIGTERM');
@@ -428,7 +357,6 @@ function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ s
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      // Process any remaining buffer
       if (lineBuffer.trim()) {
         try {
           const event = JSON.parse(lineBuffer);
@@ -439,7 +367,6 @@ function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ s
           fullText += lineBuffer;
         }
       }
-      // Always log stderr on failure for debugging
       if (code !== 0 && stderr.trim()) {
         log('error', `Claude stderr: ${stderr.trim().slice(0, 500)}`);
       }
@@ -453,78 +380,38 @@ function spawnClaude(prompt: string, maxTurns: number, cmd: string): Promise<{ s
   });
 }
 
+// ── Spawn Codex ──
+
 function spawnCodexOnce(
-  prompt: string,
-  cmd: string,
-  args: string[],
-  usePty: boolean,
+  prompt: string, cmd: string, args: string[], usePty: boolean,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
     const shellQuote = (value: string): string => {
       if (value.length === 0) return "''";
       return `'${value.replace(/'/g, `'\"'\"'`)}'`;
     };
-
     const spawnCmd = usePty ? 'script' : cmd;
     const spawnArgs = usePty
       ? ['-q', '-e', '-c', [cmd, ...args, prompt].map(shellQuote).join(' '), '/dev/null']
       : [...args, prompt];
-    const env = {
-      ...process.env,
-      TERM: process.env.TERM ?? 'dumb',
-      CI: process.env.CI ?? '1',
-      COLUMNS: process.env.COLUMNS ?? '120',
-      LINES: process.env.LINES ?? '40',
-    };
-
     const child = spawn(spawnCmd, spawnArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: PLAN_DIR + '/..',
-      env,
+      env: { ...process.env, TERM: process.env.TERM ?? 'dumb', CI: process.env.CI ?? '1', COLUMNS: process.env.COLUMNS ?? '120', LINES: process.env.LINES ?? '40' },
     });
 
     let stdout = '';
     let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { const t = chunk.toString(); stdout += t; if (verboseMode) process.stdout.write(t); try { appendFileSync(LOG_FILE, t); } catch {} });
+    child.stderr.on('data', (chunk: Buffer) => { const t = chunk.toString(); stderr += t; if (verboseMode) process.stderr.write(t); });
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stdout += text;
-      if (verboseMode) process.stdout.write(text);
-      try { appendFileSync(LOG_FILE, text); } catch {}
-    });
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      if (verboseMode) process.stderr.write(text);
-    });
-
-    const timer = setTimeout(() => {
-      log('warn', `Iteration timed out after ${ITERATION_TIMEOUT_MS / 1000}s. Killing...`);
-      child.kill('SIGTERM');
-      setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 5000);
-    }, ITERATION_TIMEOUT_MS);
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0 && stderr.trim()) {
-        log('error', `Codex stderr: ${stderr.trim().slice(0, 500)}`);
-      }
-      resolve({ stdout, stderr, exitCode: code ?? 1 });
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
+    const timer = setTimeout(() => { child.kill('SIGTERM'); setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 5000); }, ITERATION_TIMEOUT_MS);
+    child.on('close', (code) => { clearTimeout(timer); resolve({ stdout, stderr, exitCode: code ?? 1 }); });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
   });
 }
 
-async function spawnCodex(
-  prompt: string,
-  cmd: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function spawnCodex(prompt: string, cmd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const first = await spawnCodexOnce(prompt, cmd, args, false);
   if (/stdin is not a terminal/i.test(first.stderr)) {
     log('warn', 'Codex requires a TTY; retrying with PTY wrapper.');
@@ -533,21 +420,18 @@ async function spawnCodex(
   return first;
 }
 
+// ── Change Detection ──
+
 function hasMeaningfulChange(previousHead: string): boolean {
   const status = git('status --porcelain');
   if (status.length > 0) return true;
-  const head = git('rev-parse HEAD');
-  return head !== previousHead;
+  return git('rev-parse HEAD') !== previousHead;
 }
 
-/** Check if the current branch has ANY commits vs BASE_BRANCH (catches impl commits during harden) */
 function hasBranchProgress(): boolean {
   try {
-    const branchCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
-    return branchCommits > 0;
-  } catch {
-    return false;
-  }
+    return (parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0) > 0;
+  } catch { return false; }
 }
 
 function autoCommitIfDirty(chunkId: string, stage: string, iteration: number): boolean {
@@ -556,11 +440,90 @@ function autoCommitIfDirty(chunkId: string, stage: string, iteration: number): b
   try {
     git('add -A');
     git(`commit -m "auto: ${stage} ${chunkId} iter ${iteration}"`);
+    const commitHash = git('rev-parse --short HEAD');
     log('info', `Auto-committed dirty files for ${stage}:${chunkId} iter ${iteration}`);
+    recordCommitCheckpoint(chunkId, stage, iteration, commitHash);
     return true;
   } catch (err) {
     log('warn', `Auto-commit failed: ${err}`);
     return false;
+  }
+}
+
+// ── PR Creation ──
+
+function createPr(args: CliArgs, results: ChunkResult[]): void {
+  if (args.noPr) {
+    log('info', 'Skipping PR creation (--no-pr)');
+    return;
+  }
+
+  const allPassed = results.every(r => r.merged);
+  if (!allPassed) {
+    log('warn', 'Skipping PR creation — not all chunks passed');
+    return;
+  }
+
+  try {
+    execSync('which gh', { stdio: 'ignore' });
+  } catch {
+    log('warn', 'gh CLI not found — skipping PR creation');
+    return;
+  }
+
+  const currentBranch = git('branch --show-current');
+
+  // Check if PR already exists
+  try {
+    const existing = execSync(`gh pr list --head ${currentBranch} --json number --jq length`, { encoding: 'utf-8', cwd: PLAN_DIR + '/..' }).trim();
+    if (existing !== '0') {
+      log('info', `PR already exists for branch ${currentBranch}`);
+      return;
+    }
+  } catch {
+    log('warn', 'Could not check for existing PR');
+  }
+
+  // Push branch
+  try {
+    git(`push -u origin ${currentBranch}`);
+  } catch (err) {
+    log('error', `Failed to push branch: ${err}`);
+    return;
+  }
+
+  // Build PR body
+  const passed = results.filter(r => r.merged).length;
+  const totalCost = results.reduce((s, r) => s + r.cost, 0);
+  const body = [
+    '## Summary',
+    '',
+    `${passed} chunks completed successfully.`,
+    '',
+    '## Chunks',
+    '',
+    '| Chunk | Status | Iterations | Cost |',
+    '|-------|--------|-----------|------|',
+    ...results.map(r => {
+      const iters = r.implResult.iterations + r.hardenResult.iterations;
+      return `| ${r.chunkId} | ${r.merged ? 'PASS' : 'FAIL'} | ${iters} | $${r.cost.toFixed(2)} |`;
+    }),
+    '',
+    `Total cost: $${totalCost.toFixed(2)}`,
+    '',
+    '---',
+    'Generated by RALPH Build Runner',
+  ].join('\n');
+
+  const title = `feat: ${currentBranch} — ${passed} chunks completed`;
+  try {
+    const prUrl = execSync(
+      `gh pr create --base "${args.prBase}" --title "${title.slice(0, 70)}" --body "$(cat <<'PREOF'\n${body}\nPREOF\n)"`,
+      { encoding: 'utf-8', cwd: PLAN_DIR + '/..' },
+    ).trim();
+    log('info', `PR created: ${prUrl}`);
+  } catch (err) {
+    log('error', `Failed to create PR: ${err}`);
   }
 }
 
@@ -588,7 +551,6 @@ async function runRalphLoop(
   let lastOutput = '';
   let rateLimitHits = 0;
   let budgetExceeded = false;
-  const availableProviders: Array<'claude' | 'codex'> = ['claude', 'codex'];
   const rateLimitedProviders = new Set<'claude' | 'codex'>();
   let activeProvider: 'claude' | 'codex' = provider;
 
@@ -602,7 +564,7 @@ async function runRalphLoop(
 
     iteration++;
 
-    // Pre-check budget before spawning provider
+    // Pre-check budget
     {
       const preEntries = counter.allModels().map(m => {
         const t = counter.totalsFor(m);
@@ -616,16 +578,14 @@ async function runRalphLoop(
       }
     }
 
-    const spanName = `${stage}:${chunkId}:iter-${iteration}`;
     const providerColor = activeProvider === 'claude' ? ANSI.magenta : ANSI.blue;
     log('info', `${ANSI.bold}${stage}:${chunkId}${ANSI.reset} iter ${ANSI.bold}${iteration}/${maxIterations}${ANSI.reset} starting... (${providerColor}${ANSI.bold}${activeProvider}${ANSI.reset})`);
 
-    const iterSpan = TraceContext.startSpan(trace, { name: spanName, parentSpanId: parentSpan.id });
+    const iterSpan = TraceContext.startSpan(trace, { name: `${stage}:${chunkId}:iter-${iteration}`, parentSpanId: parentSpan.id });
     const startTime = Date.now();
-
-    let result: { stdout: string; stderr: string; exitCode: number };
     const headBefore = git('rev-parse HEAD');
 
+    let result: { stdout: string; stderr: string; exitCode: number };
     try {
       if (activeProvider === 'claude') {
         result = await spawnClaude(prompt, maxTurns, claudeCmd);
@@ -634,7 +594,6 @@ async function runRalphLoop(
       }
     } catch (err) {
       log('error', `Provider process error: ${err}`);
-      SpanLifecycle.setMetadata(iterSpan, { error: String(err) });
       TraceContext.endSpan(iterSpan, { status: 'error', errorMessage: String(err) }, loopDetector);
       continue;
     }
@@ -647,19 +606,13 @@ async function runRalphLoop(
       autoCommitIfDirty(chunkId, stage, iteration);
     }
 
-    // Estimate tokens — codex --json output inflates estimates (~75% metadata)
+    // Estimate tokens
     const tokenDivisor = activeProvider === 'codex' ? 16 : 4;
     const estCompletionTokens = Math.ceil(result.stdout.length / tokenDivisor);
     const estPromptTokens = Math.ceil(prompt.length / 4);
     const modelName = activeProvider === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_CODEX_MODEL;
-    SpanLifecycle.recordTokenUsage(iterSpan, {
-      promptTokens: estPromptTokens,
-      completionTokens: estCompletionTokens,
-      model: modelName,
-    }, counter);
+    SpanLifecycle.recordTokenUsage(iterSpan, { promptTokens: estPromptTokens, completionTokens: estCompletionTokens, model: modelName }, counter);
 
-    // Cost check
-    const totals = counter.grandTotal();
     const costEntries = counter.allModels().map(m => {
       const t = counter.totalsFor(m);
       return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
@@ -699,50 +652,34 @@ async function runRalphLoop(
       rateLimitHits++;
       const resetSeconds = parseResetSeconds(result.stderr);
       const sleepMs = (resetSeconds + 180) * 1000;
-      const resumeAt = new Date(Date.now() + sleepMs).toISOString();
+      log('warn', `Rate limited. Sleeping ${resetSeconds + 180}s...`);
 
-      log('warn', `${ANSI.yellow}⏳ Rate limited.${ANSI.reset} Reset in ${resetSeconds}s. Sleeping until ${resumeAt} ${ANSI.dim}(+3min buffer)${ANSI.reset}`);
-
-      // Record rate limit span
-      SpanLifecycle.setMetadata(iterSpan, {
-        rateLimit: true,
-        resetAfterMs: resetSeconds * 1000,
-        sleepUntil: resumeAt,
-        chunkId,
-        provider: activeProvider,
-      });
+      SpanLifecycle.setMetadata(iterSpan, { rateLimit: true, provider: activeProvider });
       TraceContext.endSpan(iterSpan, { status: 'completed' }, loopDetector);
 
       rateLimitedProviders.add(activeProvider);
       const otherProvider = activeProvider === 'claude' ? 'codex' : 'claude';
-      const canSwitch = availableProviders.includes(otherProvider);
-
-      if (canSwitch && !rateLimitedProviders.has(otherProvider)) {
-        const otherColor = otherProvider === 'claude' ? ANSI.magenta : ANSI.blue;
-        log('warn', `Switching to ${otherColor}${ANSI.bold}${otherProvider}${ANSI.reset}${ANSI.yellow} after rate limit`);
+      if (!rateLimitedProviders.has(otherProvider)) {
+        log('warn', `Switching to ${otherProvider} after rate limit`);
         activeProvider = otherProvider;
-        iteration--; // Don't count rate-limited iterations
+        iteration--;
         continue;
       }
 
       await sleep(sleepMs);
-      log('info', 'Rate limit cooldown complete. Resuming...');
       rateLimitedProviders.clear();
       activeProvider = provider;
-      iteration--; // Don't count rate-limited iterations
+      iteration--;
       continue;
     }
 
-    // Hard stop on non-zero exit (after rate limit handling)
+    // Hard stop on non-zero exit
     if (result.exitCode !== 0) {
-      const errLabel = result.exitCode === 1 ? 'catastrophic' : 'non-zero';
-      log('error', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — ${errLabel} exit ${result.exitCode}, stopping.`);
-      SpanLifecycle.setMetadata(iterSpan, { exitCode: result.exitCode, fatal: true });
+      log('error', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — exit ${result.exitCode}, stopping.`);
       TraceContext.endSpan(iterSpan, { status: 'error', errorMessage: `exit ${result.exitCode}` }, loopDetector);
       return { completed: false, iterations: iteration, output: lastOutput, rateLimitHits };
     }
 
-    // No promise, no rate limit
     TraceContext.endSpan(iterSpan, { status: 'completed' }, loopDetector);
 
     if (!hasMeaningfulChange(headBefore)) {
@@ -752,18 +689,11 @@ async function runRalphLoop(
 
     log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — ${ANSI.yellow}no promise yet${ANSI.reset}, iterating...`);
 
-    // Budget check
     const budgetResult = breaker.check(runningCost);
     if (budgetResult.tripped) {
       log('error', `Budget exceeded ($${runningCost.toFixed(2)} / $${budgetResult.limitUsd})! Stopping.`);
       break;
     }
-
-    // Budget warnings
-    const pct = runningCost / budgetResult.limitUsd;
-    if (pct >= 0.9) log('warn', `Budget 90% consumed ($${runningCost.toFixed(2)} / $${budgetResult.limitUsd})`);
-    else if (pct >= 0.75) log('warn', `Budget 75% consumed ($${runningCost.toFixed(2)} / $${budgetResult.limitUsd})`);
-    else if (pct >= 0.5) log('warn', `Budget 50% consumed ($${runningCost.toFixed(2)} / $${budgetResult.limitUsd})`);
   }
 
   if (iteration >= maxIterations) {
@@ -777,20 +707,14 @@ async function runRalphLoop(
 async function main() {
   const args = parseArgs(process.argv);
 
-  if (args.help) {
-    showHelp();
-    process.exit(0);
-  }
-
+  if (args.help) { showHelp(); process.exit(0); }
   verboseMode = args.verbose;
 
-  // Validate required args
   if (!args.baseBranch) {
-    console.error('Error: --base-branch is required (e.g. --base-branch feat/beast-runner)');
+    console.error('Error: --base-branch is required');
     process.exit(1);
   }
 
-  // Apply --plan-dir and --base-branch overrides
   PLAN_DIR = args.planDir;
   BUILD_DIR = resolve(PLAN_DIR, '.build');
   CHECKPOINT_FILE = resolve(BUILD_DIR, '.checkpoint');
@@ -798,32 +722,24 @@ async function main() {
   DB_FILE = resolve(BUILD_DIR, 'build-traces.db');
   BASE_BRANCH = args.baseBranch;
 
-  // Ensure build artifact directory exists (gitignored to prevent codex from reading logs)
   mkdirSync(BUILD_DIR, { recursive: true });
 
-  // Reset
   if (args.reset) {
-    for (const f of [CHECKPOINT_FILE, DB_FILE]) {
-      try { execSync(`rm -f ${f}`); } catch {}
-    }
+    for (const f of [CHECKPOINT_FILE, DB_FILE]) { try { execSync(`rm -f ${f}`); } catch {} }
     try { writeFileSync(LOG_FILE, ''); } catch {}
     log('info', 'Reset: cleared checkpoint, traces DB, and log');
   }
 
-  console.log(`\n${ANSI.bold}${ANSI.magenta}  ⚡ RALPH Build Runner${ANSI.reset} ${ANSI.dim}— observer-powered autonomous execution${ANSI.reset}\n`);
-  log('info', `Budget: $${args.budget} | Max iters: ${args.maxIterations} | Provider: ${ANSI.bold}${args.provider}${ANSI.reset} | Verbose: ${args.verbose}`);
-  log('debug', `Plan dir: ${PLAN_DIR}`);
-  log('info', `Token counts are estimates (~4 chars/token)`);
+  console.log(`\n${ANSI.bold}${ANSI.magenta}  ⚡ RALPH Build Runner${ANSI.reset} ${ANSI.dim}— Approach C${ANSI.reset}\n`);
+  log('info', `Budget: $${args.budget} | Max iters: ${args.maxIterations} | Provider: ${ANSI.bold}${args.provider}${ANSI.reset}`);
 
-  // Observer setup
   const counter = new TokenCounter();
   const costCalc = new CostCalculator(DEFAULT_PRICING);
   const breaker = new CircuitBreaker({ limitUsd: args.budget });
   const loopDetector = new LoopDetector({ windowSize: 3, repeatThreshold: 3 });
   const sqliteAdapter = new SQLiteAdapter(DB_FILE);
-  const trace = TraceContext.createTrace('RALPH Build: close-execution-gap');
+  const trace = TraceContext.createTrace('RALPH Build: Approach C');
 
-  // Trace server
   let server: TraceServer | null = null;
   if (!args.noViewer) {
     server = new TraceServer({ adapter: sqliteAdapter, port: args.port });
@@ -831,7 +747,6 @@ async function main() {
     log('info', `Trace viewer: ${ANSI.cyan}${ANSI.bold}${server.url}${ANSI.reset}`);
   }
 
-  // SIGINT handler
   let stopping = false;
   process.on('SIGINT', async () => {
     if (stopping) process.exit(1);
@@ -844,17 +759,14 @@ async function main() {
     process.exit(0);
   });
 
-  // Discover chunks
   const chunkFiles = discoverChunks();
   log('info', `Found ${ANSI.bold}${chunkFiles.length}${ANSI.reset} chunks: ${ANSI.dim}${chunkFiles.map(f => f.replace('.md', '')).join(', ')}${ANSI.reset}`);
 
-  // Checkpoint
   const checkpoint = readCheckpoint();
   const results: ChunkResult[] = [];
   const buildStart = Date.now();
   let totalRateLimitHits = 0;
 
-  // Process each chunk
   for (const chunkFile of chunkFiles) {
     if (stopping) break;
 
@@ -871,20 +783,14 @@ async function main() {
     const chunkStart = Date.now();
     const chunkSpan = TraceContext.startSpan(trace, { name: `chunk:${chunkId}` });
     const branch = `feat/${chunkId}`;
-    const baseHead = git(`rev-parse ${BASE_BRANCH}`);
     let chunkRateLimitHits = 0;
 
-    // Snapshot token state for per-chunk cost tracking
     const preChunkTokens = counter.grandTotal();
     const preChunkCost = (() => {
-      const entries = counter.allModels().map(m => {
-        const t = counter.totalsFor(m);
-        return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
-      });
+      const entries = counter.allModels().map(m => { const t = counter.totalsFor(m); return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens }; });
       return costCalc.totalCost(entries);
     })();
 
-    // Git: create branch
     try {
       git(`checkout ${BASE_BRANCH}`);
       try { git(`checkout -b ${branch}`); } catch { git(`checkout ${branch}`); }
@@ -909,7 +815,6 @@ async function main() {
       chunkRateLimitHits += implResult.rateLimitHits;
 
       if (implResult.completed) {
-        // Safety: auto-commit any dirty files left by provider
         autoCommitIfDirty(chunkId, 'impl-final', implResult.iterations);
         const implCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
         if (implCommits === 0) {
@@ -928,7 +833,7 @@ async function main() {
       implResult = { completed: true, iterations: 0, output: '', rateLimitHits: 0 };
     }
 
-    // Hardening loop (skip if impl failed or already stopping)
+    // Hardening loop
     let hardenResult: RalphLoopResult & { rateLimitHits: number } = { completed: false, iterations: 0, output: '', rateLimitHits: 0 };
     if (!stopping && implResult.completed && !checkpoint.has(`${chunkId}:harden_done`)) {
       log('info', `${chunkId}: starting harden loop (max ${args.maxIterations} iters)`);
@@ -950,7 +855,6 @@ async function main() {
       chunkRateLimitHits += hardenResult.rateLimitHits;
 
       if (hardenResult.completed) {
-        // Safety: auto-commit any dirty files left by provider
         autoCommitIfDirty(chunkId, 'harden-final', hardenResult.iterations);
         const hardenCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
         if (hardenCommits === 0) {
@@ -961,7 +865,7 @@ async function main() {
           log('info', `${chunkId}: harden ${ANSI.green}${ANSI.bold}PASSED${ANSI.reset} in ${hardenResult.iterations} iterations`);
         }
       } else {
-        log('warn', `${chunkId}: harden didn't complete promise; not marking harden_done`);
+        log('warn', `${chunkId}: harden didn't complete promise`);
         stopping = true;
       }
     } else if (checkpoint.has(`${chunkId}:harden_done`)) {
@@ -972,8 +876,7 @@ async function main() {
     // Merge back
     let merged = false;
     const branchDelta = parseInt(git(`rev-list --count ${BASE_BRANCH}..${branch}`), 10) || 0;
-    const hasBranchChanges = branchDelta > 0;
-    if (!checkpoint.has(`${chunkId}:merged`) && implResult.completed && hardenResult.completed && hasBranchChanges) {
+    if (!checkpoint.has(`${chunkId}:merged`) && implResult.completed && hardenResult.completed && branchDelta > 0) {
       try {
         git(`checkout ${BASE_BRANCH}`);
         git(`merge ${branch} --no-edit`);
@@ -983,61 +886,28 @@ async function main() {
       } catch (err) {
         log('error', `${chunkId}: merge conflict — ${err}`);
         try { git('merge --abort'); } catch {}
-        log('warn', `${chunkId}: merge aborted, continuing to next chunk`);
       }
     } else if (checkpoint.has(`${chunkId}:merged`)) {
       merged = true;
-    } else if (!hasBranchChanges) {
-      log('warn', `${chunkId}: no commits on ${branch} vs ${BASE_BRANCH}; skipping merge + checkpoint`);
-    } else if (!implResult.completed) {
-      log('warn', `${chunkId}: impl not completed; skipping merge + checkpoint`);
-    } else if (!hardenResult.completed) {
-      log('warn', `${chunkId}: harden not completed; skipping merge + checkpoint`);
+    } else if (branchDelta === 0) {
+      log('warn', `${chunkId}: no commits on ${branch} vs ${BASE_BRANCH}; skipping merge`);
     }
 
-    // Finalize chunk span — compute per-chunk costs by diffing snapshots
     const chunkDurationMs = Date.now() - chunkStart;
     const postChunkTokens = counter.grandTotal();
-    const postChunkCostEntries = counter.allModels().map(m => {
-      const t = counter.totalsFor(m);
-      return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
-    });
-    const postChunkCost = costCalc.totalCost(postChunkCostEntries);
-    const chunkTokens = {
-      promptTokens: postChunkTokens.promptTokens - preChunkTokens.promptTokens,
-      completionTokens: postChunkTokens.completionTokens - preChunkTokens.completionTokens,
-      totalTokens: postChunkTokens.totalTokens - preChunkTokens.totalTokens,
-    };
-    const chunkCost = postChunkCost - preChunkCost;
+    const postChunkCostEntries = counter.allModels().map(m => { const t = counter.totalsFor(m); return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens }; });
+    const chunkCost = costCalc.totalCost(postChunkCostEntries) - preChunkCost;
 
-    SpanLifecycle.setMetadata(chunkSpan, {
-      implIterations: implResult.iterations,
-      hardenIterations: hardenResult.iterations,
-      implCompleted: implResult.completed,
-      hardenCompleted: hardenResult.completed,
-      merged,
-      rateLimitHits: chunkRateLimitHits,
-    });
     TraceContext.endSpan(chunkSpan, { status: merged ? 'completed' : 'error' });
-
-    // Flush to SQLite
     await sqliteAdapter.flush(trace);
-
-    const totalIters = implResult.iterations + hardenResult.iterations;
-    const durationStr = (chunkDurationMs / 1000).toFixed(0);
     totalRateLimitHits += chunkRateLimitHits;
 
-    log('info', `${chunkId}: ${statusBadge(merged)} ${totalIters} iters | ~${chunkTokens.totalTokens} tokens | $${chunkCost.toFixed(2)} | ${durationStr}s`);
+    log('info', `${chunkId}: ${statusBadge(merged)} ${implResult.iterations + hardenResult.iterations} iters | $${chunkCost.toFixed(2)} | ${(chunkDurationMs / 1000).toFixed(0)}s`);
 
     results.push({
-      chunkId,
-      implResult,
-      hardenResult,
-      merged,
-      tokens: { prompt: chunkTokens.promptTokens, completion: chunkTokens.completionTokens },
-      cost: chunkCost,
-      durationMs: chunkDurationMs,
-      rateLimitHits: chunkRateLimitHits,
+      chunkId, implResult, hardenResult, merged,
+      tokens: { prompt: postChunkTokens.promptTokens - preChunkTokens.promptTokens, completion: postChunkTokens.completionTokens - preChunkTokens.completionTokens },
+      cost: chunkCost, durationMs: chunkDurationMs, rateLimitHits: chunkRateLimitHits,
     });
 
     if (stopping) break;
@@ -1049,40 +919,19 @@ async function main() {
 
   const totalDurationMs = Date.now() - buildStart;
   const grandTotals = counter.grandTotal();
-  const finalCostEntries = counter.allModels().map(m => {
-    const t = counter.totalsFor(m);
-    return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
-  });
+  const finalCostEntries = counter.allModels().map(m => { const t = counter.totalsFor(m); return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens }; });
   const totalCost = costCalc.totalCost(finalCostEntries);
 
   logHeader('BUILD SUMMARY');
-
-  const mins = (totalDurationMs / 1000 / 60).toFixed(1);
-  console.log(`  ${ANSI.dim}Duration:${ANSI.reset}     ${mins} minutes`);
-  console.log(`  ${ANSI.dim}Tokens:${ANSI.reset}       ~${grandTotals.totalTokens} ${ANSI.dim}(prompt: ~${grandTotals.promptTokens}, completion: ~${grandTotals.completionTokens})${ANSI.reset}`);
+  console.log(`  ${ANSI.dim}Duration:${ANSI.reset}     ${(totalDurationMs / 1000 / 60).toFixed(1)} minutes`);
   console.log(`  ${ANSI.dim}Budget:${ANSI.reset}       ${budgetBar(totalCost, args.budget)}`);
-  if (totalRateLimitHits > 0) {
-    console.log(`  ${ANSI.dim}Rate limits:${ANSI.reset}  ${ANSI.yellow}${totalRateLimitHits}${ANSI.reset}`);
-  }
+  if (totalRateLimitHits > 0) console.log(`  ${ANSI.dim}Rate limits:${ANSI.reset}  ${ANSI.yellow}${totalRateLimitHits}${ANSI.reset}`);
   console.log('');
 
-  // Per-model breakdown
-  if (counter.allModels().length > 0) {
-    console.log(`  ${ANSI.dim}Models:${ANSI.reset}`);
-    for (const model of counter.allModels()) {
-      const t = counter.totalsFor(model);
-      const c = costCalc.totalCost([{ model, promptTokens: t.promptTokens, completionTokens: t.completionTokens }]);
-      console.log(`    ${ANSI.bold}${model}${ANSI.reset}: ~${t.totalTokens} tokens, $${c.toFixed(2)}`);
-    }
-    console.log('');
-  }
-
-  // Per-chunk results
   if (results.length > 0) {
     console.log(`  ${ANSI.dim}Chunks:${ANSI.reset}`);
     for (const r of results) {
-      const iters = r.implResult.iterations + r.hardenResult.iterations;
-      console.log(`    ${statusBadge(r.merged)} ${ANSI.bold}${r.chunkId}${ANSI.reset} ${ANSI.dim}|${ANSI.reset} ${iters} iters ${ANSI.dim}|${ANSI.reset} $${r.cost.toFixed(2)} ${ANSI.dim}|${ANSI.reset} ${(r.durationMs / 1000).toFixed(0)}s`);
+      console.log(`    ${statusBadge(r.merged)} ${ANSI.bold}${r.chunkId}${ANSI.reset} ${ANSI.dim}|${ANSI.reset} ${r.implResult.iterations + r.hardenResult.iterations} iters ${ANSI.dim}|${ANSI.reset} $${r.cost.toFixed(2)} ${ANSI.dim}|${ANSI.reset} ${(r.durationMs / 1000).toFixed(0)}s`);
     }
     console.log('');
   }
@@ -1092,23 +941,11 @@ async function main() {
   const resultColor = failed === 0 ? ANSI.green : ANSI.red;
   console.log(`  ${resultColor}${ANSI.bold}Result: ${passed} passed, ${failed} failed${ANSI.reset} out of ${results.length} chunks\n`);
 
-  // Write plain summary to log file
-  try {
-    const summaryPlain = [
-      `Duration: ${mins} minutes`,
-      `Tokens: ~${grandTotals.totalTokens} (prompt: ~${grandTotals.promptTokens}, completion: ~${grandTotals.completionTokens})`,
-      `Cost: $${totalCost.toFixed(2)} / $${args.budget}`,
-      `Rate limit hits: ${totalRateLimitHits}`,
-      ...results.map(r => `  ${r.chunkId}: ${r.merged ? 'PASS' : 'FAIL'} | ${r.implResult.iterations + r.hardenResult.iterations} iters | $${r.cost.toFixed(2)} | ${(r.durationMs / 1000).toFixed(0)}s`),
-      `Result: ${passed} passed, ${failed} failed out of ${results.length} chunks`,
-    ].join('\n');
-    appendFileSync(LOG_FILE, summaryPlain + '\n');
-  } catch {}
+  // PR creation
+  createPr(args, results);
 
-  // Cleanup
   if (server) await server.stop();
   sqliteAdapter.close();
-
   process.exit(failed > 0 ? 1 : 0);
 }
 

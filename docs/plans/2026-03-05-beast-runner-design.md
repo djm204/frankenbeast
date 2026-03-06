@@ -77,7 +77,7 @@ design-doc.md as BeastInput.userInput
 
 ### Tracer Bullet A — Single Chunk Through Orchestrator
 
-**Goal:** One chunk file → `CliSkillExecutor` → spawns `claude --print` → ralph loop with promise detection → git branch isolation → observer tracing → `SkillResult` returned to `executeTask()`.
+**Goal:** One chunk file → `CliSkillExecutor` → spawns `claude --print` OR `codex` → ralph loop with promise detection → git branch isolation → observer tracing → `SkillResult` returned to `executeTask()`.
 
 **Proves:**
 - `executeTask()` → `skills.execute()` works for CLI-spawned AI tools
