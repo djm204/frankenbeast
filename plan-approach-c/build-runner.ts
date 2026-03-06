@@ -5,11 +5,13 @@
  */
 import { resolve } from 'node:path';
 import { mkdirSync, existsSync, unlinkSync, appendFileSync, readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import {
   BeastLoop, BeastLogger, BANNER, ANSI, budgetBar, statusBadge, logHeader,
-  ChunkFileGraphBuilder, LlmGraphBuilder, AdapterLlmClient, CliSkillExecutor, RalphLoop, GitBranchIsolator,
+  ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop, AdapterLlmClient, CliSkillExecutor, RalphLoop, GitBranchIsolator,
   FileCheckpointStore, PrCreator,
 } from '../franken-orchestrator/src/index.js';
+import type { InterviewIO } from '../franken-orchestrator/src/index.js';
 import type {
   BeastLoopDeps, BeastResult, IFirewallModule, ISkillsModule, IMemoryModule,
   IPlannerModule, IObserverModule, ICritiqueModule, IGovernorModule, IHeartbeatModule,
@@ -97,7 +99,7 @@ async function main(): Promise<void> {
     if (!args.designDoc) { console.error('Error: --design-doc <file> is required for design-doc mode'); process.exit(1); }
     if (!existsSync(args.designDoc)) { console.error(`Error: design doc file not found: ${args.designDoc}`); process.exit(1); }
   }
-  if (args.mode === 'interview') { console.log('interview mode is not yet implemented'); process.exit(0); }
+  if (args.mode === 'interview' && !args.baseBranch) { console.error('Error: --base-branch is required'); process.exit(1); }
 
   console.log(BANNER);
   const buildDir = resolve(args.planDir, '.build');
@@ -152,7 +154,17 @@ async function main(): Promise<void> {
   // Select graph builder based on mode
   let graphBuilder;
   let userInput: string;
-  if (args.mode === 'design-doc') {
+  if (args.mode === 'interview') {
+    const adapterLlm = new AdapterLlmClient(cliExecutor as never);
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const stdinIO: InterviewIO = {
+      ask: (question: string) => new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
+      display: (message: string) => console.log(`\n${message}\n`),
+    };
+    const llmGraphBuilder = new LlmGraphBuilder(adapterLlm);
+    graphBuilder = new InterviewLoop(adapterLlm, stdinIO, llmGraphBuilder);
+    userInput = 'Interactive interview session';
+  } else if (args.mode === 'design-doc') {
     const docContent = readFileSync(args.designDoc, 'utf-8');
     const adapterLlm = new AdapterLlmClient(cliExecutor as never);
     graphBuilder = new LlmGraphBuilder(adapterLlm);
