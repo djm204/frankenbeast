@@ -4,10 +4,10 @@
  * Constructs BeastLoopDeps and calls BeastLoop.run().
  */
 import { resolve } from 'node:path';
-import { mkdirSync, existsSync, unlinkSync, appendFileSync } from 'node:fs';
+import { mkdirSync, existsSync, unlinkSync, appendFileSync, readFileSync } from 'node:fs';
 import {
   BeastLoop, BeastLogger, BANNER, ANSI, budgetBar, statusBadge, logHeader,
-  ChunkFileGraphBuilder, CliSkillExecutor, RalphLoop, GitBranchIsolator,
+  ChunkFileGraphBuilder, LlmGraphBuilder, AdapterLlmClient, CliSkillExecutor, RalphLoop, GitBranchIsolator,
   FileCheckpointStore, PrCreator,
 } from '../franken-orchestrator/src/index.js';
 import type {
@@ -23,6 +23,7 @@ import {
 interface CliArgs {
   baseBranch: string; planDir: string; budget: number;
   mode: 'chunks' | 'design-doc' | 'interview';
+  designDoc: string;
   provider: 'claude' | 'codex';
   noPr: boolean; reset: boolean; verbose: boolean; help: boolean;
 }
@@ -30,7 +31,7 @@ interface CliArgs {
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     baseBranch: '', planDir: resolve(import.meta.dirname || __dirname, '.'),
-    budget: 10, mode: 'chunks', provider: 'claude',
+    budget: 10, mode: 'chunks', designDoc: '', provider: 'claude',
     noPr: false, reset: false, verbose: false, help: false,
   };
   for (let i = 2; i < argv.length; i++) {
@@ -39,6 +40,7 @@ function parseArgs(argv: string[]): CliArgs {
       case '--plan-dir': args.planDir = resolve(argv[++i]); break;
       case '--budget': args.budget = parseFloat(argv[++i]); break;
       case '--mode': { const v = argv[++i]; if (v === 'chunks' || v === 'design-doc' || v === 'interview') args.mode = v; break; }
+      case '--design-doc': args.designDoc = resolve(argv[++i]); break;
       case '--provider': { const v = (argv[++i] ?? '').toLowerCase(); if (v === 'claude' || v === 'codex') args.provider = v; break; }
       case '--no-pr': args.noPr = true; break;
       case '--reset': args.reset = true; break;
@@ -55,6 +57,7 @@ Usage: npx tsx plan-approach-c/build-runner.ts [options]
 Options:
   --base-branch <name>  Base branch (REQUIRED)    --plan-dir <dir>  Chunk dir (default: script dir)
   --budget <usd>        Budget in USD (default: 10)  --mode <mode>  chunks|design-doc|interview
+  --design-doc <file>   Design doc file (required for design-doc mode)
   --provider <name>     claude|codex (default: claude)
   --no-pr  Skip PR    --reset  Clear checkpoint    --verbose  Debug logs + trace viewer
   -h, --help  Show help`);
@@ -90,7 +93,10 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   if (args.help) { showHelp(); process.exit(0); }
   if (!args.baseBranch) { console.error('Error: --base-branch is required'); process.exit(1); }
-  if (args.mode === 'design-doc') { console.log('design-doc mode is not yet implemented'); process.exit(0); }
+  if (args.mode === 'design-doc') {
+    if (!args.designDoc) { console.error('Error: --design-doc <file> is required for design-doc mode'); process.exit(1); }
+    if (!existsSync(args.designDoc)) { console.error(`Error: design doc file not found: ${args.designDoc}`); process.exit(1); }
+  }
   if (args.mode === 'interview') { console.log('interview mode is not yet implemented'); process.exit(0); }
 
   console.log(BANNER);
@@ -143,15 +149,28 @@ async function main(): Promise<void> {
   let stopping = false;
   process.on('SIGINT', async () => { if (stopping) process.exit(1); stopping = true; logger.warn('SIGINT received. Finishing current iteration then stopping...'); await finalize(); process.exit(0); });
 
+  // Select graph builder based on mode
+  let graphBuilder;
+  let userInput: string;
+  if (args.mode === 'design-doc') {
+    const docContent = readFileSync(args.designDoc, 'utf-8');
+    const adapterLlm = new AdapterLlmClient(cliExecutor as never);
+    graphBuilder = new LlmGraphBuilder(adapterLlm);
+    userInput = docContent;
+  } else {
+    graphBuilder = new ChunkFileGraphBuilder(args.planDir);
+    userInput = `Process chunks in ${args.planDir}`;
+  }
+
   const deps: BeastLoopDeps = {
     firewall: stubFirewall, skills: stubSkills, memory: stubMemory, planner: stubPlanner,
     observer, critique: stubCritique, governor: stubGovernor, heartbeat: stubHeartbeat,
-    logger, clock: () => new Date(), graphBuilder: new ChunkFileGraphBuilder(args.planDir),
+    logger, clock: () => new Date(), graphBuilder,
     prCreator, cliExecutor, checkpoint,
   };
 
   const projectId = repoRoot.split('/').pop() ?? 'unknown';
-  const result = await new BeastLoop(deps).run({ projectId, userInput: `Process chunks in ${args.planDir}` });
+  const result = await new BeastLoop(deps).run({ projectId, userInput });
   await finalize();
   displaySummary(result, args.budget);
   process.exit(result.status !== 'completed' ? 1 : 0);
