@@ -248,6 +248,31 @@ Per-commit checkpoints enable crash recovery. On resume:
 
 **Design reference:** See [Approach C Full Pipeline Design](plans/2026-03-05-approach-c-full-pipeline-design.md) and [ADR-008](adr/008-approach-c-full-pipeline.md).
 
+## CLI Pipeline
+
+The `frankenbeast` CLI is a globally-installed tool that orchestrates the full development workflow:
+
+```mermaid
+flowchart LR
+    subgraph "Entry Detection"
+        A[No files] -->|interview| B[InterviewLoop]
+        C[--design-doc] -->|plan| D[LlmGraphBuilder]
+        E[--plan-dir] -->|execute| F[BeastLoop]
+    end
+
+    subgraph "Phase Pipeline"
+        B -->|design.md| R1[HITM Review]
+        R1 --> D
+        D -->|chunk files| R2[HITM Review]
+        R2 --> F
+        F --> G[BeastResult]
+    end
+```
+
+All project state lives in `.frankenbeast/` at the project root.
+
+**Design reference:** See [CLI E2E Design](plans/2026-03-06-cli-e2e-design.md) and [ADR-009](adr/009-global-cli-design.md).
+
 ## HTTP Services (Hono)
 
 Three modules expose HTTP servers:
