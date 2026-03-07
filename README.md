@@ -1,7 +1,7 @@
 # Frankenbeast
 
 <p align="center">
-  <img src="assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
+  <img src="/assets/assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
 </p>
 
 **Deterministic guardrails for AI agents.**
@@ -20,23 +20,259 @@ Frankenbeast is composed of 10 modules, each in its own repository with independ
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
+```mermaid
+flowchart TD
+    User([User Input])
+
+    subgraph Beast["The Beast Loop"]
+        direction TB
+
+        subgraph P1["Phase 1: Ingestion"]
+            FW["MOD-01 Firewall<br/>Injection scan, PII mask"]
+            MEM["MOD-03 Brain<br/>Context hydration"]
+        end
+
+        subgraph P2["Phase 2: Planning"]
+            PL["MOD-04 Planner<br/>DAG task graph"]
+            CR["MOD-06 Critique<br/>8 evaluators, loop"]
+        end
+
+        subgraph P3["Phase 3: Execution"]
+            SK["MOD-02 Skills<br/>Registry + MCP tools"]
+            GOV["MOD-07 Governor<br/>HITL approval gates"]
+        end
+
+        subgraph P4["Phase 4: Closure"]
+            OB["MOD-05 Observer<br/>Traces, cost, evals"]
+            HB["MOD-08 Heartbeat<br/>Reflection + briefs"]
+        end
+
+        CB["Circuit Breakers<br/>Injection → halt | Budget → HITL | Spiral → escalate"]
+
+        P1 --> P2 --> P3 --> P4
+        CB -.-> P1
+        CB -.-> P2
+        CB -.-> P3
+    end
+
+    Result([BeastResult])
+
+    User --> P1
+    P4 --> Result
+
+    classDef phase1 fill:#ff6b6b,stroke:#c0392b,color:#fff
+    classDef phase2 fill:#ff9f43,stroke:#ee5a24,color:#fff
+    classDef phase3 fill:#54a0ff,stroke:#2e86de,color:#fff
+    classDef phase4 fill:#10ac84,stroke:#0a3d62,color:#fff
+    classDef breaker fill:#2d3436,stroke:#636e72,color:#fff
+    classDef external fill:#dfe6e9,stroke:#636e72,color:#333
+
+    class FW,MEM phase1
+    class PL,CR phase2
+    class SK,GOV phase3
+    class OB,HB phase4
+    class CB breaker
+    class User,Result external
 ```
-User Input
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    The Beast Loop                               │
-│                                                                 │
-│  Phase 1: Ingestion        MOD-01 (Firewall) + MOD-03 (Memory) │
-│  Phase 2: Planning         MOD-04 (Planner)  + MOD-06 (Critique)│
-│  Phase 3: Execution        MOD-02 (Skills)   + MOD-07 (Governor)│
-│  Phase 4: Closure          MOD-05 (Observer)  + MOD-08 (Heartbeat)│
-│                                                                 │
-│  Circuit Breakers: Injection → kill | Budget → HITL | Spiral → escalate │
-└─────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-  Result
+
+### Beast Loop Sequence
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FW as Firewall (MOD-01)
+    participant MEM as Brain (MOD-03)
+    participant PL as Planner (MOD-04)
+    participant CR as Critique (MOD-06)
+    participant SK as Skills (MOD-02)
+    participant GOV as Governor (MOD-07)
+    participant OB as Observer (MOD-05)
+    participant HB as Heartbeat (MOD-08)
+
+    U->>FW: raw input
+
+    rect rgb(255, 220, 220)
+        Note over FW,MEM: Phase 1 — Ingestion
+        FW->>FW: injection scan + PII mask
+        FW-->>PL: sanitized intent
+        MEM->>MEM: hydrate ADRs, episodic traces
+        MEM-->>PL: project context
+    end
+
+    rect rgb(255, 240, 220)
+        Note over PL,CR: Phase 2 — Planning
+        PL->>PL: build task DAG
+        loop Critique loop (max N)
+            PL->>CR: submit plan
+            CR->>CR: deterministic evals first, then heuristic
+            alt Plan passes
+                CR-->>PL: approved
+            else Plan fails
+                CR-->>PL: re-plan
+            end
+        end
+        alt Spiral breaker tripped
+            CR->>GOV: escalate to human
+        end
+    end
+
+    rect rgb(220, 230, 255)
+        Note over SK,GOV: Phase 3 — Execution
+        loop Each task in topoSort()
+            SK->>SK: resolve skill (registry or MCP)
+            alt High-stakes task
+                SK->>GOV: request HITL approval
+                GOV-->>SK: approved / denied
+            end
+            SK->>OB: record span + token usage
+        end
+    end
+
+    rect rgb(220, 255, 230)
+        Note over OB,HB: Phase 4 — Closure
+        OB->>OB: finalize traces, cost summary
+        HB->>HB: pulse check + reflection
+        HB-->>PL: inject self-improvement tasks (if any)
+    end
+
+    OB-->>U: BeastResult
+```
+
+### Module Interconnections
+
+```mermaid
+graph TB
+    User([User Input])
+
+    subgraph "MOD-01: Firewall"
+        FW_IN["Inbound Interceptors<br/>Injection Scanner, PII Masker"]
+        FW_ADAPT["Adapter Pipeline<br/>Claude / OpenAI / Ollama"]
+        FW_OUT["Outbound Interceptors<br/>Schema Enforcer, Hallucination Scraper"]
+        FW_IN --> FW_ADAPT --> FW_OUT
+    end
+
+    subgraph "MOD-02: Skills"
+        SK_REG["Skill Registry<br/>ISkillRegistry"]
+    end
+
+    subgraph "MOD-03: Brain"
+        MEM_W["Working Memory"]
+        MEM_E["Episodic Memory<br/>SQLite"]
+        MEM_S["Semantic Memory<br/>ChromaDB"]
+        MEM_O["Memory Orchestrator"]
+        MEM_O --> MEM_W
+        MEM_O --> MEM_E
+        MEM_O --> MEM_S
+    end
+
+    subgraph "MOD-04: Planner"
+        PL_DAG["DAG Builder<br/>Linear / Parallel / Recursive"]
+        PL_COT["CoT Gate<br/>RationaleBlock"]
+    end
+
+    subgraph "MOD-05: Observer"
+        OB_TRACE["TraceContext + Spans"]
+        OB_COST["TokenCounter + CostCalc"]
+        OB_CB["Circuit Breaker"]
+        OB_EXPORT["Export Adapters<br/>OTEL / SQLite / Langfuse<br/>Prometheus / Tempo"]
+        OB_TRACE --> OB_EXPORT
+        OB_COST --> OB_CB
+    end
+
+    subgraph "MOD-06: Critique"
+        CR_DET["Deterministic Evaluators<br/>Safety, GhostDep, LogicLoop, ADR"]
+        CR_HEUR["Heuristic Evaluators<br/>Factuality, Conciseness, Complexity"]
+        CR_LOOP["Critique Loop"]
+        CR_DET --> CR_LOOP
+        CR_HEUR --> CR_LOOP
+    end
+
+    subgraph "MOD-07: Governor"
+        GOV_TRIG["Trigger Evaluators<br/>Budget / Skill / Confidence / Ambiguity"]
+        GOV_GW["Approval Gateway<br/>CLI / Slack channels"]
+        GOV_SEC["HMAC-SHA256 Signing"]
+        GOV_TRIG --> GOV_GW
+        GOV_SEC --> GOV_GW
+    end
+
+    subgraph "MOD-08: Heartbeat"
+        HB_DET["Deterministic Check"]
+        HB_REFL["Reflection Engine"]
+        HB_DISP["Action Dispatcher"]
+        HB_DET --> HB_REFL --> HB_DISP
+    end
+
+    subgraph "MCP Registry"
+        MCP_REG["McpRegistry<br/>Tool routing"]
+        MCP_CLI["McpClient<br/>JSON-RPC 2.0"]
+        MCP_REG --> MCP_CLI
+    end
+
+    MCP_SERVERS[(MCP Servers)]
+    LLM[(LLM Providers<br/>Claude / OpenAI / Ollama)]
+
+    subgraph "Orchestrator: Beast Loop"
+        direction LR
+        BL1["Phase 1<br/>Ingestion"]
+        BL2["Phase 2<br/>Planning"]
+        BL3["Phase 3<br/>Execution"]
+        BL4["Phase 4<br/>Closure"]
+        BL1 --> BL2 --> BL3 --> BL4
+    end
+
+    %% Orchestrator wiring
+    User --> BL1
+    BL1 -- "sanitize" --> FW_IN
+    BL1 -- "hydrate" --> MEM_O
+    BL2 -- "plan" --> PL_DAG
+    BL2 -- "critique" --> CR_LOOP
+    BL3 -- "resolve" --> SK_REG
+    BL3 -- "approve" --> GOV_GW
+    BL3 -- "callTool" --> MCP_REG
+    BL4 -- "trace" --> OB_TRACE
+    BL4 -- "pulse" --> HB_DET
+    BL4 -- "result" --> User
+
+    %% Cross-module connections
+    FW_ADAPT <--> LLM
+    FW_OUT -- "sanitized intent" --> PL_DAG
+    FW_OUT -- "validate tool calls" --> SK_REG
+    PL_DAG -- "skill discovery" --> SK_REG
+    PL_DAG -- "load context" --> MEM_O
+    PL_COT -- "verify rationale" --> GOV_TRIG
+    CR_DET -- "safety rules" --> FW_IN
+    CR_DET -- "search ADRs" --> MEM_S
+    CR_LOOP -- "escalation" --> GOV_GW
+    GOV_TRIG -- "budget check" --> OB_CB
+    HB_REFL -- "traces + lessons" --> MEM_O
+    HB_DET -- "token spend" --> OB_TRACE
+    HB_DISP -- "inject tasks" --> PL_DAG
+    MCP_CLI -- "stdio" --> MCP_SERVERS
+    MCP_REG -- "tool defs" --> SK_REG
+
+    classDef firewall fill:#ff6b6b,stroke:#c0392b,color:#fff
+    classDef skills fill:#54a0ff,stroke:#2e86de,color:#fff
+    classDef brain fill:#5f27cd,stroke:#341f97,color:#fff
+    classDef planner fill:#ff9f43,stroke:#ee5a24,color:#fff
+    classDef observer fill:#10ac84,stroke:#0a3d62,color:#fff
+    classDef critique fill:#f368e0,stroke:#c44569,color:#fff
+    classDef governor fill:#feca57,stroke:#f6b93b,color:#333
+    classDef heartbeat fill:#48dbfb,stroke:#0abde3,color:#333
+    classDef orchestrator fill:#2d3436,stroke:#636e72,color:#fff
+    classDef mcp fill:#a29bfe,stroke:#6c5ce7,color:#fff
+    classDef external fill:#dfe6e9,stroke:#636e72,color:#333
+
+    class FW_IN,FW_ADAPT,FW_OUT firewall
+    class SK_REG skills
+    class MEM_W,MEM_E,MEM_S,MEM_O brain
+    class PL_DAG,PL_COT planner
+    class OB_TRACE,OB_COST,OB_CB,OB_EXPORT observer
+    class CR_DET,CR_HEUR,CR_LOOP critique
+    class GOV_TRIG,GOV_GW,GOV_SEC governor
+    class HB_DET,HB_REFL,HB_DISP heartbeat
+    class BL1,BL2,BL3,BL4 orchestrator
+    class MCP_REG,MCP_CLI mcp
+    class User,LLM,MCP_SERVERS external
 ```
 
 ## Modules
