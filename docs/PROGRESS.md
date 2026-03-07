@@ -182,11 +182,52 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 | Root integration | 53 | 7 | PASS |
 | **Total** | **1,572** | **177** | **ALL PASS** |
 
+## Phase 8: CLI Gap Closure
+
+> Closes all gaps identified in `docs/cli-gap-analysis.md`. Plan: `plan-2026-03-07-cli-gaps/`. Branch: `feat/cli-e2e-pipeline` → integration commits on `feat/12_doc-update`.
+
+- [x] **Chunk 01–03**: CliLlmAdapter — LLM adapter for plan/interview phases
+  - New: `franken-orchestrator/src/adapters/cli-llm-adapter.ts` (implements `IAdapter` via `claude --print`)
+  - Edit: `session.ts` — replaced broken `deps.cliExecutor as never` with proper `CliLlmAdapter`
+  - Edit: `dep-factory.ts` — creates adapter instance with provider config
+  - Closes: GAP-1 (plan + interview phases now functional)
+
+- [x] **Chunk 04–06**: CliObserverBridge — real observer integration
+  - New: `franken-orchestrator/src/adapters/cli-observer-bridge.ts` (bridges `IObserverModule` ↔ `ObserverDeps`)
+  - Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer
+  - Edit: `dep-factory.ts` — replaced stub observer with real bridge
+  - Closes: GAP-2 (real token counting, cost tracking, budget enforcement)
+
+- [x] **Chunk 07**: CLI output service labels
+  - Added `[planner]`, `[observer]`, `[ralph]`, etc. labels to BeastLogger output
+
+- [x] **Chunk 08**: Clean JSON output
+  - Fixed stream-json frame leaking into CLI output; proper text extraction
+
+- [x] **Chunk 09**: Config file loading
+  - `--config <path>` now loads and merges JSON config (CLI args > env > file > defaults)
+  - Closes: GAP-5
+
+- [x] **Chunk 10**: Trace viewer wiring
+  - New: `franken-orchestrator/src/cli/trace-viewer.ts` — `--verbose` starts TraceServer on `:4040`
+  - Closes: GAP-3
+
+- [x] **Chunk 11**: E2E pipeline proof test
+  - New: `franken-orchestrator/tests/e2e/e2e-pipeline.test.ts`
+  - Validates full CLI subprocess: exit code, service labels, budget bar
+  - GAP-4 (LLM commit messages) closed by CliLlmAdapter wiring to PrCreator
+
+- [x] **Chunk 12**: Documentation update
+  - Updated `RAMP_UP.md`, `ARCHITECTURE.md`, `PROGRESS.md`, `cli-gap-analysis.md`
+
+---
+
 ## Known Limitations
 
-1. **Orchestrator execution is stub-level**: `executeTask()` in `execution.ts` records success without invoking a real skill. Real skill dispatch requires concrete skill implementations.
-2. **CLI can't run without `--dry-run`**: The `run.ts` entry point errors because there are no concrete module implementations to wire. This is by design — the orchestrator depends on port interfaces, not implementations.
-3. **OpenClaw example uses placeholder image**: `examples/openclaw-integration/docker-compose.yml` uses `image: your-openclaw-image:latest` — user must substitute their own.
+1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.
+2. **No `--non-interactive` flag**: Review loops require stdin. For CI/headless use, pipe `"y\n"` to stdin.
+3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
+4. **OpenClaw example uses placeholder image**: `examples/openclaw-integration/docker-compose.yml` uses `image: your-openclaw-image:latest` — user must substitute their own.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
