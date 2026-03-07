@@ -47,6 +47,8 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
+| `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping `claude --print` (or configurable provider) for single-shot LLM completions. Used by plan/interview phases. Strips `CLAUDE*` env vars to prevent subprocess hangs. |
+| `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
 | `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs ralph loop, returns `SkillResult`. |
 | `RalphLoop` | `franken-orchestrator/src/skills/ralph-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
 | `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
@@ -90,7 +92,46 @@ sequenceDiagram
     ET-->>BL: TaskOutcome
 ```
 
-**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures.
+#### CLI Adapter Paths
+
+The CLI uses two distinct adapter paths depending on the operation:
+
+```mermaid
+flowchart TD
+    CLI["frankenbeast CLI"]
+
+    subgraph "Planning Path (single-shot LLM)"
+        CLA["CliLlmAdapter<br/>(IAdapter)"]
+        CP["claude --print<br/>(subprocess)"]
+        CLA --> CP
+    end
+
+    subgraph "Execution Path (multi-iteration tasks)"
+        CSE["CliSkillExecutor"]
+        RL["RalphLoop"]
+        CLI2["claude --print<br/>(subprocess, looped)"]
+        CSE --> RL --> CLI2
+    end
+
+    subgraph "Observer Wiring"
+        COB["CliObserverBridge<br/>(IObserverModule ↔ ObserverDeps)"]
+        TC["TokenCounter"]
+        CC["CostCalculator"]
+        CB["CircuitBreaker"]
+        LD["LoopDetector"]
+        COB --> TC
+        COB --> CC
+        COB --> CB
+        COB --> LD
+    end
+
+    CLI -->|"interview, plan,<br/>design-doc decomposition"| CLA
+    CLI -->|"chunk execution<br/>(impl + harden)"| CSE
+    COB -.->|"token/cost tracking"| CLA
+    COB -.->|"budget enforcement"| CSE
+```
+
+**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` bridges the `IObserverModule` port interface to the concrete `ObserverDeps` expected by `CliSkillExecutor`, wiring real token counting, cost tracking, and budget enforcement from franken-observer.
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
 

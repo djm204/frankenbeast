@@ -2,6 +2,22 @@
 
 > Comparison of old `plan-approach-c/` build runner scripts vs the current `franken-orchestrator` CLI (`frankenbeast` command).
 
+## Resolution Summary
+
+**All 5 gaps are CLOSED.** Resolved in `plan-2026-03-07-cli-gaps/` (12 chunks, branch `feat/cli-e2e-pipeline`).
+
+| Gap | Description | Status | Resolved By |
+|-----|-------------|--------|-------------|
+| GAP-1 | LLM Adapter for plan/interview phases | **CLOSED** | Chunks 01–03: `CliLlmAdapter` (`franken-orchestrator/src/adapters/cli-llm-adapter.ts`) |
+| GAP-2 | Observer integration (tokens, cost, budget) | **CLOSED** | Chunks 04–06: `CliObserverBridge` (`franken-orchestrator/src/adapters/cli-observer-bridge.ts`) |
+| GAP-3 | Trace viewer | **CLOSED** | Chunk 10: `trace-viewer.ts` — `--verbose` starts TraceServer on `:4040` |
+| GAP-4 | LLM commit message generation | **CLOSED** | Chunks 01–03: `CliLlmAdapter` serves as `ILlmClient` for `PrCreator` |
+| GAP-5 | Config file loading | **CLOSED** | Chunk 09: `--config` loads JSON, merged with CLI args |
+
+**Remaining minor issues** (discovered during E2E proof, chunk 11 — see `plan-2026-03-07-cli-gaps/DISCOVERED_GAPS.md`):
+- No `--non-interactive` flag for CI/headless use (severity: low)
+- E2E tests require `npm run build` before execution (severity: low)
+
 ## Overview
 
 The frankenbeast project migrated execution capabilities from standalone scripts (`plan-approach-c/build-runner.ts` + `run-build.sh`) into the `franken-orchestrator` module as a proper global CLI. The CLI added new features (HITM review loops, subcommands, `.frankenbeast/` project state, `--resume`) but introduced regressions — most critically, the **interview and plan phases crash at runtime** due to a broken LLM adapter wiring.
@@ -89,7 +105,7 @@ These capabilities work identically (or better) in both:
 
 ## What's Missing or Stubbed
 
-### GAP-1: LLM Adapter for Plan/Interview Phases (Critical)
+### GAP-1: LLM Adapter for Plan/Interview Phases (Critical) — CLOSED
 
 **What**: The plan and interview phases need to call an LLM (for design doc generation, chunk decomposition, revision). The old runner used the same `RalphLoop` mechanism. The new CLI tries to use `AdapterLlmClient` wrapping `CliSkillExecutor`, but the types are incompatible.
 
@@ -108,7 +124,7 @@ These capabilities work identically (or better) in both:
 
 **Complexity**: Medium. The subprocess spawning pattern already exists in `RalphLoop`; this is a simpler single-shot variant.
 
-### GAP-2: Observer Integration (Token Counting, Cost, Budget Enforcement)
+### GAP-2: Observer Integration (Token Counting, Cost, Budget Enforcement) — CLOSED
 
 **What**: All observer functionality is stubbed in `dep-factory.ts:75-110`. Token counts always return 0, cost always returns 0, circuit breaker never trips. Budget limit in summary is visual noise.
 

@@ -55,15 +55,16 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 franken-orchestrator/src/
 ├── beast-loop.ts          # BeastLoop.run(input) → BeastResult
 ├── deps.ts                # BeastLoopDeps (all port interfaces)
+├── adapters/              # CliLlmAdapter (claude --print), CliObserverBridge
 ├── phases/                # ingestion, hydration, planning, execution, closure
 ├── breakers/              # injection, budget, critique-spiral circuit breakers
 ├── checkpoint/            # FileCheckpointStore (crash recovery)
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
 ├── skills/                # CliSkillExecutor, RalphLoop, GitBranchIsolator
-├── cli/                   # args.ts, config-loader.ts, run.ts (bin: frankenbeast)
+├── cli/                   # args.ts, config-loader.ts, run.ts, trace-viewer.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
-└── logging/               # BeastLogger (ANSI badges, status display)
+└── logging/               # BeastLogger (ANSI badges, service labels)
 ```
 
 **BeastContext**: Mutable state accumulator — sessionId, projectId, phase, sanitizedIntent, plan (PlanGraph), taskOutcomes, auditTrail, tokenBudget, traceContext.
@@ -72,10 +73,16 @@ franken-orchestrator/src/
 
 ## CLI Skill Execution Pipeline
 
-- `CliSkillExecutor` spawns CLI tools (claude --print, codex exec)
+- `CliLlmAdapter` implements `IAdapter` — wraps `claude --print` for single-shot LLM completions (planning, design-doc generation, interview). Env-safe: strips all `CLAUDE*` vars.
+- `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), and budget enforcement.
+- `CliSkillExecutor` spawns CLI tools (claude --print, codex exec) for multi-iteration task execution
 - `RalphLoop` repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → PR
+- CLI output uses service labels (`[planner]`, `[observer]`, `[ralph]`, etc.) for clarity
+- `--verbose` starts a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
+- `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults)
+- `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
 
 ## Build & Test
 
@@ -107,9 +114,9 @@ All modules use `tsc` except `franken-planner` (uses `tsup`).
 
 ## Known Limitations
 
-1. `executeTask()` is stub-level — records success without invoking real skills
-2. CLI requires `--dry-run` — no concrete module implementations wired yet
-3. Orchestrator depends on port interfaces, not implementations (by design)
+1. Orchestrator depends on port interfaces, not implementations (by design — hexagonal architecture)
+2. No `--non-interactive` flag for CI/headless use (review loops require stdin)
+3. E2E tests require `npm run build` before execution (no `pretest:e2e` script)
 
 ## Key Documentation
 
