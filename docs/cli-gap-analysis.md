@@ -20,35 +20,21 @@
 
 ## Overview
 
-The frankenbeast project migrated execution capabilities from standalone scripts (`plan-approach-c/build-runner.ts` + `run-build.sh`) into the `franken-orchestrator` module as a proper global CLI. The CLI added new features (HITM review loops, subcommands, `.frankenbeast/` project state, `--resume`) but introduced regressions — most critically, the **interview and plan phases crash at runtime** due to a broken LLM adapter wiring.
+The frankenbeast project migrated execution capabilities from standalone scripts (`plan-approach-c/build-runner.ts` + `run-build.sh`) into the `franken-orchestrator` module as a proper global CLI. The CLI added new features (HITM review loops, subcommands, `.frankenbeast/` project state, `--resume`). Initial migration had 5 gaps (broken LLM adapter, stub observer, missing trace viewer, unwired config/commit messages) — all resolved in `plan-2026-03-07-cli-gaps/`.
 
-## Critical: Plan & Interview Phases Are Broken
+## Critical: Plan & Interview Phases — FIXED
 
-**The CLI cannot run `frankenbeast --design-doc <path>` or `frankenbeast interview`.** Both crash with:
+~~The CLI could not run `frankenbeast --design-doc <path>` or `frankenbeast interview` — both crashed with `this.adapter.transformRequest is not a function`.~~
 
-```
-Fatal: this.adapter.transformRequest is not a function
-```
-
-**Root cause** (`franken-orchestrator/src/cli/session.ts:124`):
-
-```typescript
-const adapterLlm = new AdapterLlmClient(deps.cliExecutor as never);
-```
-
-`AdapterLlmClient` expects an `IAdapter` with `transformRequest`/`execute`/`transformResponse`/`validateCapabilities` methods (`franken-orchestrator/src/adapters/adapter-llm-client.ts:22-27`). `CliSkillExecutor` does not implement this interface — it's a skill executor, not an LLM adapter. The `as never` cast silences TypeScript but crashes at runtime.
-
-**Impact**: Only `frankenbeast run --plan-dir <existing-chunks>` works (pre-existing chunk files). The interview→plan→execute pipeline is non-functional.
-
-**Fix required**: Create a proper `IAdapter` implementation that wraps `claude --print` (or the configured provider) for single-shot LLM completions, and inject it instead of `cliExecutor`.
+**Resolved by** GAP-1 (Chunks 01–03): `CliLlmAdapter` implements `IAdapter` via `claude --print`, replacing the broken `deps.cliExecutor as never` cast in `session.ts`. All three input modes (chunks, design-doc, interview) now work end-to-end.
 
 ## Capability Comparison
 
 | Capability | Old Runner | New CLI | Status |
 |---|---|---|---|
 | **Input: chunk files** | `--mode chunks` | `--plan-dir` / `frankenbeast run` | Parity |
-| **Input: design doc** | `--mode design-doc --design-doc <f>` | `--design-doc <f>` / `frankenbeast plan` | **Broken** (runtime crash) |
-| **Input: interview** | `--mode interview` (stdin/stdout) | `frankenbeast interview` | **Broken** (runtime crash) |
+| **Input: design doc** | `--mode design-doc --design-doc <f>` | `--design-doc <f>` / `frankenbeast plan` | Fixed (GAP-1) |
+| **Input: interview** | `--mode interview` (stdin/stdout) | `frankenbeast interview` | Fixed (GAP-1) |
 | **Chunk file discovery** | `readdirSync` + `/^\d{2}.*\.md$/` | `ChunkFileGraphBuilder` (same pattern) | Parity |
 | **impl+harden task pairs** | `ChunkFileGraphBuilder` | Same class | Parity |
 | **Topological execution** | `PlanGraph.topoSort()` | Same mechanism via `BeastLoop` | Parity |
@@ -56,18 +42,18 @@ const adapterLlm = new AdapterLlmClient(deps.cliExecutor as never);
 | **Git branch isolation** | `GitBranchIsolator` (feat/ prefix) | Same class + squash merge option | Enhanced |
 | **Per-iteration auto-commit** | Yes | Yes | Parity |
 | **Checkpoint crash recovery** | `FileCheckpointStore` (`--reset`) | Same + `--resume` flag | Enhanced |
-| **HITM review loops** | None | `reviewLoop()` after design + plan phases | Enhanced (but broken — plan phase crashes) |
+| **HITM review loops** | None | `reviewLoop()` after design + plan phases | Enhanced |
 | **Subcommand entry points** | None (single `--mode` flag) | `interview` / `plan` / `run` subcommands | Enhanced |
 | **Project state in .frankenbeast/** | None (used `.build/` inline) | `.frankenbeast/plans/`, `.frankenbeast/.build/` | Enhanced |
-| **Token counting** | Full (`TokenCounter`) | Stub (always returns 0) | **Missing** |
-| **Cost calculation** | Full (`CostCalculator`) | Stub (always returns 0) | **Missing** |
-| **Budget circuit breaker** | Full (`CircuitBreaker`, trips on limit) | Stub (never trips) | **Missing** |
-| **Loop detection** | `LoopDetector` (window+threshold) | Not wired | **Missing** |
-| **Trace viewer** | `SQLiteAdapter` + `TraceServer` on :4040 | Removed | **Missing** |
-| **LLM commit messages** | Interface exists, not wired | `PrCreator` accepts `llm` param, CLI never passes it | **Missing** |
-| **Config file** | N/A | `--config` flag parsed but unused | **Missing** |
+| **Token counting** | Full (`TokenCounter`) | Real (`CliObserverBridge` → `TokenCounter`) | Fixed (GAP-2) |
+| **Cost calculation** | Full (`CostCalculator`) | Real (`CliObserverBridge` → `CostCalculator`) | Fixed (GAP-2) |
+| **Budget circuit breaker** | Full (`CircuitBreaker`, trips on limit) | Real (`CliObserverBridge` → `CircuitBreaker`) | Fixed (GAP-2) |
+| **Loop detection** | `LoopDetector` (window+threshold) | Real (`CliObserverBridge` → `LoopDetector`) | Fixed (GAP-2) |
+| **Trace viewer** | `SQLiteAdapter` + `TraceServer` on :4040 | `--verbose` starts TraceServer on `:4040` | Fixed (GAP-3) |
+| **LLM commit messages** | Interface exists, not wired | `CliLlmAdapter` passed to `PrCreator` | Fixed (GAP-4) |
+| **Config file** | N/A | `--config` loads JSON, merged with CLI args | Fixed (GAP-5) |
 | **PR creation** | `PrCreator` via `gh pr create` | Same class | Parity |
-| **Summary display** | Budget bar, per-chunk status, totals | Same layout (budget bar shows $0) | Visual only |
+| **Summary display** | Budget bar, per-chunk status, totals | Same layout (budget bar shows real USD) | Parity |
 | **Graceful shutdown** | SIGINT → finalize + exit | Same pattern | Parity |
 
 ## What's at Parity
@@ -83,7 +69,7 @@ These capabilities work identically (or better) in both:
 ## What's Enhanced (New in CLI)
 
 ### HITM Review Loops
-`franken-orchestrator/src/cli/review-loop.ts` — after generating a design doc or chunk files, the user is shown the artifacts and asked "proceed or revise?" with LLM-powered revision on feedback. **Currently non-functional** because the plan phase crashes before reaching the review loop.
+`franken-orchestrator/src/cli/review-loop.ts` — after generating a design doc or chunk files, the user is shown the artifacts and asked "proceed or revise?" with LLM-powered revision on feedback. Now functional after GAP-1 resolution.
 
 ### Subcommand Entry Points
 `franken-orchestrator/src/cli/run.ts:29-54` — `resolvePhases()` maps subcommands to phase boundaries:
@@ -97,116 +83,43 @@ These capabilities work identically (or better) in both:
 - `.frankenbeast/plans/design.md` — generated design doc
 - `.frankenbeast/plans/01_*.md` — chunk files
 - `.frankenbeast/.build/checkpoint` — crash recovery
-- `.frankenbeast/.build/traces.db` — (unused, no observer)
+- `.frankenbeast/.build/traces.db` — SQLite trace storage (via `CliObserverBridge`)
 - `.frankenbeast/.build/session.log` — log file
 
 ### Explicit Resume
 `--resume` flag allows explicitly resuming from checkpoint (old runner relied on implicit checkpoint detection).
 
-## What's Missing or Stubbed
+## Gaps (All Resolved)
 
 ### GAP-1: LLM Adapter for Plan/Interview Phases (Critical) — CLOSED
 
-**What**: The plan and interview phases need to call an LLM (for design doc generation, chunk decomposition, revision). The old runner used the same `RalphLoop` mechanism. The new CLI tries to use `AdapterLlmClient` wrapping `CliSkillExecutor`, but the types are incompatible.
-
-**Where**: `franken-orchestrator/src/cli/session.ts:71,124` — `new AdapterLlmClient(deps.cliExecutor as never)`
-
-**Fix**: Create a `CliLlmAdapter` that implements `IAdapter` by wrapping `claude --print` (or codex equivalent) for single-shot LLM completions. This is different from `RalphLoop` which manages multi-iteration conversations with promise detection. The adapter needs:
-- `transformRequest`: build CLI args from `UnifiedRequest`
-- `execute`: spawn `claude --print` with the prompt, capture stdout
-- `transformResponse`: extract text from CLI output
-- `validateCapabilities`: return true for text completion
-
-**Files to change**:
-- New: `franken-orchestrator/src/adapters/cli-llm-adapter.ts`
-- Edit: `franken-orchestrator/src/cli/session.ts` — replace `deps.cliExecutor as never` with proper adapter
-- Edit: `franken-orchestrator/src/cli/dep-factory.ts` — create and expose the adapter in `CliDeps`
-
-**Complexity**: Medium. The subprocess spawning pattern already exists in `RalphLoop`; this is a simpler single-shot variant.
+**Resolved by**: Chunks 01–03. New `CliLlmAdapter` (`franken-orchestrator/src/adapters/cli-llm-adapter.ts`) implements `IAdapter` via `claude --print` for single-shot LLM completions. Replaces broken `deps.cliExecutor as never` cast in `session.ts`. Env-safe: strips all `CLAUDE*` vars.
 
 ### GAP-2: Observer Integration (Token Counting, Cost, Budget Enforcement) — CLOSED
 
-**What**: All observer functionality is stubbed in `dep-factory.ts:75-110`. Token counts always return 0, cost always returns 0, circuit breaker never trips. Budget limit in summary is visual noise.
+**Resolved by**: Chunks 04–06. New `CliObserverBridge` (`franken-orchestrator/src/adapters/cli-observer-bridge.ts`) bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer. Replaces stub observer in `dep-factory.ts`.
 
-**Where**: `franken-orchestrator/src/cli/dep-factory.ts:73-110` — `createStubObserver()` and `createStubObserverDeps()`
+### GAP-3: Trace Viewer — CLOSED
 
-**Stub code**:
-```typescript
-function createStubObserver(): IObserverModule {
-  return {
-    startTrace: () => {},
-    startSpan: () => ({ end: () => {} }),
-    getTokenSpend: async () => ({
-      inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostUsd: 0,
-    }),
-  };
-}
-```
+**Resolved by**: Chunk 10 (`franken-orchestrator/src/cli/trace-viewer.ts`). `--verbose` starts `TraceServer` on `:4040` with `SQLiteAdapter` from franken-observer.
 
-**Fix**: Import and instantiate real observer components from `franken-observer`:
-- `TokenCounter` — track prompt/completion tokens per model
-- `CostCalculator` — convert tokens to USD via `DEFAULT_PRICING`
-- `CircuitBreaker` — trip when spend exceeds `--budget`
-- `LoopDetector` — detect infinite RALPH loops via window+threshold
+### GAP-4: LLM Commit Message Generation — CLOSED
 
-**Files to change**:
-- Edit: `franken-orchestrator/src/cli/dep-factory.ts` — replace stubs with real imports
-- Edit: `franken-orchestrator/package.json` — add `franken-observer` dependency (if not already linked)
-- May need: adapter wrappers if observer interfaces don't match `IObserverModule` exactly
+**Resolved by**: Chunks 01–03. `CliLlmAdapter` serves as `ILlmClient` for `PrCreator` via `dep-factory.ts`.
 
-**Complexity**: Medium-High. Need to verify franken-observer's exports match what `dep-factory` expects, handle initialization (SQLite for traces), and wire the `--verbose` flag to enable/disable the trace viewer.
+### GAP-5: Config File Loading — CLOSED
 
-### GAP-3: Trace Viewer
-
-**What**: Old runner provided `--verbose` → SQLite trace storage → HTTP trace viewer on `localhost:4040`. Removed in new CLI.
-
-**Where**: Was in old `plan-approach-c/build-runner.ts`. No equivalent in `franken-orchestrator/src/cli/`.
-
-**Fix**: Conditionally start `TraceServer` from `franken-observer` when `--verbose` is set. Requires `SQLiteAdapter` initialization in `dep-factory.ts`.
-
-**Files to change**:
-- Edit: `franken-orchestrator/src/cli/dep-factory.ts` — add conditional trace server setup
-- Edit: `franken-orchestrator/src/cli/session.ts` or `run.ts` — start/stop trace server lifecycle
-
-**Complexity**: Low-Medium. Components exist in franken-observer; just need wiring.
-
-### GAP-4: LLM Commit Message Generation
-
-**What**: `PrCreator` has a `generateCommitMessage()` method that uses an optional `ILlmClient` to generate conventional commit messages from diff stats. The CLI never passes the `llm` param, so it always falls back to plain `"feat: <project> - N chunks"` titles.
-
-**Where**: `franken-orchestrator/src/closure/pr-creator.ts:19,21,31-46` — `llm` param accepted but never injected from CLI.
-
-**Fix**: Pass the LLM adapter (from GAP-1) to `PrCreator` in `dep-factory.ts`.
-
-**Files to change**:
-- Edit: `franken-orchestrator/src/cli/dep-factory.ts` — pass `llm` to `PrCreator` constructor
-- Depends on: GAP-1 (need a working `ILlmClient`)
-
-**Complexity**: Low (once GAP-1 is resolved).
-
-### GAP-5: Config File Loading
-
-**What**: `--config <path>` flag is parsed in `args.ts` but never read or applied.
-
-**Where**: `franken-orchestrator/src/cli/args.ts` — parses the flag. `franken-orchestrator/src/cli/config-loader.ts` — exists but not called from `run.ts`.
-
-**Fix**: Call `config-loader.ts` from `run.ts` and merge loaded config with CLI args (CLI args take precedence).
-
-**Files to change**:
-- Edit: `franken-orchestrator/src/cli/run.ts` — call config loader
-- Verify: `franken-orchestrator/src/cli/config-loader.ts` — ensure it handles the full config schema
-
-**Complexity**: Low.
+**Resolved by**: Chunk 09. `--config <path>` now loads JSON config via `config-loader.ts`, merged with CLI args (CLI args > env > file > defaults).
 
 ## Remediation Priority
 
-| Priority | Gap | Rationale |
-|---|---|---|
-| **P0** | GAP-1: LLM Adapter | Blocks plan + interview phases entirely. Without this, the CLI is execution-only. |
-| **P1** | GAP-2: Observer Integration | Budget enforcement is critical for production use. Running without it risks unbounded LLM spend. |
-| **P2** | GAP-4: LLM Commit Messages | Quick win once GAP-1 is done. Improves PR quality. |
-| **P2** | GAP-5: Config File Loading | Quick win. Code likely already exists in config-loader.ts. |
-| **P3** | GAP-3: Trace Viewer | Nice-to-have for debugging. Not blocking any functionality. |
+| Priority | Gap | Rationale | Status |
+|---|---|---|---|
+| **P0** | GAP-1: LLM Adapter | Blocks plan + interview phases entirely. Without this, the CLI is execution-only. | **CLOSED** |
+| **P1** | GAP-2: Observer Integration | Budget enforcement is critical for production use. Running without it risks unbounded LLM spend. | **CLOSED** |
+| **P2** | GAP-4: LLM Commit Messages | Quick win once GAP-1 is done. Improves PR quality. | **CLOSED** |
+| **P2** | GAP-5: Config File Loading | Quick win. Code likely already exists in config-loader.ts. | **CLOSED** |
+| **P3** | GAP-3: Trace Viewer | Nice-to-have for debugging. Not blocking any functionality. | **CLOSED** |
 
 ## Dependency Graph
 
