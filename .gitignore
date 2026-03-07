@@ -1,7 +1,5 @@
 node_modules
 .claude
 .worktrees
-# Build runner artifacts (logs, traces, checkpoint) — must be invisible to codex/rg
-# to prevent recursive JSON escaping when codex reads its own log output
-plan-2026-03-05/.build/
-plan-beast-runner/.build/
+# Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
+**/.build/
