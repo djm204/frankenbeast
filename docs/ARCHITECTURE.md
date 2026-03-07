@@ -39,6 +39,8 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 **Resilience**: Context serialization to disk, graceful SIGTERM/SIGINT handling, module health checks on startup.
 
+## Orchestrator Internals
+
 ### CLI Skill Execution Path
 
 The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (e.g., `claude --print`, `codex exec`) as child processes. This absorbs the RALPH loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
