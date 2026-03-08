@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.3.0...frankenbeast-v0.3.1) (2026-03-08)
+
+
+### Miscellaneous
+
+* **submodule:** update franken-critique — fix TS7030 middleware returns ([987cee1](https://github.com/djm204/frankenbeast/commit/987cee13cf42d87290dce6bb9df01c7a49f6660c))
+* **submodule:** update orchestrator — --cleanup flag and branding ([a29f946](https://github.com/djm204/frankenbeast/commit/a29f946d8c817a00d94d880e22f1b83a7351e9a6))
+* **submodule:** update orchestrator — PR creator head==base guard ([1bd2dd2](https://github.com/djm204/frankenbeast/commit/1bd2dd2328c4f70c96d024cf6277fb5e9353c6dc))
+* **submodule:** update orchestrator — strip hook output from CLI responses ([3dd5e3d](https://github.com/djm204/frankenbeast/commit/3dd5e3db9dcb336716665334623bd3d22cbaac7a))
+* **submodule:** update orchestrator — tool-use stream summarization ([6999e80](https://github.com/djm204/frankenbeast/commit/6999e80594574b16ce2c17158c29cbe93a5be6f6))
+
+
+### Documentation
+
+* add interview loop UX improvements design ([a923536](https://github.com/djm204/frankenbeast/commit/a923536e8e865ad8ad41e0def9c14b1006f1eaa7))
+* add interview UX implementation plan (8 tasks) ([98096a1](https://github.com/djm204/frankenbeast/commit/98096a1114b1990229f97ef2df2fd1d501b9df7f))
+
 ## [0.3.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.2.0...frankenbeast-v0.3.0) (2026-03-08)
 
 
