@@ -164,23 +164,24 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ---
 
-## Final Test Counts (verified)
+## Test Counts
+
+> Phase 7 baseline was 1,572 tests. Phases 8–9 added orchestrator and root integration tests.
 
 | Module | Tests | Files | Status |
 |--------|-------|-------|--------|
 | frankenfirewall | 163 | 21 | PASS |
-| franken-skills | 75 | 10 | PASS (was 146/7fail — fixed vitest config picking up dist/) |
+| franken-skills | 75 | 10 | PASS |
 | franken-brain | 166 | 15 | PASS |
 | franken-planner | 188 | 18 | PASS |
 | franken-observer | 373 | 27 | PASS |
-| franken-critique | 146 | 18 | PASS (server wired to real CritiquePipeline) |
+| franken-critique | 146 | 18 | PASS |
 | franken-governor | 136 | 21 | PASS |
 | franken-heartbeat | 118 | 16 | PASS |
 | franken-types | 22 | 2 | PASS |
-| franken-orchestrator (unit) | 99 | 14 | PASS |
-| franken-orchestrator (E2E) | 33 | 8 | PASS |
-| Root integration | 53 | 7 | PASS |
-| **Total** | **1,572** | **177** | **ALL PASS** |
+| franken-orchestrator | 1,018 | 78 | PASS (1 skipped) |
+| Root integration | 162 | 11 | PASS |
+| **Total** | **2,567** | **237** | **ALL PASS** |
 
 ## Phase 8: CLI Gap Closure
 
@@ -236,7 +237,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 **CLI flags**: `--label`, `--search`, `--milestone`, `--assignee`, `--limit`, `--repo`, `--dry-run`
 
-**Tests**: 153 issue-related tests across 8 test files (unit + integration + session). Orchestrator total: 1015 tests passing.
+**Tests**: 153 issue-related tests across 8 test files (unit + integration + session). Orchestrator total: 1,018 tests passing.
 
 **Commits**: 7 (on `feat/11_docs-update`). PR: TBD.
 

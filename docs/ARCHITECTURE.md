@@ -53,7 +53,7 @@ The current local CLI path is mixed rather than fully wired:
 - Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`
 - Stubbed in `src/cli/dep-factory.ts`: firewall, skills registry, memory, planner port, critique, governor, heartbeat
 - `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
-- PR creation is wired, but the local dep factory still hardcodes target branch `main`
+- PR creation is wired; the dep factory resolves target branch from CLI args/config via `baseBranch`
 - The CLI path imports concrete observer classes from `@frankenbeast/observer`, so it is not purely ports-only today
 
 ## Orchestrator Internals
@@ -178,7 +178,7 @@ The CLI exposes three entry modes. The current local path can drive them through
 | `design-doc` | A single design document | LLM via `LlmGraphBuilder` | `LlmGraphBuilder` |
 | `interview` | Natural language goal/prompt | LLM interviews user, generates design doc, decomposes | `InterviewLoop` → `LlmGraphBuilder` |
 
-All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `MartinLoop` → `GitBranchIsolator` → `CliSkillExecutor`. PR creation is wired through `PrCreator`, but the current local CLI dep factory still hardcodes target branch `main` instead of the resolved `--base-branch`.
+All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `MartinLoop` → `GitBranchIsolator` → `CliSkillExecutor`. PR creation is wired through `PrCreator`, which resolves the target branch from CLI args/config via `baseBranch`.
 
 #### Data Flow
 
@@ -208,7 +208,7 @@ flowchart TD
 
     PG --> PLN
     EXE -->|per commit| CKP["FileCheckpointStore"]
-    CLO --> PR["gh pr create<br/>(current local wiring targets main)"]
+    CLO --> PR["gh pr create<br/>(baseBranch from CLI args/config)"]
     CLO --> BR["BeastResult"]
 ```
 

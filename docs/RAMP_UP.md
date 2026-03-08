@@ -99,7 +99,7 @@ franken-orchestrator/src/
   - `--repo <owner/repo>` target repository (auto-inferred from `gh repo view` if omitted)
   - `--dry-run` preview triage without executing
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
-- Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
+- Current local CLI dep wiring is mixed: observer, CLI adapters, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and `FileCheckpointStore` are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
 ## Build & Test
 
@@ -142,7 +142,7 @@ All modules use `tsc` except `franken-planner` and `franken-observer` (both use 
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 10 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers) |
+| `docs/adr/` | 11 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration) |
 | `docs/guides/` | quickstart, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
