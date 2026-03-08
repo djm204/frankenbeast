@@ -140,7 +140,7 @@ function validateUnifiedResponse(
   }
 
   // No provider-specific fields should leak
-  const raw = response as Record<string, unknown>;
+  const raw = response as unknown as Record<string, unknown>;
   for (const field of PROVIDER_SPECIFIC_FIELDS) {
     if (field in raw) {
       failures.push(`${label} response: provider-specific field "${field}" leaked into UnifiedResponse`);

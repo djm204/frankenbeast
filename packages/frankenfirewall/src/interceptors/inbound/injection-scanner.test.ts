@@ -3,13 +3,16 @@ import { scanForInjection } from "./injection-scanner.js";
 import type { UnifiedRequest } from "../../types/index.js";
 
 function makeRequest(content: string, system?: string): UnifiedRequest {
-  return {
+  const req: UnifiedRequest = {
     id: "test-id",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
-    system,
     messages: [{ role: "user", content }],
   };
+  if (system !== undefined) {
+    req.system = system;
+  }
+  return req;
 }
 
 describe("InjectionScanner — PASS cases", () => {

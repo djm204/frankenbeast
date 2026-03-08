@@ -28,4 +28,5 @@ export const errorHandler = createMiddleware(async (c, next) => {
       status,
     );
   }
+  return undefined;
 });

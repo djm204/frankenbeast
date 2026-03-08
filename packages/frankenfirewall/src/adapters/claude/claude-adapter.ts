@@ -120,8 +120,13 @@ export class ClaudeAdapter extends BaseAdapter implements IAdapter {
     }
 
     const messages: ClaudeMessage[] = request.messages.map((msg) => ({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: typeof msg.content === "string" ? msg.content : msg.content,
+      role: msg.role === "assistant" ? "assistant" as const : "user" as const,
+      content: typeof msg.content === "string"
+        ? msg.content
+        : msg.content.map((block): ClaudeContentBlock => ({
+            type: "text" as const,
+            text: block.text ?? block.content ?? "",
+          })),
     }));
 
     const claudeRequest: ClaudeRequest = {

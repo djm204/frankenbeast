@@ -10,8 +10,8 @@ export type McpRegistryErrorCode =
 
 export class McpRegistryError extends Error {
   readonly code: McpRegistryErrorCode;
-  readonly serverId?: string;
-  readonly toolName?: string;
+  readonly serverId?: string | undefined;
+  readonly toolName?: string | undefined;
 
   constructor(
     code: McpRegistryErrorCode,

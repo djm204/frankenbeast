@@ -94,11 +94,14 @@ export abstract class BaseAdapter {
     message: string,
     payload?: Record<string, unknown>,
   ): GuardrailViolation {
-    return {
+    const violation: GuardrailViolation = {
       code: "ADAPTER_ERROR",
       message,
       interceptor: "Pipeline",
-      payload,
     };
+    if (payload !== undefined) {
+      violation.payload = payload;
+    }
+    return violation;
   }
 }

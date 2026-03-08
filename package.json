@@ -8,21 +8,23 @@
   "description": "Deterministic guardrails framework for AI agents",
   "type": "module",
   "scripts": {
-    "build": "for d in franken-types franken-brain franken-critique franken-governor franken-heartbeat franken-observer franken-planner franken-skills frankenfirewall franken-orchestrator; do echo \"Building $d...\" && cd $d && npm run build && cd ..; done",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:all": "for d in franken-types franken-brain franken-critique franken-governor franken-heartbeat franken-observer franken-planner franken-skills frankenfirewall franken-orchestrator; do echo \"Testing $d...\" && cd $d && npm test && cd ..; done && vitest run"
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:root": "vitest run",
+    "test:root:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.0.18",
     "better-sqlite3": "^12.6.2",
+    "turbo": "^2.8.14",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
+  "packageManager": "npm@11.5.1",
   "engines": {
     "node": ">=20.0.0"
   }

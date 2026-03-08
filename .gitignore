@@ -1,6 +1,7 @@
 node_modules
 .claude
 .worktrees
+.turbo
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
 

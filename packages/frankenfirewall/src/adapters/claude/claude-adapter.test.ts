@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ClaudeAdapter } from "./claude-adapter.js";
 import type { UnifiedRequest } from "../../types/index.js";
-import stopFixture from "./fixtures/response-stop.json" assert { type: "json" };
-import toolFixture from "./fixtures/response-tool-use.json" assert { type: "json" };
+import stopFixture from "./fixtures/response-stop.json" with { type: "json" };
+import toolFixture from "./fixtures/response-tool-use.json" with { type: "json" };
 
 const BASE_REQUEST: UnifiedRequest = {
   id: "req-001",
@@ -21,13 +21,13 @@ function makeAdapter(model = "claude-sonnet-4-6"): ClaudeAdapter {
 describe("ClaudeAdapter.transformRequest", () => {
   it("maps system prompt to Anthropic top-level system field", () => {
     const adapter = makeAdapter();
-    const result = adapter.transformRequest({ ...BASE_REQUEST, system: "You are helpful." }) as Record<string, unknown>;
+    const result = adapter.transformRequest({ ...BASE_REQUEST, system: "You are helpful." }) as unknown as Record<string, unknown>;
     expect(result["system"]).toBe("You are helpful.");
   });
 
   it("omits system field when not provided", () => {
     const adapter = makeAdapter();
-    const result = adapter.transformRequest(BASE_REQUEST) as Record<string, unknown>;
+    const result = adapter.transformRequest(BASE_REQUEST) as unknown as Record<string, unknown>;
     expect(result).not.toHaveProperty("system");
   });
 
@@ -36,7 +36,7 @@ describe("ClaudeAdapter.transformRequest", () => {
     const result = adapter.transformRequest({
       ...BASE_REQUEST,
       tools: [{ name: "get_weather", description: "Get weather", input_schema: { type: "object" } }],
-    }) as Record<string, unknown>;
+    }) as unknown as Record<string, unknown>;
     expect(result["tools"]).toHaveLength(1);
     expect((result["tools"] as Array<Record<string, unknown>>)[0]?.["name"]).toBe("get_weather");
   });

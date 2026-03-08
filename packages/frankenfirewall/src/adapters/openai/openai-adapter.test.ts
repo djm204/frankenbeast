@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OpenAIAdapter } from "./openai-adapter.js";
 import { ClaudeAdapter } from "../claude/claude-adapter.js";
 import type { UnifiedRequest } from "../../types/index.js";
-import stopFixture from "./fixtures/response-stop.json" assert { type: "json" };
-import toolFixture from "./fixtures/response-tool-call.json" assert { type: "json" };
-import claudeStopFixture from "../claude/fixtures/response-stop.json" assert { type: "json" };
+import stopFixture from "./fixtures/response-stop.json" with { type: "json" };
+import toolFixture from "./fixtures/response-tool-call.json" with { type: "json" };
+import claudeStopFixture from "../claude/fixtures/response-stop.json" with { type: "json" };
 
 const BASE_REQUEST: UnifiedRequest = {
   id: "req-001",
