@@ -55,12 +55,13 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 franken-orchestrator/src/
 ├── beast-loop.ts          # BeastLoop.run(input) → BeastResult
 ├── deps.ts                # BeastLoopDeps (all port interfaces)
-├── adapters/              # CliLlmAdapter (claude/codex CLI), CliObserverBridge
+├── adapters/              # CliLlmAdapter (wraps ICliProvider), CliObserverBridge
 ├── phases/                # ingestion, hydration, planning, execution, closure
 ├── breakers/              # injection, budget, critique-spiral circuit breakers
 ├── checkpoint/            # FileCheckpointStore (plan-scoped crash recovery)
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator
+│   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
 ├── cli/                   # args.ts, config-loader.ts, run.ts, trace-viewer.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
@@ -73,15 +74,17 @@ franken-orchestrator/src/
 
 ## CLI Skill Execution Pipeline
 
-- `CliLlmAdapter` implements `IAdapter` — wraps `claude` or `codex` CLI for single-shot LLM completions used by interview/plan flows. It strips all `CLAUDE*` vars before spawn.
+- `ProviderRegistry` holds all `ICliProvider` implementations. `createDefaultRegistry()` registers 4 built-in providers: claude, codex, gemini, aider. Each provider is a single file under `src/skills/providers/`.
+- `CliLlmAdapter` implements `IAdapter` — wraps an `ICliProvider` instance for single-shot LLM completions used by interview/plan flows. Delegates env filtering and output normalization to the provider.
 - `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), and budget enforcement.
-- `CliSkillExecutor` spawns CLI tools (`claude --print`, `codex exec`) for multi-iteration task execution
-- `MartinLoop` repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
+- `CliSkillExecutor` spawns CLI tools via `ICliProvider` for multi-iteration task execution
+- `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. Rate-limit cascade rotates through providers. Repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → optional PR
 - CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity
 - `--verbose` attempts to start a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
-- `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults)
+- `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate limits (e.g., `claude,gemini,aider`)
+- `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
 - Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`

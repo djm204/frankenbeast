@@ -33,7 +33,7 @@ We need a single `frankenbeast` command that works as a drop-in tool in any proj
 - Per-plan `build-runner.ts` files are no longer needed for new plans
 - Users can go from idea to PR in a single interactive session
 - Project-local module access (importing individual modules) is deferred to a future iteration
-- Additional CLI provider support (beyond claude/codex) is deferred
+- Additional CLI provider support (beyond claude/codex) is deferred (resolved by [ADR-010](010-pluggable-cli-providers.md))
 
 ## Supersedes
 

@@ -60,16 +60,22 @@ The current local CLI path is mixed rather than fully wired:
 
 ### CLI Skill Execution Path
 
-The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (e.g., `claude --print`, `codex exec`) as child processes. This absorbs the Martin loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
+The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (claude, codex, gemini, aider) as child processes via the pluggable `ProviderRegistry`. This absorbs the Martin loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
 
 **Components:**
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping `claude --print` (or configurable provider) for single-shot LLM completions. Used by plan/interview phases. Strips `CLAUDE*` env vars to prevent subprocess hangs. |
+| `ProviderRegistry` | `franken-orchestrator/src/skills/providers/cli-provider.ts` | In-memory registry of `ICliProvider` implementations. `createDefaultRegistry()` registers all 4 built-in providers (claude, codex, gemini, aider). Lookup by name with `get(name)`. |
+| `ICliProvider` | `franken-orchestrator/src/skills/providers/cli-provider.ts` | Interface for CLI agent providers: `buildArgs`, `normalizeOutput`, `estimateTokens`, `isRateLimited`, `parseRetryAfter`, `filterEnv`, `supportsStreamJson`. |
+| `ClaudeProvider` | `franken-orchestrator/src/skills/providers/claude-provider.ts` | Claude CLI provider. `claude --print` with stream-json, strips `CLAUDE*` env vars. |
+| `CodexProvider` | `franken-orchestrator/src/skills/providers/codex-provider.ts` | Codex CLI provider. `codex exec --full-auto --json`. |
+| `GeminiProvider` | `franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
+| `AiderProvider` | `franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
+| `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
 | `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
 | `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
-| `MartinLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
+| `MartinLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic — accepts a `ProviderRegistry` and resolves providers by name from the configured fallback chain. Rate-limit cascade: exhausted providers rotate to the next in chain, with provider-specific retry-after parsing. |
 | `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
 
 **Execution flow:**
@@ -80,7 +86,7 @@ sequenceDiagram
     participant ET as executeTask()
     participant CSE as CliSkillExecutor
     participant RL as MartinLoop
-    participant CLI as CLI Process (claude/codex)
+    participant CLI as CLI Process (ICliProvider)
     participant GBI as GitBranchIsolator
     participant OB as Observer (TraceContext)
 
@@ -119,16 +125,20 @@ The CLI uses two distinct adapter paths depending on the operation:
 flowchart TD
     CLI["frankenbeast CLI"]
 
+    subgraph "Provider Registry"
+        PR["ProviderRegistry<br/>(claude, codex, gemini, aider)"]
+    end
+
     subgraph "Planning Path (single-shot LLM)"
-        CLA["CliLlmAdapter<br/>(IAdapter)"]
-        CP["claude --print<br/>(subprocess)"]
+        CLA["CliLlmAdapter<br/>(wraps ICliProvider)"]
+        CP["CLI subprocess<br/>(--provider flag)"]
         CLA --> CP
     end
 
     subgraph "Execution Path (multi-iteration tasks)"
         CSE["CliSkillExecutor"]
-        RL["MartinLoop"]
-        CLI2["claude --print<br/>(subprocess, looped)"]
+        RL["MartinLoop<br/>(fallback chain)"]
+        CLI2["CLI subprocess<br/>(--providers chain)"]
         CSE --> RL --> CLI2
     end
 
@@ -146,6 +156,8 @@ flowchart TD
 
     CLI -->|"interview, plan,<br/>design-doc decomposition"| CLA
     CLI -->|"chunk execution<br/>(impl + harden)"| CSE
+    PR -.->|"resolve by name"| CLA
+    PR -.->|"fallback chain"| RL
     COB -.->|"token/cost tracking"| CLA
     COB -.->|"budget enforcement"| CSE
 ```
@@ -331,7 +343,9 @@ flowchart LR
 
 All project state lives in `.frankenbeast/` at the project root.
 
-**Design reference:** See [CLI E2E Design](plans/2026-03-06-cli-e2e-design.md) and [ADR-009](adr/009-global-cli-design.md).
+**Provider selection:** `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate-limit cascading (e.g., `claude,gemini,aider`). The config file `providers` section supports `default`, `fallbackChain`, and per-provider `overrides` (command path, model, extra args). CLI args take precedence over config file values.
+
+**Design reference:** See [CLI E2E Design](plans/2026-03-06-cli-e2e-design.md), [ADR-009](adr/009-global-cli-design.md), and [ADR-010](adr/010-pluggable-cli-providers.md).
 
 ## HTTP Services (Hono)
 
