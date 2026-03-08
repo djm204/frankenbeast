@@ -32,7 +32,7 @@
 | Runtime     | Node.js 22 LTS          | Stable, LTS, native ESM                  |
 | Testing     | Vitest                  | ESM-native, fast; see ADR-003            |
 | Package mgr | pnpm                    | Fast, strict hoisting                    |
-| Build       | tsup                    | Zero-config TS bundler                   |
+| Build       | tsc                     | Direct TS compilation                    |
 | Linting     | ESLint + Prettier       | Enforced in CI                           |
 
 ### Key Architectural Decisions

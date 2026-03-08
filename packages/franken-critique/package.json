@@ -51,7 +51,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@franken/types": "file:../franken-types",
+    "@franken/types": "*",
     "hono": "^4.7.0",
     "zod": "^3.24.0"
   }

@@ -22,7 +22,7 @@
     "test:ci": "vitest run --coverage"
   },
   "dependencies": {
-    "@franken/types": "file:../franken-types"
+    "@franken/types": "*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.0",

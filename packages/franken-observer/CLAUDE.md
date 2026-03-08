@@ -15,10 +15,10 @@ to ensure code refactors don't break established skills.
 
 | Concern        | Choice                              | Notes                                  |
 |----------------|-------------------------------------|----------------------------------------|
-| Language       | TypeScript (strict)                 | Target ES2022, `moduleResolution: bundler` |
+| Language       | TypeScript (strict)                 | Target ES2022, `moduleResolution: NodeNext` |
 | Runtime        | Node.js 20+                         |                                        |
 | Test runner    | Vitest                              | TDD-first; co-locate `*.test.ts` files |
-| Build          | tsup                                | Dual CJS + ESM output                  |
+| Build          | tsc                                 | ESM output                             |
 | OTEL           | `@opentelemetry/api` + `@opentelemetry/sdk-node` | Core instrumentation      |
 | SQLite         | `better-sqlite3`                    | Zero-dep local dev backend             |
 | HTTP exports   | `ofetch`                            | Langfuse / Phoenix adapter calls       |

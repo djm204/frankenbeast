@@ -112,7 +112,7 @@ npm run typecheck    # tsc --noEmit across project
 
 Per-module: `cd <module> && npm test`
 
-All modules use `tsc` except `franken-planner` and `franken-observer` (both use `tsup`).
+All modules use `tsc` for builds.
 
 ## Project Config
 

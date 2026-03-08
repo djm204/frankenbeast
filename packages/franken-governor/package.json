@@ -30,7 +30,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@franken/types": "file:../franken-types",
+    "@franken/types": "*",
     "hono": "^4.7.0"
   },
   "devDependencies": {

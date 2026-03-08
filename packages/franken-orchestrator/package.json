@@ -31,8 +31,8 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@franken/types": "file:../franken-types",
-    "@frankenbeast/observer": "file:../franken-observer",
+    "@franken/types": "*",
+    "@frankenbeast/observer": "*",
     "zod": "^3.24.0"
   },
   "devDependencies": {
