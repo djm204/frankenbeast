@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.0...frankenbeast-v0.4.1) (2026-03-08)
+
+
+### Miscellaneous
+
+* move completed plan docs to docs/plans/complete/ ([45a8cac](https://github.com/djm204/frankenbeast/commit/45a8cac11580acce9447902c8e83358cabd01f25))
+* update franken-orchestrator gitlink — fix [#92](https://github.com/djm204/frankenbeast/issues/92) stream-JSON commits ([58c3cbe](https://github.com/djm204/frankenbeast/commit/58c3cbeba33b3b68fa7e0c9694f1728ffc876c2c))
+* update franken-planner gitlink — fix vitest watch mode ([99640b8](https://github.com/djm204/frankenbeast/commit/99640b8a0f2d09ac3f2cfb12cea144e79020203a))
+* update frankenfirewall gitlink — fix TS strictness errors ([708c787](https://github.com/djm204/frankenbeast/commit/708c787838c420a255b672b6e545450d4c1ef0cf))
+
+
+### Documentation
+
+* add monorepo migration ADR, design doc, and implementation plan ([47b96b0](https://github.com/djm204/frankenbeast/commit/47b96b0bc42b24eea5d3e8f16c6d3e09979e7a63))
+* fix stale documentation — test counts, ADR count, PR target branch ([0055602](https://github.com/djm204/frankenbeast/commit/0055602cf564e090f9175aa3f5b172569f7d9141))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.3.1...frankenbeast-v0.4.0) (2026-03-08)
 
 
