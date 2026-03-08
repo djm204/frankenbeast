@@ -72,11 +72,11 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 | `CodexProvider` | `packages/franken-orchestrator/src/skills/providers/codex-provider.ts` | Codex CLI provider. `codex exec --full-auto --json`. |
 | `GeminiProvider` | `packages/franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
 | `AiderProvider` | `packages/franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
-| `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
-| `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
-| `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
-| `MartinLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic — accepts a `ProviderRegistry` and resolves providers by name from the configured fallback chain. Rate-limit cascade: exhausted providers rotate to the next in chain, with provider-specific retry-after parsing. |
-| `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
+| `CliLlmAdapter` | `packages/franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
+| `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
+| `CliSkillExecutor` | `packages/franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
+| `MartinLoop` | `packages/franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic — accepts a `ProviderRegistry` and resolves providers by name from the configured fallback chain. Rate-limit cascade: exhausted providers rotate to the next in chain, with provider-specific retry-after parsing. |
+| `GitBranchIsolator` | `packages/franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
 
 **Execution flow:**
 
@@ -297,15 +297,15 @@ This preserves the build-runner's impl+harden pattern inside the orchestrator's 
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `FileCheckpointStore` | `franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. Plan-scoped: `.build/<plan-name>.checkpoint`. |
-| `ChunkFileGraphBuilder` | `franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
-| `LlmGraphBuilder` | `franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
-| `InterviewLoop` | `franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
-| `PrCreator` | `franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create`. Generates title + body from `BeastResult`. In the current local CLI dep wiring, target branch is still hardcoded to `main`. |
-| `BeastLogger` | `franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting. Streams log entries to disk incrementally (crash-safe) as `.build/<plan-name>-<datetime>-build.log`. |
-| `CLI args/config/run` | `franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
-| Execution checkpoint wiring | `franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
-| Planning GraphBuilder wiring | `franken-orchestrator/src/phases/planning.ts` | Uses `GraphBuilder.build()` when available, falls back to `IPlannerModule.createPlan()`. |
+| `FileCheckpointStore` | `packages/franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. Plan-scoped: `.build/<plan-name>.checkpoint`. |
+| `ChunkFileGraphBuilder` | `packages/franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
+| `LlmGraphBuilder` | `packages/franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
+| `InterviewLoop` | `packages/franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
+| `PrCreator` | `packages/franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create`. Generates title + body from `BeastResult`. In the current local CLI dep wiring, target branch is still hardcoded to `main`. |
+| `BeastLogger` | `packages/franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting. Streams log entries to disk incrementally (crash-safe) as `.build/<plan-name>-<datetime>-build.log`. |
+| `CLI args/config/run` | `packages/franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
+| Execution checkpoint wiring | `packages/franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
+| Planning GraphBuilder wiring | `packages/franken-orchestrator/src/phases/planning.ts` | Uses `GraphBuilder.build()` when available, falls back to `IPlannerModule.createPlan()`. |
 
 #### Crash Recovery
 
@@ -396,11 +396,11 @@ flowchart TD
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `IssueFetcher` | `franken-orchestrator/src/issues/issue-fetcher.ts` | Wraps `gh issue list` with filters (label, milestone, search, assignee, repo, limit). Infers repo from `gh repo view` when `--repo` is omitted. |
-| `IssueTriage` | `franken-orchestrator/src/issues/issue-triage.ts` | LLM-powered classification of issues as `one-shot` (single file, simple fix) or `chunked` (multi-file, architectural). Retries on parse failure. |
-| `IssueGraphBuilder` | `franken-orchestrator/src/issues/issue-graph-builder.ts` | Converts a triaged issue into a `PlanGraph`. One-shot issues get 2 tasks (impl + harden). Chunked issues are LLM-decomposed into N chunk pairs with linear dependencies. |
-| `IssueReview` | `franken-orchestrator/src/issues/issue-review.ts` | HITL triage review. Displays severity-sorted table, prompts for approval. Supports edit loop to remove specific issues. `--dry-run` previews without executing. |
-| `IssueRunner` | `franken-orchestrator/src/issues/issue-runner.ts` | Orchestrates execution: sorts by severity, tracks budget (1 USD = 1M tokens), executes via `CliSkillExecutor`, creates PRs per issue, records checkpoints. Skips remaining issues when budget is exhausted. |
+| `IssueFetcher` | `packages/franken-orchestrator/src/issues/issue-fetcher.ts` | Wraps `gh issue list` with filters (label, milestone, search, assignee, repo, limit). Infers repo from `gh repo view` when `--repo` is omitted. |
+| `IssueTriage` | `packages/franken-orchestrator/src/issues/issue-triage.ts` | LLM-powered classification of issues as `one-shot` (single file, simple fix) or `chunked` (multi-file, architectural). Retries on parse failure. |
+| `IssueGraphBuilder` | `packages/franken-orchestrator/src/issues/issue-graph-builder.ts` | Converts a triaged issue into a `PlanGraph`. One-shot issues get 2 tasks (impl + harden). Chunked issues are LLM-decomposed into N chunk pairs with linear dependencies. |
+| `IssueReview` | `packages/franken-orchestrator/src/issues/issue-review.ts` | HITL triage review. Displays severity-sorted table, prompts for approval. Supports edit loop to remove specific issues. `--dry-run` previews without executing. |
+| `IssueRunner` | `packages/franken-orchestrator/src/issues/issue-runner.ts` | Orchestrates execution: sorts by severity, tracks budget (1 USD = 1M tokens), executes via `CliSkillExecutor`, creates PRs per issue, records checkpoints. Skips remaining issues when budget is exhausted. |
 
 ### Interaction with Existing Infrastructure
 
