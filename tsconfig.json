@@ -14,16 +14,17 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@franken/firewall": ["./frankenfirewall/src/index.ts"],
-      "@franken/skills": ["./franken-skills/src/index.ts"],
-      "franken-brain": ["./franken-brain/src/index.ts"],
-      "franken-planner": ["./franken-planner/src/index.ts"],
-      "@frankenbeast/observer": ["./franken-observer/src/index.ts"],
-      "@franken/critique": ["./franken-critique/src/index.ts"],
-      "@franken/governor": ["./franken-governor/src/index.ts"],
-      "franken-heartbeat": ["./franken-heartbeat/src/index.ts"],
-      "@franken/types": ["./franken-types/src/index.ts"],
-      "franken-orchestrator": ["./franken-orchestrator/src/index.ts"]
+      "@franken/firewall": ["./packages/frankenfirewall/src/index.ts"],
+      "@franken/skills": ["./packages/franken-skills/src/index.ts"],
+      "franken-brain": ["./packages/franken-brain/src/index.ts"],
+      "franken-planner": ["./packages/franken-planner/src/index.ts"],
+      "@frankenbeast/observer": ["./packages/franken-observer/src/index.ts"],
+      "@franken/critique": ["./packages/franken-critique/src/index.ts"],
+      "@franken/governor": ["./packages/franken-governor/src/index.ts"],
+      "franken-heartbeat": ["./packages/franken-heartbeat/src/index.ts"],
+      "@franken/types": ["./packages/franken-types/src/index.ts"],
+      "franken-orchestrator": ["./packages/franken-orchestrator/src/index.ts"],
+      "@franken/mcp": ["./packages/franken-mcp/src/index.ts"]
     }
   },
   "include": [],

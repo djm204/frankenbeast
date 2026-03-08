@@ -5,14 +5,14 @@
   },
   "include": [
     "tests/**/*",
-    "franken-brain/src/**/*",
-    "franken-critique/src/**/*",
-    "franken-governor/src/**/*",
-    "franken-heartbeat/src/**/*",
-    "franken-observer/src/**/*",
-    "franken-planner/src/**/*",
-    "franken-skills/src/**/*",
-    "frankenfirewall/src/**/*"
+    "packages/franken-brain/src/**/*",
+    "packages/franken-critique/src/**/*",
+    "packages/franken-governor/src/**/*",
+    "packages/franken-heartbeat/src/**/*",
+    "packages/franken-observer/src/**/*",
+    "packages/franken-planner/src/**/*",
+    "packages/franken-skills/src/**/*",
+    "packages/frankenfirewall/src/**/*"
   ],
   "exclude": ["node_modules", "**/dist"]
 }
