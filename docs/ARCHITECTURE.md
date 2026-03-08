@@ -69,7 +69,7 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 | `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping `claude --print` (or configurable provider) for single-shot LLM completions. Used by plan/interview phases. Strips `CLAUDE*` env vars to prevent subprocess hangs. |
 | `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
 | `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs ralph loop, returns `SkillResult`. |
-| `RalphLoop` | `franken-orchestrator/src/skills/ralph-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
+| `RalphLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
 | `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
 
 **Execution flow:**
