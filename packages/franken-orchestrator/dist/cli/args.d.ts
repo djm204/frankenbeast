@@ -8,6 +8,7 @@ export interface CliArgs {
     providers?: string[] | undefined;
     designDoc?: string | undefined;
     planDir?: string | undefined;
+    planName?: string | undefined;
     noPr: boolean;
     verbose: boolean;
     reset: boolean;

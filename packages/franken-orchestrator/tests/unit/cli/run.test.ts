@@ -34,6 +34,7 @@ vi.mock('../../../src/cli/args.js', () => ({
 
 vi.mock('../../../src/cli/project-root.js', () => ({
   resolveProjectRoot: vi.fn((dir: string) => dir),
+  generatePlanName: vi.fn(() => 'plan-2026-03-08'),
   getProjectPaths: vi.fn((root: string) => ({
     root,
     frankenbeastDir: `${root}/.frankenbeast`,
@@ -44,6 +45,7 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     logFile: `${root}/.frankenbeast/.build/build.log`,
     designDocFile: `${root}/.frankenbeast/plans/design.md`,
     configFile: `${root}/.frankenbeast/config.json`,
+    llmResponseFile: `${root}/.frankenbeast/plans/llm-response.json`,
   })),
   scaffoldFrankenbeast: vi.fn(),
 }));

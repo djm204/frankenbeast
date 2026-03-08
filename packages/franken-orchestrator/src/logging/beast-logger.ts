@@ -142,9 +142,9 @@ export async function renderBanner(root: string): Promise<string> {
     }
 
     const contentWidth = Math.max(...lines.map((line) => stripAnsi(line).length));
-    const title = centerAnsi(`${A.green}${A.bold}FRANKENBEAST${A.reset}`, contentWidth);
+    const title = centerAnsi(`${A.green}${A.bold}🧟 FRANKENBEAST${A.reset}`, contentWidth);
     const versionLine = centerAnsi(`${A.gray}v${version}${A.reset}`, contentWidth);
-    return `\n${lines.join('\n')}\n\n${title}\n${versionLine}\n`;
+    return `\n${lines.join('\n')}\n\n${title} | ${versionLine}\n`;
   } catch {
     return fallback;
   }

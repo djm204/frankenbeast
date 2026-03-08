@@ -7,7 +7,7 @@ import type { CliArgs } from './args.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
@@ -105,8 +105,9 @@ async function main(): Promise<void> {
     console.log('Config:', JSON.stringify(config, null, 2));
   }
 
-  // Resolve project root
-  const paths = getProjectPaths(root);
+  // Resolve project root — scope plans by name unless --plan-dir overrides
+  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
   // Create IO for interactive prompts

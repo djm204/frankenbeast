@@ -2,7 +2,7 @@ export { BeastLoop } from './beast-loop.js';
 export type { CliArgs, Subcommand } from './cli/args.js';
 export { parseArgs, printUsage } from './cli/args.js';
 export type { ProjectPaths } from './cli/project-root.js';
-export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
+export { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './cli/project-root.js';
 export { detectCurrentBranch, resolveBaseBranch } from './cli/base-branch.js';
 export type { BeastLoopDeps } from './deps.js';
 export type { ICheckpointStore, IFirewallModule, FirewallResult, FirewallViolation, ISkillsModule, SkillDescriptor, SkillInput, SkillResult, IMemoryModule, MemoryContext, EpisodicEntry, IPlannerModule, PlanIntent, PlanGraph, PlanTask, IObserverModule, SpanHandle, TokenSpendData, ICritiqueModule, CritiqueResult, CritiqueFinding, IGovernorModule, ApprovalPayload, ApprovalOutcome, IHeartbeatModule, HeartbeatPulseResult, ILogger, } from './deps.js';

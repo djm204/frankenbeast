@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { parseArgs, printUsage } from './args.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
-import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
@@ -84,8 +84,9 @@ async function main() {
     if (args.verbose) {
         console.log('Config:', JSON.stringify(config, null, 2));
     }
-    // Resolve project root
-    const paths = getProjectPaths(root);
+    // Resolve project root — scope plans by name unless --plan-dir overrides
+    const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+    const paths = getProjectPaths(root, planName);
     scaffoldFrankenbeast(paths);
     // Create IO for interactive prompts
     const io = createStdinIO();

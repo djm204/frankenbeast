@@ -56,6 +56,7 @@ export declare class Session {
     private extractChunkDefinitions;
     private displaySummary;
     private displayIssueSummary;
+    private wrapWithResponseCache;
     private buildDepOptions;
 }
 //# sourceMappingURL=session.d.ts.map

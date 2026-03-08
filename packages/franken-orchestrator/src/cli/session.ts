@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
@@ -268,7 +268,9 @@ export class Session {
     }
 
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
-    const progressLlm = new ProgressLlmClient(adapterLlm, { label: 'Decomposing design...' });
+    // Wrap LLM to cache raw responses to the plan directory
+    const cachingLlm = this.wrapWithResponseCache(adapterLlm, paths);
+    const progressLlm = new ProgressLlmClient(cachingLlm, { label: 'Decomposing design...' });
     const llmGraphBuilder = new LlmGraphBuilder(progressLlm);
 
     logger.info('Decomposing design into chunks...', 'planner');
@@ -420,6 +422,23 @@ export class Session {
     console.log(
       `\n  ${fixed === outcomes.length ? A.green : A.red}${A.bold}Result: ${fixed} fixed, ${failed} failed, ${skipped} skipped${A.reset}\n`,
     );
+  }
+
+  private wrapWithResponseCache(
+    llm: { complete(prompt: string): Promise<string> },
+    paths: ProjectPaths,
+  ): { complete(prompt: string): Promise<string> } {
+    return {
+      async complete(prompt: string): Promise<string> {
+        const response = await llm.complete(prompt);
+        try {
+          writeFileSync(paths.llmResponseFile, response, 'utf-8');
+        } catch {
+          // Non-fatal — caching is best-effort
+        }
+        return response;
+      },
+    };
   }
 
   private buildDepOptions() {
