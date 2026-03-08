@@ -222,6 +222,26 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ---
 
+## Phase 9: GitHub Issues as Work Source
+
+> Adds `frankenbeast issues` subcommand — fetch, triage, review, and fix GitHub issues autonomously. Branch: `feat/11_docs-update`. Plan: `plan-2026-03-08-github-issues/`.
+
+**New components** (all in `franken-orchestrator/src/issues/`):
+
+- `IssueFetcher` — wraps `gh issue list` with label/milestone/search/assignee/repo/limit filters
+- `IssueTriage` — LLM-powered classification (one-shot vs chunked complexity)
+- `IssueGraphBuilder` — converts triaged issues into `PlanGraph` with impl+harden task pairs
+- `IssueReview` — HITL triage review with severity-sorted table, edit loop, and `--dry-run` preview
+- `IssueRunner` — budget-tracked sequential execution, sorted by severity, PR creation per issue
+
+**CLI flags**: `--label`, `--search`, `--milestone`, `--assignee`, `--limit`, `--repo`, `--dry-run`
+
+**Tests**: 153 issue-related tests across 8 test files (unit + integration + session). Orchestrator total: 1015 tests passing.
+
+**Chunks implemented**: 11 chunks (types, fetcher, triage, graph-builder, review, runner, CLI wiring, session integration, dep-factory, e2e, docs).
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.

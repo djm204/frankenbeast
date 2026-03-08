@@ -347,6 +347,70 @@ All project state lives in `.frankenbeast/` at the project root.
 
 **Design reference:** See [CLI E2E Design](plans/2026-03-06-cli-e2e-design.md), [ADR-009](adr/009-global-cli-design.md), and [ADR-010](adr/010-pluggable-cli-providers.md).
 
+## Issues Pipeline
+
+The `frankenbeast issues` subcommand fetches GitHub issues and executes fixes autonomously. It runs as a separate pipeline from the chunk-based BeastLoop, reusing the same `CliSkillExecutor`, `GitBranchIsolator`, and `PrCreator` infrastructure.
+
+### Pipeline Flow
+
+```mermaid
+flowchart TD
+    subgraph "CLI Entry"
+        CLI["frankenbeast issues<br/>--label, --search, --repo, etc."]
+    end
+
+    subgraph "Issues Pipeline"
+        IF["IssueFetcher<br/>gh issue list → GithubIssue[]"]
+        IT["IssueTriage<br/>LLM classifies: one-shot | chunked"]
+        IR["IssueReview<br/>HITL approval (or --dry-run preview)"]
+        IRN["IssueRunner<br/>budget-tracked sequential execution"]
+    end
+
+    subgraph "Shared Execution Infrastructure"
+        IGB["IssueGraphBuilder<br/>issue → PlanGraph (impl+harden pairs)"]
+        CSE["CliSkillExecutor<br/>MartinLoop → CLI subprocess"]
+        GBI["GitBranchIsolator<br/>branch per issue"]
+        PRC["PrCreator<br/>gh pr create (Fixes #N)"]
+        CKP["FileCheckpointStore"]
+    end
+
+    CLI --> IF
+    IF --> IT
+    IT --> IR
+    IR -->|approved| IRN
+    IR -->|"--dry-run or abort"| STOP["Exit"]
+
+    IRN --> IGB
+    IGB --> CSE
+    IRN --> GBI
+    IRN --> CKP
+    IRN --> PRC
+
+    classDef issues fill:#ff9f43,stroke:#ee5a24,color:#fff
+    classDef shared fill:#2d3436,stroke:#636e72,color:#fff
+    class IF,IT,IR,IRN issues
+    class IGB,CSE,GBI,PRC,CKP shared
+```
+
+### Component Table
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| `IssueFetcher` | `franken-orchestrator/src/issues/issue-fetcher.ts` | Wraps `gh issue list` with filters (label, milestone, search, assignee, repo, limit). Infers repo from `gh repo view` when `--repo` is omitted. |
+| `IssueTriage` | `franken-orchestrator/src/issues/issue-triage.ts` | LLM-powered classification of issues as `one-shot` (single file, simple fix) or `chunked` (multi-file, architectural). Retries on parse failure. |
+| `IssueGraphBuilder` | `franken-orchestrator/src/issues/issue-graph-builder.ts` | Converts a triaged issue into a `PlanGraph`. One-shot issues get 2 tasks (impl + harden). Chunked issues are LLM-decomposed into N chunk pairs with linear dependencies. |
+| `IssueReview` | `franken-orchestrator/src/issues/issue-review.ts` | HITL triage review. Displays severity-sorted table, prompts for approval. Supports edit loop to remove specific issues. `--dry-run` previews without executing. |
+| `IssueRunner` | `franken-orchestrator/src/issues/issue-runner.ts` | Orchestrates execution: sorts by severity, tracks budget (1 USD = 1M tokens), executes via `CliSkillExecutor`, creates PRs per issue, records checkpoints. Skips remaining issues when budget is exhausted. |
+
+### Interaction with Existing Infrastructure
+
+The issues pipeline does not run through `BeastLoop`. Instead, `Session.runIssues()` directly orchestrates the pipeline and reuses shared components:
+
+- **`CliSkillExecutor`** — spawns CLI agents via `MartinLoop` with the provider fallback chain
+- **`GitBranchIsolator`** — creates `issue-{number}` branches, merges back on success
+- **`PrCreator`** — generates PRs with `Fixes #{issueNumber}` in the body
+- **`FileCheckpointStore`** — enables crash recovery for interrupted issue processing
+
 ## HTTP Services (Hono)
 
 Three modules expose HTTP servers:
@@ -576,10 +640,27 @@ Canonical type definitions shared across all modules:
         MCP_REG -- "tool definitions<br/>as skills" --> SK_REG
         MCP_CONST -- "constraint check<br/>requires_hitl?" --> GOV_TRIG
 
+        %% === Issues Pipeline ===
+        subgraph "Issues Pipeline"
+            direction TB
+            IS_FETCH["IssueFetcher<br/>gh issue list"]
+            IS_TRIAGE["IssueTriage<br/>LLM classification"]
+            IS_REVIEW["IssueReview<br/>HITL approval"]
+            IS_RUNNER["IssueRunner<br/>budget-tracked execution"]
+            IS_GRAPH["IssueGraphBuilder<br/>issue → PlanGraph"]
+            IS_FETCH --> IS_TRIAGE --> IS_REVIEW --> IS_RUNNER
+            IS_RUNNER --> IS_GRAPH
+        end
+
+        IS_RUNNER -- "execute tasks" --> BL_EXEC
+        IS_GRAPH -- "PlanGraph" --> IS_RUNNER
+        User -- "frankenbeast issues" --> IS_FETCH
+
         %% === Output back to user ===
         GOV_GW -- "approval<br/>requests" --> User
         HB_BRIEF -- "morning<br/>brief" --> User
         BL_CLOSE -- "final<br/>result" --> User
+        IS_RUNNER -- "IssueOutcome[]" --> User
 
         %% === STYLING ===
         classDef firewall fill:#ff6b6b,stroke:#c0392b,color:#fff
@@ -604,6 +685,8 @@ Canonical type definitions shared across all modules:
         class CR_PIPE,CR_DET,CR_HEUR,CR_BREAK,CR_LOOP,CR_LESSON critique
         class GOV_TRIG,GOV_GW,GOV_CHAN,GOV_SEC,GOV_AUDIT governor
         class HB_DET,HB_REFL,HB_DISP,HB_BRIEF heartbeat
+        classDef issues fill:#ff9f43,stroke:#ee5a24,color:#fff
+        class IS_FETCH,IS_TRIAGE,IS_REVIEW,IS_RUNNER,IS_GRAPH issues
         class User,LLM,MCP_SERVERS external
 ```
 
