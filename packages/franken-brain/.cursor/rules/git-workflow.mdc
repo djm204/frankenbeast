@@ -1,0 +1,48 @@
+---
+description: Git workflow - commits, branching, PRs, safety rules. Universal git practices for clean, traceable project history.
+alwaysApply: true
+---
+
+# Git Workflow
+
+## Commit Practices
+
+- **Atomic commits**: one logical change per commit; each should compile and pass tests
+- **Separate concerns**: refactoring, features, and tests in separate commits
+
+### Conventional Commits Format
+
+`<type>(<scope>): <subject>` — Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `style`, `ci`
+
+Good: `feat(auth): add login button component` — Bad: `WIP`, `fix stuff`
+
+## Branch Strategy
+
+- Branch from `main`: `feat/`, `fix/`, `refactor/`, `docs/`, `chore/`
+- Work in small commits, push and create PR
+
+## Pull Request Checklist
+
+- [ ] Tests pass locally
+- [ ] Code compiles, linting passes, formatted
+- [ ] Self-reviewed
+- [ ] Tests added/updated
+- [ ] No breaking changes (or documented)
+
+## Safety Rules
+
+**Never without explicit permission:**
+- `git push --force` (especially main/master)
+- `git reset --hard`, `git clean -f`, `git branch -D`
+- Skip hooks (`--no-verify`)
+
+**Best practices:**
+- Stage specific files (not `git add .`)
+- Review staged changes before commit: `git diff --staged`
+- Never stage sensitive files (.env, credentials)
+
+## Handling Mistakes
+
+- **Amend**: only the most recent unpushed commit
+- **Hook failure**: fix issue, re-stage, create NEW commit (don't amend)
+- **Undo last commit** (keep changes): `git reset --soft HEAD~1`

@@ -1,0 +1,50 @@
+---
+description: Observability—metrics (four golden signals, RED/USE), logs (structured), traces, alerting. User-centric; actionable; correlate across stack.
+alwaysApply: false
+---
+
+# Observability
+
+Guidelines for metrics, logs, traces, and alerting.
+
+## Core Principles
+
+1. **Three Pillars** - Metrics, logs, traces; correlate via trace_id.
+2. **User-Centric** - Measure what matters to users and SLOs.
+3. **Actionable** - Dashboards and alerts drive action; avoid vanity metrics.
+4. **Correlation** - Link signals (e.g. trace_id in logs) for debugging.
+
+## Metrics
+
+- **Types**: Counter (rate, totals), gauge (current value), histogram (percentiles). Use RED for requests (rate, errors, duration); USE for resources (utilization, saturation, errors).
+- **Four golden signals**: Latency, traffic, errors, saturation. Alert on SLO burn rate or threshold; avoid alerting on every blip.
+- **Cardinality**: Keep label cardinality low; no user_id or request_id as labels.
+
+## Logs
+
+- **Structured**: JSON with level, message, timestamp, trace_id, span_id. Same schema across services.
+- **Levels**: Debug (dev), Info (normal), Warn (recoverable), Error (attention). Avoid Fatal in services.
+- **Collection**: Centralize (Loki, ELK, etc.); retain per policy; index for search and correlation.
+
+## Traces
+
+- **Context propagation**: W3C or OTLP; pass through HTTP/gRPC so requests are traceable end-to-end.
+- **Spans**: One per operation; record errors; use semantic attributes. Sample (e.g. 10%) if volume is high.
+
+## Alerting
+
+- **Actionable**: Every alert has a clear action and runbook link.
+- **Severity**: Critical (page immediately), Warning (respond within SLA), Info (next business day). If it can wait, don’t page.
+- **SLO-based**: Prefer multi-window burn-rate alerts over raw threshold to reduce noise.
+
+## Definition of Done (New Service)
+
+- [ ] Metrics exposed; key dashboards created; alerts with runbooks.
+- [ ] Structured logging and trace propagation in place.
+- [ ] On-call can debug using logs + traces + metrics.
+
+## Common Pitfalls
+
+- **Alert fatigue** - Too many or non-actionable alerts; tune and consolidate.
+- **Logs without context** - Add trace_id/correlation_id so logs and traces match.
+- **No SLO** - Define SLOs and error budget before adding more metrics.

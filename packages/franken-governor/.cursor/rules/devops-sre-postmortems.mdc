@@ -1,0 +1,49 @@
+---
+description: Postmortems—blameless, thorough, actionable. Timeline, root cause, action items, shared learnings. Focus on systems, not individuals.
+alwaysApply: false
+---
+
+# Postmortems
+
+Guidelines for learning from incidents.
+
+## Core Principles
+
+1. **Blameless** - Focus on systems and process; assume good intent; “what allowed this?” not “who did this?”
+2. **Thorough** - Root cause and contributing factors; not just symptoms.
+3. **Actionable** - Specific action items with owners and due dates; track to completion.
+4. **Shared** - Publish and discuss; whole org learns.
+
+## When to Write
+
+- **SEV1/SEV2**: Always. Schedule within 2–5 business days.
+- **SEV3**: If repeat pattern or learning value; optional otherwise.
+- **SEV4**: Usually not; optional for trends.
+
+## Structure
+
+- **Summary**: One paragraph; what happened and impact (duration, users, SLO).
+- **Timeline**: UTC; key events (detect, acknowledge, mitigate, resolve).
+- **Root cause**: Technical explanation; avoid “human error” as root cause—ask what allowed it (missing check, unclear runbook, etc.).
+- **Contributing factors**: Process, tooling, pressure, ambiguity.
+- **What went well / poorly**: Honest; improves future response.
+- **Action items**: Table with owner, due date, type (prevent, detect, mitigate, process). Track in tickets; review in follow-up.
+- **Lessons learned**: What the org should take away.
+
+## Blameless Language
+
+- **Avoid**: “Who broke this?” “Why didn’t you?” “They should have.”
+- **Use**: “What in our system/process allowed this?” “How do we prevent this class of error?” “What did they know at the time?”
+
+## Definition of Done (Postmortem)
+
+- [ ] Draft within 5 business days; reviewed by participants.
+- [ ] Action items created and assigned; linked in doc.
+- [ ] Published (internal or broader); shared in team/org.
+- [ ] Action items reviewed in follow-up; closed or deferred with reason.
+
+## Common Pitfalls
+
+- **Blame** - Naming individuals or “human error” stops learning; focus on systems.
+- **No follow-through** - Action items forgotten; track and review.
+- **Theater** - Writing a doc but not changing process or code; ensure actions land.

@@ -1,0 +1,28 @@
+{
+  "servers": {
+    "echo-server": {
+      "command": "node",
+      "args": ["echo-server.js"],
+      "constraints": {
+        "is_destructive": false,
+        "requires_hitl": false,
+        "sandbox_type": "LOCAL"
+      }
+    },
+    "file-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+      "env": { "HOME": "/tmp" },
+      "initTimeoutMs": 10000,
+      "callTimeoutMs": 5000,
+      "toolOverrides": {
+        "write_file": {
+          "constraints": {
+            "is_destructive": true,
+            "requires_hitl": true
+          }
+        }
+      }
+    }
+  }
+}

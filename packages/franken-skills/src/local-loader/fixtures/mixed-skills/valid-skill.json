@@ -1,0 +1,17 @@
+{
+  "skill_id": "mixed-valid",
+  "metadata": {
+    "name": "Mixed Valid",
+    "description": "The only valid file in this dir",
+    "source": "LOCAL"
+  },
+  "interface": {
+    "input_schema": { "type": "object" },
+    "output_schema": { "type": "object" }
+  },
+  "constraints": {
+    "is_destructive": false,
+    "requires_hitl": false,
+    "sandbox_type": "LOCAL"
+  }
+}

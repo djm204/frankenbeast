@@ -1,0 +1,52 @@
+---
+description: Code quality standards - SOLID, DRY, clean code practices, naming, error handling, immutability. Universal across languages and frameworks.
+alwaysApply: true
+---
+
+# Code Quality Standards
+
+## SOLID Principles
+
+- **Single Responsibility**: One function, one job. One class, one purpose.
+- **Open/Closed**: Extend via composition, not modification.
+- **Liskov Substitution**: Subtypes must be substitutable for base types.
+- **Interface Segregation**: Small, focused interfaces over large, general ones.
+- **Dependency Inversion**: Depend on abstractions; inject dependencies, don't import concrete implementations.
+
+## DRY
+
+- Abstract repeated patterns into utilities
+- One source of truth for validation logic, constants, configs
+- Don't over-abstract — three similar lines often beats a premature abstraction
+
+## Clean Code
+
+### Naming
+- Intention-revealing names; avoid abbreviations; be consistent and searchable
+- ❌ `const e = getE(u)` → ✅ `const userEmail = getEmail(user)`
+
+### Functions
+- Small (<20 lines), single-purpose, 0-3 args, return early to reduce nesting
+- Avoid side effects when possible
+
+### Comments
+- Code should be self-documenting; comments explain *why*, not *what*
+- Delete commented-out code (use git)
+
+## Error Handling
+
+- Never swallow errors silently
+- Provide meaningful error messages with context
+- Fail fast with clear diagnostics
+- Handle errors at the appropriate level
+
+## Immutability
+
+- Prefer immutable updates: `{ ...user, name: newName }` over `user.name = newName`
+- Prefer pure functions
+
+## Avoid Over-Engineering
+
+- Only make changes directly requested or clearly necessary
+- Don't add features or abstractions beyond scope
+- Don't design for hypothetical future requirements

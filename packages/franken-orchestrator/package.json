@@ -1,0 +1,43 @@
+{
+  "name": "franken-orchestrator",
+  "version": "0.1.0",
+  "description": "The Beast Loop — orchestrator wiring all Frankenbeast modules into a unified agent pipeline",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "frankenbeast": "./dist/cli/run.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "INTEGRATION=true vitest run",
+    "test:e2e": "E2E=true vitest run",
+    "lint": "eslint src/ tests/"
+  },
+  "keywords": ["frankenbeast", "orchestrator", "agent", "beast-loop"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@franken/types": "file:../franken-types",
+    "@frankenbeast/observer": "file:../franken-observer",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18"
+  }
+}

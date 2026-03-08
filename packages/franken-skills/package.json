@@ -1,0 +1,55 @@
+{
+  "name": "@franken/skills",
+  "version": "0.1.0",
+  "description": "Skill Frontloading & Registry — MOD-02 of the Frankenbeast agentic system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "frankenbeast",
+    "skill-registry",
+    "agent",
+    "llm",
+    "tool-use",
+    "agentic"
+  ],
+  "author": "David Josef Mendez <me@davidmendez.dev>",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djm204/franken-skills.git"
+  },
+  "homepage": "https://github.com/djm204/franken-skills#readme",
+  "bugs": {
+    "url": "https://github.com/djm204/franken-skills/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "module",
+  "overrides": {
+    "minimatch": ">=10.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.0.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

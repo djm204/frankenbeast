@@ -1,0 +1,11 @@
+{
+  "goal": "Research and summarise the latest AI safety papers",
+  "spans": [
+    { "name": "plan" },
+    { "name": "search_web" },
+    { "name": "read_paper" },
+    { "name": "read_paper" },
+    { "name": "summarise" },
+    { "name": "write_report" }
+  ]
+}

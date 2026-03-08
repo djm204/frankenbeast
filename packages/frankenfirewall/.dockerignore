@@ -1,0 +1,7 @@
+node_modules
+dist
+*.test.ts
+tests
+.git
+.gitignore
+coverage

@@ -1,0 +1,35 @@
+[
+  {
+    "skill_id": "good-skill",
+    "metadata": {
+      "name": "Good Skill",
+      "description": "A valid skill entry",
+      "source": "GLOBAL"
+    },
+    "interface": {
+      "input_schema": { "type": "object" },
+      "output_schema": { "type": "object" }
+    },
+    "constraints": {
+      "is_destructive": false,
+      "requires_hitl": false,
+      "sandbox_type": "LOCAL"
+    }
+  },
+  {
+    "skill_id": "",
+    "metadata": {
+      "name": "Bad Skill",
+      "description": "",
+      "source": "GLOBAL"
+    },
+    "interface": {
+      "input_schema": { "type": "object" }
+    },
+    "constraints": {
+      "is_destructive": "yes",
+      "requires_hitl": false,
+      "sandbox_type": "LOCAL"
+    }
+  }
+]

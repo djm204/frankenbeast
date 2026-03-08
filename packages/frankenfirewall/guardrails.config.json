@@ -1,0 +1,15 @@
+{
+  "project_name": "Project-Alpha",
+  "security_tier": "STRICT",
+  "schema_version": 1,
+  "agnostic_settings": {
+    "redact_pii": true,
+    "max_token_spend_per_call": 0.05,
+    "allowed_providers": ["anthropic", "openai", "local-ollama"]
+  },
+  "safety_hooks": {
+    "pre_flight": ["check_injection", "validate_auth_token"],
+    "post_flight": ["verify_json_schema", "check_for_ghost_deps"]
+  },
+  "dependency_whitelist": []
+}

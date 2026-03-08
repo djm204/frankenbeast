@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+*.db
+*.tsbuildinfo
+.env
+.env.local

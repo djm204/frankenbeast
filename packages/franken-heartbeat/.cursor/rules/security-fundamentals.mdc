@@ -1,0 +1,41 @@
+---
+description: Security fundamentals - zero trust, input validation, OWASP prevention, secrets management. Universal security practices for all software.
+alwaysApply: true
+---
+
+# Security Fundamentals
+
+## Core Principles
+
+- **Zero Trust**: Every input is hostile until proven otherwise
+- **Defense in Depth**: Multiple security layers; never rely on one control
+- **Least Privilege**: Grant minimum permissions necessary
+- **Fail Secure**: When something fails, fail to a secure state
+
+## Input Validation
+
+- Validate ALL external input at system boundaries (forms, API requests, files, env vars)
+- Sanitize output for target context (HTML encode, parameterize queries, URL encode)
+
+## OWASP Top Vulnerabilities
+
+- **Injection**: Use parameterized queries and safe APIs — never interpolate user input into queries or commands
+- **XSS**: Use `textContent` not `innerHTML`; sanitize with DOMPurify when HTML is needed
+- **Broken Auth**: Use established auth libraries, secure HTTP-only SameSite cookies, rate-limit auth endpoints, CSRF tokens
+- **Data Exposure**: Never log passwords/tokens/PII; HTTPS everywhere; encrypt at rest; bcrypt/argon2 for passwords
+
+## Secrets Management
+
+- No API keys, passwords, or tokens in code or version control
+- Use `.env.local` (gitignored) + `.env.example` (committed, no real values)
+- Support secret rotation without downtime
+
+## Error Handling
+
+- Don't leak internals: ❌ `res.json({ error: e.stack })` → ✅ `res.json({ error: 'Internal server error', requestId })`
+- Generic auth errors: ❌ "Password incorrect for user admin" → ✅ "Invalid credentials"
+
+## Dependencies
+
+- Audit regularly (`npm audit`, `pip-audit`); keep updated; lock versions
+- Review new dependencies before adding; prefer well-maintained packages

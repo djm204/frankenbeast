@@ -1,0 +1,51 @@
+---
+description: Change management—small changes, progressive delivery, reversibility, observability. Risk levels, deployment checklist, rollback.
+alwaysApply: false
+---
+
+# Change Management
+
+Guidelines for safe production changes.
+
+## Core Principles
+
+1. **Small Changes** - Easier to review, deploy, and rollback; smaller blast radius.
+2. **Progressive Delivery** - Canary, staged rollout; validate at each step.
+3. **Reversibility** - Every change reversible quickly; rollback plan and automation.
+4. **Observability** - Watch metrics and logs during and after deploy; alert on regression.
+
+## Risk Levels
+
+- **Low**: Docs, logging, non-critical flags. Standard PR and tests; deploy anytime.
+- **Medium**: UI, non-critical API, features behind flags. Staging validation; deploy in business hours with monitoring.
+- **High**: DB migrations, auth, payments, critical API. Multiple reviewers, staging, rollback plan, on-call aware. Deploy in window with rollback ready.
+
+## Deployment Checklist
+
+- **Pre**: Tests green; review done; rollback plan; feature flags if risky; on-call aware; dashboards open.
+- **During**: Watch error rate, latency, logs; abort or rollback if thresholds breached.
+- **Post**: Smoke test; compare metrics to baseline; update deploy log.
+
+## Progressive Delivery
+
+- **Canary**: e.g. 5% traffic; 15 min; success = error rate and latency within bound; then increase.
+- **Staged**: 25% → 75% → 100% with validation between; or blue-green with switch.
+- **Rollback triggers**: Auto-rollback on error rate or latency threshold; manual for logic bugs or security.
+
+## Rollback
+
+- **Automated**: Trigger on alert (e.g. error rate > 5% for 5 min); revert to previous version.
+- **Manual**: One command (e.g. `kubectl rollout undo` or Argo rollback); document and test.
+- **Verify**: After rollback, confirm metrics and health; postmortem if needed.
+
+## Definition of Done (Deploy)
+
+- [ ] Rollback plan and command documented; tested in staging if high risk.
+- [ ] Monitoring in place; on-call aware for high risk.
+- [ ] Post-deploy check done; incident created if regression.
+
+## Common Pitfalls
+
+- **Big bang** - Large change = hard rollback and long debug; prefer small, frequent.
+- **No rollback test** - Rollback can fail (e.g. schema); test it.
+- **Deploy and leave** - Watch for at least one interval; verify no delayed regression.

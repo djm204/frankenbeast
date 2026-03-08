@@ -1,0 +1,54 @@
+---
+description: Disaster recovery—RTO/RPO, backup strategy, failover, DR testing. Plan for failure; test regularly; automate where possible.
+alwaysApply: false
+---
+
+# Disaster Recovery
+
+Guidelines for DR planning and execution.
+
+## Core Principles
+
+1. **Plan for Failure** - Assume disasters happen; prepare in advance.
+2. **Test Regularly** - Untested plans are just docs; run drills and failover tests.
+3. **Automate Recovery** - Manual steps are slow and error-prone under stress.
+4. **Document** - Runbooks and playbooks; don’t rely on memory.
+
+## RTO and RPO
+
+- **RTO (Recovery Time Objective)**: Max acceptable time to restore service. “How long can we be down?”
+- **RPO (Recovery Point Objective)**: Max acceptable data loss. “How much data can we lose?”
+
+Tier services (e.g. critical vs standard); set RTO/RPO per tier. Critical: short RTO/RPO, active-active or hot standby. Standard: longer RTO/RPO, cold standby or backup restore.
+
+## Backup Strategy
+
+- **Databases**: Continuous replication plus periodic snapshots; cross-region; retention per policy. Test restore monthly.
+- **Object storage**: Versioning and cross-region replication; lifecycle per classification.
+- **Config and secrets**: GitOps for config; Vault or equivalent for secrets; encrypted backup.
+- **No backup of backups only** - Verify restores; otherwise backup may be corrupt or unusable.
+
+## Failover
+
+- **Automated**: Health checks and auto-failover for critical path; test failover and fail-back.
+- **Manual**: Playbook with steps, owners, and rollback; run tabletop or drill quarterly.
+- **Communication**: Status page, stakeholders, and internal channel; document who is notified when.
+
+## DR Testing
+
+- **Tabletop**: Walk through runbooks; quarterly; all on-call.
+- **Component failover**: DB replica, Redis, LB; monthly.
+- **Regional or full DR**: Less frequent; scheduled; stakeholders informed.
+- **Document** what was tested and what broke; fix and re-test.
+
+## Definition of Done (DR)
+
+- [ ] RTO/RPO defined per tier; backup and failover documented.
+- [ ] Restore/failover tested; runbooks updated from tests.
+- [ ] Owners and escalation clear; reviewed periodically.
+
+## Common Pitfalls
+
+- **Backup but no restore test** - Restore can fail; test it.
+- **Outdated runbooks** - After infra changes, update and re-test.
+- **Single region/cell** - Plan for region or AZ failure; don’t assume “it won’t happen.”

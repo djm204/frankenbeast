@@ -1,0 +1,17 @@
+{
+  "skill_id": "custom-deploy",
+  "metadata": {
+    "name": "Custom Deploy",
+    "description": "Project-specific deployment override",
+    "source": "LOCAL"
+  },
+  "interface": {
+    "input_schema": { "type": "object", "properties": { "env": { "type": "string" } } },
+    "output_schema": { "type": "object", "properties": { "success": { "type": "boolean" } } }
+  },
+  "constraints": {
+    "is_destructive": true,
+    "requires_hitl": true,
+    "sandbox_type": "DOCKER"
+  }
+}

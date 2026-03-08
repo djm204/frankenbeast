@@ -1,0 +1,57 @@
+export const VERSION = '0.1.0';
+
+export type {
+  ResponseCode,
+  TriggerSeverity,
+  TriggerResult,
+  ApprovalRequest,
+  ApprovalResponse,
+  ApprovalOutcome,
+  SessionToken,
+} from './core/types.js';
+
+export type { GovernorConfig } from './core/config.js';
+export { defaultConfig } from './core/config.js';
+
+export {
+  GovernorError,
+  ApprovalTimeoutError,
+  ChannelUnavailableError,
+  SignatureVerificationError,
+  TriggerEvaluationError,
+} from './errors/index.js';
+
+export type { TriggerEvaluator } from './triggers/index.js';
+export {
+  BudgetTrigger,
+  SkillTrigger,
+  ConfidenceTrigger,
+  AmbiguityTrigger,
+  TriggerRegistry,
+} from './triggers/index.js';
+export type {
+  BudgetTriggerContext,
+  SkillTriggerContext,
+  ConfidenceTriggerContext,
+  AmbiguityTriggerContext,
+} from './triggers/index.js';
+
+export type { ApprovalChannel } from './gateway/index.js';
+export { ApprovalGateway } from './gateway/index.js';
+export type { AuditRecorder, ApprovalGatewayDeps } from './gateway/index.js';
+export { GovernorCritiqueAdapter } from './gateway/index.js';
+export type { GovernorCritiqueAdapterDeps } from './gateway/index.js';
+export { createGovernor } from './gateway/index.js';
+export type { CreateGovernorOptions } from './gateway/index.js';
+
+export type { GovernorMemoryPort, EpisodicTraceRecord } from './audit/index.js';
+export { GovernorAuditRecorder } from './audit/index.js';
+
+export { SignatureVerifier } from './security/index.js';
+export { createSessionToken, SessionTokenStore } from './security/index.js';
+export type { CreateSessionTokenParams } from './security/index.js';
+
+export { CliChannel } from './channels/index.js';
+export type { ReadlineAdapter, CliChannelDeps } from './channels/index.js';
+export { SlackChannel } from './channels/index.js';
+export type { HttpClient, SlackCallbackServer, SlackChannelDeps } from './channels/index.js';

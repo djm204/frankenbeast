@@ -1,0 +1,36 @@
+{
+  "name": "franken-brain",
+  "version": "0.1.0",
+  "description": "MOD-03: Memory Systems for the Frankenbeast AI agent",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --reporter=verbose",
+    "test:watch": "vitest --reporter=verbose",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --reporter=verbose --config vitest.integration.config.ts",
+    "lint": "eslint src/ tests/"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "better-sqlite3": "^12.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "ulid": "^3.0.2",
+    "zod": "^4.3.6"
+  }
+}

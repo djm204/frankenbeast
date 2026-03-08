@@ -1,0 +1,16 @@
+{
+  "skill_id": "",
+  "metadata": {
+    "name": "Bad",
+    "description": "",
+    "source": "LOCAL"
+  },
+  "interface": {
+    "input_schema": { "type": "object" }
+  },
+  "constraints": {
+    "is_destructive": "yes",
+    "requires_hitl": false,
+    "sandbox_type": "LOCAL"
+  }
+}

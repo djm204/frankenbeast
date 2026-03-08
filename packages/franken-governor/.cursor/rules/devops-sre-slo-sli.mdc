@@ -1,0 +1,46 @@
+---
+description: SLOs, SLIs, and error budgets—definitions, choosing SLIs, error budget policy, burn-rate alerting. Balance reliability and velocity.
+alwaysApply: false
+---
+
+# SLOs, SLIs, and Error Budgets
+
+Guidelines for service level objectives and error budgets.
+
+## Definitions
+
+- **SLI**: Quantitative measure of service behavior (e.g. successful_requests / total_requests, or requests_under_500ms / total). Must be measurable and user-relevant.
+- **SLO**: Target for an SLI (e.g. 99.9% availability over 30 days). Internal target; often stricter than SLA.
+- **SLA**: Contract with consequences (e.g. credits); usually looser than SLO to allow buffer.
+- **Error budget**: 1 − SLO (e.g. 0.1% = ~43 min/month). Consumed by outages and bad releases; when exhausted, prioritize reliability over features.
+
+## Choosing SLIs
+
+- **Availability**: Success / total (HTTP 2xx/3xx, or health checks). Good for APIs and user-facing services.
+- **Latency**: Requests under threshold / total (e.g. p99 < 500ms). Good for responsiveness.
+- **Throughput**: Request rate or success rate; good for batch or async.
+- **Quality**: Optional (e.g. % correct results). Use sparingly; keep SLI count small (2–4 per service).
+
+## Error Budget Policy
+
+- **Healthy (>50% budget)**: Normal velocity; experiments allowed.
+- **Caution (25–50%)**: Review changes; limit risky deploys.
+- **Critical (10–25%)**: Focus on reliability; rollback plans required.
+- **Exhausted (<10%)**: Feature freeze; all-hands reliability; postmortem before deploy.
+
+## Alerting on SLOs
+
+- Use **burn rate** (how fast budget is consumed) rather than raw error rate. Multi-window (e.g. 1h and 6h) reduces false positives. Alert when burn rate would exhaust budget within the window.
+- Link alerts to runbooks; severity by impact on budget.
+
+## Definition of Done (SLO)
+
+- [ ] SLI defined and measured; SLO target and window set.
+- [ ] Error budget policy documented and communicated.
+- [ ] Alerts and dashboards in place; runbooks linked.
+
+## Common Pitfalls
+
+- **SLO as exact target** - SLO defines acceptable reliability; use error budget for tradeoffs, not “hit exactly 99.9%.”
+- **Too many SLOs** - Focus on 2–4 key SLIs; avoid vanity metrics.
+- **No consequences** - Error budget must influence prioritization (freeze, rollback, focus on reliability).
