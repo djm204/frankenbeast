@@ -1,0 +1,148 @@
+
+> franken-orchestrator@0.1.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/home/pfk/dev/frankenbeast/packages/franken-orchestrator[39m
+
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~250 tokens
+ [32m✓[39m tests/unit/skills/git-branch-isolator.test.ts [2m([22m[2m40 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~5,000 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 2/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 3/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 2/5 | chunk: 01_types | 1s elapsed | ~200 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 1/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 2/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+[martin] Iteration 3/5 | chunk: 01_types | 1s elapsed | ~100 tokens
+ [32m✓[39m tests/unit/phases/execution.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 81[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/cli-skill-executor.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 316[2mms[22m[39m
+ [32m✓[39m tests/unit/execution-checkpoint.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 83[2mms[22m[39m
+iter 1
+no promiseiter 2
+<promise>IMPL_X_DONE</promise> [32m✓[39m tests/unit/adapters/cli-llm-adapter.test.ts [2m([22m[2m36 tests[22m[2m)[22m[32m 169[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/rate-limit-resilience.test.ts [2m([22m[2m38 tests[22m[2m)[22m[33m 654[2mms[22m[39m
+     [33m[2m✓[22m[39m parses retry-after header [33m 537[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/session-interview-ux.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 660[2mms[22m[39m
+     [33m[2m✓[22m[39m wraps AdapterLlmClient with ProgressLlmClient and shows a summary card [33m 636[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/session.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 734[2mms[22m[39m
+       [33m[2m✓[22m[39m exports SessionPhase type with three values [33m 672[2mms[22m[39m
+ [32m✓[39m tests/unit/pr-creator.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/spinner.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+ok
+<promise>IMPL_X_DONE</promise>ok
+<promise>IMPL_X_DONE</promise>ok
+<promise>IMPL_X_DONE</promise>ok
+<promise>IMPL_X_DONE</promise>ok
+<promise>IMPL_X_DONE</promise> [32m✓[39m tests/unit/cli/dep-factory-providers.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 845[2mms[22m[39m
+     [33m[2m✓[22m[39m throws descriptive error for unknown provider name [33m 808[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/martin-loop.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/types.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/issue-runner.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+You're on branch "feat/10_verify-everything". Are you sure you want to target this as your base branch? (y/n)
+> [90mstdout[2m | tests/unit/cli/session-issues.test.ts[2m > [22m[2mresolvePhases handles issues subcommand[2m > [22m[2mreturns entryPhase for issues subcommand
+[22m[39m
+
+ [32m✓[39m tests/unit/cli/session-issues.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 918[2mms[22m[39m
+     [33m[2m✓[22m[39m happy path: fetch → triage → review → run → summary [33m 653[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/file-writer.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/unit/chunk-file-graph-builder.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/unit/build-runner-integration.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m tests/unit/beast-loop.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+[90mstderr[2m | tests/unit/llm-graph-builder.test.ts[2m > [22m[2mLlmGraphBuilder[2m > [22m[2mmaxChunks enforcement[2m > [22m[2mdefaults maxChunks to 12
+[22m[39mLLM produced 15 chunks, exceeding max of 12. Truncating to first 12.
+
+ [32m✓[39m tests/unit/file-checkpoint-store.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+[90mstderr[2m | tests/unit/llm-graph-builder.test.ts[2m > [22m[2mLlmGraphBuilder[2m > [22m[2mmaxChunks enforcement[2m > [22m[2mrespects custom maxChunks option
+[22m[39mLLM produced 10 chunks, exceeding max of 5. Truncating to first 5.
+
+ [32m✓[39m tests/unit/llm-graph-builder.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/args-providers.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/unit/logging/beast-logger.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m tests/unit/phases/planning.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m test/skills/martin-loop-output.test.ts [2m([22m[2m39 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/issue-fetcher.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/unit/closure/pr-creator.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/config-loader-providers.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/config-loader.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m tests/unit/phases/closure.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/cli-provider.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/gemini-provider.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m test/cli/cleanup.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/issue-graph-builder.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/session-plan.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1601[2mms[22m[39m
+     [33m[2m✓[22m[39m runPlan() constructs AdapterLlmClient with cliLlmAdapter, not cliExecutor [33m 661[2mms[22m[39m
+     [33m[2m✓[22m[39m returns a cliLlmAdapter with transformRequest method [33m 928[2mms[22m[39m
+ [32m✓[39m test/logging/beast-logger-labels.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m test/cli/trace-viewer.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/issue-triage.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/unit/logger.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/args.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m tests/unit/phases/hydration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/project-root.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/unit/phases/ingestion.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/base-branch.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+You're on branch "feat/10_verify-everything". Are you sure you want to target this as your base branch? (y/n)
+> [90mstdout[2m | test/cli/config-loading.test.ts
+[22m[39m[90m15:44:24[0m [36m[1m INFO[0m [37m[config]  [0m Using default config (env + defaults)
+
+[32m[1m######## ########     ###    ##    ## ##    ## ######## ##    ## ########  ########    ###     ######  ########
+##       ##     ##   ## ##   ###   ## ##   ##  ##       ###   ## ##     ## ##         ## ##   ##    ##    ##
+##       ##     ##  ##   ##  ####  ## ##  ##   ##       ####  ## ##     ## ##        ##   ##  ##          ##
+######   ########  ##     ## ## ## ## #####    ######   ## ## ## ########  ######   ##     ##  ######     ##
+##       ##   ##   ######### ##  #### ##  ##   ##       ##  #### ##     ## ##       #########       ##    ##
+##       ##    ##  ##     ## ##   ### ##   ##  ##       ##   ### ##     ## ##       ##     ## ##    ##    ##
+##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##
+[0m
+
+
+ [32m✓[39m tests/unit/resilience/context-serializer.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/unit/interview-loop.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/claude-provider.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m test/cli/config-loading.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m tests/unit/resilience/module-initializer.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/progress-llm-client.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/unit/helpers/skills-helpers.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/unit/issues/issue-review.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 81[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/codex-provider.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/aider-provider.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m test/adapters/cli-observer-bridge.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/cli-observer-bridge.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+[90mstdout[2m | tests/unit/cli/run.test.ts
+[22m[39m[BANNER]
+
+ [32m✓[39m tests/unit/context/franken-context.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/run.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/unit/config/orchestrator-config.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/skills-adapter.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/governor-adapter.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/providers/stream-json-utils.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/cli-types.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/design-summary.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/observer-adapter.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/unit/config/orchestrator-config-providers.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/firewall-adapter.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/critique-adapter.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/unit/resilience/graceful-shutdown.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/llm-planner.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m test/closure/pr-creator-branding.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/unit/breakers/breakers.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m test/cli/budget-enforcement.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/unit/cli/noop-detector.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/planning-graph-builder.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/heartbeat-adapter.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/planner-adapter.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/unit/skills/llm-skill-handler.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/unit/adapters/memory-adapter.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [2m[90m↓[39m[22m test/e2e/e2e-pipeline.test.ts [2m([22m[2m1 test[22m[2m | [22m[33m1 skipped[39m[2m)[22m
+
+[2m Test Files [22m [1m[32m79 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (80)[39m
+[2m      Tests [22m [1m[32m1040 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (1041)[39m
+[2m   Start at [22m 15:44:19
+[2m   Duration [22m 6.43s[2m (transform 16.53s, setup 0ms, import 19.09s, tests 7.81s, environment 33ms)[22m
+

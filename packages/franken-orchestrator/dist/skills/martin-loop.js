@@ -1,0 +1,495 @@
+/**
+ * MartinLoop — the smarter loop.
+ *
+ * Named after Martin because Ralph was too naive for the job:
+ *   - Ralph hardcoded two providers and called it a day.
+ *   - Martin uses a pluggable ProviderRegistry — add a new AI agent
+ *     by dropping in an ICliProvider, not by editing a god function.
+ *   - Ralph panicked on rate limits. Martin gracefully cascades through
+ *     a provider fallback chain, parses retry-after headers from every
+ *     provider dialect, sleeps the minimum time, then picks back up.
+ *   - Ralph dumped raw JSON to the terminal. Martin streams clean text
+ *     in real-time through StreamLineBuffer with thinking content dimmed.
+ *   - Ralph let plugins poison his child processes. Martin sets
+ *     FRANKENBEAST_SPAWNED=1 so rogue plugins know to stand down.
+ *
+ * Rest in peace, Ralph. You were a good first draft.
+ */
+import { spawn } from 'node:child_process';
+import { createDefaultRegistry } from './providers/cli-provider.js';
+import { tryExtractTextFromNode } from './providers/index.js';
+export function parseResetTime(stderr, stdout) {
+    const combined = `${stderr}\n${stdout}`;
+    // Anthropic "retry-after: 30" header
+    const retryAfterHeaderMatch = combined.match(/retry.?after:?\s*(\d+)\s*s?/i);
+    if (retryAfterHeaderMatch?.[1]) {
+        return { sleepSeconds: parseInt(retryAfterHeaderMatch[1], 10), source: 'retry-after header' };
+    }
+    // "Please retry after 25s"
+    const retryAfterPatternMatch = combined.match(/retry.?after\s+(\d+)\s*s?/i);
+    if (retryAfterPatternMatch?.[1]) {
+        return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after header' };
+    }
+    // "try again in 5 minutes" / "try again in 30 seconds"
+    const minutesMatch = combined.match(/try again in (\d+) minute/i);
+    if (minutesMatch?.[1])
+        return { sleepSeconds: parseInt(minutesMatch[1], 10) * 60, source: 'minutes pattern' };
+    const secondsMatch = combined.match(/try again in (\d+) second/i);
+    if (secondsMatch?.[1])
+        return { sleepSeconds: parseInt(secondsMatch[1], 10), source: 'seconds pattern' };
+    // "rate limit resets at 2026-03-05T20:15:00Z" or epoch timestamp
+    const isoMatch = combined.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
+    if (isoMatch?.[1]) {
+        const resetAt = new Date(isoMatch[1]).getTime();
+        const now = Date.now();
+        if (resetAt > now)
+            return { sleepSeconds: Math.ceil((resetAt - now) / 1000), source: 'reset-at timestamp' };
+    }
+    // "x-ratelimit-reset: <epoch>" header
+    const epochMatch = combined.match(/x-ratelimit-reset:\s*(\d{10,13})/i);
+    if (epochMatch?.[1]) {
+        const epoch = parseInt(epochMatch[1], 10);
+        const resetMs = epoch > 1e12 ? epoch : epoch * 1000;
+        const now = Date.now();
+        if (resetMs > now)
+            return { sleepSeconds: Math.ceil((resetMs - now) / 1000), source: 'x-ratelimit-reset epoch' };
+    }
+    // OpenAI / Codex "resets in Ns"
+    const resetsInMatch = combined.match(/resets?\s+in\s+(\d+)\s*s/i);
+    if (resetsInMatch?.[1])
+        return { sleepSeconds: parseInt(resetsInMatch[1], 10), source: 'resets-in pattern' };
+    // No parseable reset time
+    return { sleepSeconds: -1, source: 'unknown' };
+}
+function defaultSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function abortError() {
+    const error = new Error('MartinLoop sleep aborted');
+    error.name = 'AbortError';
+    return error;
+}
+function sleepWithAbort(ms, sleepFn, signal) {
+    if (!signal)
+        return sleepFn(ms);
+    if (signal.aborted)
+        return Promise.reject(abortError());
+    if (sleepFn === defaultSleep) {
+        return new Promise((resolve, reject) => {
+            const onAbort = () => {
+                clearTimeout(timer);
+                signal.removeEventListener('abort', onAbort);
+                reject(abortError());
+            };
+            const timer = setTimeout(() => {
+                signal.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+            signal.addEventListener('abort', onAbort, { once: true });
+        });
+    }
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            signal.removeEventListener('abort', onAbort);
+            reject(abortError());
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        sleepFn(ms)
+            .then(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+        })
+            .catch((error) => {
+            signal.removeEventListener('abort', onAbort);
+            reject(error);
+        });
+    });
+}
+/**
+ * Process a single complete line from stream-json output.
+ * If it's valid JSON, extract text content. If plain text, pass through.
+ * Returns empty string for non-text JSON frames or blank lines.
+ */
+export function processStreamLine(line) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0)
+        return '';
+    try {
+        const obj = JSON.parse(trimmed);
+        // Check for thinking content (extended thinking / reasoning)
+        const delta = obj.delta;
+        if (delta?.thinking && typeof delta.thinking === 'string') {
+            return `\x1b[2m${delta.thinking}\x1b[0m`;
+        }
+        const parts = [];
+        tryExtractTextFromNode(obj, parts);
+        return parts.join('');
+    }
+    catch {
+        // Not JSON — pass through as plain text
+        return trimmed;
+    }
+}
+/**
+ * Summarize a tool use invocation as a compact, dimmed one-liner.
+ * Extracts the most useful parameter (file_path, command, pattern) from the
+ * accumulated JSON input fragments.
+ */
+function summarizeToolUse(toolName, inputJson) {
+    let detail = '';
+    try {
+        const input = JSON.parse(inputJson);
+        if (typeof input.file_path === 'string') {
+            // Show just the basename for brevity
+            const parts = input.file_path.split('/');
+            detail = parts[parts.length - 1] || input.file_path;
+        }
+        else if (typeof input.command === 'string') {
+            const cmd = input.command;
+            detail = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+        }
+        else if (typeof input.pattern === 'string') {
+            detail = input.pattern;
+        }
+    }
+    catch {
+        // Partial / malformed JSON — just show the tool name
+    }
+    const label = detail ? `${toolName} ${detail}` : toolName;
+    return `\x1b[2m[tool] ${label}\x1b[0m`;
+}
+/**
+ * Line-buffered processor for stream-json output.
+ * Accumulates bytes until newline, then processes each complete line
+ * through processStreamLine. Partial lines are held until completed.
+ *
+ * Tracks tool-use blocks: when a `content_block_start` with `type: "tool_use"`
+ * is seen, subsequent `input_json_delta` frames are accumulated silently and a
+ * compact summary is emitted on `content_block_stop`. Tool-result blocks are
+ * suppressed entirely to avoid dumping file contents to the terminal.
+ */
+export class StreamLineBuffer {
+    buffer = '';
+    /** Active tool-use block state, keyed by content_block index. */
+    activeToolUse = null;
+    /** Set of content_block indices that are tool_result blocks (suppressed). */
+    suppressedIndices = new Set();
+    /** Push raw data. Returns array of clean text strings (empty entries filtered out). */
+    push(data) {
+        this.buffer += data;
+        const lines = this.buffer.split('\n');
+        this.buffer = lines.pop() ?? ''; // last element is incomplete line (or empty after trailing \n)
+        const results = [];
+        for (const line of lines) {
+            const result = this.processLine(line);
+            if (result !== null && result.length > 0) {
+                results.push(result);
+            }
+        }
+        return results;
+    }
+    /** Flush remaining buffer as plain text. */
+    flush() {
+        if (this.buffer.trim().length === 0) {
+            this.buffer = '';
+            return [];
+        }
+        const text = this.buffer.trim();
+        this.buffer = '';
+        return [text];
+    }
+    /** Process a single line with tool-use state tracking. Returns null to suppress output. */
+    processLine(line) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0)
+            return '';
+        let obj = null;
+        try {
+            obj = JSON.parse(trimmed);
+        }
+        catch {
+            // Not JSON — pass through as plain text
+            return trimmed;
+        }
+        const eventType = obj.type;
+        const index = typeof obj.index === 'number' ? obj.index : -1;
+        // ── content_block_start ──
+        if (eventType === 'content_block_start') {
+            const block = obj.content_block;
+            if (block?.type === 'tool_use' && typeof block.name === 'string') {
+                this.activeToolUse = { index, name: block.name, inputJson: '' };
+                return null;
+            }
+            if (block?.type === 'tool_result') {
+                this.suppressedIndices.add(index);
+                return null;
+            }
+            return ''; // text block start — no visible output
+        }
+        // ── content_block_delta ──
+        if (eventType === 'content_block_delta') {
+            // Inside a tool_use block — accumulate input JSON
+            if (this.activeToolUse && index === this.activeToolUse.index) {
+                const delta = obj.delta;
+                if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+                    this.activeToolUse.inputJson += delta.partial_json;
+                }
+                return null;
+            }
+            // Inside a tool_result block — suppress
+            if (this.suppressedIndices.has(index)) {
+                return null;
+            }
+        }
+        // ── content_block_stop ──
+        if (eventType === 'content_block_stop') {
+            if (this.activeToolUse && index === this.activeToolUse.index) {
+                const summary = summarizeToolUse(this.activeToolUse.name, this.activeToolUse.inputJson);
+                this.activeToolUse = null;
+                return summary;
+            }
+            if (this.suppressedIndices.has(index)) {
+                this.suppressedIndices.delete(index);
+                return null;
+            }
+            return '';
+        }
+        // Fall through to default processing
+        return processStreamLine(line);
+    }
+}
+const NO_COMMIT_CONSTRAINT = '\n\nIMPORTANT: Do NOT run git commit, git push, git tag, or any other git write commands. The orchestrator handles all commits automatically. Only read/edit files and run tests/builds.\n';
+function spawnIteration(config, provider) {
+    return new Promise((resolve, reject) => {
+        const cmd = config.command ?? provider.command;
+        const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns });
+        const prompt = config.prompt + NO_COMMIT_CONSTRAINT;
+        const args = provider.supportsStreamJson()
+            ? [...providerArgs, '--', prompt]
+            : [...providerArgs, prompt];
+        const env = provider.filterEnv(process.env);
+        const child = spawn(cmd, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            cwd: config.workingDir,
+            env,
+        });
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        let timedOut = false;
+        const cleanParts = [];
+        const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
+        const finish = (result) => {
+            if (settled)
+                return;
+            settled = true;
+            resolve(result);
+        };
+        child.stdout.on('data', (chunk) => {
+            const text = chunk.toString();
+            stdout += text;
+            // Stream output to terminal so the user can see the agent working
+            if (streamBuffer) {
+                const lines = streamBuffer.push(text);
+                for (const line of lines) {
+                    cleanParts.push(line);
+                    process.stdout.write(line + '\n');
+                }
+            }
+            else {
+                cleanParts.push(text);
+                process.stdout.write(text);
+            }
+        });
+        child.stderr.on('data', (chunk) => {
+            stderr += chunk.toString();
+            // stderr is captured for build.log via onIteration callback — not piped
+            // to terminal (too noisy with --verbose). Errors surface via logger.
+        });
+        // Timeout: SIGTERM first, then SIGKILL after 5s
+        const timer = setTimeout(() => {
+            timedOut = true;
+            config.onProviderTimeout?.(provider.name, config.timeoutMs);
+            child.kill('SIGTERM');
+            setTimeout(() => {
+                try {
+                    child.kill('SIGKILL');
+                }
+                catch { /* already dead */ }
+            }, 5_000);
+            // Hard fail-safe: if process still hasn't closed, force resolution.
+            setTimeout(() => {
+                if (streamBuffer) {
+                    const remaining = streamBuffer.flush();
+                    for (const line of remaining)
+                        cleanParts.push(line);
+                }
+                finish({
+                    stdout,
+                    stderr: `${stderr}\n[MartinLoop] iteration timed out after ${config.timeoutMs}ms`,
+                    exitCode: 124,
+                    timedOut: true,
+                    cleanStdout: cleanParts.join('\n'),
+                });
+            }, 7_000);
+        }, config.timeoutMs);
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (streamBuffer) {
+                const remaining = streamBuffer.flush();
+                for (const line of remaining)
+                    cleanParts.push(line);
+            }
+            finish({ stdout, stderr, exitCode: code ?? 1, timedOut, cleanStdout: cleanParts.join('\n') });
+        });
+        child.on('error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+export class MartinLoop {
+    registry;
+    constructor(registry) {
+        this.registry = registry ?? createDefaultRegistry();
+    }
+    async run(config) {
+        const providers = config.providers && config.providers.length > 0
+            ? config.providers
+            : ['claude', 'codex'];
+        const sleepFn = config._sleepFn ?? defaultSleep;
+        const initialProvider = config.provider;
+        let iteration = 0;
+        let lastOutput = '';
+        let totalTokens = 0;
+        let activeProvider = config.provider;
+        let pendingSleepMs = 0;
+        const promiseRegex = new RegExp(`<promise>${escapeRegex(config.promiseTag)}</promise>`);
+        // Provider exhaustion tracking
+        const exhaustedProviders = new Map();
+        while (iteration < config.maxIterations) {
+            iteration++;
+            const startTime = Date.now();
+            const resolved = this.registry.get(activeProvider);
+            config.onProviderAttempt?.(activeProvider, iteration);
+            let result;
+            try {
+                result = await spawnIteration(config, resolved);
+            }
+            catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                config.onSpawnError?.(activeProvider, msg);
+                continue;
+            }
+            const durationMs = Date.now() - startTime;
+            // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
+            // For non-stream-json providers, normalize the raw stdout via the provider.
+            const normalizedStdout = resolved.supportsStreamJson()
+                ? result.cleanStdout
+                : resolved.normalizeOutput(result.stdout);
+            lastOutput = normalizedStdout;
+            const tokensEstimated = resolved.estimateTokens(normalizedStdout);
+            totalTokens += tokensEstimated;
+            // Never treat timed-out iterations as rate-limited — the timeout killed the
+            // process, any "rate limit" text in stdout is the model's code, not an API error.
+            const rateLimited = !result.timedOut && resolved.isRateLimited(result.stderr);
+            const promiseDetected = promiseRegex.test(normalizedStdout);
+            const iterResult = {
+                iteration,
+                exitCode: result.exitCode,
+                stdout: normalizedStdout,
+                stderr: result.stderr,
+                durationMs,
+                rateLimited,
+                promiseDetected,
+                tokensEstimated,
+                sleepMs: pendingSleepMs,
+            };
+            // Reset pendingSleepMs after reporting it
+            pendingSleepMs = 0;
+            config.onIteration?.(iteration, iterResult);
+            // Rate limit: provider fallback chain
+            if (rateLimited) {
+                iteration--;
+                // Notify via legacy callback (non-controlling)
+                config.onRateLimit?.(activeProvider);
+                // Track this provider as exhausted
+                exhaustedProviders.set(activeProvider, { stderr: result.stderr, stdout: normalizedStdout });
+                // Find next non-exhausted provider
+                const nextProvider = providers.find(p => !exhaustedProviders.has(p));
+                if (nextProvider) {
+                    // Switch to next provider, retry immediately
+                    config.onProviderSwitch?.(activeProvider, nextProvider, 'rate-limit');
+                    activeProvider = nextProvider;
+                    continue;
+                }
+                // All providers exhausted — parse reset times and sleep
+                let shortestSleep = Infinity;
+                let shortestSource = 'unknown';
+                for (const [providerName, data] of exhaustedProviders) {
+                    const providerImpl = this.registry.get(providerName);
+                    const retryMs = providerImpl.parseRetryAfter(data.stderr);
+                    if (retryMs !== undefined) {
+                        // Provider-specific parsing succeeded (returns milliseconds)
+                        const sleepSeconds = retryMs / 1000;
+                        if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
+                            shortestSleep = sleepSeconds;
+                            shortestSource = `${providerName} parseRetryAfter`;
+                        }
+                    }
+                    else {
+                        // Fallback to generic parseResetTime
+                        const parsed = parseResetTime(data.stderr, data.stdout);
+                        if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
+                            shortestSleep = parsed.sleepSeconds;
+                            shortestSource = parsed.source;
+                        }
+                    }
+                }
+                let sleepMs;
+                let sleepSource;
+                if (shortestSleep === Infinity) {
+                    // No parseable reset time — fallback to 120s
+                    sleepMs = 120_000;
+                    sleepSource = 'unknown';
+                    // Log warning with raw stderr so user can see what the API said
+                    const rawStderrs = [...exhaustedProviders.entries()]
+                        .map(([p, d]) => `${p}: ${d.stderr}`)
+                        .join(' | ');
+                    console.warn(`[MartinLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
+                }
+                else {
+                    sleepMs = shortestSleep * 1000;
+                    sleepSource = shortestSource;
+                }
+                // Fire onSleep before sleeping
+                config.onSleep?.(sleepMs, sleepSource);
+                // Sleep until reset (abort-aware so SIGINT can interrupt long waits)
+                await sleepWithAbort(sleepMs, sleepFn, config.abortSignal);
+                // Track the sleep duration for the next iteration's report
+                pendingSleepMs = sleepMs;
+                // Clear exhausted state, reset to original provider
+                exhaustedProviders.clear();
+                if (activeProvider !== initialProvider) {
+                    config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
+                }
+                activeProvider = initialProvider;
+                continue;
+            }
+            // Promise detected — verify meaningful output
+            if (promiseDetected) {
+                const stripped = normalizedStdout.replace(promiseRegex, '').trim();
+                if (stripped.length === 0) {
+                    // Promise without meaningful changes — reject
+                    return { completed: false, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+                }
+                return { completed: true, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+            }
+        }
+        return { completed: false, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+    }
+}
+function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+//# sourceMappingURL=martin-loop.js.map

@@ -1,0 +1,307 @@
+
+> @franken/skills@0.1.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/home/pfk/dev/frankenbeast/packages/franken-skills[39m
+
+[90mstdout[2m | src/registry/skill-registry.test.ts[2m > [22m[2mSkillRegistry — local/global precedence[2m > [22m[2mlocal skill with same skill_id as global — local wins
+[22m[39m[SkillRegistry] Local skill "shared" overrides global entry. { skill_id: [32m'shared'[39m, source: [32m'LOCAL'[39m }
+
+ [32m✓[39m src/registry/skill-registry.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 153[2mms[22m[39m
+ [32m✓[39m src/types/unified-skill-contract.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/discovery/discovery-service.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 139[2mms[22m[39m
+[90mstdout[2m | src/local-loader/local-skill-loader.test.ts[2m > [22m[2mLocalSkillLoader[2m > [22m[2mreturns empty array for empty directory — no error
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/home/pfk/dev/frankenbeast/packages/franken-skills/src/local-loader/fixtures/empty-skills" — skipping local skills. {
+  dir: [32m'/home/pfk/dev/frankenbeast/packages/franken-skills/src/local-loader/fixtures/empty-skills'[39m
+}
+
+ [32m✓[39m src/validator/validate-skill-contract.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+[90mstderr[2m | src/scaffold/skill-gen-scaffold.test.ts[2m > [22m[2mSkillGenScaffold[2m > [22m[2mgenerate() returns a contract skeleton with skill_id pre-filled
+[22m[39m[SkillGenScaffold] Skill "my-missing-skill" not found in registry. Add it to /skills/my-missing-skill.json to enable this capability. {
+  skill_id: [32m'my-missing-skill'[39m,
+  template: {
+    skill_id: [32m'my-missing-skill'[39m,
+    metadata: {
+      name: [32m'TODO: name for my-missing-skill'[39m,
+      description: [32m'TODO: high-clarity description of what my-missing-skill does'[39m,
+      source: [32m'LOCAL'[39m
+    },
+    interface: { input_schema: [36m[Object][39m, output_schema: [36m[Object][39m },
+    constraints: {
+      is_destructive: [33mtrue[39m,
+      requires_hitl: [33mtrue[39m,
+      sandbox_type: [32m'DOCKER'[39m
+    }
+  }
+}
+
+[90mstderr[2m | src/scaffold/skill-gen-scaffold.test.ts[2m > [22m[2mSkillGenScaffold[2m > [22m[2mscaffold skeleton passes structural validation (all required keys present)
+[22m[39m[SkillGenScaffold] Skill "validate-me" not found in registry. Add it to /skills/validate-me.json to enable this capability. {
+  skill_id: [32m'validate-me'[39m,
+  template: {
+    skill_id: [32m'validate-me'[39m,
+    metadata: {
+      name: [32m'TODO: name for validate-me'[39m,
+      description: [32m'TODO: high-clarity description of what validate-me does'[39m,
+      source: [32m'LOCAL'[39m
+    },
+    interface: { input_schema: [36m[Object][39m, output_schema: [36m[Object][39m },
+    constraints: {
+      is_destructive: [33mtrue[39m,
+      requires_hitl: [33mtrue[39m,
+      sandbox_type: [32m'DOCKER'[39m
+    }
+  }
+}
+
+[90mstderr[2m | src/scaffold/skill-gen-scaffold.test.ts[2m > [22m[2mSkillGenScaffold[2m > [22m[2mscaffold defaults — is_destructive: true, requires_hitl: true, sandbox_type: DOCKER
+[22m[39m[SkillGenScaffold] Skill "conservative-check" not found in registry. Add it to /skills/conservative-check.json to enable this capability. {
+  skill_id: [32m'conservative-check'[39m,
+  template: {
+    skill_id: [32m'conservative-check'[39m,
+    metadata: {
+      name: [32m'TODO: name for conservative-check'[39m,
+      description: [32m'TODO: high-clarity description of what conservative-check does'[39m,
+      source: [32m'LOCAL'[39m
+    },
+    interface: { input_schema: [36m[Object][39m, output_schema: [36m[Object][39m },
+    constraints: {
+      is_destructive: [33mtrue[39m,
+      requires_hitl: [33mtrue[39m,
+      sandbox_type: [32m'DOCKER'[39m
+    }
+  }
+}
+
+[90mstderr[2m | src/scaffold/skill-gen-scaffold.test.ts[2m > [22m[2mSkillGenScaffold[2m > [22m[2mscaffold source is LOCAL (goes in /skills, not global package)
+[22m[39m[SkillGenScaffold] Skill "local-check" not found in registry. Add it to /skills/local-check.json to enable this capability. {
+  skill_id: [32m'local-check'[39m,
+  template: {
+    skill_id: [32m'local-check'[39m,
+    metadata: {
+      name: [32m'TODO: name for local-check'[39m,
+      description: [32m'TODO: high-clarity description of what local-check does'[39m,
+      source: [32m'LOCAL'[39m
+    },
+    interface: { input_schema: [36m[Object][39m, output_schema: [36m[Object][39m },
+    constraints: {
+      is_destructive: [33mtrue[39m,
+      requires_hitl: [33mtrue[39m,
+      sandbox_type: [32m'DOCKER'[39m
+    }
+  }
+}
+
+ [32m✓[39m src/local-loader/local-skill-loader.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 153[2mms[22m[39m
+[90mstderr[2m | src/scaffold/skill-gen-scaffold.test.ts[2m > [22m[2mSkillGenScaffold[2m > [22m[2mgenerate() does not change registry state — purely side-effect of logging
+[22m[39m[SkillGenScaffold] Skill "orphan" not found in registry. Add it to /skills/orphan.json to enable this capability. {
+  skill_id: [32m'orphan'[39m,
+  template: {
+    skill_id: [32m'orphan'[39m,
+    metadata: {
+      name: [32m'TODO: name for orphan'[39m,
+      description: [32m'TODO: high-clarity description of what orphan does'[39m,
+      source: [32m'LOCAL'[39m
+    },
+    interface: { input_schema: [36m[Object][39m, output_schema: [36m[Object][39m },
+    constraints: {
+      is_destructive: [33mtrue[39m,
+      requires_hitl: [33mtrue[39m,
+      sandbox_type: [32m'DOCKER'[39m
+    }
+  }
+}
+
+ [32m✓[39m src/scaffold/skill-gen-scaffold.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m src/registry/i-skill-registry.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 600[2mms[22m[39m
+     [33m[2m✓[22m[39m SkillRegistry class (via createRegistry) satisfies ISkillRegistry [33m 593[2mms[22m[39m
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() populates registry with global skills — isSynced() becomes true
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+ [32m✓[39m src/discovery/agent-skills-cli.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() populates registry with global skills — isSynced() becomes true
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/skill-registry.perf.test.ts[2m > [22m[2mPerformance baseline[2m > [22m[2msync() with 100 skills completes in <200ms (subprocess mocked)
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/skill-registry.perf.test.ts[2m > [22m[2mPerformance baseline[2m > [22m[2mgetSkill() with 1000 registered skills returns in <1ms
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() with local override — local version is returned
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'custom-deploy'[39m,
+  source: [32m'LOCAL'[39m,
+  is_destructive: [33mtrue[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() with invalid local file — global skills still registered, error logged
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() with invalid local file — global skills still registered, error logged
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/skill-registry.perf.test.ts[2m > [22m[2mPerformance baseline[2m > [22m[2mgetAll() with 1000 registered skills completes in <5ms
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+ [32m✓[39m src/registry/skill-registry.perf.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 151[2mms[22m[39m
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() with invalid local file — global skills still registered, error logged
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() is idempotent — second call replaces registry state cleanly
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() is idempotent — second call replaces registry state cleanly
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() is idempotent — second call replaces registry state cleanly
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() is idempotent — second call replaces registry state cleanly
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() truly replaces — skill absent from second sync is removed
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() truly replaces — skill absent from second sync is removed
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() truly replaces — skill absent from second sync is removed
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2msync() truly replaces — skill absent from second sync is removed
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2mdebug log emitted per skill after sync()
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2mgetAll() returns empty array on empty registry (no crash)
+[22m[39m[LocalSkillLoader] /skills directory does not exist at "/tmp/nonexistent-skills" — skipping local skills. { dir: [32m'/tmp/nonexistent-skills'[39m }
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2mgetSkill() for unknown id triggers scaffold warn — still returns undefined
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+[90mstdout[2m | src/registry/create-registry.test.ts[2m > [22m[2mcreateRegistry + sync()[2m > [22m[2mgetSkill() for known id does not trigger scaffold
+[22m[39m[SkillRegistry] Registered skill {
+  skill_id: [32m'deploy-to-vercel'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mtrue[39m,
+  sandbox_type: [32m'DOCKER'[39m
+}
+[SkillRegistry] Registered skill {
+  skill_id: [32m'run-tests'[39m,
+  source: [32m'GLOBAL'[39m,
+  is_destructive: [33mfalse[39m,
+  requires_hitl: [33mfalse[39m,
+  sandbox_type: [32m'LOCAL'[39m
+}
+
+ [32m✓[39m src/registry/create-registry.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 440[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m75 passed[39m[22m[90m (75)[39m
+[2m   Start at [22m 15:44:14
+[2m   Duration [22m 4.59s[2m (transform 7.12s, setup 0ms, import 10.01s, tests 1.74s, environment 2ms)[22m
+

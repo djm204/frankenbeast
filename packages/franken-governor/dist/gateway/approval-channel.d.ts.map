@@ -1,0 +1,1 @@
+{"version":3,"file":"approval-channel.d.ts","sourceRoot":"","sources":["../../src/gateway/approval-channel.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,eAAe,EAAE,gBAAgB,EAAE,MAAM,kBAAkB,CAAC;AAE1E,MAAM,WAAW,eAAe;IAC9B,QAAQ,CAAC,SAAS,EAAE,MAAM,CAAC;IAC3B,eAAe,CAAC,OAAO,EAAE,eAAe,GAAG,OAAO,CAAC,gBAAgB,CAAC,CAAC;CACtE"}

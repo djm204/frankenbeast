@@ -1,0 +1,19 @@
+
+> @franken/mcp@0.1.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/home/pfk/dev/frankenbeast/packages/franken-mcp[39m
+
+ [32m✓[39m src/types/mcp-types.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m src/config/resolve-constraints.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/client/json-rpc.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 122[2mms[22m[39m
+ [32m✓[39m src/transport/stdio-transport.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 228[2mms[22m[39m
+ [32m✓[39m src/config/load-config.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 270[2mms[22m[39m
+ [32m✓[39m src/client/mcp-client.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 621[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m85 passed[39m[22m[90m (85)[39m
+[2m   Start at [22m 15:44:13
+[2m   Duration [22m 3.94s[2m (transform 6.34s, setup 0ms, import 8.33s, tests 1.26s, environment 3ms)[22m
+

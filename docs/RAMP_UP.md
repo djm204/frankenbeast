@@ -4,23 +4,23 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as **11 package directories** in this workspace: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **3 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All 11 packages live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **3 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`). Cross-package dependencies use workspace references (e.g., `@frankenbeast/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 ## Modules
 
-| ID | Directory | Purpose |
-|----|-----------|---------|
-| MOD-01 | `frankenfirewall/` | LLM proxy, injection scanning, PII masking, adapters (Claude/OpenAI/Ollama) |
-| MOD-02 | `franken-skills/` | Skill registry & discovery (`ISkillRegistry`, `UnifiedSkillContract`) |
-| MOD-03 | `franken-brain/` | Memory systems (working/episodic/semantic), PII guards |
-| MOD-04 | `franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
-| MOD-05 | `franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
-| MOD-06 | `franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
-| MOD-07 | `franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
-| MOD-08 | `franken-heartbeat/` | Proactive reflection, morning briefs, checklists |
-| shared | `franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| MCP | `franken-mcp/` | MCP server client & registry |
-| orch | `franken-orchestrator/` | Beast Loop, CLI, phases, circuit breakers, skill execution, crash recovery |
+| ID | Package | Purpose |
+|----|---------|---------|
+| MOD-01 | `packages/frankenfirewall/` | LLM proxy, injection scanning, PII masking, adapters (Claude/OpenAI/Ollama) |
+| MOD-02 | `packages/franken-skills/` | Skill registry & discovery (`ISkillRegistry`, `UnifiedSkillContract`) |
+| MOD-03 | `packages/franken-brain/` | Memory systems (working/episodic/semantic), PII guards |
+| MOD-04 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
+| MOD-05 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
+| MOD-06 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
+| MOD-07 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
+| MOD-08 | `packages/franken-heartbeat/` | Proactive reflection, morning briefs, checklists |
+| shared | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
+| MCP | `packages/franken-mcp/` | MCP server client & registry |
+| orch | `packages/franken-orchestrator/` | Beast Loop, CLI, phases, circuit breakers, skill execution, crash recovery |
 
 ## The Beast Loop (4 Phases)
 
@@ -52,7 +52,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 ## Orchestrator Internals
 
 ```
-franken-orchestrator/src/
+packages/franken-orchestrator/src/
 ├── beast-loop.ts          # BeastLoop.run(input) → BeastResult
 ├── deps.ts                # BeastLoopDeps (all port interfaces)
 ├── adapters/              # CliLlmAdapter, CliObserverBridge, AdapterLlmClient, module adapters
@@ -103,14 +103,15 @@ franken-orchestrator/src/
 
 ## Build & Test
 
+All commands run via Turborepo for dependency-ordered builds and parallel testing:
+
 ```bash
-npm run build        # Root build loop over 10 package dirs (currently skips franken-mcp)
-npm run test         # Root Vitest run
-npm run test:all     # Per-module test loop + root Vitest (currently skips franken-mcp)
-npm run typecheck    # tsc --noEmit across project
+npm run build        # turbo run build (dependency-ordered across all packages)
+npm test             # turbo run test (parallel across all packages)
+npm run typecheck    # turbo run typecheck
 ```
 
-Per-module: `cd <module> && npm test`
+Per-package: `npx turbo run test --filter=franken-brain`
 
 All modules use `tsc` for builds.
 
@@ -152,5 +153,5 @@ All modules use `tsc` for builds.
 - **Tracer bullets**: Thin end-to-end slice first, flesh out later.
 - **Atomic commits**: One logical change per commit.
 - **ADRs**: Document all non-obvious architectural decisions.
-- **Git remotes**: SSH format `git@github.com-djm204:djm204/<repo>.git`
+- **Single repo**: `git clone` gets everything — all packages in one repository
 - **Martin workflow**: Automated loop — chunks → impl loop → harden loop → merge → verify

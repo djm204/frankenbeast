@@ -1,0 +1,1 @@
+{"version":3,"file":"embedding-provider-interface.d.ts","sourceRoot":"","sources":["../../src/semantic/embedding-provider-interface.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,kBAAkB;IACjC,mEAAmE;IACnE,KAAK,CAAC,KAAK,EAAE,MAAM,EAAE,GAAG,OAAO,CAAC,MAAM,EAAE,EAAE,CAAC,CAAC;CAC7C"}
