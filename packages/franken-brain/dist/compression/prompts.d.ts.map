@@ -1,0 +1,1 @@
+{"version":3,"file":"prompts.d.ts","sourceRoot":"","sources":["../../src/compression/prompts.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,mBAAmB,CAAC;AACrD,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,mBAAmB,CAAC;AAEvD,wBAAgB,wBAAwB,CAAC,KAAK,EAAE,WAAW,EAAE,GAAG,MAAM,CAarE;AAED,wBAAgB,iBAAiB,CAAC,MAAM,EAAE,aAAa,EAAE,GAAG,MAAM,CAajE"}

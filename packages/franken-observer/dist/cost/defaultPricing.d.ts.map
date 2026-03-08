@@ -1,0 +1,1 @@
+{"version":3,"file":"defaultPricing.d.ts","sourceRoot":"","sources":["../../src/cost/defaultPricing.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,YAAY;IAC3B,sCAAsC;IACtC,gBAAgB,EAAE,MAAM,CAAA;IACxB,0CAA0C;IAC1C,oBAAoB,EAAE,MAAM,CAAA;CAC7B;AAED,MAAM,MAAM,YAAY,GAAG,MAAM,CAAC,MAAM,EAAE,YAAY,CAAC,CAAA;AAEvD;;;GAGG;AACH,eAAO,MAAM,eAAe,EAAE,YAU7B,CAAA"}

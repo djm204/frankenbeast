@@ -1,0 +1,31 @@
+
+> @franken/critique@0.1.0 test
+> vitest run
+
+
+ RUN  v3.2.4 /home/pfk/dev/frankenbeast/packages/franken-critique
+
+ ✓ tests/unit/pipeline/critique-pipeline.test.ts (7 tests) 19ms
+ ✓ tests/unit/evaluators/complexity.test.ts (6 tests) 8ms
+ ✓ tests/unit/evaluators/factuality.test.ts (5 tests) 26ms
+ ✓ tests/unit/evaluators/conciseness.test.ts (5 tests) 9ms
+ ✓ tests/unit/memory/lesson-recorder.test.ts (6 tests) 27ms
+ ✓ tests/unit/evaluators/safety.test.ts (6 tests) 71ms
+ ✓ tests/unit/evaluators/scalability.test.ts (6 tests) 28ms
+ ✓ tests/unit/breakers/max-iteration.test.ts (7 tests) 27ms
+ ✓ tests/unit/breakers/token-budget.test.ts (5 tests) 10ms
+ ✓ tests/unit/server/app.test.ts (9 tests) 275ms
+ ✓ tests/unit/reviewer.test.ts (9 tests) 90ms
+ ✓ tests/unit/errors/errors.test.ts (14 tests) 22ms
+ ✓ tests/unit/evaluators/ghost-dependency.test.ts (9 tests) 172ms
+ ✓ tests/unit/types/types.test.ts (25 tests) 80ms
+ ✓ tests/unit/evaluators/adr-compliance.test.ts (5 tests) 178ms
+ ✓ tests/unit/loop/critique-loop.test.ts (7 tests) 128ms
+ ✓ tests/unit/evaluators/logic-loop.test.ts (9 tests) 44ms
+ ✓ tests/unit/breakers/consensus-failure.test.ts (6 tests) 95ms
+
+ Test Files  18 passed (18)
+      Tests  146 passed (146)
+   Start at  15:44:14
+   Duration  7.44s (transform 4.85s, setup 0ms, collect 10.93s, tests 1.31s, environment 5ms, prepare 18.05s)
+

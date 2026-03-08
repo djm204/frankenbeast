@@ -1,0 +1,1 @@
+{"version":3,"file":"partition-for-pruning.d.ts","sourceRoot":"","sources":["../../src/working/partition-for-pruning.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,mBAAmB,CAAC;AAErD,MAAM,WAAW,eAAe;IAC9B,SAAS,EAAE,WAAW,EAAE,CAAC;IACzB,UAAU,EAAE,WAAW,EAAE,CAAC;CAC3B;AAED;;;;;;;;GAQG;AACH,wBAAgB,mBAAmB,CAAC,KAAK,EAAE,WAAW,EAAE,GAAG,eAAe,CAsCzE"}

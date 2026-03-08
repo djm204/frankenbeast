@@ -1,0 +1,1 @@
+{"version":3,"file":"channel-unavailable-error.d.ts","sourceRoot":"","sources":["../../src/errors/channel-unavailable-error.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAE,MAAM,qBAAqB,CAAC;AAEpD,qBAAa,uBAAwB,SAAQ,aAAa;aAEtC,SAAS,EAAE,MAAM;gBAAjB,SAAS,EAAE,MAAM,EACjC,MAAM,EAAE,MAAM;CAMjB"}

@@ -1,0 +1,31 @@
+
+> franken-planner@0.1.0 test
+> vitest run
+
+
+ RUN  v2.1.9 /home/pfk/dev/frankenbeast/packages/franken-planner
+
+ ✓ tests/unit/hitl/hitl-gate.test.ts (12 tests) 17ms
+ ✓ tests/unit/planners/parallel.test.ts (11 tests) 70ms
+ ✓ tests/unit/planners/linear.test.ts (8 tests) 111ms
+ ✓ tests/unit/recovery/recovery-controller.test.ts (12 tests) 149ms
+ ✓ tests/integration/planner-parallel.integration.test.ts (5 tests) 71ms
+ ✓ tests/unit/planners/recursive.test.ts (12 tests) 197ms
+ ✓ tests/unit/cot/cot-gate.test.ts (11 tests) 249ms
+ ✓ tests/unit/core/dag.test.ts (32 tests) 227ms
+ ✓ tests/integration/planner-cot.integration.test.ts (5 tests) 99ms
+ ✓ tests/integration/planner-linear.integration.test.ts (9 tests) 128ms
+ ✓ tests/unit/planner.test.ts (14 tests) 97ms
+ ✓ tests/unit/core/guards.test.ts (20 tests) 196ms
+ ✓ tests/unit/recovery/recovery-plan-generator.test.ts (7 tests) 59ms
+ ✓ tests/integration/planner-recursive.integration.test.ts (5 tests) 95ms
+ ✓ tests/unit/hitl/plan-exporter.test.ts (10 tests) 70ms
+ ✓ tests/unit/cot/rationale-enforcer.test.ts (8 tests) 7ms
+ ✓ tests/unit/index.test.ts (1 test) 12ms
+ ✓ tests/unit/recovery/error-ingester.test.ts (6 tests) 151ms
+
+ Test Files  18 passed (18)
+      Tests  188 passed (188)
+   Start at  15:44:13
+   Duration  7.49s (transform 7.87s, setup 0ms, collect 19.39s, tests 2.00s, environment 6ms, prepare 17.57s)
+

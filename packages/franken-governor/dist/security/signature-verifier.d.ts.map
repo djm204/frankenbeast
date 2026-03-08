@@ -1,0 +1,1 @@
+{"version":3,"file":"signature-verifier.d.ts","sourceRoot":"","sources":["../../src/security/signature-verifier.ts"],"names":[],"mappings":"AAEA,qBAAa,iBAAiB;IAChB,OAAO,CAAC,QAAQ,CAAC,MAAM;gBAAN,MAAM,EAAE,MAAM;IAE3C,IAAI,CAAC,OAAO,EAAE,MAAM,GAAG,MAAM;IAI7B,MAAM,CAAC,OAAO,EAAE,MAAM,EAAE,SAAS,EAAE,MAAM,GAAG,OAAO;CASpD"}

@@ -2,6 +2,33 @@
 
 This project uses AI-assisted development. Rules in `.cursor/rules/` provide guidance.
 
+## Monorepo Layout
+
+This is an npm workspaces monorepo with Turborepo for build orchestration. All 11 packages live under `packages/`:
+
+```
+packages/
+├── franken-types/           # Shared type definitions
+├── frankenfirewall/         # MOD-01: LLM proxy
+├── franken-skills/          # MOD-02: Skill registry
+├── franken-brain/           # MOD-03: Memory systems
+├── franken-planner/         # MOD-04: DAG planning
+├── franken-observer/        # MOD-05: Tracing & cost
+├── franken-critique/        # MOD-06: Self-critique
+├── franken-governor/        # MOD-07: HITL governance
+├── franken-heartbeat/       # MOD-08: Reflection
+├── franken-mcp/             # MCP server registry
+└── franken-orchestrator/    # The Beast Loop & CLI
+```
+
+**Build commands** (all via Turborepo):
+- `npm run build` — runs `turbo run build` (dependency-ordered)
+- `npm test` — runs `turbo run test` (parallel across packages)
+- `npm run typecheck` — runs `turbo run typecheck`
+- Per-package: `npx turbo run test --filter=franken-brain`
+
+Cross-package dependencies are managed by npm workspaces (e.g., `@frankenbeast/types`). See [ADR-011](docs/adr/011-monorepo-migration.md) for the migration from individual repos.
+
 ## Installed Templates
 
 - **Shared** (always included): Core principles, code quality, security, git workflow, communication

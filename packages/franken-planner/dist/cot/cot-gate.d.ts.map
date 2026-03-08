@@ -1,0 +1,1 @@
+{"version":3,"file":"cot-gate.d.ts","sourceRoot":"","sources":["../../src/cot/cot-gate.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,YAAY,EAAE,MAAM,sBAAsB,CAAC;AACzD,OAAO,KAAK,EAAE,kBAAkB,EAAE,MAAM,qBAAqB,CAAC;AAC9D,OAAO,EAAE,iBAAiB,EAAE,MAAM,yBAAyB,CAAC;AAE5D;;;;;;;;;;;GAWG;AACH,wBAAgB,gBAAgB,CAC9B,QAAQ,EAAE,YAAY,EACtB,YAAY,EAAE,kBAAkB,EAChC,QAAQ,GAAE,iBAA2C,GACpD,YAAY,CAWd"}

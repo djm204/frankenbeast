@@ -1,0 +1,1 @@
+{"version":3,"file":"signature-verification-error.d.ts","sourceRoot":"","sources":["../../src/errors/signature-verification-error.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAE,MAAM,qBAAqB,CAAC;AAEpD,qBAAa,0BAA2B,SAAQ,aAAa;aAC/B,SAAS,EAAE,MAAM;gBAAjB,SAAS,EAAE,MAAM;CAK9C"}

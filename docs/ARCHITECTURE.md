@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Frankenbeast is a deterministic guardrails framework for AI agents, comprising 11 packages:
+Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. All 11 packages live under `packages/`. See [ADR-011](adr/011-monorepo-migration.md).
 
 This document mixes two views:
 
@@ -66,12 +66,12 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `ProviderRegistry` | `franken-orchestrator/src/skills/providers/cli-provider.ts` | In-memory registry of `ICliProvider` implementations. `createDefaultRegistry()` registers all 4 built-in providers (claude, codex, gemini, aider). Lookup by name with `get(name)`. |
-| `ICliProvider` | `franken-orchestrator/src/skills/providers/cli-provider.ts` | Interface for CLI agent providers: `buildArgs`, `normalizeOutput`, `estimateTokens`, `isRateLimited`, `parseRetryAfter`, `filterEnv`, `supportsStreamJson`. |
-| `ClaudeProvider` | `franken-orchestrator/src/skills/providers/claude-provider.ts` | Claude CLI provider. `claude --print` with stream-json, strips `CLAUDE*` env vars. |
-| `CodexProvider` | `franken-orchestrator/src/skills/providers/codex-provider.ts` | Codex CLI provider. `codex exec --full-auto --json`. |
-| `GeminiProvider` | `franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
-| `AiderProvider` | `franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
+| `ProviderRegistry` | `packages/franken-orchestrator/src/skills/providers/cli-provider.ts` | In-memory registry of `ICliProvider` implementations. `createDefaultRegistry()` registers all 4 built-in providers (claude, codex, gemini, aider). Lookup by name with `get(name)`. |
+| `ICliProvider` | `packages/franken-orchestrator/src/skills/providers/cli-provider.ts` | Interface for CLI agent providers: `buildArgs`, `normalizeOutput`, `estimateTokens`, `isRateLimited`, `parseRetryAfter`, `filterEnv`, `supportsStreamJson`. |
+| `ClaudeProvider` | `packages/franken-orchestrator/src/skills/providers/claude-provider.ts` | Claude CLI provider. `claude --print` with stream-json, strips `CLAUDE*` env vars. |
+| `CodexProvider` | `packages/franken-orchestrator/src/skills/providers/codex-provider.ts` | Codex CLI provider. `codex exec --full-auto --json`. |
+| `GeminiProvider` | `packages/franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
+| `AiderProvider` | `packages/franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
 | `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
 | `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
 | `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
