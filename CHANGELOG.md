@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.3.1...frankenbeast-v0.4.0) (2026-03-08)
+
+
+### Features
+
+* GitHub issues as autonomous work source ([#90](https://github.com/djm204/frankenbeast/issues/90)) ([152970f](https://github.com/djm204/frankenbeast/commit/152970f3e192c80673c77d0a29816ca0728de1a5))
+
 ## [0.3.1](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.3.0...frankenbeast-v0.3.1) (2026-03-08)
 
 
