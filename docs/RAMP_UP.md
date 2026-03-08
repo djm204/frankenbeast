@@ -143,7 +143,7 @@ All modules use `tsc` except `franken-planner` and `franken-observer` (both use 
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
 | `docs/adr/` | 10 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers) |
-| `docs/guides/` | quickstart, add-llm-provider, wrap-external-agent |
+| `docs/guides/` | quickstart, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Development Practices
