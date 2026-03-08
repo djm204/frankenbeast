@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.1...frankenbeast-v0.4.2) (2026-03-08)
+
+
+### Miscellaneous
+
+* update orchestrator gitlink — baseBranch creation fix ([435e0dc](https://github.com/djm204/frankenbeast/commit/435e0dc6421e4ede631b0180c98f34223ab214a2))
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.0...frankenbeast-v0.4.1) (2026-03-08)
 
 
