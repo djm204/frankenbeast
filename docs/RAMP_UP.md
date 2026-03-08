@@ -55,14 +55,16 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 franken-orchestrator/src/
 ├── beast-loop.ts          # BeastLoop.run(input) → BeastResult
 ├── deps.ts                # BeastLoopDeps (all port interfaces)
-├── adapters/              # CliLlmAdapter (wraps ICliProvider), CliObserverBridge
+├── adapters/              # CliLlmAdapter, CliObserverBridge, AdapterLlmClient, module adapters
 ├── phases/                # ingestion, hydration, planning, execution, closure
 ├── breakers/              # injection, budget, critique-spiral circuit breakers
 ├── checkpoint/            # FileCheckpointStore (plan-scoped crash recovery)
+├── closure/               # PrCreator (gh pr create, LLM-powered titles/descriptions)
+├── context/               # FrankenContext, context-factory
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
-├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator
+├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
-├── cli/                   # args.ts, config-loader.ts, run.ts, trace-viewer.ts
+├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, review-loop.ts, cleanup.ts, trace-viewer.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
 └── logging/               # BeastLogger (ANSI badges, service labels, crash-safe incremental file logging)
@@ -86,6 +88,7 @@ franken-orchestrator/src/
 - `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate limits (e.g., `claude,gemini,aider`)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
+- `--cleanup` removes all build logs, checkpoints, and traces from `.frankenbeast/.build/`
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
 - Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
@@ -123,7 +126,6 @@ All modules use `tsc` except `franken-planner` and `franken-observer` (both use 
 2. The current CLI path is not purely ports-only: `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`
 3. There is no dedicated `--non-interactive` flag; headless usage currently relies on starting at `plan` or `run` with existing inputs
 4. `--resume` is parsed, but it is not wired as a distinct resume control path; checkpoint-based task skipping still works from existing checkpoint files
-5. `createCliDeps()` currently constructs `PrCreator` with target branch `main`, not the resolved `--base-branch`
 
 ## Key Documentation
 
@@ -133,7 +135,7 @@ All modules use `tsc` except `franken-planner` and `franken-observer` (both use 
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
 | `docs/adr/` | 10 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers) |
 | `docs/guides/` | quickstart, add-llm-provider, wrap-external-agent |
-| `docs/plans/` | Design docs for MCP, execute-task, beast-runner, approach-c |
+| `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Development Practices
 
