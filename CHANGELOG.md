@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.2.0...frankenbeast-v0.3.0) (2026-03-08)
+
+
+### Features
+
+* **orchestrator:** add LLM-powered squash commits and PR descriptions ([#9](https://github.com/djm204/frankenbeast/issues/9)) ([f792a5c](https://github.com/djm204/frankenbeast/commit/f792a5c0fc552cbd82a19e2c143b8358c5609b04))
+
+
+### Bug Fixes
+
+* gitignore all .build/ dirs + force-checkout on conflicts ([bd73c07](https://github.com/djm204/frankenbeast/commit/bd73c071b41c92f99d3bc74207dbf36576f39d59))
+* rewrite cli-gaps build-runner + sync orchestrator gitlink ([aaf8fcb](https://github.com/djm204/frankenbeast/commit/aaf8fcbe5faf43ebba514235b77e74f3c7bead38))
+* update orchestrator gitlink — plugin poisoning + false success bugs ([da29da5](https://github.com/djm204/frankenbeast/commit/da29da5c11aa300c332e2401a200dab6b351893b))
+* update orchestrator gitlink — safe checkout conflict resolution ([a335deb](https://github.com/djm204/frankenbeast/commit/a335deba149176cee9ff289c6cf10ce23d7131ea))
+* update orchestrator gitlink — thinking output + build.log tee ([d15630b](https://github.com/djm204/frankenbeast/commit/d15630b6dda79e2ed71867bb60584725aebe1f88))
+* update orchestrator gitlink + restore BeastLoop runner for cli-gaps ([c9e3327](https://github.com/djm204/frankenbeast/commit/c9e3327c6d1497db804fefb9458fb128ff2df625))
+* use integration branch so PR is not empty ([7181a43](https://github.com/djm204/frankenbeast/commit/7181a43aa83b7f7df2dbd1d3a813e5bdf063d946))
+
+
+### Miscellaneous
+
+* update orchestrator gitlink — CliLlmAdapter implementation ([bf03635](https://github.com/djm204/frankenbeast/commit/bf036354f1015bb0464ffb9455183c07c7a47b6b))
+* update orchestrator gitlink — CliLlmAdapter wiring (chunk 03) ([8aa7469](https://github.com/djm204/frankenbeast/commit/8aa74696f1ac6d862f7911f3687cf2dc58679c4e))
+* update orchestrator gitlink — observer bridge tests (chunk 05) ([cf9ee61](https://github.com/djm204/frankenbeast/commit/cf9ee61ab181a764abbd9052edb3ec2f5f785b91))
+* update orchestrator gitlink — observer bridge wiring ([1b14e37](https://github.com/djm204/frankenbeast/commit/1b14e37659112f457b407fdf51e44194d57f2b06))
+
+
+### Documentation
+
+* add security audit, CLI gap analysis, and security-expert cursor rules ([fb1d74a](https://github.com/djm204/frankenbeast/commit/fb1d74aef95e81e75eccf968393eff13fd7043fb))
+* close CLI gaps, add design docs, update architecture ([#12](https://github.com/djm204/frankenbeast/issues/12)) ([3159d22](https://github.com/djm204/frankenbeast/commit/3159d228e0865b932cd4297b9c9e97bcc83f7046))
+* **plans:** add docs truth cleanup implementation plan ([b44bbe2](https://github.com/djm204/frankenbeast/commit/b44bbe25bee562702ab40e6ac6f083ef6c551c49))
+* sync main docs with current CLI state ([2049901](https://github.com/djm204/frankenbeast/commit/2049901bdc8f82a8231f21545ae0318560277a0b))
+
+
+### Tests
+
+* **docs:** tighten docs contract coverage ([9ae3070](https://github.com/djm204/frankenbeast/commit/9ae3070b84c0972509d46a8f02acc8580eac38d3))
+
 ## [0.2.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.1.0...frankenbeast-v0.2.0) (2026-03-07)
 
 
