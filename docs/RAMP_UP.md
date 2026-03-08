@@ -62,6 +62,7 @@ franken-orchestrator/src/
 ├── closure/               # PrCreator (gh pr create, LLM-powered titles/descriptions)
 ├── context/               # FrankenContext, context-factory
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
+├── issues/               # IssueFetcher, IssueTriage, IssueGraphBuilder, IssueReview, IssueRunner
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
 ├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, review-loop.ts, cleanup.ts, trace-viewer.ts
@@ -89,6 +90,14 @@ franken-orchestrator/src/
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
 - `--cleanup` removes all build logs, checkpoints, and traces from `.frankenbeast/.build/`
+- `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
+  - `--label <labels>` comma-separated labels (e.g. `critical,high`)
+  - `--search <query>` GitHub search syntax (e.g. `"label:bug label:high"`)
+  - `--milestone <name>` filter by milestone
+  - `--assignee <user>` filter by assignee
+  - `--limit <n>` max issues to fetch (default: 30)
+  - `--repo <owner/repo>` target repository (auto-inferred from `gh repo view` if omitted)
+  - `--dry-run` preview triage without executing
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
 - Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
