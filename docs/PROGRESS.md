@@ -238,6 +238,8 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 **Tests**: 153 issue-related tests across 8 test files (unit + integration + session). Orchestrator total: 1015 tests passing.
 
+**Commits**: 7 (on `feat/11_docs-update`). PR: TBD.
+
 **Chunks implemented**: 11 chunks (types, fetcher, triage, graph-builder, review, runner, CLI wiring, session integration, dep-factory, e2e, docs).
 
 ---
