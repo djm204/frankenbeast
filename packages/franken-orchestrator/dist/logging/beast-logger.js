@@ -63,29 +63,29 @@ export const BANNER = `\n${A.green}${A.bold}` +
     '##       ##    ##  ##     ## ##   ### ##   ##  ##       ##   ### ##     ## ##       ##     ## ##    ##    ##\n' +
     '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
     `${A.reset}\n`;
-const ASCII_CHARS = ' .,:;irsXA253hMHGS#9B&@';
-const GREEN_RAMP = [22, 28, 34, 40, 46, 82, 118, 154];
+const ASCII_SHADES = [' ', '░', '▒', '▓', '█'];
 export async function renderBanner(root) {
     const version = readBannerVersion(root);
     const fallback = buildFallbackBanner(version);
-    const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-logo-ascii.png');
+    const logoPath = resolve(root, 'assets', 'img', 'asciiheader.png');
     if (!process.stdout.isTTY || !existsSync(logoPath)) {
         return fallback;
     }
     try {
         const columns = process.stdout.columns ?? 100;
-        const width = Math.max(44, Math.min(columns - 6, 92));
+        const width = Math.max(38, Math.min(columns - 10, 74));
         const pipeline = sharp(logoPath)
             .greyscale()
             .normalise()
-            .linear(1.15, -18)
+            .linear(1.2, -28)
+            .blur(0.35)
             .sharpen();
         const metadata = await pipeline.metadata();
         if (!metadata.width || !metadata.height) {
             return fallback;
         }
         // Terminal glyphs are taller than they are wide, so compress the image height.
-        const height = Math.max(18, Math.round((metadata.height / metadata.width) * width * 0.42));
+        const height = Math.max(18, Math.round((metadata.height / metadata.width) * width * 0.46));
         const { data, info } = await pipeline
             .resize({ width, height, fit: 'inside' })
             .raw()
@@ -97,21 +97,17 @@ export async function renderBanner(root) {
             let hasInk = false;
             for (let x = 0; x < info.width; x += 1) {
                 const pixel = data[(y * info.width + x) * stride] ?? 255;
-                const ink = Math.max(0, 210 - pixel) / 210;
-                if (ink <= 0.035) {
+                const ink = Math.max(0, 188 - pixel) / 188;
+                if (ink <= 0.045) {
                     line += ' ';
                     continue;
                 }
                 hasInk = true;
-                const glyphIndex = Math.min(ASCII_CHARS.length - 1, Math.floor(Math.pow(ink, 0.9) * (ASCII_CHARS.length - 1)));
-                const colorIndex = Math.min(GREEN_RAMP.length - 1, Math.floor(Math.pow(ink, 0.8) * (GREEN_RAMP.length - 1)));
-                const glyph = ASCII_CHARS[glyphIndex] ?? '@';
-                const color = GREEN_RAMP[colorIndex] ?? GREEN_RAMP[GREEN_RAMP.length - 1];
-                const weight = ink >= 0.62 ? A.bold : ink <= 0.18 ? A.dim : '';
-                line += `${weight}\x1b[38;5;${color}m${glyph}${A.reset}`;
+                const glyphIndex = Math.min(ASCII_SHADES.length - 1, Math.floor(Math.pow(ink, 0.9) * (ASCII_SHADES.length - 1)));
+                line += ASCII_SHADES[glyphIndex] ?? '█';
             }
             if (hasInk) {
-                lines.push(line);
+                lines.push(`${A.green}${line.replace(/\s+$/, '')}${A.reset}`);
             }
         }
         if (lines.length === 0) {

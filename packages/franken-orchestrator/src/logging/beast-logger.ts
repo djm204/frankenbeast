@@ -75,13 +75,10 @@ export const BANNER = `\n${A.green}${A.bold}` +
   '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
   `${A.reset}\n`;
 
-const ASCII_CHARS = ' .,:;irsXA253hMHGS#9B&@';
-const GREEN_RAMP = [22, 28, 34, 40, 46, 82, 118, 154] as const;
-
 export async function renderBanner(root: string): Promise<string> {
   const version = readBannerVersion(root);
   const fallback = buildFallbackBanner(version);
-  const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-logo-ascii.png');
+  const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-github-logo-478x72.png');
 
   if (!process.stdout.isTTY || !existsSync(logoPath)) {
     return fallback;
@@ -89,52 +86,54 @@ export async function renderBanner(root: string): Promise<string> {
 
   try {
     const columns = process.stdout.columns ?? 100;
-    const width = Math.max(44, Math.min(columns - 6, 92));
+    const width = Math.max(28, Math.min(Math.floor(columns * 0.55), 44));
     const pipeline = sharp(logoPath)
-      .greyscale()
-      .normalise()
-      .linear(1.15, -18)
-      .sharpen();
+      .ensureAlpha()
+      .resize({ width, fit: 'inside' });
     const metadata = await pipeline.metadata();
 
     if (!metadata.width || !metadata.height) {
       return fallback;
     }
 
-    // Terminal glyphs are taller than they are wide, so compress the image height.
-    const height = Math.max(18, Math.round((metadata.height / metadata.width) * width * 0.42));
     const { data, info } = await pipeline
-      .resize({ width, height, fit: 'inside' })
       .raw()
       .toBuffer({ resolveWithObject: true });
 
     const lines: string[] = [];
     const stride = info.channels;
+    const pixelAt = (x: number, y: number): [number, number, number, number] => {
+      if (y >= info.height) return [0, 0, 0, 0];
+      const index = (y * info.width + x) * stride;
+      return [
+        data[index] ?? 0,
+        data[index + 1] ?? 0,
+        data[index + 2] ?? 0,
+        data[index + 3] ?? 0,
+      ];
+    };
 
-    for (let y = 0; y < info.height; y += 1) {
+    for (let y = 0; y < info.height; y += 2) {
       let line = '';
       let hasInk = false;
 
       for (let x = 0; x < info.width; x += 1) {
-        const pixel = data[(y * info.width + x) * stride] ?? 255;
-        const ink = Math.max(0, 210 - pixel) / 210;
+        const [r1, g1, b1, a1] = pixelAt(x, y);
+        const [r2, g2, b2, a2] = pixelAt(x, y + 1);
 
-        if (ink <= 0.035) {
+        if (a1 < 18 && a2 < 18) {
           line += ' ';
           continue;
         }
 
         hasInk = true;
-        const glyphIndex = Math.min(ASCII_CHARS.length - 1, Math.floor(Math.pow(ink, 0.9) * (ASCII_CHARS.length - 1)));
-        const colorIndex = Math.min(GREEN_RAMP.length - 1, Math.floor(Math.pow(ink, 0.8) * (GREEN_RAMP.length - 1)));
-        const glyph = ASCII_CHARS[glyphIndex] ?? '@';
-        const color = GREEN_RAMP[colorIndex] ?? GREEN_RAMP[GREEN_RAMP.length - 1]!;
-        const weight = ink >= 0.62 ? A.bold : ink <= 0.18 ? A.dim : '';
-        line += `${weight}\x1b[38;5;${color}m${glyph}${A.reset}`;
+        const fg = a1 < 18 ? '39' : `38;2;${r1};${g1};${b1}`;
+        const bg = a2 < 18 ? '49' : `48;2;${r2};${g2};${b2}`;
+        line += `\x1b[${fg};${bg}m▀`;
       }
 
       if (hasInk) {
-        lines.push(line);
+        lines.push(`${line}${A.reset}`);
       }
     }
 
