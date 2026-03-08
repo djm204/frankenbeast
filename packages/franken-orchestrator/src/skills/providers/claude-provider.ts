@@ -129,7 +129,6 @@ function stripHookBlocks(raw: string): string {
   const MARKER = '"hookSpecificOutput"';
   let result = raw;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const markerIdx = result.indexOf(MARKER);
     if (markerIdx === -1) break;
