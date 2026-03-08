@@ -58,13 +58,13 @@ franken-orchestrator/src/
 ├── adapters/              # CliLlmAdapter (claude/codex CLI), CliObserverBridge
 ├── phases/                # ingestion, hydration, planning, execution, closure
 ├── breakers/              # injection, budget, critique-spiral circuit breakers
-├── checkpoint/            # FileCheckpointStore (crash recovery)
+├── checkpoint/            # FileCheckpointStore (plan-scoped crash recovery)
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
 ├── skills/                # CliSkillExecutor, RalphLoop, GitBranchIsolator
 ├── cli/                   # args.ts, config-loader.ts, run.ts, trace-viewer.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
-└── logging/               # BeastLogger (ANSI badges, service labels)
+└── logging/               # BeastLogger (ANSI badges, service labels, crash-safe incremental file logging)
 ```
 
 **BeastContext**: Mutable state accumulator — `sessionId`, `projectId`, `userInput`, `phase`, `sanitizedIntent`, `plan`, `tokenSpend`, `audit`.
@@ -83,6 +83,7 @@ franken-orchestrator/src/
 - `--verbose` attempts to start a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults)
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
+- Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
 - Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
 ## Build & Test

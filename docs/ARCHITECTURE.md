@@ -285,12 +285,12 @@ This preserves the build-runner's impl+harden pattern inside the orchestrator's 
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `FileCheckpointStore` | `franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. |
+| `FileCheckpointStore` | `franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. Plan-scoped: `.build/<plan-name>.checkpoint`. |
 | `ChunkFileGraphBuilder` | `franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
 | `LlmGraphBuilder` | `franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
 | `InterviewLoop` | `franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
 | `PrCreator` | `franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create`. Generates title + body from `BeastResult`. In the current local CLI dep wiring, target branch is still hardcoded to `main`. |
-| `BeastLogger` | `franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting for CLI output. |
+| `BeastLogger` | `franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting. Streams log entries to disk incrementally (crash-safe) as `.build/<plan-name>-<datetime>-build.log`. |
 | `CLI args/config/run` | `franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
 | Execution checkpoint wiring | `franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
 | Planning GraphBuilder wiring | `franken-orchestrator/src/phases/planning.ts` | Uses `GraphBuilder.build()` when available, falls back to `IPlannerModule.createPlan()`. |
