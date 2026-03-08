@@ -5,7 +5,9 @@
  * Provides formatted log levels, budget bars, status badges,
  * boxed headers, and service highlighting for verbose mode.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import sharp from 'sharp';
 // ── ANSI escape codes ──
 const A = {
     reset: '\x1b[0m',
@@ -61,6 +63,69 @@ export const BANNER = `\n${A.green}${A.bold}` +
     '##       ##    ##  ##     ## ##   ### ##   ##  ##       ##   ### ##     ## ##       ##     ## ##    ##    ##\n' +
     '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
     `${A.reset}\n`;
+const ASCII_CHARS = ' .,:;irsXA253hMHGS#9B&@';
+const GREEN_RAMP = [22, 28, 34, 40, 46, 82, 118, 154];
+export async function renderBanner(root) {
+    const version = readBannerVersion(root);
+    const fallback = buildFallbackBanner(version);
+    const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-logo-ascii.png');
+    if (!process.stdout.isTTY || !existsSync(logoPath)) {
+        return fallback;
+    }
+    try {
+        const columns = process.stdout.columns ?? 100;
+        const width = Math.max(44, Math.min(columns - 6, 92));
+        const pipeline = sharp(logoPath)
+            .greyscale()
+            .normalise()
+            .linear(1.15, -18)
+            .sharpen();
+        const metadata = await pipeline.metadata();
+        if (!metadata.width || !metadata.height) {
+            return fallback;
+        }
+        // Terminal glyphs are taller than they are wide, so compress the image height.
+        const height = Math.max(18, Math.round((metadata.height / metadata.width) * width * 0.42));
+        const { data, info } = await pipeline
+            .resize({ width, height, fit: 'inside' })
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        const lines = [];
+        const stride = info.channels;
+        for (let y = 0; y < info.height; y += 1) {
+            let line = '';
+            let hasInk = false;
+            for (let x = 0; x < info.width; x += 1) {
+                const pixel = data[(y * info.width + x) * stride] ?? 255;
+                const ink = Math.max(0, 210 - pixel) / 210;
+                if (ink <= 0.035) {
+                    line += ' ';
+                    continue;
+                }
+                hasInk = true;
+                const glyphIndex = Math.min(ASCII_CHARS.length - 1, Math.floor(Math.pow(ink, 0.9) * (ASCII_CHARS.length - 1)));
+                const colorIndex = Math.min(GREEN_RAMP.length - 1, Math.floor(Math.pow(ink, 0.8) * (GREEN_RAMP.length - 1)));
+                const glyph = ASCII_CHARS[glyphIndex] ?? '@';
+                const color = GREEN_RAMP[colorIndex] ?? GREEN_RAMP[GREEN_RAMP.length - 1];
+                const weight = ink >= 0.62 ? A.bold : ink <= 0.18 ? A.dim : '';
+                line += `${weight}\x1b[38;5;${color}m${glyph}${A.reset}`;
+            }
+            if (hasInk) {
+                lines.push(line);
+            }
+        }
+        if (lines.length === 0) {
+            return fallback;
+        }
+        const contentWidth = Math.max(...lines.map((line) => stripAnsi(line).length));
+        const title = centerAnsi(`${A.green}${A.bold}FRANKENBEAST${A.reset}`, contentWidth);
+        const versionLine = centerAnsi(`${A.gray}v${version}${A.reset}`, contentWidth);
+        return `\n${lines.join('\n')}\n\n${title}\n${versionLine}\n`;
+    }
+    catch {
+        return fallback;
+    }
+}
 // ── Service badge ──
 const BADGE_COLORS = {
     martin: A.cyan,
@@ -176,6 +241,30 @@ export class BeastLogger {
     }
 }
 export { A as ANSI };
+function buildFallbackBanner(version) {
+    const title = `${A.green}${A.bold}FRANKENBEAST${A.reset}`;
+    const versionLine = `${A.gray}v${version}${A.reset}`;
+    return `${BANNER}${centerAnsi(title, 104)}\n${centerAnsi(versionLine, 104)}\n`;
+}
+function readBannerVersion(root) {
+    const packageJsonPath = resolve(root, 'package.json');
+    if (!existsSync(packageJsonPath)) {
+        return 'dev';
+    }
+    try {
+        const raw = readFileSync(packageJsonPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : 'dev';
+    }
+    catch {
+        return 'dev';
+    }
+}
+function centerAnsi(text, width) {
+    const visibleWidth = stripAnsi(text).length;
+    const leftPad = Math.max(0, Math.floor((width - visibleWidth) / 2));
+    return `${' '.repeat(leftPad)}${text}`;
+}
 function safeStringify(value) {
     try {
         return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? v.toString() : v);

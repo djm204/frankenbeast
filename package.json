@@ -20,6 +20,7 @@
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.0.18",
     "better-sqlite3": "^12.6.2",
+    "sharp": "^0.34.5",
     "turbo": "^2.8.14",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

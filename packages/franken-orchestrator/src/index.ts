@@ -109,6 +109,7 @@ export {
   statusBadge,
   logHeader,
   BANNER,
+  renderBanner,
   ANSI,
 } from './logging/beast-logger.js';
 export type { BeastLoggerOptions } from './logging/beast-logger.js';

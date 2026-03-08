@@ -6,6 +6,7 @@ import {
   statusBadge,
   logHeader,
   BANNER,
+  renderBanner,
 } from '../../../src/logging/beast-logger.js';
 
 // ── stripAnsi ──
@@ -129,6 +130,13 @@ describe('BANNER', () => {
   it('is under 20 lines', () => {
     const lines = BANNER.split('\n').filter(l => l.length > 0);
     expect(lines.length).toBeLessThanOrEqual(20);
+  });
+
+  it('renderBanner falls back to text when the logo path is unavailable', async () => {
+    const banner = await renderBanner('/definitely/missing');
+    const plain = stripAnsi(banner);
+    expect(plain).toContain('FRANKENBEAST');
+    expect(plain).toContain('vdev');
   });
 });
 

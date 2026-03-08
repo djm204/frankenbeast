@@ -12,7 +12,7 @@ import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { BANNER, BeastLogger } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -89,6 +89,9 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const root = resolveProjectRoot(args.baseDir);
+  console.log(await renderBanner(root));
+
   const config = await resolveConfig(args);
 
   const logger = new BeastLogger({ verbose: args.verbose });
@@ -102,10 +105,7 @@ async function main(): Promise<void> {
     console.log('Config:', JSON.stringify(config, null, 2));
   }
 
-  console.log(BANNER);
-
   // Resolve project root
-  const root = resolveProjectRoot(args.baseDir);
   const paths = getProjectPaths(root);
   scaffoldFrankenbeast(paths);
 

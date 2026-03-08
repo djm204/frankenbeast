@@ -35,7 +35,7 @@ export { ProviderRegistry, createDefaultRegistry } from './skills/providers/inde
 // Checkpoint
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
 // Logging
-export { BeastLogger, stripAnsi, budgetBar, statusBadge, logHeader, BANNER, ANSI, } from './logging/beast-logger.js';
+export { BeastLogger, stripAnsi, budgetBar, statusBadge, logHeader, BANNER, renderBanner, ANSI, } from './logging/beast-logger.js';
 // Resilience
 export { serializeContext, deserializeContext, saveContext, loadContext, } from './resilience/context-serializer.js';
 export { GracefulShutdown } from './resilience/graceful-shutdown.js';

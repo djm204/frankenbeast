@@ -7,7 +7,7 @@ import { cleanupBuild } from './cleanup.js';
 import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
-import { BANNER, BeastLogger } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
 /**
  * Creates an InterviewIO backed by stdin/stdout.
  */
@@ -71,6 +71,8 @@ async function main() {
             : 'Nothing to clean up.');
         process.exit(0);
     }
+    const root = resolveProjectRoot(args.baseDir);
+    console.log(await renderBanner(root));
     const config = await resolveConfig(args);
     const logger = new BeastLogger({ verbose: args.verbose });
     if (args.config) {
@@ -82,9 +84,7 @@ async function main() {
     if (args.verbose) {
         console.log('Config:', JSON.stringify(config, null, 2));
     }
-    console.log(BANNER);
     // Resolve project root
-    const root = resolveProjectRoot(args.baseDir);
     const paths = getProjectPaths(root);
     scaffoldFrankenbeast(paths);
     // Create IO for interactive prompts

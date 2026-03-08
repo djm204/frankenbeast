@@ -33,6 +33,7 @@ export declare function statusBadge(pass: boolean): string;
 /** Boxed header with `─` and `│` border characters in cyan. */
 export declare function logHeader(title: string): string;
 export declare const BANNER: string;
+export declare function renderBanner(root: string): Promise<string>;
 export interface BeastLoggerOptions {
     readonly verbose: boolean;
     readonly captureForFile?: boolean;

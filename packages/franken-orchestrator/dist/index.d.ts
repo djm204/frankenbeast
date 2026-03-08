@@ -36,7 +36,7 @@ export type { CliSkillConfig, GitIsolationConfig, MartinLoopConfig, MartinLoopRe
 export type { ICliProvider, ProviderOpts } from './skills/providers/index.js';
 export { ProviderRegistry, createDefaultRegistry } from './skills/providers/index.js';
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
-export { BeastLogger, stripAnsi, budgetBar, statusBadge, logHeader, BANNER, ANSI, } from './logging/beast-logger.js';
+export { BeastLogger, stripAnsi, budgetBar, statusBadge, logHeader, BANNER, renderBanner, ANSI, } from './logging/beast-logger.js';
 export type { BeastLoggerOptions } from './logging/beast-logger.js';
 export { serializeContext, deserializeContext, saveContext, loadContext, } from './resilience/context-serializer.js';
 export type { ContextSnapshot } from './resilience/context-serializer.js';
