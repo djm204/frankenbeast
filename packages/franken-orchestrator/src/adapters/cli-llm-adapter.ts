@@ -14,11 +14,13 @@ export interface CliLlmAdapterOpts {
   workingDir: string;
   timeoutMs?: number;
   commandOverride?: string;
+  /** Called with each complete line of stdout as it arrives (for streaming progress). */
+  onStreamLine?: (line: string) => void;
 }
 
 export class CliLlmAdapter implements IAdapter {
   private readonly provider: ICliProvider;
-  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string };
+  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string; onStreamLine?: (line: string) => void };
   private readonly _spawn: SpawnFn;
 
   constructor(
@@ -31,6 +33,7 @@ export class CliLlmAdapter implements IAdapter {
       workingDir: opts.workingDir,
       timeoutMs: opts.timeoutMs ?? 120_000,
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
+      ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
     };
     this._spawn = _spawnFn ?? (nodeSpawn as SpawnFn);
   }
@@ -67,6 +70,7 @@ export class CliLlmAdapter implements IAdapter {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      let lineBuffer = '';
 
       const settle = (fn: () => void): void => {
         if (settled) return;
@@ -75,7 +79,20 @@ export class CliLlmAdapter implements IAdapter {
       };
 
       child.stdout!.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString();
+        const text = chunk.toString();
+        stdout += text;
+
+        if (this.opts.onStreamLine) {
+          lineBuffer += text;
+          const lines = lineBuffer.split('\n');
+          // Keep the last (possibly incomplete) segment in the buffer
+          lineBuffer = lines.pop()!;
+          for (const line of lines) {
+            if (line.trim().length > 0) {
+              this.opts.onStreamLine(line);
+            }
+          }
+        }
       });
 
       child.stderr!.on('data', (chunk: Buffer) => {
@@ -93,6 +110,10 @@ export class CliLlmAdapter implements IAdapter {
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        // Flush remaining line buffer
+        if (this.opts.onStreamLine && lineBuffer.trim().length > 0) {
+          this.opts.onStreamLine(lineBuffer);
+        }
         if (code !== 0) {
           settle(() => reject(new Error(`CLI exited with code ${code}: ${stderr}`)));
         } else {

@@ -6,12 +6,13 @@ import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
 import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger.js';
+import { createStreamProgressHandler } from '../adapters/stream-progress.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
-import { createCliDeps } from './dep-factory.js';
+import { createCliDeps, type CliDepOptions } from './dep-factory.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -253,7 +254,10 @@ export class Session {
 
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
-    const { cliLlmAdapter, logger } = await createCliDeps(this.buildDepOptions());
+    const depOptions = this.buildDepOptions();
+    // Enable stream progress during planning so the user sees thinking/tool activity
+    depOptions.onStreamLine = createStreamProgressHandler();
+    const { cliLlmAdapter, logger } = await createCliDeps(depOptions);
 
     // Load design doc
     let designContent: string;
@@ -441,7 +445,7 @@ export class Session {
     };
   }
 
-  private buildDepOptions() {
+  private buildDepOptions(): CliDepOptions {
     return {
       paths: this.config.paths,
       baseBranch: this.config.baseBranch,

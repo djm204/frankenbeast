@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {
@@ -49,6 +49,43 @@ describe('tryExtractTextFromNode', () => {
     const out: string[] = [];
     tryExtractTextFromNode({ content_block: { text: 'from block' } }, out);
     expect(out).toEqual(['from block']);
+  });
+});
+
+describe('stripHookJson', () => {
+  it('strips a single hookSpecificOutput object', () => {
+    const input = '{ "hookSpecificOutput": { "hookEventName": "SessionStart" } }[{"id":"chunk1"}]';
+    expect(stripHookJson(input)).toBe('[{"id":"chunk1"}]');
+  });
+
+  it('strips hook output with nested braces in string values', () => {
+    const input = '{ "hookSpecificOutput": { "data": "value with { braces }" } }[{"id":"a"}]';
+    expect(stripHookJson(input)).toBe('[{"id":"a"}]');
+  });
+
+  it('strips multiple hook objects', () => {
+    const input = '{ "hookSpecificOutput": {} }{ "hookSpecificOutput": {} }[1,2,3]';
+    expect(stripHookJson(input)).toBe('[1,2,3]');
+  });
+
+  it('returns text unchanged when no hook output present', () => {
+    const input = '[{"id":"chunk1","objective":"do stuff"}]';
+    expect(stripHookJson(input)).toBe(input);
+  });
+
+  it('handles empty input', () => {
+    expect(stripHookJson('')).toBe('');
+  });
+
+  it('strips pretty-printed multi-line hook JSON', () => {
+    const input = `{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "<EXTREMELY_IMPORTANT>\\nYou have superpowers.\\n</EXTREMELY_IMPORTANT>"
+  }
+}
+[{"id":"chunk1"}]`;
+    expect(stripHookJson(input)).toBe('[{"id":"chunk1"}]');
   });
 });
 

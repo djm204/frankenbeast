@@ -281,6 +281,43 @@ describe('CliLlmAdapter', () => {
         await adapter.execute({ prompt: 'test', maxTurns: 1 });
         expect(calls[0]!.options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
       });
+
+      it('calls onStreamLine for each complete line of stdout', async () => {
+        const lines = 'line1\nline2\nline3\n';
+        const { spawnFn } = createMockSpawn({ stdout: lines, exitCode: 0 });
+        const collected: string[] = [];
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, onStreamLine: (l) => collected.push(l) },
+          spawnFn,
+        );
+        await adapter.execute({ prompt: 'test', maxTurns: 1 });
+        expect(collected).toEqual(['line1', 'line2', 'line3']);
+      });
+
+      it('does not call onStreamLine for empty lines', async () => {
+        const lines = 'line1\n\n\nline2\n';
+        const { spawnFn } = createMockSpawn({ stdout: lines, exitCode: 0 });
+        const collected: string[] = [];
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, onStreamLine: (l) => collected.push(l) },
+          spawnFn,
+        );
+        await adapter.execute({ prompt: 'test', maxTurns: 1 });
+        expect(collected).toEqual(['line1', 'line2']);
+      });
+
+      it('still returns full stdout even with onStreamLine', async () => {
+        const { spawnFn } = createMockSpawn({ stdout: 'full output', exitCode: 0 });
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, onStreamLine: () => {} },
+          spawnFn,
+        );
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+        expect(result).toBe('full output');
+      });
     });
   });
 

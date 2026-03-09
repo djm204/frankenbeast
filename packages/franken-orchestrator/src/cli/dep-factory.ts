@@ -40,6 +40,8 @@ export interface CliDepOptions {
   issueIO?: ReviewIO | undefined;
   /** Dry-run flag for IssueReview. */
   dryRun?: boolean | undefined;
+  /** Stream line callback for real-time progress during LLM calls. */
+  onStreamLine?: ((line: string) => void) | undefined;
 }
 
 export interface IssueCliDeps {
@@ -154,6 +156,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
+    ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
   });
 
   const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
