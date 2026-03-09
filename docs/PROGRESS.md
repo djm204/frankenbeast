@@ -245,6 +245,18 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ---
 
+## Phase 10: Chunk Session Context Preservation
+
+> Branch: `feat/chunk-session-context`
+
+- Canonical chunk execution state now lives under `.frankenbeast/.build/chunk-sessions/` with provider-agnostic transcript entries.
+- `MartinLoop` is session-aware: it can resume from canonical state, snapshot before compaction, compact at `>= 85%` context usage, and replay on provider switch.
+- `CliObserverBridge` now estimates rendered context-window usage in addition to cost and token accounting.
+- `CliSkillExecutor` and `dep-factory` wire chunk-session store, snapshot store, renderer, compactor, and recovery metadata (`lastKnownGoodCommit`).
+- `ChunkSessionGc` removes expired chunk-session artifacts and orphaned snapshots; `--cleanup` now recursively removes chunk-session directories as well.
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.

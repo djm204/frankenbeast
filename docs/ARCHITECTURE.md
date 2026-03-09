@@ -50,7 +50,7 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 The current local CLI path is mixed rather than fully wired:
 
-- Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`
+- Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`, chunk-session store/renderer/compactor/GC
 - Stubbed in `src/cli/dep-factory.ts`: firewall, skills registry, memory, planner port, critique, governor, heartbeat
 - `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
 - PR creation is wired; the dep factory resolves target branch from CLI args/config via `baseBranch`
@@ -67,15 +67,20 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
 | `ProviderRegistry` | `packages/franken-orchestrator/src/skills/providers/cli-provider.ts` | In-memory registry of `ICliProvider` implementations. `createDefaultRegistry()` registers all 4 built-in providers (claude, codex, gemini, aider). Lookup by name with `get(name)`. |
-| `ICliProvider` | `packages/franken-orchestrator/src/skills/providers/cli-provider.ts` | Interface for CLI agent providers: `buildArgs`, `normalizeOutput`, `estimateTokens`, `isRateLimited`, `parseRetryAfter`, `filterEnv`, `supportsStreamJson`. |
+| `ICliProvider` | `packages/franken-orchestrator/src/skills/providers/cli-provider.ts` | Interface for CLI agent providers: `buildArgs`, `normalizeOutput`, `estimateTokens`, `isRateLimited`, `parseRetryAfter`, `filterEnv`, `supportsStreamJson`, native-session capability, default context-window size. |
 | `ClaudeProvider` | `packages/franken-orchestrator/src/skills/providers/claude-provider.ts` | Claude CLI provider. `claude --print` with stream-json, strips `CLAUDE*` env vars. |
 | `CodexProvider` | `packages/franken-orchestrator/src/skills/providers/codex-provider.ts` | Codex CLI provider. `codex exec --full-auto --json`. |
 | `GeminiProvider` | `packages/franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
 | `AiderProvider` | `packages/franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
 | `CliLlmAdapter` | `packages/franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
-| `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
-| `CliSkillExecutor` | `packages/franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
-| `MartinLoop` | `packages/franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic — accepts a `ProviderRegistry` and resolves providers by name from the configured fallback chain. Rate-limit cascade: exhausted providers rotate to the next in chain, with provider-specific retry-after parsing. |
+| `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline and estimates context-window usage for compaction. |
+| `CliSkillExecutor` | `packages/franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs MartinLoop, manages recovery commits, and passes chunk-session services into the loop. |
+| `MartinLoop` | `packages/franken-orchestrator/src/skills/martin-loop.ts` | Core loop: load or create canonical `ChunkSession`, render the provider request, capture output, snapshot before compaction, compact at `>= 85%` usage, and continue until `<promise>TAG</promise>` or max iterations. Rate-limit cascade still rotates through fallback providers. |
+| `FileChunkSessionStore` | `packages/franken-orchestrator/src/session/chunk-session-store.ts` | Persists canonical chunk execution state under `.frankenbeast/.build/chunk-sessions/<plan>/<chunk>.json`. |
+| `FileChunkSessionSnapshotStore` | `packages/franken-orchestrator/src/session/chunk-session-snapshot-store.ts` | Writes immutable pre-compaction rollback snapshots under `.frankenbeast/.build/chunk-session-snapshots/`. |
+| `ChunkSessionRenderer` | `packages/franken-orchestrator/src/session/chunk-session-renderer.ts` | Converts canonical chunk-session state into provider-specific prompts and native-session flags. |
+| `ChunkSessionCompactor` | `packages/franken-orchestrator/src/session/chunk-session-compactor.ts` | Summarizes older transcript history into a compacted execution summary while preserving promise-tag and unresolved-error context. |
+| `ChunkSessionGc` | `packages/franken-orchestrator/src/session/chunk-session-gc.ts` | Removes expired chunk-session artifacts and orphaned snapshots; `--cleanup` removes them eagerly. |
 | `GitBranchIsolator` | `packages/franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
 
 **Execution flow:**
@@ -137,9 +142,13 @@ flowchart TD
 
     subgraph "Execution Path (multi-iteration tasks)"
         CSE["CliSkillExecutor"]
-        RL["MartinLoop<br/>(fallback chain)"]
+        RL["MartinLoop<br/>(fallback chain + chunk sessions)"]
         CLI2["CLI subprocess<br/>(--providers chain)"]
+        CSS["ChunkSessionStore"]
+        CSC["ChunkSessionCompactor"]
         CSE --> RL --> CLI2
+        RL -.-> CSS
+        RL -.-> CSC
     end
 
     subgraph "Observer Wiring"
@@ -162,7 +171,18 @@ flowchart TD
     COB -.->|"budget enforcement"| CSE
 ```
 
-**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` bridges the `IObserverModule` port interface to the concrete `ObserverDeps` expected by `CliSkillExecutor`, wiring real token counting, cost tracking, and budget enforcement from franken-observer.
+**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` also estimates rendered context-window usage so chunk execution can snapshot and compact before exceeding the provider budget.
+
+#### Canonical Chunk Sessions
+
+Chunk execution no longer relies on provider-native history as the source of truth. The canonical state lives under `.frankenbeast/.build/chunk-sessions/` and contains normalized transcript entries, provider metadata, compaction generation, context-window usage, and recovery metadata such as `lastKnownGoodCommit`.
+
+Provider-native session continuation is now an optimization only:
+
+- if the active provider supports native resume and has not changed, the renderer may set `sessionContinue`
+- if the provider changes or its native state is lost, the next provider replays from the canonical chunk session
+- before compaction, MartinLoop writes a snapshot to `.frankenbeast/.build/chunk-session-snapshots/`
+- at `>= 85%` rendered context usage, the loop compacts transcript history into a `compaction_summary` and resumes from that compacted state
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
 
@@ -298,6 +318,8 @@ This preserves the build-runner's impl+harden pattern inside the orchestrator's 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
 | `FileCheckpointStore` | `packages/franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. Plan-scoped: `.build/<plan-name>.checkpoint`. |
+| `FileChunkSessionStore` | `packages/franken-orchestrator/src/session/chunk-session-store.ts` | JSON store for canonical chunk execution context. |
+| `FileChunkSessionSnapshotStore` | `packages/franken-orchestrator/src/session/chunk-session-snapshot-store.ts` | Rollback snapshots written immediately before chunk compaction. |
 | `ChunkFileGraphBuilder` | `packages/franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
 | `LlmGraphBuilder` | `packages/franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
 | `InterviewLoop` | `packages/franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
@@ -317,6 +339,13 @@ Per-commit checkpoints enable crash recovery. On resume:
 | Clean, no checkpoint for this task | Start task fresh |
 | Dirty files, tests pass | Auto-commit as recovery commit, continue |
 | Dirty files, tests fail | Reset to last checkpoint commit |
+
+Chunk-session recovery complements file checkpoints:
+
+- every chunk keeps canonical execution context in `.build/chunk-sessions/`
+- recovery commits update `lastKnownGoodCommit` inside the chunk session
+- compaction writes rollback snapshots before transcript surgery
+- `ChunkSessionGc` prunes expired sessions and orphaned snapshots during CLI startup
 
 **Design reference:** See [Approach C Full Pipeline Design](plans/2026-03-05-approach-c-full-pipeline-design.md) and [ADR-008](adr/008-approach-c-full-pipeline.md).
 

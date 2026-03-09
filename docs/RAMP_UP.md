@@ -62,6 +62,7 @@ packages/franken-orchestrator/src/
 ├── closure/               # PrCreator (gh pr create, LLM-powered titles/descriptions)
 ├── context/               # FrankenContext, context-factory
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
+├── session/               # ChunkSession store, renderer, compactor, GC
 ├── issues/               # IssueFetcher, IssueTriage, IssueGraphBuilder, IssueReview, IssueRunner
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
@@ -80,9 +81,9 @@ packages/franken-orchestrator/src/
 
 - `ProviderRegistry` holds all `ICliProvider` implementations. `createDefaultRegistry()` registers 4 built-in providers: claude, codex, gemini, aider. Each provider is a single file under `src/skills/providers/`.
 - `CliLlmAdapter` implements `IAdapter` — wraps an `ICliProvider` instance for single-shot LLM completions used by interview/plan flows. Delegates env filtering and output normalization to the provider.
-- `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), and budget enforcement.
+- `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), budget enforcement, and context-window estimation for chunk compaction.
 - `CliSkillExecutor` spawns CLI tools via `ICliProvider` for multi-iteration task execution
-- `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. Rate-limit cascade rotates through providers. Repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
+- `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. When chunk-session services are wired, it loads canonical chunk state from `.frankenbeast/.build/chunk-sessions/`, renders provider requests from normalized transcript state, snapshots before compaction, compacts at `>= 85%` context usage, and can replay that canonical state on provider switch.
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → optional PR
 - CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity
@@ -94,7 +95,7 @@ packages/franken-orchestrator/src/
   - **Tier 1 (Conversational)**: Simple chat uses cheap model with `chatMode` (no tool permissions), spinner while waiting
   - **Tier 2 (Execution)**: `/run <desc>` spawns a full-permissions CLI agent. `/plan <desc>` dispatches to planning. Natural language also triggers execution via IntentRouter → EscalationPolicy
   - `ChatAgentExecutor` implements `ITaskExecutor`, `ConversationEngine` handles LLM replies, `TurnRunner` handles execution dispatch
-- `--cleanup` removes all build logs, checkpoints, and traces from `.frankenbeast/.build/`
+- `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
   - `--search <query>` GitHub search syntax (e.g. `"label:bug label:high"`)
@@ -103,7 +104,7 @@ packages/franken-orchestrator/src/
   - `--limit <n>` max issues to fetch (default: 30)
   - `--repo <owner/repo>` target repository (auto-inferred from `gh repo view` if omitted)
   - `--dry-run` preview triage without executing
-- Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe). Different plans have independent checkpoints and log histories.
+- Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
 - Current local CLI dep wiring is mixed: observer, CLI adapters, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and `FileCheckpointStore` are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
 ## Build & Test
