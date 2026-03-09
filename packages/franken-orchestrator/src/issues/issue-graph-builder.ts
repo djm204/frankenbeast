@@ -1,7 +1,7 @@
 import type { PlanGraph, PlanTask } from '../deps.js';
 import type { GithubIssue, TriageResult } from './types.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';
-import { stripHookJson } from '../skills/providers/stream-json-utils.js';
+import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
 type CompleteFn = (prompt: string) => Promise<string>;
 
@@ -83,19 +83,7 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
   }
 
   private parseResponse(raw: string): ChunkDefinition[] {
-    let text = raw.trim();
-
-    // Strip hook output that leaked through normalizeOutput
-    text = stripHookJson(text);
-
-    // Strip markdown code fences if present
-    const fenceMatch = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
-    if (fenceMatch) {
-      text = fenceMatch[1]!.trim();
-    }
-
-    // Strip trailing commas (common LLM artifact)
-    text = text.replace(/,\s*([}\]])/g, '$1');
+    const text = cleanLlmJson(raw);
 
     let parsed: unknown;
     try {

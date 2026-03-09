@@ -3,6 +3,8 @@ node_modules
 .worktrees
 .turbo
 dist
+# Frankenbeast project-local state (build logs, checkpoints, plans)
+.frankenbeast/
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
 

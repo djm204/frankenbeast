@@ -53,6 +53,72 @@ export function stripHookJson(text: string): string {
   return result.trim();
 }
 
+/**
+ * Clean raw LLM output so it can be JSON.parse()'d.
+ * Uses bracket-depth matching to extract the JSON structure,
+ * so it works regardless of markdown wrapping, code fences,
+ * leading/trailing prose, or other LLM formatting quirks.
+ */
+export function cleanLlmJson(raw: string): string {
+  let text = stripHookJson(raw.trim());
+
+  // Try parsing as-is first (fast path)
+  try { JSON.parse(text); return text; } catch { /* fall through */ }
+
+  // Find the first [ or { and extract the matching structure
+  // using bracket-depth counting that respects quoted strings.
+  const extracted = extractJsonStructure(text);
+  if (extracted !== null) {
+    // Strip trailing commas before } or ] (common LLM artifact)
+    return extracted.replace(/,\s*([}\]])/g, '$1');
+  }
+
+  // Last resort: strip fences and trailing commas, hope for the best
+  text = text.replace(/^`{3,}\w*\s*\n?/, '');
+  text = text.replace(/\n?\s*`{3,}\s*$/, '');
+  text = text.trim();
+  text = text.replace(/,\s*([}\]])/g, '$1');
+  return text;
+}
+
+/**
+ * Find the first `[` or `{` in the text and extract the complete
+ * JSON structure by bracket-depth counting, respecting quoted strings.
+ * Returns null if no valid structure is found.
+ */
+function extractJsonStructure(text: string): string | null {
+  // Find first [ or {
+  let start = -1;
+  let openChar = '';
+  let closeChar = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '[' || text[i] === '{') {
+      start = i;
+      openChar = text[i]!;
+      closeChar = openChar === '[' ? ']' : '}';
+      break;
+    }
+  }
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (esc) { esc = false; continue; }
+    if (ch === '\\' && inStr) { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === openChar) depth++;
+    else if (ch === closeChar) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 /** Recursively extract text from a stream-json node. */
 export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   if (typeof node === 'string') {

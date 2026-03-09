@@ -2,7 +2,7 @@ import type { ILlmClient } from '@franken/types';
 import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
-import { stripHookJson } from '../skills/providers/stream-json-utils.js';
+import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
 /**
  * Minimal chunk definition expected from LLM JSON output.
@@ -24,6 +24,8 @@ interface ChunkDefinition {
  */
 export class LlmGraphBuilder implements GraphBuilder {
   private readonly maxChunks: number;
+  /** The parsed chunk definitions from the last build() call. */
+  public lastChunks: ChunkDefinition[] = [];
 
   constructor(
     private readonly llm: ILlmClient,
@@ -45,6 +47,7 @@ export class LlmGraphBuilder implements GraphBuilder {
       );
       truncated = chunks.slice(0, this.maxChunks);
     }
+    this.lastChunks = truncated;
     return this.buildGraph(truncated);
   }
 
@@ -83,21 +86,7 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
   }
 
   private parseResponse(raw: string): ChunkDefinition[] {
-    let text = raw.trim();
-
-    // Strip hook output that leaked through normalizeOutput.
-    // Hook blocks are JSON objects containing "hookSpecificOutput" — the spawned
-    // CLI emits these when project-scoped hooks fire despite FRANKENBEAST_SPAWNED=1.
-    text = stripHookJson(text);
-
-    // Strip markdown code fences if present
-    const fenceMatch = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
-    if (fenceMatch) {
-      text = fenceMatch[1]!.trim();
-    }
-
-    // Strip trailing commas (common LLM artifact)
-    text = text.replace(/,\s*([}\]])/g, '$1');
+    const text = cleanLlmJson(raw);
 
     let parsed: unknown;
     try {

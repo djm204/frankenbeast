@@ -7,7 +7,7 @@ import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
 import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger.js';
-import { createStreamProgressHandler } from '../adapters/stream-progress.js';
+import { createStreamProgressWithSpinner } from '../adapters/stream-progress.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
@@ -262,7 +262,8 @@ export class Session {
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
     depOptions.adapterWorkingDir = tmpdir();
-    depOptions.onStreamLine = createStreamProgressHandler();
+    const progress = createStreamProgressWithSpinner({ label: 'Planning...' });
+    depOptions.onStreamLine = progress.onLine;
     const { cliLlmAdapter, logger } = await createCliDeps(depOptions);
 
     // Load design doc
@@ -279,17 +280,20 @@ export class Session {
 
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
     // Wrap LLM to cache raw responses to the plan directory.
-    // No ProgressLlmClient spinner — stream progress handler shows real-time activity.
+    // Spinner + stream progress handler shows real-time activity (no ProgressLlmClient needed).
     const cachingLlm = this.wrapWithResponseCache(adapterLlm, paths);
     const llmGraphBuilder = new LlmGraphBuilder(cachingLlm);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
-    // Build the plan graph to get chunk definitions
-    const planGraph = await llmGraphBuilder.build({ goal: designContent });
+    // Build the plan graph — lastChunks preserves the structured LLM output
+    try {
+      await llmGraphBuilder.build({ goal: designContent });
+    } finally {
+      progress.stop();
+    }
 
-    // Extract chunk definitions from the plan graph tasks
-    const chunks = this.extractChunkDefinitions(planGraph);
+    const chunks = llmGraphBuilder.lastChunks;
     logger.info(`Planned ${chunks.length} chunk(s)`, 'planner');
 
     // Write chunk files
@@ -302,11 +306,10 @@ export class Session {
       artifactLabel: 'Chunk files',
       io,
       onRevise: async (feedback) => {
-        const revisedGraph = await llmGraphBuilder.build({
+        await llmGraphBuilder.build({
           goal: `${designContent}\n\nRevision feedback: ${feedback}`,
         });
-        const revisedChunks = this.extractChunkDefinitions(revisedGraph);
-        chunkPaths = writeChunkFiles(paths, revisedChunks);
+        chunkPaths = writeChunkFiles(paths, llmGraphBuilder.lastChunks);
         return chunkPaths;
       },
     });

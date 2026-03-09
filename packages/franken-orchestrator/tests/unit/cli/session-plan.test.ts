@@ -109,14 +109,24 @@ const mockLlmGraphBuild = vi.fn(async () => ({
 }));
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
   const MockLlmGraphBuilder = vi.fn(function (
-    this: { build: typeof mockLlmGraphBuild },
+    this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[] },
     llm: unknown,
   ) {
     llmGraphBuilderCtorArg = llm;
+    this.lastChunks = [{ id: 'chunk-a', objective: 'Build A', files: ['src/a.ts'], successCriteria: 'Tests pass', verificationCommand: 'npx vitest run', dependencies: [] }];
     this.build = mockLlmGraphBuild;
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };
 });
+
+// Mock stream-progress to prevent real timers/stderr writes
+vi.mock('../../../src/adapters/stream-progress.js', () => ({
+  createStreamProgressWithSpinner: vi.fn(() => ({
+    onLine: vi.fn(),
+    stop: vi.fn(),
+  })),
+  createStreamProgressHandler: vi.fn(() => vi.fn()),
+}));
 
 // Mock reviewLoop, file-writer, beast-logger
 vi.mock('../../../src/cli/review-loop.js', () => ({

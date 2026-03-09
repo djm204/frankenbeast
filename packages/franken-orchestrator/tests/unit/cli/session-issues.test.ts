@@ -171,7 +171,8 @@ vi.mock('../../../src/planning/interview-loop.js', () => {
 
 // Mock LlmGraphBuilder (imported by session.ts)
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
-  const MockLlmGraphBuilder = vi.fn(function (this: { build: () => Promise<unknown> }) {
+  const MockLlmGraphBuilder = vi.fn(function (this: { build: () => Promise<unknown>; lastChunks: unknown[] }) {
+    this.lastChunks = [];
     this.build = vi.fn(async () => ({ tasks: [] }));
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };

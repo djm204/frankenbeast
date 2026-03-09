@@ -1,5 +1,55 @@
 import { ANSI } from '../logging/beast-logger.js';
 
+const FRAMES = ['|', '/', '-', '\\'];
+const SPINNER_INTERVAL_MS = 100;
+
+export interface StreamProgressHandle {
+  onLine: (line: string) => void;
+  stop: () => void;
+}
+
+/**
+ * Creates a stream progress handler with an integrated spinner.
+ * The spinner shows elapsed time from the start; progress lines
+ * (thinking, tool use, chunk IDs) appear above the spinner line.
+ * Call `stop()` after the LLM call resolves to clear the spinner.
+ */
+export function createStreamProgressWithSpinner(
+  options: { write?: (text: string) => void; label?: string } = {},
+): StreamProgressHandle {
+  const write = options.write ?? ((t: string) => process.stderr.write(t));
+  const label = options.label ?? 'LLM working...';
+
+  let frameIdx = 0;
+  const startMs = Date.now();
+
+  const renderSpinner = (): void => {
+    const frame = FRAMES[frameIdx % FRAMES.length]!;
+    const secs = ((Date.now() - startMs) / 1000).toFixed(1);
+    write(`\r\x1b[K${frame} ${label} (${secs}s)`);
+    frameIdx++;
+  };
+
+  const interval = setInterval(renderSpinner, SPINNER_INTERVAL_MS);
+  renderSpinner();
+
+  // Progress lines clear the spinner, write the line, then the spinner re-renders on next tick
+  const writeProgress = (text: string): void => {
+    write('\r\x1b[K');
+    write(text);
+  };
+
+  const handler = createStreamProgressHandler(writeProgress);
+
+  return {
+    onLine: handler,
+    stop: () => {
+      clearInterval(interval);
+      write('\r\x1b[K');
+    },
+  };
+}
+
 /**
  * Parses stream-json lines from the Claude CLI and renders
  * meaningful progress to the terminal: thinking status, tool use,

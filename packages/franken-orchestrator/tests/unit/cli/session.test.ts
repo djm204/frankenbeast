@@ -76,7 +76,8 @@ const mockLlmGraphBuild = vi.fn(async () => ({
   ],
 }));
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
-  const MockLlmGraphBuilder = vi.fn(function (this: { build: typeof mockLlmGraphBuild }) {
+  const MockLlmGraphBuilder = vi.fn(function (this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[] }) {
+    this.lastChunks = [{ id: 'auth', objective: 'Build auth', files: ['src/auth.ts'], successCriteria: 'Tests pass', verificationCommand: 'npx vitest run', dependencies: [] }];
     this.build = mockLlmGraphBuild;
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };
@@ -403,20 +404,22 @@ describe('Session', () => {
   });
 
   describe('extractChunkDefinitions', () => {
-    it('extracts chunks from impl: tasks, filtering harden: tasks', async () => {
+    it('uses lastChunks from LlmGraphBuilder for chunk files', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       mockReadDesignDoc.mockReturnValueOnce('# Design');
 
       const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
       await new Session(config).start();
 
-      // writeChunkFiles should have been called with extracted chunk definitions
+      // writeChunkFiles should have been called with the structured lastChunks
       expect(mockWriteChunkFiles).toHaveBeenCalledWith(
         config.paths,
         expect.arrayContaining([
           expect.objectContaining({
             id: 'auth',
-            objective: 'Implement auth',
+            files: ['src/auth.ts'],
+            successCriteria: 'Tests pass',
+            verificationCommand: 'npx vitest run',
           }),
         ]),
       );

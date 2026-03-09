@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {
@@ -86,6 +86,61 @@ describe('stripHookJson', () => {
 }
 [{"id":"chunk1"}]`;
     expect(stripHookJson(input)).toBe('[{"id":"chunk1"}]');
+  });
+});
+
+describe('cleanLlmJson', () => {
+  it('returns clean JSON unchanged', () => {
+    const input = '[{"id":"chunk1"}]';
+    expect(cleanLlmJson(input)).toBe(input);
+  });
+
+  it('strips opening code fence with json tag', () => {
+    const input = '```json\n[{"id":"chunk1"}]';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([{ id: 'chunk1' }]);
+  });
+
+  it('strips both opening and closing code fences', () => {
+    const input = '```json\n[{"id":"chunk1"}]\n```';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([{ id: 'chunk1' }]);
+  });
+
+  it('strips code fences without language tag', () => {
+    const input = '```\n{"key":"value"}\n```';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual({ key: 'value' });
+  });
+
+  it('strips trailing commas', () => {
+    const input = '[{"id":"a",},{"id":"b",},]';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  it('handles code fences + hook output + trailing commas together', () => {
+    const input = '{ "hookSpecificOutput": {} }```json\n[{"id":"a",}]\n```';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([{ id: 'a' }]);
+  });
+
+  it('handles opening fence only (no closing fence)', () => {
+    const input = '```json\n[{"id":"chunk1"},{"id":"chunk2"}]';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([{ id: 'chunk1' }, { id: 'chunk2' }]);
+  });
+
+  it('handles multi-line fenced JSON', () => {
+    const input = `\`\`\`json
+[
+  {
+    "id": "setup",
+    "objective": "Set up project"
+  }
+]
+\`\`\``;
+    const result = JSON.parse(cleanLlmJson(input));
+    expect(result).toEqual([{ id: 'setup', objective: 'Set up project' }]);
+  });
+
+  it('strips whitespace around fences', () => {
+    const input = '  \n```json\n[1,2,3]\n```\n  ';
+    expect(JSON.parse(cleanLlmJson(input))).toEqual([1, 2, 3]);
   });
 });
 

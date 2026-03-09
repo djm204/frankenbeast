@@ -83,8 +83,9 @@ vi.mock('../../../src/planning/interview-loop.js', () => ({
 
 vi.mock('../../../src/planning/llm-graph-builder.js', () => ({
   LlmGraphBuilder: vi.fn().mockImplementation(function MockLlmGraphBuilder(
-    this: { build(intent: { goal: string }): Promise<{ tasks: never[] }> },
+    this: { build(intent: { goal: string }): Promise<{ tasks: never[] }>; lastChunks: unknown[] },
   ) {
+    this.lastChunks = [];
     this.build = async (intent) => {
       planBuilds.push(intent);
       return { tasks: [] };
