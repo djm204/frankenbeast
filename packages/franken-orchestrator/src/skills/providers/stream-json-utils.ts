@@ -141,10 +141,31 @@ export function tryExtractTextFromNode(node: unknown, out: string[]): void {
     }
   }
 
-  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response', 'message', 'content_block'];
+  // Codex JSON events often wrap assistant text inside item/part payloads.
+  // Claude/Gemini stream-json frames use content/message/content_block shapes.
+  const nestedKeys = [
+    'delta',
+    'content',
+    'parts',
+    'part',
+    'data',
+    'result',
+    'response',
+    'message',
+    'content_block',
+    'item',
+    'items',
+  ];
   for (const key of nestedKeys) {
     if (obj[key] !== undefined) {
       tryExtractTextFromNode(obj[key], out);
     }
+  }
+
+  // Some providers place structured content under `output` as an array/object
+  // instead of a direct string. Recurse only for non-strings to avoid duplicates.
+  const output = obj['output'];
+  if (output !== undefined && typeof output !== 'string') {
+    tryExtractTextFromNode(output, out);
   }
 }

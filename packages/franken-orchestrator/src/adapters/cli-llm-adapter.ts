@@ -2,7 +2,7 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 import type { IAdapter } from './adapter-llm-client.js';
 import type { ICliProvider } from '../skills/providers/cli-provider.js';
 
-type CliTransformed = { prompt: string; maxTurns: number };
+type CliTransformed = { prompt: string; maxTurns: number; model: string | undefined; chatMode: boolean; sessionContinue: boolean };
 
 type SpawnFn = (
   command: string,
@@ -14,14 +14,19 @@ export interface CliLlmAdapterOpts {
   workingDir: string;
   timeoutMs?: number;
   commandOverride?: string;
+  /** Override the model used for completions (e.g. 'claude-sonnet-4-6'). */
+  model?: string;
+  /** When true, omit tool/permission flags — used for conversational chat. */
+  chatMode?: boolean;
   /** Called with each complete line of stdout as it arrives (for streaming progress). */
   onStreamLine?: (line: string) => void;
 }
 
 export class CliLlmAdapter implements IAdapter {
   private readonly provider: ICliProvider;
-  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string; onStreamLine?: (line: string) => void };
+  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string; model?: string; chatMode: boolean; onStreamLine?: (line: string) => void };
   private readonly _spawn: SpawnFn;
+  private chatCallCount = 0;
 
   constructor(
     provider: ICliProvider,
@@ -32,7 +37,9 @@ export class CliLlmAdapter implements IAdapter {
     this.opts = {
       workingDir: opts.workingDir,
       timeoutMs: opts.timeoutMs ?? 120_000,
+      chatMode: opts.chatMode ?? false,
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
     };
     this._spawn = _spawnFn ?? (nodeSpawn as SpawnFn);
@@ -44,15 +51,20 @@ export class CliLlmAdapter implements IAdapter {
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
-    return { prompt: last?.content ?? '', maxTurns: 1 };
+    const sessionContinue = this.opts.chatMode && this.chatCallCount > 0;
+    return { prompt: last?.content ?? '', maxTurns: 1, model: this.opts.model, chatMode: this.opts.chatMode, sessionContinue };
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns } = providerRequest as CliTransformed;
+    const { prompt, maxTurns, model, chatMode, sessionContinue } = providerRequest as CliTransformed;
+    if (chatMode) this.chatCallCount++;
     const cmd = this.opts.commandOverride ?? this.provider.command;
 
-    const args = this.provider.buildArgs({ maxTurns });
-    args.push(prompt);
+    const args = this.provider.buildArgs({ maxTurns, model, chatMode, sessionContinue });
+
+    // Pipe prompt via stdin instead of as a CLI arg to avoid E2BIG
+    // when transcript history is large. Claude CLI reads from stdin
+    // when no positional arg is provided with --print.
 
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -62,10 +74,13 @@ export class CliLlmAdapter implements IAdapter {
 
     return new Promise<string>((resolve, reject) => {
       const child = this._spawn(cmd, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         cwd: this.opts.workingDir,
         env,
       });
+
+      child.stdin!.write(prompt);
+      child.stdin!.end();
 
       let stdout = '';
       let stderr = '';

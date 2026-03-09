@@ -120,4 +120,22 @@ describe('CodexProvider', () => {
     expect(result).toContain('from json');
     expect(result).toContain('plain line');
   });
+
+  it('normalizeOutput extracts assistant text from codex item.completed events', () => {
+    const raw = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'message',
+        role: 'assistant',
+        content: [
+          { type: 'output_text', text: 'Implemented chunk 08' },
+          { type: 'output_text', text: '<promise>HARDEN_08_http-chat-routes_DONE</promise>' },
+        ],
+      },
+    });
+
+    const result = provider.normalizeOutput(raw);
+    expect(result).toContain('Implemented chunk 08');
+    expect(result).toContain('<promise>HARDEN_08_http-chat-routes_DONE</promise>');
+  });
 });

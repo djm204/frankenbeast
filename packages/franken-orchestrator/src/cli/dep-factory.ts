@@ -50,6 +50,10 @@ export interface CliDepOptions {
    * running from /tmp means no project root, so no plugins fire.
    */
   adapterWorkingDir?: string | undefined;
+  /** Override the model used by the LLM adapter (e.g. 'claude-sonnet-4-6' for chat). */
+  adapterModel?: string | undefined;
+  /** When true, omit tool/permission flags — used for conversational chat. */
+  chatMode?: boolean | undefined;
 }
 
 export interface IssueCliDeps {
@@ -164,6 +168,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
+    ...(options.adapterModel ? { model: options.adapterModel } : {}),
+    ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
   });
 

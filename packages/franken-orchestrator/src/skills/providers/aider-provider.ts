@@ -13,6 +13,7 @@ const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 export class AiderProvider implements ICliProvider {
   readonly name = 'aider';
   readonly command = 'aider';
+  readonly chatModel = 'sonnet';
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['--message', '--yes-always', '--no-stream', '--no-auto-commits'];

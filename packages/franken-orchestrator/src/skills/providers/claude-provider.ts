@@ -16,16 +16,28 @@ const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 export class ClaudeProvider implements ICliProvider {
   readonly name = 'claude';
   readonly command = 'claude';
+  readonly chatModel = 'claude-sonnet-4-6';
 
   buildArgs(opts: ProviderOpts): string[] {
+    // chatMode uses native session continuation: first call creates a session,
+    // subsequent calls --continue it. Non-chat always uses --no-session-persistence.
     const args: string[] = [
       '--print', '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
       '--verbose',
       '--disable-slash-commands',
-      '--no-session-persistence',
-      '--plugin-dir', '/dev/null',
     ];
+
+    if (opts.chatMode) {
+      if (opts.sessionContinue) args.push('--continue');
+    } else {
+      args.push('--no-session-persistence');
+    }
+
+    args.push('--plugin-dir', '/dev/null');
+    if (opts.model !== undefined) {
+      args.push('--model', opts.model);
+    }
     if (opts.maxTurns !== undefined) {
       args.push('--max-turns', String(opts.maxTurns));
     }
@@ -38,12 +50,26 @@ export class ClaudeProvider implements ICliProvider {
   normalizeOutput(raw: string): string {
     const cleaned = stripHookJson(raw);
     const lines = cleaned.split('\n');
-    const extracted: string[] = [];
 
+    // Prefer the "result" event — it contains the complete final text and
+    // avoids duplication from intermediate "assistant" content_block events.
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
+      try {
+        const obj = JSON.parse(trimmed) as Record<string, unknown>;
+        if (obj['type'] === 'result' && typeof obj['result'] === 'string') {
+          const text = (obj['result'] as string).trim();
+          if (text.length > 0) return text;
+        }
+      } catch { /* not JSON, skip */ }
+    }
 
+    // Fallback: extract text from all events (for non-standard output)
+    const extracted: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
       try {
         const obj = JSON.parse(trimmed) as unknown;
         const parts: string[] = [];
@@ -52,7 +78,6 @@ export class ClaudeProvider implements ICliProvider {
           extracted.push(parts.join(''));
         }
       } catch {
-        // Not JSON — pass through as plain text
         extracted.push(trimmed);
       }
     }

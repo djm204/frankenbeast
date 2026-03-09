@@ -50,6 +50,30 @@ describe('tryExtractTextFromNode', () => {
     tryExtractTextFromNode({ content_block: { text: 'from block' } }, out);
     expect(out).toEqual(['from block']);
   });
+
+  it('recurses into codex-style item payloads', () => {
+    const out: string[] = [];
+    tryExtractTextFromNode({
+      item: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'from item' }],
+      },
+    }, out);
+    expect(out).toEqual(['from item']);
+  });
+
+  it('recurses into codex-style part payloads', () => {
+    const out: string[] = [];
+    tryExtractTextFromNode({ part: { type: 'output_text', text: 'from part' } }, out);
+    expect(out).toEqual(['from part']);
+  });
+
+  it('recurses into structured output containers without duplicating string output', () => {
+    const out: string[] = [];
+    tryExtractTextFromNode({ output: [{ type: 'output_text', text: 'from output array' }] }, out);
+    expect(out).toEqual(['from output array']);
+  });
 });
 
 describe('stripHookJson', () => {

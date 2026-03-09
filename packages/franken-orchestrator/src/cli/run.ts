@@ -13,6 +13,17 @@ import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
+import { ChatRepl } from './chat-repl.js';
+import { ConversationEngine } from '../chat/conversation-engine.js';
+import { TurnRunner } from '../chat/turn-runner.js';
+import { FileSessionStore } from '../chat/session-store.js';
+import { createCliDeps } from './dep-factory.js';
+import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
+import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
+import { ChatAgentExecutor } from '../chat/chat-agent-executor.js';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -110,7 +121,49 @@ export async function main(): Promise<void> {
   const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
-  // Create IO for interactive prompts
+  // Chat subcommand dispatches to interactive REPL — owns its own readline
+  if (args.subcommand === 'chat') {
+    const chatStoreDir = join(paths.frankenbeastDir, 'chat');
+    const sessionStore = new FileSessionStore(chatStoreDir);
+    const projectId = paths.root.split('/').pop() ?? 'unknown';
+
+    const registry = createDefaultRegistry();
+    const resolvedProvider = registry.get(args.provider);
+    const chatDepOpts = {
+      paths,
+      baseBranch: 'main',
+      budget: args.budget,
+      provider: args.provider,
+      providers: args.providers ?? config.providers.fallbackChain,
+      providersConfig: config.providers.overrides,
+      noPr: true,
+      verbose: args.verbose,
+      reset: false,
+      adapterWorkingDir: tmpdir(),
+      adapterModel: resolvedProvider.chatModel,
+      chatMode: true,
+    };
+    const { cliLlmAdapter, finalize } = await createCliDeps(chatDepOpts);
+    const chatLlm = new AdapterLlmClient(cliLlmAdapter);
+
+    // Execution adapter: full permissions, project root, no chatMode
+    const override = config.providers.overrides?.[args.provider];
+    const execAdapter = new CliLlmAdapter(resolvedProvider, {
+      workingDir: paths.root,
+      ...(override?.command ? { commandOverride: override.command } : {}),
+    });
+    const execLlm = new AdapterLlmClient(execAdapter);
+
+    const engine = new ConversationEngine({ llm: chatLlm, projectName: projectId, sessionContinuation: true });
+    const executor = new ChatAgentExecutor({ llm: execLlm });
+    const turnRunner = new TurnRunner(executor);
+    const repl = new ChatRepl({ engine, turnRunner, projectId, sessionStore, verbose: args.verbose });
+    await repl.start();
+    await finalize();
+    return;
+  }
+
+  // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
   // Resolve base branch

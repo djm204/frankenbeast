@@ -19,11 +19,17 @@ export interface ProviderOpts {
   readonly model?: string | undefined;
   readonly extraArgs?: readonly string[] | undefined;
   readonly commandOverride?: string | undefined;
+  /** When true, omit tool/permission flags — used for conversational chat. */
+  readonly chatMode?: boolean | undefined;
+  /** When true, add --continue to resume the previous CLI session (chatMode only). */
+  readonly sessionContinue?: boolean | undefined;
 }
 
 export interface ICliProvider {
   readonly name: string;
   readonly command: string;
+  /** Cheap model for conversational/chat use. Each provider defines its own. */
+  readonly chatModel: string;
   buildArgs(opts: ProviderOpts): string[];
   normalizeOutput(raw: string): string;
   estimateTokens(text: string): number;

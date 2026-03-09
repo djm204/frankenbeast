@@ -1,6 +1,6 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-export type Subcommand = 'interview' | 'plan' | 'run' | 'issues' | undefined;
+export type Subcommand = 'interview' | 'plan' | 'run' | 'issues' | 'chat' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -28,7 +28,7 @@ export interface CliArgs {
   dryRun?: boolean | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues']);
+const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues', 'chat']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -38,6 +38,7 @@ Subcommands:
   plan --design-doc <f>   Decompose design doc into chunk files
   run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
   issues                  Fetch and filter GitHub issues
+  chat                    Interactive chat REPL with ConversationEngine
 
 Options:
   --base-dir <path>       Project root (default: cwd)
@@ -87,7 +88,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'interview' | 'plan' | 'run' | 'issues';
+    subcommand = first as 'interview' | 'plan' | 'run' | 'issues' | 'chat';
     flagArgs = argv.slice(1);
   }
 

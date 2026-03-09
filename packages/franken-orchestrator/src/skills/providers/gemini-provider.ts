@@ -15,6 +15,7 @@ const RATE_LIMIT_PATTERNS =
 export class GeminiProvider implements ICliProvider {
   readonly name = 'gemini';
   readonly command = 'gemini';
+  readonly chatModel = 'gemini-2.0-flash';
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['-p', '--yolo', '--output-format', 'stream-json'];

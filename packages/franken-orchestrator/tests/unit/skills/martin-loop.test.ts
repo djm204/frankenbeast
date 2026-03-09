@@ -227,6 +227,31 @@ describe('MartinLoop', () => {
     expect(firstIter[1].stdout).toContain('Implemented chunk 11');
   });
 
+  it('detects promise tag in codex item.completed assistant messages', async () => {
+    queueMock({
+      stdout: JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: 'Chunk hardened successfully' },
+            { type: 'output_text', text: '<promise>IMPL_X_DONE</promise>' },
+          ],
+        },
+      }),
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'codex' }));
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain('Chunk hardened successfully');
+    expect(result.output).toContain('<promise>IMPL_X_DONE</promise>');
+    expect(result.tokensUsed).toBeGreaterThan(0);
+  });
+
   it('does not treat successful codex narrative text as rate limited', async () => {
     queueMock({
       stdout: [

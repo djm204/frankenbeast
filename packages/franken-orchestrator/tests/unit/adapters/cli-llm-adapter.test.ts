@@ -27,9 +27,11 @@ function createMockSpawn(opts: {
     calls.push({ cmd, args: [...args], options });
 
     const proc = new EventEmitter() as ChildProcess;
+    const stdinStream = new PassThrough();
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
 
+    Object.defineProperty(proc, 'stdin', { value: stdinStream, writable: false });
     Object.defineProperty(proc, 'stdout', { value: stdoutStream, writable: false });
     Object.defineProperty(proc, 'stderr', { value: stderrStream, writable: false });
     Object.defineProperty(proc, 'pid', { value: 12345, writable: false });
@@ -101,7 +103,7 @@ describe('CliLlmAdapter', () => {
           { role: 'user', content: 'second message' },
         ],
       });
-      expect(result).toEqual({ prompt: 'second message', maxTurns: 1 });
+      expect(result).toEqual({ prompt: 'second message', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
     });
 
     it('returns empty prompt when no user messages exist', () => {
@@ -112,7 +114,7 @@ describe('CliLlmAdapter', () => {
         model: 'adapter',
         messages: [{ role: 'assistant', content: 'hello' }],
       });
-      expect(result).toEqual({ prompt: '', maxTurns: 1 });
+      expect(result).toEqual({ prompt: '', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
     });
   });
 
@@ -136,7 +138,7 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('/usr/local/bin/claude-custom');
       });
 
-      it('builds args via provider.buildArgs() and appends prompt', async () => {
+      it('builds args via provider.buildArgs() and pipes prompt via stdin', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
         await adapter.execute({ prompt: 'do something', maxTurns: 1 });
@@ -153,8 +155,10 @@ describe('CliLlmAdapter', () => {
         expect(args).toContain('--no-session-persistence');
         expect(args).toContain('--max-turns');
         expect(args[args.indexOf('--max-turns') + 1]).toBe('1');
-        // prompt appended
-        expect(args).toContain('do something');
+        // prompt piped via stdin, not in args
+        expect(args).not.toContain('do something');
+        // stdin is pipe
+        expect(calls[0]!.options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
       });
 
       it('filters CLAUDE* env vars via provider.filterEnv()', async () => {
@@ -203,8 +207,8 @@ describe('CliLlmAdapter', () => {
         expect(args).toContain('--full-auto');
         expect(args).toContain('--json');
         expect(args).toContain('--color');
-        // prompt appended
-        expect(args).toContain('test');
+        // prompt piped via stdin, not in args
+        expect(args).not.toContain('test');
       });
 
       it('does not filter CLAUDE* env vars (codex filterEnv passes through)', async () => {
@@ -275,11 +279,11 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.options.cwd).toBe('/my/project');
       });
 
-      it('uses stdio ignore/pipe/pipe', async () => {
+      it('uses stdio pipe/pipe/pipe for stdin prompt piping', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
         await adapter.execute({ prompt: 'test', maxTurns: 1 });
-        expect(calls[0]!.options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+        expect(calls[0]!.options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
       });
 
       it('calls onStreamLine for each complete line of stdout', async () => {
@@ -508,7 +512,7 @@ describe('CliLlmAdapter', () => {
       };
 
       const transformed = adapter.transformRequest(request);
-      expect(transformed).toEqual({ prompt: 'What is the answer?', maxTurns: 1 });
+      expect(transformed).toEqual({ prompt: 'What is the answer?', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
 
       const rawResponse = await adapter.execute(transformed);
       expect(typeof rawResponse).toBe('string');
