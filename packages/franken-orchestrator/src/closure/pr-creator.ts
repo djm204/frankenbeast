@@ -35,10 +35,16 @@ export class PrCreator {
   async generateCommitMessage(diffStat: string, chunkObjective: string): Promise<string | null> {
     if (!this.llm) return null;
     try {
+      const scope = detectScopeFromDiffStat(diffStat);
+      const scopeHint = scope
+        ? `The scope MUST be "${scope}" (derived from the affected package).`
+        : 'Omit the scope — these are root-level changes.';
+
       const prompt = [
         'Write a semver-compatible conventional commit message for this change.',
         'Format: type(scope): description',
         'Types: feat, fix, chore, refactor, docs, test, ci, perf',
+        `${scopeHint}`,
         'One line, max 72 chars. No markdown, no backticks.',
         'The type determines semver bump: feat = minor, fix = patch, BREAKING CHANGE footer = major.',
         '',
@@ -51,7 +57,7 @@ export class PrCreator {
       const msg = cleanCommitMessage(raw);
       const subject = msg.split('\n')[0] ?? '';
       if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
-        return buildFallbackCommitMessage(chunkObjective);
+        return buildFallbackCommitMessage(chunkObjective, scope);
       }
       return msg;
     } catch {
@@ -510,9 +516,27 @@ const BRANDING = 'made with Frankenbeast 🧟';
 /** Matches a valid conventional commit subject: type(scope): description */
 const CONVENTIONAL_SUBJECT_RE = /^[a-z]+(\([^)]+\))?: \S/;
 
-function buildFallbackCommitMessage(chunkObjective: string): string {
+function buildFallbackCommitMessage(chunkObjective: string, scope?: string): string {
   const slug = chunkObjective.trim().slice(0, 50).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').toLowerCase();
-  return `chore: implement ${slug || 'changes'}\n\n${BRANDING}`;
+  const scopePart = scope ? `(${scope})` : '';
+  return `chore${scopePart}: implement ${slug || 'changes'}\n\n${BRANDING}`;
+}
+
+/**
+ * Extract a conventional-commit scope from a diff stat string.
+ * Looks for `packages/<name>/` patterns in the file paths.
+ * Returns a scope string or empty string for root-only changes.
+ */
+function detectScopeFromDiffStat(diffStat: string): string {
+  const packages = new Set<string>();
+  for (const line of diffStat.split('\n')) {
+    const match = line.match(/packages\/([^/]+)\//);
+    if (match?.[1]) packages.add(match[1]);
+  }
+  const sorted = [...packages].sort();
+  if (sorted.length === 0) return '';
+  if (sorted.length <= 3) return sorted.join(',');
+  return `${sorted.length}-packages`;
 }
 
 function appendIssueRef(body: string, issueNumber: number): string {

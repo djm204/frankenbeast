@@ -70,6 +70,33 @@ export function parseDirtySubmodules(porcelain: string): string[] {
     .map(line => line.replace(/^ ?m /, '').trim());
 }
 
+/**
+ * Extract package component names from a list of file paths.
+ * Maps `packages/franken-brain/src/foo.ts` → `franken-brain`.
+ * Returns sorted, deduplicated component names.
+ */
+export function detectAffectedPackages(filePaths: string[]): string[] {
+  const packages = new Set<string>();
+  for (const file of filePaths) {
+    const match = file.match(/^packages\/([^/]+)\//);
+    if (match?.[1]) packages.add(match[1]);
+  }
+  return [...packages].sort();
+}
+
+/**
+ * Build a conventional-commit-style scope string from affected packages.
+ * - 0 packages (root-only change): returns empty string
+ * - 1 package: returns `(franken-brain)`
+ * - 2-3 packages: returns `(franken-brain,franken-types)`
+ * - 4+ packages: returns `(4-packages)`
+ */
+export function buildCommitScope(packages: string[]): string {
+  if (packages.length === 0) return '';
+  if (packages.length <= 3) return `(${packages.join(',')})`;
+  return `(${packages.length}-packages)`;
+}
+
 export class GitBranchIsolator {
   private readonly config: GitIsolationConfig;
 
@@ -153,14 +180,30 @@ export class GitBranchIsolator {
     const status = this.git('status --porcelain');
     if (status.length === 0) return false;
     try {
-      const msg = `auto: ${stage} ${chunkId} iter ${iteration}`;
-      this.commitDirtySubmodules(status, msg);
+      this.commitDirtySubmodules(status, `auto: ${stage} ${chunkId} iter ${iteration}`);
       this.git('add -A');
       this.unstageBannedFiles();
+      const scope = this.detectStagedScope();
+      const msg = `auto${scope}: ${stage} ${chunkId} iter ${iteration}`;
       this.git(`commit -m "${msg}"`);
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * After staging, detect which packages are affected and return a
+   * conventional-commit scope string like `(franken-brain)`.
+   */
+  private detectStagedScope(): string {
+    try {
+      const staged = this.git('diff --cached --name-only');
+      if (!staged) return '';
+      const files = staged.split('\n').filter(f => f.length > 0);
+      return buildCommitScope(detectAffectedPackages(files));
+    } catch {
+      return '';
     }
   }
 

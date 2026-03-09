@@ -6,7 +6,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { execSync } from 'node:child_process';
-import { GitBranchIsolator, parseDirtySubmodules } from '../../../src/skills/git-branch-isolator.js';
+import { GitBranchIsolator, parseDirtySubmodules, detectAffectedPackages, buildCommitScope } from '../../../src/skills/git-branch-isolator.js';
 
 const mockExecSync = execSync as unknown as ReturnType<typeof vi.fn>;
 
@@ -139,6 +139,7 @@ describe('GitBranchIsolator', () => {
     it('commits dirty files and returns true', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git status --porcelain') return ' M src/foo.ts\n';
+        if (cmd === 'git diff --cached --name-only') return 'src/foo.ts';
         return '';
       });
 
@@ -613,5 +614,122 @@ describe('parseDirtySubmodules()', () => {
   it('does not match regular modified files (capital M)', () => {
     expect(parseDirtySubmodules('M  src/foo.ts\n')).toEqual([]);
     expect(parseDirtySubmodules(' M src/foo.ts\n')).toEqual([]);
+  });
+});
+
+describe('detectAffectedPackages()', () => {
+  it('extracts package names from file paths', () => {
+    const files = [
+      'packages/franken-brain/src/index.ts',
+      'packages/franken-brain/src/store.ts',
+      'packages/franken-types/src/types.ts',
+    ];
+    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-types']);
+  });
+
+  it('returns empty array for root-only changes', () => {
+    const files = ['CLAUDE.md', '.gitignore', 'docs/ARCHITECTURE.md'];
+    expect(detectAffectedPackages(files)).toEqual([]);
+  });
+
+  it('deduplicates packages', () => {
+    const files = [
+      'packages/franken-brain/src/a.ts',
+      'packages/franken-brain/src/b.ts',
+      'packages/franken-brain/tests/a.test.ts',
+    ];
+    expect(detectAffectedPackages(files)).toEqual(['franken-brain']);
+  });
+
+  it('sorts package names alphabetically', () => {
+    const files = [
+      'packages/frankenfirewall/src/index.ts',
+      'packages/franken-brain/src/index.ts',
+      'packages/franken-mcp/src/index.ts',
+    ];
+    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-mcp', 'frankenfirewall']);
+  });
+
+  it('handles mixed root and package files', () => {
+    const files = [
+      'CLAUDE.md',
+      'packages/franken-orchestrator/src/cli/run.ts',
+    ];
+    expect(detectAffectedPackages(files)).toEqual(['franken-orchestrator']);
+  });
+});
+
+describe('buildCommitScope()', () => {
+  it('returns empty string for no packages', () => {
+    expect(buildCommitScope([])).toBe('');
+  });
+
+  it('returns single package scope', () => {
+    expect(buildCommitScope(['franken-brain'])).toBe('(franken-brain)');
+  });
+
+  it('returns comma-separated for 2-3 packages', () => {
+    expect(buildCommitScope(['franken-brain', 'franken-types'])).toBe('(franken-brain,franken-types)');
+    expect(buildCommitScope(['a', 'b', 'c'])).toBe('(a,b,c)');
+  });
+
+  it('returns count for 4+ packages', () => {
+    expect(buildCommitScope(['a', 'b', 'c', 'd'])).toBe('(4-packages)');
+    expect(buildCommitScope(['a', 'b', 'c', 'd', 'e', 'f'])).toBe('(6-packages)');
+  });
+});
+
+describe('autoCommit() scoped messages', () => {
+  let isolator: GitBranchIsolator;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockExecSync.mockReturnValue('');
+    isolator = new GitBranchIsolator(makeConfig());
+  });
+
+  it('includes package scope in commit message for single-package changes', () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd === 'git status --porcelain') return ' M packages/franken-brain/src/index.ts\n';
+      if (cmd === 'git diff --cached --name-only') return 'packages/franken-brain/src/index.ts';
+      return '';
+    });
+
+    isolator.autoCommit('03_chunk', 'impl', 1);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'git commit -m "auto(franken-brain): impl 03_chunk iter 1"',
+      expect.objectContaining({ cwd: '/fake/repo' }),
+    );
+  });
+
+  it('includes multi-package scope for changes across packages', () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd === 'git status --porcelain') return ' M packages/franken-brain/src/a.ts\n M packages/franken-types/src/b.ts\n';
+      if (cmd === 'git diff --cached --name-only') return 'packages/franken-brain/src/a.ts\npackages/franken-types/src/b.ts';
+      return '';
+    });
+
+    isolator.autoCommit('03_chunk', 'impl', 1);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'git commit -m "auto(franken-brain,franken-types): impl 03_chunk iter 1"',
+      expect.objectContaining({ cwd: '/fake/repo' }),
+    );
+  });
+
+  it('omits scope for root-only changes', () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd === 'git status --porcelain') return ' M CLAUDE.md\n';
+      if (cmd === 'git diff --cached --name-only') return 'CLAUDE.md';
+      return '';
+    });
+
+    isolator.autoCommit('03_chunk', 'impl', 1);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'git commit -m "auto: impl 03_chunk iter 1"',
+      expect.objectContaining({ cwd: '/fake/repo' }),
+    );
   });
 });
