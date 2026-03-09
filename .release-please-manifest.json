@@ -6,7 +6,7 @@
   "packages/franken-heartbeat": "0.3.0",
   "packages/franken-mcp": "0.3.0",
   "packages/franken-observer": "0.3.0",
-  "packages/franken-orchestrator": "0.4.0",
+  "packages/franken-orchestrator": "0.4.1",
   "packages/franken-planner": "0.3.0",
   "packages/franken-skills": "0.3.0",
   "packages/franken-types": "0.3.0",
