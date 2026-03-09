@@ -64,11 +64,8 @@ export async function withSpinner<T>(
   const spinner = new Spinner(options);
   spinner.start(label);
   try {
-    const result = await fn();
+    return await fn();
+  } finally {
     spinner.stop();
-    return result;
-  } catch (err) {
-    spinner.stop();
-    throw err;
   }
 }
