@@ -153,14 +153,33 @@ export class ChatRepl {
     this.io.print(`${ANSI.green}${runResult.summary}${ANSI.reset}`);
   }
 
-  private async handleSlashCommand(cmd: string, _raw: string): Promise<void> {
+  private async handleSlashCommand(cmd: string, raw: string): Promise<void> {
+    const description = raw.slice(cmd.length).trim();
+
     switch (cmd) {
-      case '/plan':
-        this.io.print(`${ANSI.blue}Describe what to plan in natural language.${ANSI.reset}`);
+      case '/plan': {
+        if (!description) {
+          this.io.print(`${ANSI.dim}Usage: /plan <description>${ANSI.reset}`);
+          return;
+        }
+        const outcome = { kind: 'plan' as const, planSummary: description, chunkCount: 0 };
+        const runResult = await this.turnRunner.run(outcome);
+        this.io.print(`${ANSI.blue}plan:${ANSI.reset} ${runResult.summary}`);
         break;
-      case '/run':
-        this.io.print(`${ANSI.magenta}Describe what to execute in natural language.${ANSI.reset}`);
+      }
+      case '/run': {
+        if (!description) {
+          this.io.print(`${ANSI.dim}Usage: /run <description>${ANSI.reset}`);
+          return;
+        }
+        const outcome = { kind: 'execute' as const, taskDescription: description, approvalRequired: false };
+        await this.handleExecute({
+          outcome,
+          tier: 'premium_execution' as const,
+          newMessages: [{ role: 'user' as const, content: raw, timestamp: new Date().toISOString() }],
+        });
         break;
+      }
       case '/status':
         this.io.print(
           `${ANSI.dim}project=${this.projectId} messages=${this.transcript.length}${ANSI.reset}`,

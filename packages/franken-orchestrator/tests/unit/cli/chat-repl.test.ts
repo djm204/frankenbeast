@@ -259,6 +259,70 @@ describe('ChatRepl', () => {
     expect(outputs.some(o => o.includes('Hi there!'))).toBe(true);
   });
 
+  it('dispatches /run <description> to TurnRunner as execute outcome', async () => {
+    const { io, pushInput } = mockChatIO();
+    pushInput('/run create a hello world file');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+    });
+    await repl.start();
+
+    expect(mockRunTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'execute',
+        taskDescription: 'create a hello world file',
+      }),
+    );
+    // Should NOT go through the engine
+    const engineCalls = mockProcessTurn.mock.calls.filter(
+      ([input]: [string]) => input.startsWith('/run'),
+    );
+    expect(engineCalls).toHaveLength(0);
+  });
+
+  it('dispatches /plan <description> to TurnRunner as plan outcome', async () => {
+    const { io, pushInput } = mockChatIO();
+    pushInput('/plan build a react dashboard');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+    });
+    await repl.start();
+
+    expect(mockRunTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'plan',
+        planSummary: 'build a react dashboard',
+      }),
+    );
+  });
+
+  it('shows error when /run is used without a description', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('/run');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+    });
+    await repl.start();
+
+    expect(outputs.some(o => o.includes('description'))).toBe(true);
+    expect(mockRunTurn).not.toHaveBeenCalled();
+  });
+
   it('maintains transcript across turns', async () => {
     const { io, pushInput } = mockChatIO();
     pushInput('first message');

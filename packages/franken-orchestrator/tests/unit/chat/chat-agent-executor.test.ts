@@ -28,6 +28,7 @@ describe('ChatAgentExecutor', () => {
     const result = await executor.execute({ userInput: 'do something' });
 
     expect(result.status).toBe('failed');
+    expect(result.summary).toContain('rate limited');
     expect(result.errors).toContain('rate limited');
   });
 
@@ -38,6 +39,6 @@ describe('ChatAgentExecutor', () => {
     const executor = new ChatAgentExecutor({ llm: mockLlm, onProgress });
     await executor.execute({ userInput: 'fix bug' });
 
-    expect(onProgress).toHaveBeenCalled();
+    expect(onProgress).toHaveBeenCalledWith('Spawning agent...');
   });
 });
