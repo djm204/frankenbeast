@@ -6,7 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
 
 // Re-export for backward compatibility (used by providers/index.ts)
 export { tryExtractTextFromNode } from './stream-json-utils.js';
@@ -36,7 +36,7 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   normalizeOutput(raw: string): string {
-    const cleaned = stripHookBlocks(raw);
+    const cleaned = stripHookJson(raw);
     const lines = cleaned.split('\n');
     const extracted: string[] = [];
 
@@ -120,54 +120,3 @@ export class ClaudeProvider implements ICliProvider {
   }
 }
 
-/**
- * Strip JSON blocks containing "hookSpecificOutput" from raw CLI output.
- * Uses brace-depth matching to correctly handle multi-line pretty-printed
- * hook JSON with nested braces in string values.
- */
-function stripHookBlocks(raw: string): string {
-  const MARKER = '"hookSpecificOutput"';
-  let result = raw;
-
-  while (true) {
-    const markerIdx = result.indexOf(MARKER);
-    if (markerIdx === -1) break;
-
-    // Walk backward from marker to find the opening '{' of the enclosing object
-    let start = -1;
-    for (let i = markerIdx - 1; i >= 0; i--) {
-      if (result[i] === '{') {
-        start = i;
-        break;
-      }
-    }
-    if (start === -1) break;
-
-    // Walk forward from start using brace-depth matching to find the closing '}'
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    let end = -1;
-
-    for (let i = start; i < result.length; i++) {
-      const ch = result[i]!;
-
-      if (escape) { escape = false; continue; }
-      if (ch === '\\' && inString) { escape = true; continue; }
-      if (ch === '"') { inString = !inString; continue; }
-      if (inString) continue;
-
-      if (ch === '{') depth++;
-      else if (ch === '}') {
-        depth--;
-        if (depth === 0) { end = i; break; }
-      }
-    }
-
-    if (end === -1) break;
-
-    result = result.slice(0, start) + result.slice(end + 1);
-  }
-
-  return result;
-}

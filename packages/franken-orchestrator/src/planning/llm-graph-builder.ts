@@ -2,6 +2,7 @@ import type { ILlmClient } from '@franken/types';
 import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
+import { stripHookJson } from '../skills/providers/stream-json-utils.js';
 
 /**
  * Minimal chunk definition expected from LLM JSON output.
@@ -83,6 +84,11 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
 
   private parseResponse(raw: string): ChunkDefinition[] {
     let text = raw.trim();
+
+    // Strip hook output that leaked through normalizeOutput.
+    // Hook blocks are JSON objects containing "hookSpecificOutput" — the spawned
+    // CLI emits these when project-scoped hooks fire despite FRANKENBEAST_SPAWNED=1.
+    text = stripHookJson(text);
 
     // Strip markdown code fences if present
     const fenceMatch = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
@@ -245,3 +251,4 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
     );
   }
 }
+
