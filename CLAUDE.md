@@ -115,6 +115,25 @@ All rules are in `.cursor/rules/`. The AI assistant reads these automatically.
 | `ml-ai-security.mdc` | security guidelines |
 | `ml-ai-testing.mdc` | testing guidelines |
 
+## Mandatory: .gitignore Hygiene
+
+When adding new packages, tools, build artifacts, or dependencies you **MUST** verify .gitignore coverage:
+
+1. **Before committing**, run `git status` and check for untracked files that should not be tracked
+2. **Never commit** build artifacts (`dist/`, `.turbo/`, `coverage/`), secrets (`.env`, credentials), or tool caches (`node_modules/`, `.build/`)
+3. **If a new tool generates output** (e.g., turbo cache, vitest coverage, tsc output), add its output directory to `.gitignore` BEFORE committing anything else
+4. **If files are already tracked that shouldn't be**, remove them with `git rm -r --cached <path>` — do NOT just add to .gitignore (gitignore only affects untracked files)
+5. **Root `.gitignore`** covers repo-wide patterns; package-level `.gitignore` files cover package-specific patterns
+
+Common patterns that MUST be ignored:
+- `node_modules/` — dependencies
+- `dist/` — build output (CI builds from source)
+- `.turbo/` — turbo cache and logs
+- `coverage/` — test coverage reports
+- `.build/` — frankenbeast build runner artifacts
+- `.env`, `.env.*` — environment secrets
+- `*.db`, `*.db-shm`, `*.db-wal` — SQLite files
+
 ## Customization
 
 - Create new `.mdc` files in `.cursor/rules/` for project-specific rules

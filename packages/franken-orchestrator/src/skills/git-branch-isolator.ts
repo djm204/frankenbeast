@@ -9,6 +9,25 @@ const SAFE_ID = /^[a-zA-Z0-9_\-./]+$/;
 // Files here can be safely removed to unblock a git checkout.
 const EXPENDABLE_DIRS = ['.build'];
 
+/**
+ * Patterns that should NEVER be committed.
+ * If `git add -A` stages files matching these, unstage them and
+ * warn — the spawned agent failed to update .gitignore.
+ */
+const BANNED_STAGE_PATTERNS = [
+  /^node_modules\//,
+  /\/node_modules\//,
+  /^dist\//,
+  /\/dist\//,
+  /^\.turbo\//,
+  /\/\.turbo\//,
+  /^coverage\//,
+  /\/coverage\//,
+  /^\.env$/,
+  /\/\.env$/,
+  /\.env\.\w+$/,
+];
+
 function assertSafeId(id: string): void {
   if (!SAFE_ID.test(id)) {
     throw new Error(`Unsafe chunkId: "${id}"`);
@@ -137,11 +156,29 @@ export class GitBranchIsolator {
       const msg = `auto: ${stage} ${chunkId} iter ${iteration}`;
       this.commitDirtySubmodules(status, msg);
       this.git('add -A');
+      this.unstageBannedFiles();
       this.git(`commit -m "${msg}"`);
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * After `git add -A`, check for staged files that should never be
+   * committed (build artifacts, caches, secrets). Unstage any matches.
+   */
+  private unstageBannedFiles(): void {
+    try {
+      const staged = this.git('diff --cached --name-only');
+      if (staged.length === 0) return;
+      const banned = staged.split('\n').filter(f =>
+        BANNED_STAGE_PATTERNS.some(p => p.test(f)),
+      );
+      for (const file of banned) {
+        try { this.git(`reset HEAD -- "${file}"`); } catch { /* already unstaged */ }
+      }
+    } catch { /* non-fatal */ }
   }
 
   /**

@@ -284,7 +284,7 @@ export class StreamLineBuffer {
   }
 }
 
-const NO_COMMIT_CONSTRAINT = '\n\nIMPORTANT: Do NOT run git commit, git push, git tag, or any other git write commands. The orchestrator handles all commits automatically. Only read/edit files and run tests/builds.\n';
+const NO_COMMIT_CONSTRAINT = '\n\nIMPORTANT: Do NOT run git commit, git push, git tag, or any other git write commands. The orchestrator handles all commits automatically. Only read/edit files and run tests/builds.\nNEVER commit build output or generated files. These must ALWAYS be in .gitignore: dist/, node_modules/, .turbo/, coverage/, .build/, .env, *.db. If you add new tools, build steps, or dependencies that produce output, update .gitignore BEFORE doing anything else.\n';
 
 function spawnIteration(
   config: MartinLoopConfig,

@@ -1,1 +1,0 @@
-{"version":3,"file":"approval-timeout-error.d.ts","sourceRoot":"","sources":["../../src/errors/approval-timeout-error.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAE,MAAM,qBAAqB,CAAC;AAEpD,qBAAa,oBAAqB,SAAQ,aAAa;aAEnC,SAAS,EAAE,MAAM;aACjB,SAAS,EAAE,MAAM;gBADjB,SAAS,EAAE,MAAM,EACjB,SAAS,EAAE,MAAM;CAMpC"}

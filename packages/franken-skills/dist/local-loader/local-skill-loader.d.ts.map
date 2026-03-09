@@ -1,1 +1,0 @@
-{"version":3,"file":"local-skill-loader.d.ts","sourceRoot":"","sources":["../../src/local-loader/local-skill-loader.ts"],"names":[],"mappings":"AAEA,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,mBAAmB,CAAC;AAG9D,qBAAa,gBAAgB;IACrB,IAAI,CAAC,GAAG,EAAE,MAAM,GAAG,OAAO,CAAC,oBAAoB,EAAE,CAAC;CA0CzD"}
