@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/frankenfirewall-v0.3.0...frankenfirewall-v0.3.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* release-please scoping and commit hygiene ([742c7cc](https://github.com/djm204/frankenbeast/commit/742c7cc7792aac3f6f85ee638ba3b165de34bc5f))
+
 ## [0.3.0](https://github.com/djm204/frankenbeast/compare/frankenfirewall-v0.2.0...frankenfirewall-v0.3.0) (2026-03-09)
 
 
