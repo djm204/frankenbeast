@@ -148,15 +148,20 @@ The mapper must support:
 - resume existing session
 - per-channel transcript continuity
 
-## 3. Shared chat backend
+## 3. Shared chat backend (WebSocket Bridge)
 
 After normalization, every inbound message goes through the same flow:
 
-`ChannelInboundMessage -> SessionMapper -> ConversationEngine -> ChannelOutboundMessage`
+`ChannelInboundMessage -> SessionMapper -> WebSocketBridge -> Orchestrator (WebSocket) -> ChannelOutboundMessage`
+
+The gateway maintains (or re-establishes) a WebSocket connection to the `franken-orchestrator`'s `/v1/chat/ws` endpoint for each active session. This allows the gateway to:
+- Stream incremental execution progress (deltas) back to the channel (e.g., Slack thread updates)
+- Receive real-time approval requests
+- Handle multi-turn turns without repeated HTTP overhead
 
 ## 4. Canonical outbound message
 
-The chat engine should return structured content that adapters can render:
+The chat engine returns structured content that adapters can render:
 
 ```ts
 interface ChannelOutboundMessage {
@@ -168,6 +173,7 @@ interface ChannelOutboundMessage {
     style?: 'primary' | 'secondary' | 'danger';
   }>;
   metadata?: Record<string, unknown>;
+  delta?: string; // For streaming updates
 }
 ```
 
@@ -175,238 +181,17 @@ Platform adapters then convert this into Slack blocks, Discord embeds, Telegram 
 
 ---
 
-## Capability Model
+## WebSocket Bridge Adapter
 
-Each channel has different affordances. Model them explicitly:
+The `franken-comms` package includes a `ChatSocketBridge` that implements the client-side of the orchestrator's WebSocket protocol (`ws-chat-types.ts`).
 
-```ts
-interface ChannelCapabilities {
-  threads: boolean;
-  buttons: boolean;
-  slashCommands: boolean;
-  richBlocks: boolean;
-  fileUpload: boolean;
-  markdownFlavor: 'slack' | 'discord' | 'telegram' | 'plain';
-}
-```
-
-Do not assume feature parity.
+Responsibilities:
+- **Authentication**: Exchanges a session token with the orchestrator
+- **Streaming**: Subscribes to `assistant.message.delta` and `turn.execution.progress` events
+- **State Management**: Tracks session state and pending approvals
+- **Heartbeat**: Maintains connection health
 
 ---
-
-## Channel-by-Channel Plan
-
-## Slack
-
-Best v1 uses:
-
-- DMs
-- channel threads
-- approval actions with interactive buttons
-
-Inbound:
-
-- Events API webhook
-- slash command or app mention
-- interactive action callbacks
-
-Outbound:
-
-- Block Kit
-- thread replies
-- buttons for approval and next-step actions
-
-Notes:
-
-- Reuse existing Slack approval patterns from `franken-governor`
-- support thread affinity so one thread maps to one Beast session
-
-## Discord
-
-Best v1 uses:
-
-- DMs
-- bot mentions in channels
-- thread replies
-
-Inbound:
-
-- interactions endpoint for slash commands
-- message create events
-- button interactions
-
-Outbound:
-
-- embeds
-- buttons
-- follow-up messages for execution progress
-
-Notes:
-
-- support explicit `/franken` slash command for clean invocation
-- ignore non-mentioned channel chatter by default
-
-## Telegram
-
-Best v1 uses:
-
-- direct chat with bot
-- optional group mention mode later
-
-Inbound:
-
-- webhook updates
-- text messages
-- callback queries from inline keyboards
-
-Outbound:
-
-- text messages
-- inline keyboard buttons
-
-Notes:
-
-- keep formatting conservative
-- ideal as a lightweight personal control surface
-
-## WhatsApp
-
-Best v1 uses:
-
-- direct operator communication
-- alerts, approvals, and concise task exchange
-
-Inbound:
-
-- webhook via Meta WhatsApp Business API or Twilio bridge
-- text replies
-- button replies where supported
-
-Outbound:
-
-- concise text
-- template messages for re-engagement if outside the allowed session window
-
-Notes:
-
-- this is the most constrained channel
-- make it the last implementation target
-- assume stricter message length and re-contact rules
-
----
-
-## Security Requirements
-
-Per the repo rules and existing governor patterns, every channel integration must include:
-
-- signature verification on inbound webhooks where the platform supports it
-- replay protection on webhook events
-- schema validation on all payloads
-- secret validation at startup
-- rate limiting
-- idempotency for duplicate event delivery
-- no raw provider payload logging in full
-- explicit redaction of tokens, secrets, phone numbers, and personal identifiers
-
-Each inbound event should be stored with:
-
-- normalized id
-- dedupe key
-- verification status
-- source channel
-
-Fail closed on invalid signatures.
-
----
-
-## Approval Flow
-
-Messaging channels should support governor approvals, but through the same approval model as the web and CLI chat.
-
-Recommended approach:
-
-- the chat engine emits an `approval` outbound message
-- the channel adapter renders channel-native actions
-- user response maps back to the canonical approval endpoint or shared approval service
-
-Do not create separate approval semantics per platform.
-
----
-
-## Progress and Streaming
-
-Messaging platforms are not full-duplex UIs, so execution feedback should be incremental but compact.
-
-Use a standard pattern:
-
-1. acknowledgment message
-2. optional plan summary
-3. execution started
-4. periodic progress updates
-5. final result summary
-6. approval prompt when needed
-
-Progress updates must be rate-limited to avoid channel spam.
-
----
-
-## Configuration Model
-
-Add channel config under a top-level communication package config:
-
-```ts
-interface CommsConfig {
-  enabledChannels: Array<'slack' | 'discord' | 'telegram' | 'whatsapp'>;
-  defaultProjectId?: string;
-  sessionMappingStrategy: 'thread' | 'channel' | 'dm';
-  slack?: SlackConfig;
-  discord?: DiscordConfig;
-  telegram?: TelegramConfig;
-  whatsapp?: WhatsAppConfig;
-}
-```
-
-Each channel config should include:
-
-- secrets/tokens
-- webhook endpoint configuration
-- allowed workspaces/servers/chats
-- permitted usage mode: DM only, mentions only, thread only
-
----
-
-## Metrics and Analytics
-
-These channel integrations should feed the dashboard plan.
-
-Track:
-
-- inbound messages by channel
-- sessions by channel
-- execution turns by channel
-- approvals by channel
-- failures by channel
-- response latency by channel
-- cheap vs premium usage by channel
-- cost per channel
-
-This is critical for knowing which communication surfaces are actually worth operating.
-
----
-
-## Phased Delivery
-
-## Phase 0 — Prerequisites
-
-Must already exist:
-
-- shared `ConversationEngine`
-- persistent chat sessions
-- HTTP/API chat entrypoint
-- approval endpoint or shared approval service
-- dashboard telemetry event hooks
-
-Without those, stop. Do not start channel work first.
 
 ## Phase 1 — Core Comms Abstractions
 
@@ -415,32 +200,35 @@ Deliverables:
 - `ChannelAdapter` interface
 - canonical inbound/outbound message types
 - session mapper
+- `ChatSocketBridge` (WebSocket client for orchestrator)
 - channel registry
 - config schema
 
 Tests:
 
 - mapping inbound messages to sessions
+- `ChatSocketBridge` protocol compliance
 - outbound renderer contract tests
 - idempotency and dedupe behavior
 
 ## Phase 2 — Shared Gateway and Server
 
-Use Hono.
+Use Hono for inbound webhooks.
 
 Deliverables:
 
 - webhook server scaffold
 - per-channel route registration
 - auth, signature, and replay middleware
-- bridge into `ConversationEngine`
+- bridge into `ChatSocketBridge`
 
 Tests:
 
 - invalid payload rejected with `422`
 - invalid signature rejected
 - duplicate event ignored
-- valid event creates or resumes session
+- valid event triggers WebSocket message relay
+
 
 ## Phase 3 — Slack Integration
 
