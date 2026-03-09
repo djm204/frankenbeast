@@ -91,4 +91,12 @@ export class GeminiProvider implements ICliProvider {
   supportsStreamJson(): boolean {
     return true;
   }
+
+  supportsNativeSessionResume(): boolean {
+    return false;
+  }
+
+  defaultContextWindowTokens(): number {
+    return 1_048_576;
+  }
 }

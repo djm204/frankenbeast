@@ -21,7 +21,7 @@ export interface ProviderOpts {
   readonly commandOverride?: string | undefined;
   /** When true, omit tool/permission flags — used for conversational chat. */
   readonly chatMode?: boolean | undefined;
-  /** When true, add --continue to resume the previous CLI session (chatMode only). */
+  /** When true, ask the provider to resume its native CLI session if supported. */
   readonly sessionContinue?: boolean | undefined;
 }
 
@@ -37,6 +37,8 @@ export interface ICliProvider {
   parseRetryAfter(stderr: string): number | undefined;
   filterEnv(env: Record<string, string>): Record<string, string>;
   supportsStreamJson(): boolean;
+  supportsNativeSessionResume(): boolean;
+  defaultContextWindowTokens(): number;
 }
 
 export class ProviderRegistry {

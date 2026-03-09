@@ -77,4 +77,12 @@ export class CodexProvider implements ICliProvider {
   supportsStreamJson(): boolean {
     return false;
   }
+
+  supportsNativeSessionResume(): boolean {
+    return false;
+  }
+
+  defaultContextWindowTokens(): number {
+    return 128_000;
+  }
 }

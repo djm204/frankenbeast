@@ -17,6 +17,8 @@ describe('ICliProvider', () => {
       parseRetryAfter: (_stderr: string) => undefined,
       filterEnv: (env: Record<string, string>) => env,
       supportsStreamJson: () => false,
+      supportsNativeSessionResume: () => false,
+      defaultContextWindowTokens: () => 128_000,
       ...overrides,
     };
   }
@@ -95,6 +97,16 @@ describe('ICliProvider', () => {
     const p = makeStubProvider({ supportsStreamJson: () => true });
     expect(p.supportsStreamJson()).toBe(true);
   });
+
+  it('supportsNativeSessionResume returns boolean', () => {
+    const p = makeStubProvider({ supportsNativeSessionResume: () => true });
+    expect(p.supportsNativeSessionResume()).toBe(true);
+  });
+
+  it('defaultContextWindowTokens returns a number', () => {
+    const p = makeStubProvider({ defaultContextWindowTokens: () => 200_000 });
+    expect(p.defaultContextWindowTokens()).toBe(200_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -139,6 +151,8 @@ describe('ProviderRegistry', () => {
       parseRetryAfter: () => undefined,
       filterEnv: (env: Record<string, string>) => env,
       supportsStreamJson: () => false,
+      supportsNativeSessionResume: () => false,
+      defaultContextWindowTokens: () => 128_000,
     };
   }
 

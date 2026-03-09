@@ -143,5 +143,12 @@ export class ClaudeProvider implements ICliProvider {
   supportsStreamJson(): boolean {
     return true;
   }
-}
 
+  supportsNativeSessionResume(): boolean {
+    return true;
+  }
+
+  defaultContextWindowTokens(): number {
+    return 200_000;
+  }
+}
