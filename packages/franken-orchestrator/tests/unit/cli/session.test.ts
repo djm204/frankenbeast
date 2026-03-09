@@ -76,11 +76,29 @@ const mockLlmGraphBuild = vi.fn(async () => ({
   ],
 }));
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
-  const MockLlmGraphBuilder = vi.fn(function (this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[] }) {
+  const MockLlmGraphBuilder = vi.fn(function (this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[]; lastValidationIssues: unknown[] }) {
     this.lastChunks = [{ id: 'auth', objective: 'Build auth', files: ['src/auth.ts'], successCriteria: 'Tests pass', verificationCommand: 'npx vitest run', dependencies: [] }];
+    this.lastValidationIssues = [];
     this.build = mockLlmGraphBuild;
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };
+});
+
+// Mock PlanContextGatherer
+vi.mock('../../../src/planning/plan-context-gatherer.js', () => {
+  const MockPlanContextGatherer = vi.fn(function (this: { gather: ReturnType<typeof vi.fn> }) {
+    this.gather = vi.fn(async () => ({ rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [] }));
+  });
+  return { PlanContextGatherer: MockPlanContextGatherer };
+});
+
+// Mock ChunkFileWriter
+const mockChunkWriterWrite = vi.fn((_chunks: unknown[], _issues?: unknown[]) => ['/mock/01_chunk.md']);
+vi.mock('../../../src/planning/chunk-file-writer.js', () => {
+  const MockChunkFileWriter = vi.fn(function (this: { write: typeof mockChunkWriterWrite }) {
+    this.write = mockChunkWriterWrite;
+  });
+  return { ChunkFileWriter: MockChunkFileWriter };
 });
 
 // Mock AdapterLlmClient
@@ -101,11 +119,9 @@ vi.mock('../../../src/cli/review-loop.js', () => ({
 // Mock file-writer
 const mockWriteDesignDoc = vi.fn((_paths: ProjectPaths, _content: string) => '/mock/design.md');
 const mockReadDesignDoc = vi.fn((_paths: ProjectPaths) => undefined as string | undefined);
-const mockWriteChunkFiles = vi.fn((_paths: ProjectPaths, _chunks: unknown[]) => ['/mock/01_chunk.md']);
 vi.mock('../../../src/cli/file-writer.js', () => ({
   writeDesignDoc: (...args: unknown[]) => mockWriteDesignDoc(args[0] as ProjectPaths, args[1] as string),
   readDesignDoc: (...args: unknown[]) => mockReadDesignDoc(args[0] as ProjectPaths),
-  writeChunkFiles: (...args: unknown[]) => mockWriteChunkFiles(args[0] as ProjectPaths, args[1] as unknown[]),
 }));
 
 // Mock BeastLoop
@@ -362,7 +378,7 @@ describe('Session', () => {
       const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
       await new Session(config).start();
 
-      expect(mockWriteChunkFiles).toHaveBeenCalled();
+      expect(mockChunkWriterWrite).toHaveBeenCalled();
       expect(mockReviewLoop).toHaveBeenCalledWith(
         expect.objectContaining({
           artifactLabel: 'Chunk files',
@@ -411,9 +427,8 @@ describe('Session', () => {
       const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
       await new Session(config).start();
 
-      // writeChunkFiles should have been called with the structured lastChunks
-      expect(mockWriteChunkFiles).toHaveBeenCalledWith(
-        config.paths,
+      // ChunkFileWriter.write should have been called with the structured lastChunks
+      expect(mockChunkWriterWrite).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
             id: 'auth',
@@ -422,6 +437,7 @@ describe('Session', () => {
             verificationCommand: 'npx vitest run',
           }),
         ]),
+        expect.any(Array),
       );
     });
   });

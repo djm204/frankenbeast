@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
+import { PlanContextGatherer } from '../planning/plan-context-gatherer.js';
+import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
@@ -17,7 +19,7 @@ import { createCliDeps, type CliDepOptions } from './dep-factory.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
-import { writeDesignDoc, readDesignDoc, writeChunkFiles } from './file-writer.js';
+import { writeDesignDoc, readDesignDoc } from './file-writer.js';
 import type { ChunkDefinition } from './file-writer.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
@@ -282,7 +284,9 @@ export class Session {
     // Wrap LLM to cache raw responses to the plan directory.
     // Spinner + stream progress handler shows real-time activity (no ProgressLlmClient needed).
     const cachingLlm = this.wrapWithResponseCache(adapterLlm, paths);
-    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm);
+    const contextGatherer = new PlanContextGatherer(paths.root);
+    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer);
+    const chunkWriter = new ChunkFileWriter(paths.plansDir);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
@@ -294,10 +298,15 @@ export class Session {
     }
 
     const chunks = llmGraphBuilder.lastChunks;
+    const issues = llmGraphBuilder.lastValidationIssues;
     logger.info(`Planned ${chunks.length} chunk(s)`, 'planner');
 
-    // Write chunk files
-    let chunkPaths = writeChunkFiles(paths, chunks);
+    if (issues.length > 0) {
+      logger.warn(`${issues.length} validation warning(s) attached to chunks`, 'planner');
+    }
+
+    // Write chunk files using ChunkFileWriter
+    let chunkPaths = chunkWriter.write(chunks, issues);
     logger.info(`Wrote chunk files to ${paths.plansDir}`, 'planner');
 
     // Review loop
@@ -309,7 +318,10 @@ export class Session {
         await llmGraphBuilder.build({
           goal: `${designContent}\n\nRevision feedback: ${feedback}`,
         });
-        chunkPaths = writeChunkFiles(paths, llmGraphBuilder.lastChunks);
+        chunkPaths = chunkWriter.write(
+          llmGraphBuilder.lastChunks,
+          llmGraphBuilder.lastValidationIssues,
+        );
         return chunkPaths;
       },
     });

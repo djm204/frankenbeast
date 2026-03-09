@@ -109,14 +109,31 @@ const mockLlmGraphBuild = vi.fn(async () => ({
 }));
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
   const MockLlmGraphBuilder = vi.fn(function (
-    this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[] },
+    this: { build: typeof mockLlmGraphBuild; lastChunks: unknown[]; lastValidationIssues: unknown[] },
     llm: unknown,
   ) {
     llmGraphBuilderCtorArg = llm;
     this.lastChunks = [{ id: 'chunk-a', objective: 'Build A', files: ['src/a.ts'], successCriteria: 'Tests pass', verificationCommand: 'npx vitest run', dependencies: [] }];
+    this.lastValidationIssues = [];
     this.build = mockLlmGraphBuild;
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };
+});
+
+// Mock PlanContextGatherer
+vi.mock('../../../src/planning/plan-context-gatherer.js', () => {
+  const MockPlanContextGatherer = vi.fn(function (this: { gather: ReturnType<typeof vi.fn> }) {
+    this.gather = vi.fn(async () => ({ rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [] }));
+  });
+  return { PlanContextGatherer: MockPlanContextGatherer };
+});
+
+// Mock ChunkFileWriter
+vi.mock('../../../src/planning/chunk-file-writer.js', () => {
+  const MockChunkFileWriter = vi.fn(function (this: { write: ReturnType<typeof vi.fn> }) {
+    this.write = vi.fn(() => ['/mock/01_chunk.md']);
+  });
+  return { ChunkFileWriter: MockChunkFileWriter };
 });
 
 // Mock stream-progress to prevent real timers/stderr writes

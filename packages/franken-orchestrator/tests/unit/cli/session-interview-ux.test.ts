@@ -83,13 +83,32 @@ vi.mock('../../../src/planning/interview-loop.js', () => ({
 
 vi.mock('../../../src/planning/llm-graph-builder.js', () => ({
   LlmGraphBuilder: vi.fn().mockImplementation(function MockLlmGraphBuilder(
-    this: { build(intent: { goal: string }): Promise<{ tasks: never[] }>; lastChunks: unknown[] },
+    this: { build(intent: { goal: string }): Promise<{ tasks: never[] }>; lastChunks: unknown[]; lastValidationIssues: unknown[] },
   ) {
     this.lastChunks = [];
+    this.lastValidationIssues = [];
     this.build = async (intent) => {
       planBuilds.push(intent);
       return { tasks: [] };
     };
+  }),
+}));
+
+// Mock PlanContextGatherer
+vi.mock('../../../src/planning/plan-context-gatherer.js', () => ({
+  PlanContextGatherer: vi.fn().mockImplementation(function MockPlanContextGatherer(
+    this: { gather: ReturnType<typeof vi.fn> },
+  ) {
+    this.gather = vi.fn(async () => ({ rampUp: '', relevantSignatures: [], packageDeps: {}, existingPatterns: [] }));
+  }),
+}));
+
+// Mock ChunkFileWriter
+vi.mock('../../../src/planning/chunk-file-writer.js', () => ({
+  ChunkFileWriter: vi.fn().mockImplementation(function MockChunkFileWriter(
+    this: { write: ReturnType<typeof vi.fn> },
+  ) {
+    this.write = vi.fn(() => []);
   }),
 }));
 
