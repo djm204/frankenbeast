@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/v0.7.2...v0.8.0) (2026-03-09)
+
+
+### Features
+
+* **franken-orchestrator:** add spinner to LLM progress, extract cleanLlmJson utility, use lastChunks for plan output ([dccc569](https://github.com/djm204/frankenbeast/commit/dccc56923cda689fc06bdbbd3285400e0342f574))
+
+
+### Miscellaneous
+
+* **main:** release franken-brain 0.3.1 ([effa089](https://github.com/djm204/frankenbeast/commit/effa08962666df7e8a4a38e03e4f496bac29dd88))
+* **main:** release franken-brain 0.3.1 ([7ac1899](https://github.com/djm204/frankenbeast/commit/7ac18999020a6acef9a3833170fa3a5844ea4aa8))
+* **main:** release franken-critique 0.3.1 ([0070ce4](https://github.com/djm204/frankenbeast/commit/0070ce4a4145c8ddefb9cfc75ccd3b98ae1492cc))
+* **main:** release franken-critique 0.3.1 ([06ebfce](https://github.com/djm204/frankenbeast/commit/06ebfce410f5c7088e2566d56303216102a54e30))
+* **main:** release franken-governor 0.3.1 ([1f2ee34](https://github.com/djm204/frankenbeast/commit/1f2ee3438c72308c000658d04c0f70e491f7812d))
+* **main:** release franken-governor 0.3.1 ([1c4dc1d](https://github.com/djm204/frankenbeast/commit/1c4dc1d405fc9122c5b04e36965e380d1a511471))
+* **main:** release franken-heartbeat 0.3.1 ([705a3ed](https://github.com/djm204/frankenbeast/commit/705a3ed944fd2f05a60bd1db6709a02f65f3d8ce))
+* **main:** release franken-heartbeat 0.3.1 ([aca8e23](https://github.com/djm204/frankenbeast/commit/aca8e23ef80a312b738f3b4fbe9cb613e76ccb14))
+* **main:** release franken-mcp 0.3.1 ([b1883ff](https://github.com/djm204/frankenbeast/commit/b1883ffb516129bc1717e4416e5c9ff07914e8b7))
+* **main:** release franken-mcp 0.3.1 ([b5d29a8](https://github.com/djm204/frankenbeast/commit/b5d29a805d83c587674b68e01ee7310bc9d384a8))
+* **main:** release franken-observer 0.3.1 ([6185508](https://github.com/djm204/frankenbeast/commit/61855086227deea864955d3f524a40e0caf0d6b2))
+* **main:** release franken-observer 0.3.1 ([0149ef1](https://github.com/djm204/frankenbeast/commit/0149ef1a92cffbe26c9f53aea0f01597a8363ab0))
+* **main:** release franken-orchestrator 0.5.0 ([#111](https://github.com/djm204/frankenbeast/issues/111)) ([c0ecd21](https://github.com/djm204/frankenbeast/commit/c0ecd215267c534ae48dca5c984fff974acaaa62))
+* **main:** release franken-planner 0.3.1 ([b9af413](https://github.com/djm204/frankenbeast/commit/b9af41366d4113a58571df48f7b6a1ac8dfa6293))
+* **main:** release franken-planner 0.3.1 ([4d53eda](https://github.com/djm204/frankenbeast/commit/4d53edac55621b491cab8860efc990a88f19ab53))
+* **main:** release franken-skills 0.3.1 ([e8079d9](https://github.com/djm204/frankenbeast/commit/e8079d91d29a9f2bf4d3f793eeabaff509600824))
+* **main:** release franken-skills 0.3.1 ([98fb1ef](https://github.com/djm204/frankenbeast/commit/98fb1ef3984217f6d562fd1825154f18b4020435))
+* **main:** release franken-types 0.3.1 ([d79e88c](https://github.com/djm204/frankenbeast/commit/d79e88c91781f7a1f45971363ca6c5890033c4bf))
+* **main:** release franken-types 0.3.1 ([bfeee54](https://github.com/djm204/frankenbeast/commit/bfeee54916f3cbb849e49532f473d25949385eba))
+* **main:** release frankenfirewall 0.3.1 ([925d307](https://github.com/djm204/frankenbeast/commit/925d3074dffdec32f7bbf221f52fef8cbd4e8f39))
+* **main:** release frankenfirewall 0.3.1 ([b2b5b79](https://github.com/djm204/frankenbeast/commit/b2b5b79796dacc49f8984a398bc9bd575cbfa225))
+* resolve manifest conflict ([6da6efa](https://github.com/djm204/frankenbeast/commit/6da6efac2ceb2fac9b1ff57a338d40c0b7d16041))
+* resolve manifest conflict ([c777b97](https://github.com/djm204/frankenbeast/commit/c777b9714bf46f78c9b9d0467e1a78e085217665))
+* resolve manifest conflict ([ec9e9be](https://github.com/djm204/frankenbeast/commit/ec9e9be4a6ae0d43c27b6a7df1ab2ca0db60093b))
+* resolve manifest conflict ([55623d9](https://github.com/djm204/frankenbeast/commit/55623d923502b1cedef3503dc9a19b151b33671c))
+* resolve manifest conflict ([d66f706](https://github.com/djm204/frankenbeast/commit/d66f706c88d9bd9f175d28e40f2428285eaa9ade))
+* resolve manifest conflict ([6e41dbb](https://github.com/djm204/frankenbeast/commit/6e41dbb5fa8067a96054d201b86cf1928fab2a11))
+* resolve manifest conflict after franken-types merge ([9df4952](https://github.com/djm204/frankenbeast/commit/9df49529ba12edce9fbf081cfb21729bb9a2617d))
+
 ## [0.7.2](https://github.com/djm204/frankenbeast/compare/v0.7.1...v0.7.2) (2026-03-09)
 
 
