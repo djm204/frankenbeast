@@ -51,3 +51,24 @@ export class Spinner {
     this.frameIdx++;
   }
 }
+
+/**
+ * Wraps an async operation with a spinner.
+ * Starts spinner before calling fn, stops when fn resolves/rejects.
+ */
+export async function withSpinner<T>(
+  label: string,
+  fn: () => Promise<T>,
+  options: SpinnerOptions = {},
+): Promise<T> {
+  const spinner = new Spinner(options);
+  spinner.start(label);
+  try {
+    const result = await fn();
+    spinner.stop();
+    return result;
+  } catch (err) {
+    spinner.stop();
+    throw err;
+  }
+}
