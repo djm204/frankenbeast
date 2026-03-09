@@ -5,11 +5,14 @@ import { ConversationEngine } from '../chat/conversation-engine.js';
 import { TurnRunner } from '../chat/turn-runner.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
+import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 
 export interface ChatAppOptions {
   sessionStoreDir: string;
   llm: ILlmClient;
   projectName: string;
+  sessionContinuation?: boolean;
+  sessionTokenSecret?: string;
   turnRunner?: TurnRunner;
 }
 
@@ -20,6 +23,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const engine = new ConversationEngine({
     llm: opts.llm,
     projectName: opts.projectName,
+    ...(opts.sessionContinuation !== undefined
+      ? { sessionContinuation: opts.sessionContinuation }
+      : {}),
   });
   const executor = {
     execute: async ({ userInput }: { userInput: string }) => ({
@@ -31,13 +37,22 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     }),
   };
   const turnRunner = opts.turnRunner ?? new TurnRunner(executor);
+  const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
 
   const app = new Hono();
   app.use('*', requestId);
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   app.onError(errorHandler);
 
-  const routes = chatRoutes({ sessionStore, engine, turnRunner });
+  const routes = chatRoutes({
+    sessionStore,
+    engine,
+    turnRunner,
+    issueSocketToken: (sessionId) => issueSessionToken({
+      secret: sessionTokenSecret,
+      sessionId,
+    }),
+  });
   app.route('/', routes);
 
   return app;

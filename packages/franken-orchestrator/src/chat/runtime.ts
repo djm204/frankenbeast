@@ -29,6 +29,7 @@ export interface ChatRuntimeResult {
   displayMessages: ChatDisplayMessage[];
   events: TurnEvent[];
   pendingApproval: boolean;
+  pendingApprovalDescription?: string;
   state: string;
   tier: string | null;
   transcript: TranscriptMessage[];
@@ -133,21 +134,17 @@ export class ChatRuntime {
           { kind: 'status', content: 'No diff available.' },
         ]);
       case '/approve':
-        return this.result(
+        return this.result({
+          ...state,
+          pendingApproval: false,
+        }, [
           {
-            ...state,
-            pendingApproval: false,
+            kind: state.pendingApproval ? 'approval' : 'status',
+            content: state.pendingApproval ? 'Approved.' : 'Nothing pending.',
           },
-          [
-            {
-              kind: state.pendingApproval ? 'approval' : 'status',
-              content: state.pendingApproval ? 'Approved.' : 'Nothing pending.',
-            },
-          ],
-          {
-            state: state.pendingApproval ? 'approved' : 'active',
-          },
-        );
+        ], {
+          state: state.pendingApproval ? 'approved' : 'active',
+        });
       default:
         return this.result(state, []);
     }
@@ -228,6 +225,7 @@ export class ChatRuntime {
       {
         events: runResult.events,
         outcome,
+        ...(pendingApproval ? { pendingApprovalDescription: outcome.taskDescription } : {}),
         state: stateFromRunResult(runResult),
         tier,
       },
@@ -240,6 +238,7 @@ export class ChatRuntime {
     extra?: {
       events?: TurnEvent[];
       outcome?: TurnOutcome;
+      pendingApprovalDescription?: string;
       state?: string;
       tier?: string | null;
     },
@@ -248,6 +247,9 @@ export class ChatRuntime {
       displayMessages,
       events: extra?.events ?? [],
       pendingApproval: state.pendingApproval,
+      ...(extra?.pendingApprovalDescription !== undefined
+        ? { pendingApprovalDescription: extra.pendingApprovalDescription }
+        : {}),
       state: extra?.state ?? 'active',
       tier: extra?.tier ?? null,
       transcript: state.transcript,

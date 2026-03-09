@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createChatApp } from '../../../src/http/chat-app.js';
+import { verifySessionToken } from '../../../src/http/ws-chat-auth.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/http-chat');
@@ -45,6 +46,7 @@ describe('Chat HTTP Routes', () => {
     const body = await res.json();
     expect(body.data.id).toBeDefined();
     expect(body.data.projectId).toBe('my-project');
+    expect(body.data.socketToken).toEqual(expect.any(String));
   });
 
   // --- Get session ---
@@ -61,8 +63,36 @@ describe('Chat HTTP Routes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.id).toBe(created.id);
+    expect(body.data.socketToken).toEqual(expect.any(String));
     expect(body.data.transcript).toEqual([]);
     expect(body.data.state).toBe('active');
+  });
+
+  it('issues socket tokens that are scoped to the session id', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const secret = 'test-secret-for-http-routes';
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('Mock reply') },
+      projectName: 'test-project',
+      sessionTokenSecret: secret,
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}`);
+    const body = await res.json();
+    expect(
+      verifySessionToken({
+        secret,
+        sessionId: created.id,
+        token: body.data.socketToken,
+      }),
+    ).toBe(true);
   });
 
   it('GET /v1/chat/sessions/:id returns 404 for unknown ID', async () => {
