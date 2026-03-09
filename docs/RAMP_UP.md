@@ -65,7 +65,8 @@ packages/franken-orchestrator/src/
 ├── issues/               # IssueFetcher, IssueTriage, IssueGraphBuilder, IssueReview, IssueRunner
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
-├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, review-loop.ts, cleanup.ts, trace-viewer.ts
+├── chat/                  # ConversationEngine, IntentRouter, EscalationPolicy, ChatAgentExecutor, TurnRunner, session-store
+├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, chat-repl.ts, spinner.ts, review-loop.ts, cleanup.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
 └── logging/               # BeastLogger (ANSI badges, service labels, crash-safe incremental file logging)
@@ -89,6 +90,10 @@ packages/franken-orchestrator/src/
 - `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate limits (e.g., `claude,gemini,aider`)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
+- `frankenbeast chat` — interactive two-tier REPL:
+  - **Tier 1 (Conversational)**: Simple chat uses cheap model with `chatMode` (no tool permissions), spinner while waiting
+  - **Tier 2 (Execution)**: `/run <desc>` spawns a full-permissions CLI agent. `/plan <desc>` dispatches to planning. Natural language also triggers execution via IntentRouter → EscalationPolicy
+  - `ChatAgentExecutor` implements `ITaskExecutor`, `ConversationEngine` handles LLM replies, `TurnRunner` handles execution dispatch
 - `--cleanup` removes all build logs, checkpoints, and traces from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
@@ -143,7 +148,7 @@ All modules use `tsc` for builds.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 11 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration) |
+| `docs/adr/` | 15 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner) |
 | `docs/guides/` | quickstart, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
