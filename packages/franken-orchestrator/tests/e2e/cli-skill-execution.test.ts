@@ -7,6 +7,11 @@ import { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
 import type { ObserverDeps } from '../../src/skills/cli-skill-executor.js';
 import type { MartinLoop } from '../../src/skills/martin-loop.js';
 import type { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
+import { FileChunkSessionStore } from '../../src/session/chunk-session-store.js';
+import { FileChunkSessionSnapshotStore } from '../../src/session/chunk-session-snapshot-store.js';
+import { ChunkSessionRenderer } from '../../src/session/chunk-session-renderer.js';
+import { ChunkSessionCompactor } from '../../src/session/chunk-session-compactor.js';
+import { createChunkSession, createChunkTranscriptEntry } from '../../src/session/chunk-session.js';
 import {
   InMemoryFirewall,
   InMemorySkills,
@@ -17,6 +22,9 @@ import {
   InMemoryGovernor,
   InMemoryHeartbeat,
 } from '../helpers/in-memory-ports.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
   const PROMISE_TAG = 'IMPL_test-chunk_DONE';
@@ -61,6 +69,7 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
     const mockGit = {
       isolate: vi.fn(),
       merge: vi.fn().mockReturnValue({ merged: true, commits: 1 }),
+      getWorkingDir: vi.fn().mockReturnValue('/tmp/test-project'),
     } as unknown as GitBranchIsolator;
 
     const observerDeps = createMockObserverDeps();
@@ -126,5 +135,132 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
     const taskSpans = observer.spans.filter(s => s.name.startsWith('task:'));
     expect(taskSpans.length).toBeGreaterThan(0);
     expect(taskSpans.every(s => s.endedAt !== undefined)).toBe(true);
+  });
+
+  it('persists snapshot and compaction artifacts before completing a chunk', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cli-skill-compact-'));
+    const planName = 'demo-plan';
+    const sessionStore = new FileChunkSessionStore(join(root, 'chunk-sessions'));
+    const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'chunk-session-snapshots'));
+    const renderer = new ChunkSessionRenderer();
+    const compactor = new ChunkSessionCompactor({
+      summarize: async () => 'Compacted summary for resumed work.',
+    });
+
+    const mockMartin = {
+      run: vi.fn().mockImplementation(async (config: any) => {
+        const session = createChunkSession({
+          planName: config.planName,
+          taskId: config.taskId,
+          chunkId: config.chunkId,
+          promiseTag: config.promiseTag,
+          workingDir: config.workingDir,
+          provider: config.provider,
+          maxTokens: 1000,
+        });
+        const populated = {
+          ...session,
+          iterations: 1,
+          transcript: [
+            createChunkTranscriptEntry('objective', config.prompt),
+            createChunkTranscriptEntry('assistant', 'Large intermediate output'),
+          ],
+        };
+
+        config.sessionStore.save(populated);
+        config.snapshotStore.writeSnapshot(populated, 'pre-compaction');
+        const compacted = await config.compactor.compact(populated);
+        config.sessionStore.save(compacted);
+        config.onIteration?.(1, {
+          iteration: 1,
+          exitCode: 0,
+          stdout: `Implementation complete\n<promise>${config.promiseTag}</promise>`,
+          stderr: '',
+          durationMs: 100,
+          rateLimited: false,
+          promiseDetected: true,
+          tokensEstimated: 50,
+          sleepMs: 0,
+        });
+        return {
+          completed: true,
+          iterations: 1,
+          output: `Implementation complete\n<promise>${config.promiseTag}</promise>`,
+          tokensUsed: 100,
+        };
+      }),
+    } as unknown as MartinLoop;
+
+    const mockGit = {
+      isolate: vi.fn(),
+      merge: vi.fn().mockReturnValue({ merged: true, commits: 1 }),
+      autoCommit: vi.fn().mockReturnValue(true),
+      getCurrentHead: vi.fn().mockReturnValue('abc123'),
+      getStatus: vi.fn().mockReturnValue(''),
+      getWorkingDir: vi.fn().mockReturnValue(root),
+      getDiffStat: vi.fn().mockReturnValue('src/file.ts | 10 +'),
+    } as unknown as GitBranchIsolator;
+
+    const observerDeps = createMockObserverDeps();
+    const cliExecutor = new CliSkillExecutor(
+      mockMartin,
+      mockGit,
+      observerDeps,
+      undefined,
+      undefined,
+      undefined,
+      {
+        provider: 'claude',
+        planName,
+        sessionStore,
+        snapshotStore,
+        renderer,
+        compactor,
+        contextUsage: () => ({
+          usedTokens: 900,
+          maxTokens: 1000,
+          usageRatio: 0.9,
+          threshold: 0.85,
+          shouldCompact: true,
+        }),
+      } as any,
+    );
+
+    const skills = new InMemorySkills([
+      { id: 'cli:test-chunk', name: 'Test Chunk', requiresHitl: false, executionType: 'cli' },
+    ]);
+
+    const deps: BeastLoopDeps = {
+      firewall: new InMemoryFirewall(),
+      skills,
+      memory: new InMemoryMemory(),
+      planner: new InMemoryPlanner({
+        planFactory: () => ({
+          tasks: [{
+            id: 'impl:test-chunk',
+            objective: 'Execute test chunk',
+            requiredSkills: ['cli:test-chunk'],
+            dependsOn: [],
+          }],
+        }),
+      }),
+      observer: new InMemoryObserver(),
+      critique: new InMemoryCritique(),
+      governor: new InMemoryGovernor(),
+      heartbeat: new InMemoryHeartbeat(),
+      logger: new NullLogger(),
+      cliExecutor,
+      clock: () => new Date('2025-01-15T10:00:00Z'),
+    };
+
+    const loop = new BeastLoop(deps);
+    const result = await loop.run({ projectId: 'test', userInput: 'test chunk' });
+
+    expect(result.status).toBe('completed');
+    expect(snapshotStore.list(planName, 'test-chunk')).toHaveLength(1);
+    const stored = sessionStore.load(planName, 'test-chunk');
+    expect(stored?.transcript.some((entry) => entry.kind === 'compaction_summary')).toBe(true);
+
+    rmSync(root, { recursive: true, force: true });
   });
 });

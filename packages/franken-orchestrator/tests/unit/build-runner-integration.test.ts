@@ -7,6 +7,11 @@ import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.
 import { PrCreator } from '../../src/closure/pr-creator.js';
 import { ChunkFileGraphBuilder } from '../../src/planning/chunk-file-graph-builder.js';
 import { BeastLogger } from '../../src/logging/beast-logger.js';
+import { FileChunkSessionStore } from '../../src/session/chunk-session-store.js';
+import { ChunkSessionRenderer } from '../../src/session/chunk-session-renderer.js';
+import { createChunkSession, createChunkTranscriptEntry } from '../../src/session/chunk-session.js';
+import { ClaudeProvider } from '../../src/skills/providers/claude-provider.js';
+import { CodexProvider } from '../../src/skills/providers/codex-provider.js';
 import type {
   BeastLoopDeps,
   IFirewallModule,
@@ -274,6 +279,43 @@ describe('build-runner integration — dep construction wiring', () => {
         expect(result.phase).toBe('closure');
         expect(result.durationMs).toBeGreaterThanOrEqual(0);
         expect(result.taskResults).toHaveLength(2);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('replays canonical chunk session state when switching providers', () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'br-failover-'));
+      try {
+        const store = new FileChunkSessionStore(join(tmpDir, 'chunk-sessions'));
+        const renderer = new ChunkSessionRenderer();
+        const session = {
+          ...createChunkSession({
+            planName: 'demo-plan',
+            taskId: 'impl:01_test_chunk',
+            chunkId: '01_test_chunk',
+            promiseTag: 'IMPL_01_test_chunk_DONE',
+            workingDir: tmpDir,
+            provider: 'claude',
+            maxTokens: 200000,
+          }),
+          iterations: 2,
+          activeProvider: 'claude',
+          transcript: [
+            createChunkTranscriptEntry('objective', 'Implement chunk'),
+            createChunkTranscriptEntry('assistant', 'Existing canonical state'),
+          ],
+        };
+        store.save(session);
+
+        const loaded = store.load('demo-plan', '01_test_chunk');
+        const codexRendered = renderer.render(loaded!, new CodexProvider());
+        const claudeRendered = renderer.render(loaded!, new ClaudeProvider());
+
+        expect(codexRendered.sessionContinue).toBe(false);
+        expect(codexRendered.prompt).toContain('Existing canonical state');
+        expect(codexRendered.prompt).toContain('Promise tag: IMPL_01_test_chunk_DONE');
+        expect(claudeRendered.sessionContinue).toBe(true);
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
