@@ -14,14 +14,12 @@ import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
 import { ChatRepl } from './chat-repl.js';
-import { ConversationEngine } from '../chat/conversation-engine.js';
-import { TurnRunner } from '../chat/turn-runner.js';
+import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
 import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { ChatAgentExecutor } from '../chat/chat-agent-executor.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -154,10 +152,19 @@ export async function main(): Promise<void> {
     });
     const execLlm = new AdapterLlmClient(execAdapter);
 
-    const engine = new ConversationEngine({ llm: chatLlm, projectName: projectId, sessionContinuation: true });
-    const executor = new ChatAgentExecutor({ llm: execLlm });
-    const turnRunner = new TurnRunner(executor);
-    const repl = new ChatRepl({ engine, turnRunner, projectId, sessionStore, verbose: args.verbose });
+    const runtime = createChatRuntime({
+      chatLlm,
+      executionLlm: execLlm,
+      projectName: projectId,
+      sessionContinuation: true,
+    });
+    const repl = new ChatRepl({
+      engine: runtime.engine,
+      turnRunner: runtime.turnRunner,
+      projectId,
+      sessionStore,
+      verbose: args.verbose,
+    });
     await repl.start();
     await finalize();
     return;

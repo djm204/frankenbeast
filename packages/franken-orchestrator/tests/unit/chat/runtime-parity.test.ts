@@ -1,35 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
-import { ChatRuntime } from '../../../src/chat/runtime.js';
-import { TurnRunner } from '../../../src/chat/turn-runner.js';
+import { createChatRuntime } from '../../../src/chat/chat-runtime-factory.js';
 
 describe('chat runtime parity', () => {
-  it('preserves CLI continuation semantics through shared runtime configuration', async () => {
+  it('preserves CLI continuation semantics through the shared runtime factory', async () => {
     const llm = { complete: vi.fn().mockResolvedValue('continued reply') };
-    const engine = new ConversationEngine({
-      llm,
+    const runtime = createChatRuntime({
+      chatLlm: llm,
       projectName: 'test-project',
       sessionContinuation: true,
     });
-    const runtime = new ChatRuntime({
-      engine,
-      turnRunner: new TurnRunner({
-        execute: vi.fn().mockResolvedValue({
-          status: 'success',
-          summary: 'done',
-          filesChanged: [],
-          testsRun: 0,
-          errors: [],
-        }),
-      }),
-    });
 
-    const first = await runtime.run('hello', {
+    const first = await runtime.runtime.run('hello', {
       pendingApproval: false,
       projectId: 'test-project',
       transcript: [],
     });
-    const second = await runtime.run('second', {
+    const second = await runtime.runtime.run('second', {
       pendingApproval: false,
       projectId: 'test-project',
       transcript: first.transcript,
@@ -39,24 +25,33 @@ describe('chat runtime parity', () => {
     expect(second.displayMessages[0]?.kind).toBe('reply');
   });
 
-  it('matches CLI slash-command behavior for /approve when nothing is pending', async () => {
-    const runtime = new ChatRuntime({
-      engine: new ConversationEngine({
-        llm: { complete: vi.fn().mockResolvedValue('ignored') },
-        projectName: 'test-project',
-      }),
-      turnRunner: new TurnRunner({
-        execute: vi.fn().mockResolvedValue({
-          status: 'success',
-          summary: 'done',
-          filesChanged: [],
-          testsRun: 0,
-          errors: [],
-        }),
-      }),
+  it('uses the execution llm for execute outcomes while leaving conversational turns on chat llm', async () => {
+    const chatLlm = { complete: vi.fn().mockResolvedValue('ignored chat reply') };
+    const executionLlm = { complete: vi.fn().mockResolvedValue('execution result') };
+    const runtime = createChatRuntime({
+      chatLlm,
+      executionLlm,
+      projectName: 'test-project',
     });
 
-    const result = await runtime.run('/approve', {
+    const result = await runtime.turnRunner.run({
+      kind: 'execute',
+      taskDescription: 'implement the dashboard shell',
+      approvalRequired: false,
+    });
+
+    expect(result.summary).toContain('execution result');
+    expect(executionLlm.complete).toHaveBeenCalledWith('implement the dashboard shell');
+    expect(chatLlm.complete).not.toHaveBeenCalled();
+  });
+
+  it('matches CLI slash-command behavior for /approve when nothing is pending', async () => {
+    const runtime = createChatRuntime({
+      chatLlm: { complete: vi.fn().mockResolvedValue('ignored') },
+      projectName: 'test-project',
+    });
+
+    const result = await runtime.runtime.run('/approve', {
       pendingApproval: false,
       projectId: 'test-project',
       transcript: [],

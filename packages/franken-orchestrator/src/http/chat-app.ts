@@ -1,37 +1,48 @@
 import { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
-import { ConversationEngine } from '../chat/conversation-engine.js';
-import { TurnRunner } from '../chat/turn-runner.js';
-import { ChatAgentExecutor } from '../chat/chat-agent-executor.js';
+import type { ISessionStore } from '../chat/session-store.js';
+import type { ConversationEngine } from '../chat/conversation-engine.js';
+import type { TurnRunner } from '../chat/turn-runner.js';
+import type { ChatRuntime } from '../chat/runtime.js';
+import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 
 export interface ChatAppOptions {
-  sessionStoreDir: string;
-  llm: ILlmClient;
+  sessionStoreDir?: string;
+  sessionStore?: ISessionStore;
+  llm?: ILlmClient;
   executionLlm?: ILlmClient;
-  projectName: string;
+  projectName?: string;
   sessionContinuation?: boolean;
   sessionTokenSecret?: string;
+  engine?: ConversationEngine;
+  runtime?: ChatRuntime;
   turnRunner?: TurnRunner;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
 
 export function createChatApp(opts: ChatAppOptions): Hono {
-  const sessionStore = new FileSessionStore(opts.sessionStoreDir);
-  const engine = new ConversationEngine({
-    llm: opts.llm,
-    projectName: opts.projectName,
-    ...(opts.sessionContinuation !== undefined
-      ? { sessionContinuation: opts.sessionContinuation }
-      : {}),
-  });
-  const turnRunner = opts.turnRunner ?? new TurnRunner(new ChatAgentExecutor({
-    llm: opts.executionLlm ?? opts.llm,
-  }));
+  const sessionStore = opts.sessionStore
+    ?? new FileSessionStore(required(opts.sessionStoreDir, 'sessionStoreDir'));
+  const runtimeBundle = (opts.engine && opts.runtime && opts.turnRunner)
+    ? {
+        engine: opts.engine,
+        runtime: opts.runtime,
+        turnRunner: opts.turnRunner,
+      }
+    : createChatRuntime({
+        chatLlm: required(opts.llm, 'llm'),
+        executionLlm: opts.executionLlm,
+        projectName: required(opts.projectName, 'projectName'),
+        ...(opts.sessionContinuation !== undefined
+          ? { sessionContinuation: opts.sessionContinuation }
+          : {}),
+        ...(opts.turnRunner ? { turnRunner: opts.turnRunner } : {}),
+      });
   const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
 
   const app = new Hono();
@@ -41,8 +52,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
 
   const routes = chatRoutes({
     sessionStore,
-    engine,
-    turnRunner,
+    engine: runtimeBundle.engine,
+    turnRunner: runtimeBundle.turnRunner,
     issueSocketToken: (sessionId) => issueSessionToken({
       secret: sessionTokenSecret,
       sessionId,
@@ -51,4 +62,11 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   app.route('/', routes);
 
   return app;
+}
+
+function required<T>(value: T | undefined, field: string): T {
+  if (value === undefined) {
+    throw new Error(`createChatApp requires '${field}' when shared runtime dependencies are not provided`);
+  }
+  return value;
 }
