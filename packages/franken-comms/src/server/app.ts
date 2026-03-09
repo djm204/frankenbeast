@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ChatGateway } from '../gateway/chat-gateway.js';
 import { slackRouter } from '../channels/slack/slack-router.js';
+import { discordRouter } from '../channels/discord/discord-router.js';
 import { SessionMapper } from '../core/session-mapper.js';
 
 export interface CommsAppOptions {
@@ -9,10 +10,13 @@ export interface CommsAppOptions {
   slack?: {
     signingSecret: string;
   };
+  discord?: {
+    publicKey: string;
+  };
 }
 
 export function createCommsApp(options: CommsAppOptions): Hono {
-  const { gateway, sessionMapper, slack } = options;
+  const { gateway, sessionMapper, slack, discord } = options;
   const app = new Hono();
 
   app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -22,6 +26,14 @@ export function createCommsApp(options: CommsAppOptions): Hono {
       gateway,
       sessionMapper,
       signingSecret: slack.signingSecret,
+    }));
+  }
+
+  if (discord) {
+    app.route('/discord', discordRouter({
+      gateway,
+      sessionMapper,
+      publicKey: discord.publicKey,
     }));
   }
 
