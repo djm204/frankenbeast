@@ -19,8 +19,31 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Tag frankenbeast release as latest
-        if: ${{ steps.release.outputs['.--release_created'] == 'true' }}
+      - name: Ensure only root release is marked latest
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ steps.release.outputs['.--tag_name'] }}" --latest
+        run: |
+          # Root releases use bare version tags (v1.2.3).
+          # Component releases are prefixed (franken-brain-v0.3.0).
+          # GitHub auto-marks the most recently created release as "latest",
+          # which could be any sub-package. Fix that.
+          latest_tag=$(gh release view --json tagName --jq '.tagName' 2>/dev/null || echo '')
+          if [ -z "$latest_tag" ]; then exit 0; fi
+
+          # If the current "latest" is already a root release, nothing to do
+          if [[ "$latest_tag" =~ ^v[0-9] ]]; then
+            echo "Latest is already root release: $latest_tag"
+            exit 0
+          fi
+
+          # Demote the component release
+          echo "Demoting component release: $latest_tag"
+          gh release edit "$latest_tag" --latest=false
+
+          # Promote the most recent root release back to latest
+          root_tag=$(gh release list --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]"))][0].tagName' 2>/dev/null || echo '')
+          if [ -n "$root_tag" ]; then
+            echo "Promoting root release: $root_tag"
+            gh release edit "$root_tag" --latest
+          fi
