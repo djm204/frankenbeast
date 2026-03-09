@@ -175,12 +175,12 @@ export async function main(): Promise<void> {
 
     if (args.subcommand === 'chat-server') {
       const server = await startChatServer({
-        host: args.host,
-        port: args.port,
         sessionStoreDir,
         llm: chatLlm,
         executionLlm: execLlm,
         projectName: projectId,
+        ...(args.host ? { host: args.host } : {}),
+        ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
       });
       console.log(`Chat server listening on ${server.url}`);

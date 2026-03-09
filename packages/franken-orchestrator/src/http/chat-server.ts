@@ -43,9 +43,9 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const sessionStore = new FileSessionStore(options.sessionStoreDir);
   const runtime = createChatRuntime({
     chatLlm: options.llm,
-    executionLlm: options.executionLlm,
     projectName: options.projectName,
     sessionContinuation: options.sessionContinuation ?? true,
+    ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
   const app = createChatApp({
     sessionStore,
@@ -145,8 +145,8 @@ function toRequest(request: IncomingMessage): Request {
     method,
     headers,
     body: Readable.toWeb(request) as ReadableStream,
-    duplex: 'half',
-  });
+    ...( { duplex: 'half' } as { duplex: 'half' } ),
+  } as RequestInit);
 }
 
 function closeServer(server: HttpServer): Promise<void> {

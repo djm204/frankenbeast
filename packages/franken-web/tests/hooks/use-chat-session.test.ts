@@ -7,11 +7,15 @@ const mockGetSession = vi.fn();
 const mockSocketUrl = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
-  ChatApiClient: vi.fn().mockImplementation(() => ({
-    createSession: mockCreateSession,
-    getSession: mockGetSession,
-    socketUrl: mockSocketUrl,
-  })),
+  ChatApiClient: vi.fn(function (this: {
+    createSession: typeof mockCreateSession;
+    getSession: typeof mockGetSession;
+    socketUrl: typeof mockSocketUrl;
+  }) {
+    this.createSession = mockCreateSession;
+    this.getSession = mockGetSession;
+    this.socketUrl = mockSocketUrl;
+  }),
 }));
 
 class MockWebSocket {

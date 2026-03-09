@@ -36,8 +36,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       }
     : createChatRuntime({
         chatLlm: required(opts.llm, 'llm'),
-        executionLlm: opts.executionLlm,
         projectName: required(opts.projectName, 'projectName'),
+        ...(opts.executionLlm ? { executionLlm: opts.executionLlm } : {}),
         ...(opts.sessionContinuation !== undefined
           ? { sessionContinuation: opts.sessionContinuation }
           : {}),

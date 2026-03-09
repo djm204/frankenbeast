@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "chat-server": "npm run build && node dist/cli/run.js chat-server",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
