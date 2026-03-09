@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ILlmClient } from '@franken/types';
 import type {
   ModelTierValue,
@@ -54,6 +55,7 @@ export class ConversationEngine {
       const totalCost = history.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
       if (totalCost >= this.budgetPerSession) {
         const userMessage: TranscriptMessage = {
+          id: randomUUID(),
           role: 'user',
           content: input,
           timestamp: new Date().toISOString(),
@@ -75,6 +77,7 @@ export class ConversationEngine {
     const { tier, outcome } = this.policy.evaluate(intent, input);
 
     const userMessage: TranscriptMessage = {
+      id: randomUUID(),
       role: 'user',
       content: input,
       timestamp: new Date().toISOString(),
@@ -96,6 +99,7 @@ export class ConversationEngine {
           modelTier: tier,
         };
         const assistantMessage: TranscriptMessage = {
+          id: randomUUID(),
           role: 'assistant',
           content: response,
           timestamp: new Date().toISOString(),

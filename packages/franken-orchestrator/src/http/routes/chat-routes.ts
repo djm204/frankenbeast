@@ -22,6 +22,7 @@ export interface ChatRoutesDeps {
   sessionStore: ISessionStore;
   engine: ConversationEngine;
   turnRunner: TurnRunner;
+  issueSocketToken: (sessionId: string) => string;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -44,7 +45,7 @@ function sessionStateFromRunStatus(status: TurnRunResult['status']): string {
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, engine, turnRunner } = deps;
+  const { sessionStore, engine, turnRunner, issueSocketToken } = deps;
   const app = new Hono();
 
   // Health check
@@ -55,14 +56,14 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
-    return c.json({ data: session }, 201);
+    return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } }, 201);
   });
 
   // Get session
   app.get('/v1/chat/sessions/:id', (c) => {
     const id = c.req.param('id');
     const session = getSessionOrThrow(sessionStore, id);
-    return c.json({ data: session });
+    return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } });
   });
 
   // Submit message

@@ -49,6 +49,7 @@ export type TurnOutcome = ReplyOutcome | ClarifyOutcome | PlanOutcome | ExecuteO
 // --- Zod schemas ---
 
 export const TranscriptMessageSchema = z.object({
+  id: z.string().optional(),
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
   timestamp: z.string(),
@@ -69,6 +70,10 @@ export const ChatSessionSchema = z.object({
   projectId: z.string(),
   transcript: z.array(TranscriptMessageSchema),
   state: z.string(),
+  pendingApproval: z.object({
+    description: z.string(),
+    requestedAt: z.string(),
+  }).nullable().optional(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
   createdAt: z.string(),

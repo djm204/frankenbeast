@@ -1,47 +1,70 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { ChatShell } from '../../src/components/chat-shell.js';
 
-afterEach(cleanup);
-
-// Mock useChatSession
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
-    transcript: [
-      { role: 'user', content: 'Hello', timestamp: new Date().toISOString() },
+    messages: [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'Hello',
+        timestamp: '2026-03-09T00:00:00Z',
+        receipt: 'read',
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Dispatch accepted.',
+        timestamp: '2026-03-09T00:00:01Z',
+        modelTier: 'cheap',
+        streaming: false,
+      },
     ],
     status: 'idle' as const,
+    connectionStatus: 'connected' as const,
     tier: 'cheap',
+    tokenTotals: { cheap: 5, premiumReasoning: 2, premiumExecution: 1 },
+    costUsd: 0.42,
+    sessionId: 'sess-1',
+    projectId: 'test-project',
+    pendingApproval: { description: 'Approve deploy', requestedAt: '2026-03-09T00:00:02Z' },
+    activity: [
+      { type: 'turn.execution.start', data: { taskDescription: 'Deploy' }, timestamp: '2026-03-09T00:00:03Z' },
+    ],
     send: vi.fn(),
     approve: vi.fn(),
-    sessionId: 'sess-1',
   }),
 }));
 
+afterEach(cleanup);
+
 describe('ChatShell', () => {
-  it('renders transcript pane and composer', () => {
-    render(<ChatShell baseUrl="http://localhost:3000" projectId="test" />);
-    expect(screen.getByText('Hello')).toBeDefined();
+  it('renders Frankenbeast dashboard branding and version', () => {
+    const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+    const nav = container.querySelector('[aria-label="Dashboard navigation"]');
+
+    expect(screen.getByText('v0.9.0')).toBeDefined();
+    expect(nav?.textContent).toContain('Chat');
+    expect(nav?.textContent).toContain('Sessions');
+    expect(nav?.textContent).toContain('Analytics');
+  });
+
+  it('renders the chat workspace inside the dashboard shell', () => {
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    expect(screen.getByText('Dispatch accepted.')).toBeDefined();
     expect(screen.getByRole('textbox')).toBeDefined();
+    expect(screen.getByText('Approve deploy')).toBeDefined();
+    expect(screen.getByText('turn.execution.start')).toBeDefined();
   });
 
-  it('renders cost badge with current tier', () => {
-    render(<ChatShell baseUrl="http://localhost:3000" projectId="test" />);
-    // The tier value is rendered as exact text in a dd element
-    const tierDd = screen.getByText('cheap');
-    expect(tierDd).toBeDefined();
-    expect(tierDd.tagName).toBe('DD');
-  });
+  it('shows connection and session status in the top bar', () => {
+    const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+    const topbar = container.querySelector('.topbar');
 
-  it('renders two-column layout with main and aside', () => {
-    const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test" />);
-    expect(container.querySelector('main')).not.toBeNull();
-    expect(container.querySelector('aside')).not.toBeNull();
-  });
-
-  it('renders activity pane in aside', () => {
-    const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test" />);
-    const aside = container.querySelector('aside');
-    expect(aside).not.toBeNull();
+    expect(topbar?.textContent).toContain('connected');
+    expect(topbar?.textContent).toContain('sess-1');
+    expect(topbar?.textContent).toContain('test-project');
   });
 });
