@@ -1,1 +1,0 @@
-{"version":3,"file":"trace-viewer.d.ts","sourceRoot":"","sources":["../../src/cli/trace-viewer.ts"],"names":[],"mappings":"AAEA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,4BAA4B,CAAC;AAE9D,MAAM,WAAW,iBAAiB;IAChC,IAAI,IAAI,OAAO,CAAC,IAAI,CAAC,CAAC;CACvB;AAED;;;;;;GAMG;AACH,wBAAsB,gBAAgB,CACpC,YAAY,EAAE,MAAM,EACpB,MAAM,EAAE,WAAW,GAClB,OAAO,CAAC,iBAAiB,GAAG,IAAI,CAAC,CA4BnC"}

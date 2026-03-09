@@ -166,8 +166,11 @@ export async function main(): Promise<void> {
 }
 
 import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const self = fileURLToPath(import.meta.url);
+const caller = process.argv[1];
+if (caller && realpathSync(caller) === realpathSync(self)) {
   main().catch((error) => {
     console.error('Fatal:', error instanceof Error ? error.message : error);
     process.exit(1);

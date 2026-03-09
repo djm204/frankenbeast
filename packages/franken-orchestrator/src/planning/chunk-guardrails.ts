@@ -8,4 +8,6 @@ export const CHUNK_GUARDRAILS =
   `- Do NOT run "gh pr create" or create pull requests. PR creation is handled by the orchestrator after all chunks complete.\n` +
   `- Do NOT delete, move, or modify chunk/plan files. They are read-only inputs.\n` +
   `- Do NOT run "git push". The orchestrator manages pushing.\n` +
-  `- Do NOT delete source code files unless the chunk explicitly requires it.\n`;
+  `- Do NOT delete source code files unless the chunk explicitly requires it.\n` +
+  `- Do NOT commit build artifacts, caches, or generated output. If you add new tools or build steps that produce output files, add their output directories to .gitignore BEFORE committing. Common patterns: node_modules/, dist/, .turbo/, coverage/, .build/, .env, *.db.\n` +
+  `- If you discover tracked files that should be ignored (build output, caches, logs), remove them from tracking with "git rm -r --cached <path>" and ensure .gitignore covers them.\n`;
