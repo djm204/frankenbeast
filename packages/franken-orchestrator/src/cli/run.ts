@@ -71,7 +71,7 @@ export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> 
   return loadConfig(args);
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const args = parseArgs();
 
   if (args.help) {
@@ -165,7 +165,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error('Fatal:', error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error('Fatal:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

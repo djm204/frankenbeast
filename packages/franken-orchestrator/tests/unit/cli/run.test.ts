@@ -89,9 +89,9 @@ vi.mock('node:readline', () => ({
   })),
 }));
 
-// ── Import run.ts exports (main() will fire but mocks handle it) ──
+// ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 
@@ -200,15 +200,19 @@ describe('main wiring', () => {
   });
 });
 
-describe('main() import-time side effects', () => {
-  // main() fires on import; these checks run after the async chain settles
-  // via mocked deps, so import-time calls are still recorded.
-  it('scaffolds project and resolves base branch during startup', () => {
+describe('main() execution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('scaffolds project and resolves base branch during startup', async () => {
+    await main();
     expect(scaffoldFrankenbeast).toHaveBeenCalled();
     expect(resolveBaseBranch).toHaveBeenCalled();
   });
 
-  it('creates a Session and calls start()', () => {
+  it('creates a Session and calls start()', async () => {
+    await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
   });
