@@ -1,5 +1,5 @@
 {
-  ".": "0.6.0",
+  ".": "0.7.0",
   "packages/franken-brain": "0.3.0",
   "packages/franken-critique": "0.3.0",
   "packages/franken-governor": "0.3.0",
