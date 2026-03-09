@@ -19,6 +19,7 @@ export interface ConversationEngineOptions {
   llm: ILlmClient;
   projectName: string;
   maxTranscriptLength?: number;
+  budgetPerSession?: number;
 }
 
 export class ConversationEngine {
@@ -26,8 +27,9 @@ export class ConversationEngine {
   private readonly router: IntentRouter;
   private readonly policy: EscalationPolicy;
   private readonly promptBuilder: PromptBuilder;
+  private readonly budgetPerSession?: number;
 
-  constructor({ llm, projectName, maxTranscriptLength }: ConversationEngineOptions) {
+  constructor({ llm, projectName, maxTranscriptLength, budgetPerSession }: ConversationEngineOptions) {
     this.llm = llm;
     this.router = new IntentRouter();
     this.policy = new EscalationPolicy();
@@ -35,12 +37,35 @@ export class ConversationEngine {
       projectName,
       ...(maxTranscriptLength !== undefined ? { maxMessages: maxTranscriptLength } : {}),
     });
+    this.budgetPerSession = budgetPerSession;
   }
 
   async processTurn(
     input: string,
     history: TranscriptMessage[],
   ): Promise<TurnResult> {
+    // Budget check: reject if cumulative cost exceeds session budget
+    if (this.budgetPerSession !== undefined) {
+      const totalCost = history.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
+      if (totalCost >= this.budgetPerSession) {
+        const userMessage: TranscriptMessage = {
+          role: 'user',
+          content: input,
+          timestamp: new Date().toISOString(),
+        };
+        const budgetReply: ReplyOutcome = {
+          kind: 'reply',
+          content: `Session budget exceeded ($${totalCost.toFixed(2)} / $${this.budgetPerSession.toFixed(2)}). Please start a new session.`,
+          modelTier: 'cheap',
+        };
+        return {
+          outcome: budgetReply,
+          tier: 'cheap',
+          newMessages: [userMessage],
+        };
+      }
+    }
+
     const intent = this.router.classify(input);
     const { tier, outcome } = this.policy.evaluate(intent, input);
 

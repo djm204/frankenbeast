@@ -54,6 +54,7 @@ export const TranscriptMessageSchema = z.object({
   timestamp: z.string(),
   modelTier: z.string().optional(),
   tokens: z.number().nonnegative().optional(),
+  costUsd: z.number().nonnegative().optional(),
 });
 export type TranscriptMessage = z.infer<typeof TranscriptMessageSchema>;
 

@@ -12,22 +12,28 @@ const requestedIntegration = requestedPaths.some((arg) => arg.includes('tests/in
 const requestedE2e = requestedPaths.some((arg) => arg.includes('tests/e2e/'));
 const runIntegration = isIntegration || requestedIntegration;
 const runE2e = isE2e || requestedE2e;
+const requestedUnit = requestedPaths.some((arg) => arg.includes('tests/unit/'));
+const runMixed = [runE2e, runIntegration, requestedUnit].filter(Boolean).length > 1;
 
 export default defineConfig({
   root: packageRoot,
   test: {
     globals: false,
     environment: 'node',
-    include: runE2e
-      ? ['tests/e2e/**/*.test.ts']
-      : runIntegration
-        ? ['tests/integration/**/*.test.ts']
-        : ['tests/unit/**/*.test.ts', 'test/**/*.test.ts'],
-    exclude: runE2e
+    include: runMixed
+      ? ['tests/**/*.test.ts', 'test/**/*.test.ts']
+      : runE2e
+        ? ['tests/e2e/**/*.test.ts']
+        : runIntegration
+          ? ['tests/integration/**/*.test.ts']
+          : ['tests/unit/**/*.test.ts', 'test/**/*.test.ts'],
+    exclude: runMixed
       ? []
-      : runIntegration
+      : runE2e
         ? []
-        : ['tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
+        : runIntegration
+          ? []
+          : ['tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
