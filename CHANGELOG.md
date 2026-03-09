@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/v0.7.1...v0.7.2) (2026-03-09)
+
+
+### Miscellaneous
+
+* **main:** release franken-orchestrator 0.4.0 ([dc59ca3](https://github.com/djm204/frankenbeast/commit/dc59ca3bf2483386a596eea8aa1660553d887420))
+* **main:** release franken-orchestrator 0.4.0 ([1e0d119](https://github.com/djm204/frankenbeast/commit/1e0d119f3b7f9daacb5fbb3101e7c7e3cd9532cc))
+* **main:** release franken-orchestrator 0.4.1 ([#109](https://github.com/djm204/frankenbeast/issues/109)) ([012a01a](https://github.com/djm204/frankenbeast/commit/012a01aba1d7bb908ff83d92fc54c68c5fc6377f))
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/v0.7.0...v0.7.1) (2026-03-09)
 
 
