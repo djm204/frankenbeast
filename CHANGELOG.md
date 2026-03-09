@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.1...frankenbeast-v0.5.0) (2026-03-09)
+
+
+### Features
+
+* migrate to real monorepo with npm workspaces + Turborepo ([#96](https://github.com/djm204/frankenbeast/issues/96)) ([f2028b1](https://github.com/djm204/frankenbeast/commit/f2028b139003a6bc09df35d8904a53c0457d67cb))
+* **orchestrator:** add chunk prompt guardrails to prevent destructive agent actions ([9cdb5b0](https://github.com/djm204/frankenbeast/commit/9cdb5b0f93a8f0db756bd2386c6850ef363efa12))
+* **orchestrator:** plan-scoped dirs, hook stripping, LLM response caching ([#98](https://github.com/djm204/frankenbeast/issues/98)) ([d97f37c](https://github.com/djm204/frankenbeast/commit/d97f37c05e02c01acb2fda75f2a121f507db62e5))
+
+
+### Miscellaneous
+
+* delete the old plans ([eb191d5](https://github.com/djm204/frankenbeast/commit/eb191d5c0f08f559bdb43803c10eb072b1966de8))
+* move finished plans to complete folder ([f5df763](https://github.com/djm204/frankenbeast/commit/f5df7634aeae10d6b715241f5f091e1e68a72e42))
+* remove unecessary rules now that it is a monorepo ([5113b8d](https://github.com/djm204/frankenbeast/commit/5113b8d67a5e1daec8b8d50c26c7563d70c54623))
+* update orchestrator gitlink — baseBranch creation fix ([435e0dc](https://github.com/djm204/frankenbeast/commit/435e0dc6421e4ede631b0180c98f34223ab214a2))
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.0...frankenbeast-v0.4.1) (2026-03-08)
 
 
