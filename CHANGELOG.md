@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/v0.9.0...v0.10.0) (2026-03-09)
+
+
+### Features
+
+* **chat:** session continuation, input blocking, spinner, output sanitization, color diff ([e4eb862](https://github.com/djm204/frankenbeast/commit/e4eb86252fc641a17eded66040059c57f4e82702))
+* **franken-orchestrator:** add conversational chat interface with CLI, HTTP, SSE, and web UI ([13c01f4](https://github.com/djm204/frankenbeast/commit/13c01f410ab81f5fc8223543d567e454701365fb))
+
+
+### Miscellaneous
+
+* **franken-orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([1d85288](https://github.com/djm204/frankenbeast/commit/1d8528826af44828725dc12015e57a15c23467ab))
+* **franken-orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([a4ad1f5](https://github.com/djm204/frankenbeast/commit/a4ad1f57f53ab7cb36769a65972ce35681bc81ec))
+* **franken-web:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([8c9b0aa](https://github.com/djm204/frankenbeast/commit/8c9b0aaea9708f530b5cfaefca7cb71e3a857c9e))
+* **franken-web:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([f680458](https://github.com/djm204/frankenbeast/commit/f680458d11940f2a60aeffc8570fe96b785ca69b))
+* **main:** release franken-orchestrator 0.7.0 ([a2c3d28](https://github.com/djm204/frankenbeast/commit/a2c3d28325ab7df69322812f7e3d0de9610541a4))
+* **main:** release franken-orchestrator 0.7.0 ([c5faafa](https://github.com/djm204/frankenbeast/commit/c5faafa5a30431c21d63d601a761fa32141697c1))
+
+
+### Documentation
+
+* add chat agent dispatch design doc ([6958b2b](https://github.com/djm204/frankenbeast/commit/6958b2b27235eb4eb1fe68ed65908237ff2e05f2))
+* add chat agent dispatch implementation plan ([784a44c](https://github.com/djm204/frankenbeast/commit/784a44c06605c05ae087dcc4b017db3911814ca8))
+* **adr:** ADR-014 chat two-tier dispatch architecture ([bcec6a0](https://github.com/djm204/frankenbeast/commit/bcec6a0ef1c05b15df19fee73297c5900d9ece02))
+* **adr:** ADR-015 shared spinner abstraction ([e347467](https://github.com/djm204/frankenbeast/commit/e3474674ba8ac5a1db2bd46d86dc92a90ebbc37c))
+* update RAMP_UP.md with chat agent dispatch and new ADRs ([e94f69f](https://github.com/djm204/frankenbeast/commit/e94f69f5c9bdde0d18f74daddf7a27e2c18fa89f))
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/v0.8.0...v0.9.0) (2026-03-09)
 
 
