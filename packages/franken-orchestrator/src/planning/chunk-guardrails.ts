@@ -9,5 +9,5 @@ export const CHUNK_GUARDRAILS =
   `- Do NOT delete, move, or modify chunk/plan files. They are read-only inputs.\n` +
   `- Do NOT run "git push". The orchestrator manages pushing.\n` +
   `- Do NOT delete source code files unless the chunk explicitly requires it.\n` +
-  `- Do NOT commit build artifacts, caches, or generated output. If you add new tools or build steps that produce output files, add their output directories to .gitignore BEFORE committing. Common patterns: node_modules/, dist/, .turbo/, coverage/, .build/, .env, *.db.\n` +
+  `- Do NOT commit build artifacts, caches, or generated output (dist/, node_modules/, .turbo/, coverage/, .build/, .env, *.db). These must ALWAYS be in .gitignore. If you add new tools or build steps, add their output directories to .gitignore BEFORE committing.\n` +
   `- If you discover tracked files that should be ignored (build output, caches, logs), remove them from tracking with "git rm -r --cached <path>" and ensure .gitignore covers them.\n`;

@@ -1,1 +1,0 @@
-{"version":3,"file":"max-iteration.d.ts","sourceRoot":"","sources":["../../src/breakers/max-iteration.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,cAAc,EAAE,oBAAoB,EAAE,SAAS,EAAE,UAAU,EAAE,MAAM,sBAAsB,CAAC;AAGxG,qBAAa,mBAAoB,YAAW,cAAc;IACxD,QAAQ,CAAC,IAAI,mBAAmB;IAEhC,KAAK,CAAC,KAAK,EAAE,SAAS,EAAE,MAAM,EAAE,UAAU,GAAG,oBAAoB;CAkBlE"}

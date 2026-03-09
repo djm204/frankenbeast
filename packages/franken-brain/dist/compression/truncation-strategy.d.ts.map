@@ -1,1 +1,0 @@
-{"version":3,"file":"truncation-strategy.d.ts","sourceRoot":"","sources":["../../src/compression/truncation-strategy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,mBAAmB,CAAC;AAErD,OAAO,KAAK,EAAE,oBAAoB,EAAE,iBAAiB,EAAE,MAAM,oCAAoC,CAAC;AASlG,qBAAa,kBAAmB,YAAW,oBAAoB;IACvD,QAAQ,CAAC,UAAU,EAAE,WAAW,EAAE,EAAE,MAAM,EAAE,MAAM,GAAG,OAAO,CAAC,iBAAiB,CAAC;CAyCtF"}

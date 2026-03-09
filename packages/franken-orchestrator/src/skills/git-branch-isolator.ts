@@ -17,6 +17,8 @@ const EXPENDABLE_DIRS = ['.build'];
 const BANNED_STAGE_PATTERNS = [
   /^node_modules\//,
   /\/node_modules\//,
+  /^dist\//,
+  /\/dist\//,
   /^\.turbo\//,
   /\/\.turbo\//,
   /^coverage\//,

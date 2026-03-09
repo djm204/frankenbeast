@@ -1,1 +1,0 @@
-{"version":3,"file":"trigger-registry.d.ts","sourceRoot":"","sources":["../../src/triggers/trigger-registry.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,kBAAkB,CAAC;AACtD,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,wBAAwB,CAAC;AAE/D,qBAAa,eAAe;IACd,OAAO,CAAC,QAAQ,CAAC,UAAU;gBAAV,UAAU,EAAE,aAAa,CAAC,gBAAgB,CAAC;IAExE,WAAW,CAAC,OAAO,EAAE,OAAO,GAAG,aAAa;CAU7C"}
