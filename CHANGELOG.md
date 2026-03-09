@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/v0.10.0...v0.11.0) (2026-03-09)
+
+
+### Features
+
+* Add canonical chunk-session execution state ([5d36b0c](https://github.com/djm204/frankenbeast/commit/5d36b0c6ba6edb385812d7d5c0bb98ea77216fff))
+* add websocket-backed Frankenbeast dashboard chat ([f0e089d](https://github.com/djm204/frankenbeast/commit/f0e089dea6f35685f016b0a373c6e3440ccc1e45))
+* **web:** build dashboard chat shell with live socket UX ([95af810](https://github.com/djm204/frankenbeast/commit/95af810040ff0e7679117a1978091eea085ea0e5))
+
+
+### Miscellaneous
+
+* **main:** release franken-orchestrator 0.8.0 ([ebf5d22](https://github.com/djm204/frankenbeast/commit/ebf5d2270d8da2bedfab62ced7924577e74a05c1))
+* **main:** release franken-orchestrator 0.8.0 ([c710711](https://github.com/djm204/frankenbeast/commit/c710711c73f9ce43820d4aba26518f47702c3b5e))
+* **main:** release franken-orchestrator 0.9.0 ([1d329a9](https://github.com/djm204/frankenbeast/commit/1d329a93b747c583a33d30119dc70f001c7434f7))
+* **main:** release franken-orchestrator 0.9.0 ([60d3c35](https://github.com/djm204/frankenbeast/commit/60d3c35026f473573b8cd402764363b9e8b28805))
+
+
+### Documentation
+
+* **orchestrator:** document chunk session execution model ([bf4347c](https://github.com/djm204/frankenbeast/commit/bf4347ca1e1d7544d522313767966d1b40c7d746))
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/v0.9.0...v0.10.0) (2026-03-09)
 
 
