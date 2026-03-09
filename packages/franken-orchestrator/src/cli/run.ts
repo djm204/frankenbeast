@@ -14,16 +14,15 @@ import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
 import { ChatRepl } from './chat-repl.js';
-import { ConversationEngine } from '../chat/conversation-engine.js';
-import { TurnRunner } from '../chat/turn-runner.js';
+import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
 import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { ChatAgentExecutor } from '../chat/chat-agent-executor.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { startChatServer } from '../http/chat-server.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -82,6 +81,56 @@ export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> 
   return loadConfig(args);
 }
 
+interface ChatSurfaceDeps {
+  chatLlm: AdapterLlmClient;
+  execLlm: AdapterLlmClient;
+  finalize: () => Promise<void>;
+  projectId: string;
+  sessionStoreDir: string;
+}
+
+async function createChatSurfaceDeps(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  paths: ReturnType<typeof getProjectPaths>,
+): Promise<ChatSurfaceDeps> {
+  const sessionStoreDir = join(paths.frankenbeastDir, 'chat');
+  const projectId = paths.root.split('/').pop() ?? 'unknown';
+  const registry = createDefaultRegistry();
+  const resolvedProvider = registry.get(args.provider);
+  const chatDepOpts = {
+    paths,
+    baseBranch: 'main',
+    budget: args.budget,
+    provider: args.provider,
+    providers: args.providers ?? config.providers.fallbackChain,
+    providersConfig: config.providers.overrides,
+    noPr: true,
+    verbose: args.verbose,
+    reset: false,
+    adapterWorkingDir: tmpdir(),
+    adapterModel: resolvedProvider.chatModel,
+    chatMode: true,
+  };
+  const { cliLlmAdapter, finalize } = await createCliDeps(chatDepOpts);
+  const chatLlm = new AdapterLlmClient(cliLlmAdapter);
+
+  const override = config.providers.overrides?.[args.provider];
+  const execAdapter = new CliLlmAdapter(resolvedProvider, {
+    workingDir: paths.root,
+    ...(override?.command ? { commandOverride: override.command } : {}),
+  });
+  const execLlm = new AdapterLlmClient(execAdapter);
+
+  return {
+    chatLlm,
+    execLlm,
+    finalize,
+    projectId,
+    sessionStoreDir,
+  };
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs();
 
@@ -121,43 +170,37 @@ export async function main(): Promise<void> {
   const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
-  // Chat subcommand dispatches to interactive REPL — owns its own readline
-  if (args.subcommand === 'chat') {
-    const chatStoreDir = join(paths.frankenbeastDir, 'chat');
-    const sessionStore = new FileSessionStore(chatStoreDir);
-    const projectId = paths.root.split('/').pop() ?? 'unknown';
+  if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
+    const { chatLlm, execLlm, finalize, projectId, sessionStoreDir } = await createChatSurfaceDeps(args, config, paths);
 
-    const registry = createDefaultRegistry();
-    const resolvedProvider = registry.get(args.provider);
-    const chatDepOpts = {
-      paths,
-      baseBranch: 'main',
-      budget: args.budget,
-      provider: args.provider,
-      providers: args.providers ?? config.providers.fallbackChain,
-      providersConfig: config.providers.overrides,
-      noPr: true,
-      verbose: args.verbose,
-      reset: false,
-      adapterWorkingDir: tmpdir(),
-      adapterModel: resolvedProvider.chatModel,
-      chatMode: true,
-    };
-    const { cliLlmAdapter, finalize } = await createCliDeps(chatDepOpts);
-    const chatLlm = new AdapterLlmClient(cliLlmAdapter);
+    if (args.subcommand === 'chat-server') {
+      const server = await startChatServer({
+        sessionStoreDir,
+        llm: chatLlm,
+        executionLlm: execLlm,
+        projectName: projectId,
+        ...(args.host ? { host: args.host } : {}),
+        ...(args.port !== undefined ? { port: args.port } : {}),
+        ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
+      });
+      console.log(`Chat server listening on ${server.url}`);
+      return;
+    }
 
-    // Execution adapter: full permissions, project root, no chatMode
-    const override = config.providers.overrides?.[args.provider];
-    const execAdapter = new CliLlmAdapter(resolvedProvider, {
-      workingDir: paths.root,
-      ...(override?.command ? { commandOverride: override.command } : {}),
+    const sessionStore = new FileSessionStore(sessionStoreDir);
+    const runtime = createChatRuntime({
+      chatLlm,
+      executionLlm: execLlm,
+      projectName: projectId,
+      sessionContinuation: true,
     });
-    const execLlm = new AdapterLlmClient(execAdapter);
-
-    const engine = new ConversationEngine({ llm: chatLlm, projectName: projectId, sessionContinuation: true });
-    const executor = new ChatAgentExecutor({ llm: execLlm });
-    const turnRunner = new TurnRunner(executor);
-    const repl = new ChatRepl({ engine, turnRunner, projectId, sessionStore, verbose: args.verbose });
+    const repl = new ChatRepl({
+      engine: runtime.engine,
+      turnRunner: runtime.turnRunner,
+      projectId,
+      sessionStore,
+      verbose: args.verbose,
+    });
     await repl.start();
     await finalize();
     return;

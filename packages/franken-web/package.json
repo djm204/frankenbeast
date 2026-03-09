@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:chat": "VITE_API_URL=http://127.0.0.1:3000 vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",

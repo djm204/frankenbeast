@@ -1,6 +1,6 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-export type Subcommand = 'interview' | 'plan' | 'run' | 'issues' | 'chat' | undefined;
+export type Subcommand = 'interview' | 'plan' | 'run' | 'issues' | 'chat' | 'chat-server' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -18,6 +18,9 @@ export interface CliArgs {
   resume: boolean;
   cleanup: boolean;
   config?: string | undefined;
+  host?: string | undefined;
+  port?: number | undefined;
+  allowOrigin?: string | undefined;
   help: boolean;
   issueLabel?: string[] | undefined;
   issueMilestone?: string | undefined;
@@ -28,7 +31,7 @@ export interface CliArgs {
   dryRun?: boolean | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues', 'chat']);
+const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues', 'chat', 'chat-server']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -39,6 +42,7 @@ Subcommands:
   run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
   issues                  Fetch and filter GitHub issues
   chat                    Interactive chat REPL with ConversationEngine
+  chat-server             Run the local HTTP+WebSocket chat server for franken-web
 
 Options:
   --base-dir <path>       Project root (default: cwd)
@@ -50,6 +54,9 @@ Options:
   --plan-dir <path>       Path to chunk files directory
   --plan-name <name>      Plan name (default: auto-generated from date)
   --config <path>         Path to config file (JSON)
+  --host <host>           Chat server bind host (default: 127.0.0.1)
+  --port <port>           Chat server bind port (default: 3000)
+  --allow-origin <url>    Allow one additional websocket Origin
   --no-pr                 Skip PR creation
   --verbose               Debug logs + trace viewer
   --reset                 Clear checkpoint and traces
@@ -74,6 +81,8 @@ Examples:
   frankenbeast plan --design-doc design.md  # plan only
   frankenbeast run                          # execute only
   frankenbeast run --resume                 # resume execution
+  frankenbeast chat-server                  # local chat server
+  frankenbeast chat-server --port 4242      # local chat server on custom port
   frankenbeast issues --label critical,high # fetch filtered issues
   frankenbeast issues --dry-run             # preview issue fetch
 `.trim();
@@ -88,7 +97,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'interview' | 'plan' | 'run' | 'issues' | 'chat';
+    subcommand = first as 'interview' | 'plan' | 'run' | 'issues' | 'chat' | 'chat-server';
     flagArgs = argv.slice(1);
   }
 
@@ -104,6 +113,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       'plan-dir': { type: 'string' },
       'plan-name': { type: 'string' },
       config: { type: 'string' },
+      host: { type: 'string' },
+      port: { type: 'string' },
+      'allow-origin': { type: 'string' },
       'no-pr': { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
       reset: { type: 'boolean', default: false },
@@ -157,6 +169,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     planDir: values['plan-dir'],
     planName: values['plan-name'],
     config: values.config,
+    host: values.host ?? (subcommand === 'chat-server' ? '127.0.0.1' : undefined),
+    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3000 : undefined),
+    allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,
     reset: values.reset ?? false,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseArgs } from '../../../src/cli/args.js';
+import { parseArgs, printUsage } from '../../../src/cli/args.js';
 
 describe('parseArgs', () => {
   it('returns defaults with no args', () => {
@@ -29,6 +29,28 @@ describe('parseArgs', () => {
     const args = parseArgs(['run', '--resume']);
     expect(args.subcommand).toBe('run');
     expect(args.resume).toBe(true);
+  });
+
+  it('parses chat-server subcommand with local defaults', () => {
+    const args = parseArgs(['chat-server']);
+    expect(args.subcommand).toBe('chat-server');
+    expect(args.host).toBe('127.0.0.1');
+    expect(args.port).toBe(3000);
+    expect(args.allowOrigin).toBeUndefined();
+  });
+
+  it('parses chat-server host, port, and origin overrides', () => {
+    const args = parseArgs([
+      'chat-server',
+      '--host', '0.0.0.0',
+      '--port', '4242',
+      '--allow-origin', 'http://localhost:5173',
+    ]);
+
+    expect(args.subcommand).toBe('chat-server');
+    expect(args.host).toBe('0.0.0.0');
+    expect(args.port).toBe(4242);
+    expect(args.allowOrigin).toBe('http://localhost:5173');
   });
 
   it('parses global flags without subcommand', () => {
@@ -71,6 +93,15 @@ describe('parseArgs', () => {
   it('parses --help', () => {
     const args = parseArgs(['--help']);
     expect(args.help).toBe(true);
+  });
+
+  it('prints usage text including chat-server', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    printUsage();
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('chat-server'));
+    logSpy.mockRestore();
   });
 
   it('parses --config', () => {

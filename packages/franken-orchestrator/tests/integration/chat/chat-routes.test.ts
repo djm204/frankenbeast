@@ -149,6 +149,35 @@ describe('Chat HTTP Routes', () => {
     expect(llmComplete).toHaveBeenCalledWith('implement the dashboard shell');
   });
 
+  it('preserves session continuation semantics across repeated HTTP turns', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      sessionContinuation: true,
+    });
+
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(llmComplete).toHaveBeenNthCalledWith(2, 'second');
+  });
+
   it('POST /v1/chat/sessions/:id/messages returns 404 for unknown session', async () => {
     const res = await app.request('/v1/chat/sessions/nonexistent/messages', {
       method: 'POST',
