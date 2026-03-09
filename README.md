@@ -657,6 +657,7 @@ frankenbeast/
 - [Architecture](docs/ARCHITECTURE.md) — system overview with Mermaid diagrams
 - [Beast Loop Explained](docs/beast-loop-explained.md) — the 5 interlocking loops and their mechanics
 - [Quickstart Guide](docs/guides/quickstart.md) — get running in 7 steps
+- [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) — start the WebSocket chat server and dashboard locally
 - [Add an LLM Provider](docs/guides/add-llm-provider.md) — implement `IAdapter` in 4 steps
 - [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
