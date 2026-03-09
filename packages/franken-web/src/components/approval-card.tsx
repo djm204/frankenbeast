@@ -6,14 +6,29 @@ export interface ApprovalCardProps {
 }
 
 export function ApprovalCard({ pending, description, onApprove, onReject }: ApprovalCardProps) {
-  if (!pending) return null;
+  if (!pending) {
+    return (
+      <section className="rail-card" aria-label="Pending approval">
+        <div className="rail-card__header">
+          <p className="eyebrow">Approvals</p>
+          <h2>Queue</h2>
+        </div>
+        <p className="rail-card__empty">No approval required.</p>
+      </section>
+    );
+  }
 
   return (
-    <section aria-label="Pending approval">
-      <h3>Approval Required</h3>
-      <p>{description}</p>
-      <button onClick={onApprove}>Approve</button>
-      <button onClick={onReject}>Reject</button>
+    <section className="rail-card rail-card--approval" aria-label="Pending approval">
+      <div className="rail-card__header">
+        <p className="eyebrow">Approvals</p>
+        <h2>Approval Required</h2>
+      </div>
+      <p className="approval-card__description">{description}</p>
+      <div className="approval-card__actions">
+        <button onClick={onApprove}>Approve</button>
+        <button className="button-secondary" onClick={onReject}>Reject</button>
+      </div>
     </section>
   );
 }

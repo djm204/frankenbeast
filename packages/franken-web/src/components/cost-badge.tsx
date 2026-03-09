@@ -10,18 +10,21 @@ export interface CostBadgeProps {
 
 export function CostBadge({ tier, tokenTotals, costUsd }: CostBadgeProps) {
   return (
-    <section aria-label="Cost summary">
-      <h2>Cost</h2>
-      <dl>
+    <section className="rail-card" aria-label="Cost summary">
+      <div className="rail-card__header">
+        <p className="eyebrow">Spend</p>
+        <h2>Cost Summary</h2>
+      </div>
+      <dl className="cost-grid">
         <dt>Tier</dt>
         <dd>{tier}</dd>
-        <dt>Cheap tokens</dt>
+        <dt>Cheap</dt>
         <dd>{tokenTotals.cheap}</dd>
-        <dt>Premium reasoning</dt>
+        <dt>Reasoning</dt>
         <dd>{tokenTotals.premiumReasoning}</dd>
-        <dt>Premium execution</dt>
+        <dt>Execution</dt>
         <dd>{tokenTotals.premiumExecution}</dd>
-        <dt>Total cost</dt>
+        <dt>Total</dt>
         <dd>${costUsd.toFixed(2)}</dd>
       </dl>
     </section>

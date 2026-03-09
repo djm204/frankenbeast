@@ -3,6 +3,7 @@ import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
 import { ConversationEngine } from '../chat/conversation-engine.js';
 import { TurnRunner } from '../chat/turn-runner.js';
+import { ChatAgentExecutor } from '../chat/chat-agent-executor.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
@@ -10,6 +11,7 @@ import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 export interface ChatAppOptions {
   sessionStoreDir: string;
   llm: ILlmClient;
+  executionLlm?: ILlmClient;
   projectName: string;
   sessionContinuation?: boolean;
   sessionTokenSecret?: string;
@@ -27,16 +29,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       ? { sessionContinuation: opts.sessionContinuation }
       : {}),
   });
-  const executor = {
-    execute: async ({ userInput }: { userInput: string }) => ({
-      status: 'success' as const,
-      summary: `Executed: ${userInput}`,
-      filesChanged: [],
-      testsRun: 0,
-      errors: [],
-    }),
-  };
-  const turnRunner = opts.turnRunner ?? new TurnRunner(executor);
+  const turnRunner = opts.turnRunner ?? new TurnRunner(new ChatAgentExecutor({
+    llm: opts.executionLlm ?? opts.llm,
+  }));
   const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
 
   const app = new Hono();

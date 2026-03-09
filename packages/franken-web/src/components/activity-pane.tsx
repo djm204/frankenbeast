@@ -1,13 +1,8 @@
-import { useRef, useEffect } from 'react';
-
-export interface TurnEvent {
-  type: string;
-  data: Record<string, unknown>;
-  timestamp: string;
-}
+import { useEffect, useRef } from 'react';
+import type { ActivityEvent } from '../hooks/use-chat-session';
 
 export interface ActivityPaneProps {
-  events: TurnEvent[];
+  events: ActivityEvent[];
 }
 
 export function ActivityPane({ events }: ActivityPaneProps) {
@@ -15,23 +10,26 @@ export function ActivityPane({ events }: ActivityPaneProps) {
 
   useEffect(() => {
     if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth' });
+      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [events.length]);
 
   return (
-    <section aria-label="Activity">
-      <h2>Activity</h2>
-      {events.length === 0 && <p>No events yet.</p>}
-      {events.map((evt, i) => (
-        <div key={i} className="activity-event">
-          <span className="activity-event__type">{evt.type}</span>
-          <span className="activity-event__summary">
-            {JSON.stringify(evt.data)}
-          </span>
-        </div>
-      ))}
-      <div ref={endRef} />
+    <section className="rail-card" aria-label="Activity">
+      <div className="rail-card__header">
+        <p className="eyebrow">Activity</p>
+        <h2>Runtime Events</h2>
+      </div>
+      {events.length === 0 && <p className="rail-card__empty">Waiting for execution events.</p>}
+      <div className="activity-list">
+        {events.map((event, index) => (
+          <article key={`${event.type}-${event.timestamp}-${index}`} className="activity-event">
+            <strong className="activity-event__type">{event.type}</strong>
+            <span className="activity-event__summary">{JSON.stringify(event.data ?? {})}</span>
+          </article>
+        ))}
+        <div ref={endRef} />
+      </div>
     </section>
   );
 }

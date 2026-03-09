@@ -1,11 +1,22 @@
-// --- Response envelope types (mirroring chunk 08 contract) ---
+export interface PendingApproval {
+  description: string;
+  requestedAt: string;
+}
 
 export interface TranscriptMessage {
+  id?: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
   modelTier?: string;
   tokens?: number;
+  costUsd?: number;
+}
+
+export interface TokenTotals {
+  cheap: number;
+  premiumReasoning: number;
+  premiumExecution: number;
 }
 
 export interface ChatSession {
@@ -13,11 +24,9 @@ export interface ChatSession {
   projectId: string;
   transcript: TranscriptMessage[];
   state: string;
-  tokenTotals: {
-    cheap: number;
-    premiumReasoning: number;
-    premiumExecution: number;
-  };
+  pendingApproval?: PendingApproval | null;
+  socketToken: string;
+  tokenTotals: TokenTotals;
   costUsd: number;
   createdAt: string;
   updatedAt: string;
@@ -45,7 +54,15 @@ interface ApiErrorEnvelope {
   error: { code: string; message: string; details?: unknown };
 }
 
-// --- API Client ---
+export function toSocketUrl(baseUrl: string, sessionId: string, token: string): string {
+  const url = new URL(baseUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/chat/ws`;
+  url.search = '';
+  url.searchParams.set('sessionId', sessionId);
+  url.searchParams.set('token', token);
+  return url.toString();
+}
 
 export class ChatApiClient {
   constructor(private readonly baseUrl: string) {}
@@ -86,8 +103,8 @@ export class ChatApiClient {
     );
   }
 
-  streamUrl(sessionId: string): string {
-    return `${this.baseUrl}/v1/chat/sessions/${encodeURIComponent(sessionId)}/stream`;
+  socketUrl(sessionId: string, token: string): string {
+    return toSocketUrl(this.baseUrl, sessionId, token);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

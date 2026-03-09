@@ -7,7 +7,7 @@ afterEach(cleanup);
 describe('Composer', () => {
   it('calls onSend with input value on submit', () => {
     const onSend = vi.fn();
-    render(<Composer onSend={onSend} disabled={false} />);
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
 
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'hello' } });
@@ -18,7 +18,7 @@ describe('Composer', () => {
 
   it('clears input after submit', () => {
     const onSend = vi.fn();
-    render(<Composer onSend={onSend} disabled={false} />);
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
 
     const input = screen.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'hello' } });
@@ -28,14 +28,14 @@ describe('Composer', () => {
   });
 
   it('disables submit button when disabled prop is true', () => {
-    render(<Composer onSend={vi.fn()} disabled={true} />);
+    render(<Composer onSend={vi.fn()} disabled={true} connectionStatus="connected" status="sending" />);
     const button = screen.getByRole('button');
     expect(button).toHaveProperty('disabled', true);
   });
 
   it('does not call onSend with empty input', () => {
     const onSend = vi.fn();
-    render(<Composer onSend={onSend} disabled={false} />);
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
 
     fireEvent.submit(screen.getByRole('textbox').closest('form')!);
     expect(onSend).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ describe('Composer', () => {
 
   it('handles Enter key submission via form', () => {
     const onSend = vi.fn();
-    render(<Composer onSend={onSend} disabled={false} />);
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
 
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'enter test' } });
@@ -53,7 +53,7 @@ describe('Composer', () => {
   });
 
   it('submit button has a label', () => {
-    render(<Composer onSend={vi.fn()} disabled={false} />);
+    render(<Composer onSend={vi.fn()} disabled={false} connectionStatus="connected" status="idle" />);
     const button = screen.getByRole('button');
     expect(button.textContent).toBeTruthy();
   });

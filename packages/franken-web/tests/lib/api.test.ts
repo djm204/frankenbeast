@@ -22,6 +22,7 @@ describe('ChatApiClient', () => {
               projectId: 'proj-1',
               transcript: [],
               state: 'active',
+              socketToken: 'socket-token-1',
               tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
               costUsd: 0,
               createdAt: '2026-03-09T00:00:00Z',
@@ -33,6 +34,7 @@ describe('ChatApiClient', () => {
       const session = await client.createSession('proj-1');
       expect(session.id).toBe('chat-123-abc');
       expect(session.projectId).toBe('proj-1');
+      expect(session.socketToken).toBe('socket-token-1');
       expect(session.transcript).toEqual([]);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/v1/chat/sessions',
@@ -56,6 +58,7 @@ describe('ChatApiClient', () => {
               projectId: 'proj-1',
               transcript: [{ role: 'user', content: 'hello', timestamp: '2026-03-09T00:00:00Z' }],
               state: 'active',
+              socketToken: 'socket-token-2',
               tokenTotals: { cheap: 10, premiumReasoning: 0, premiumExecution: 0 },
               costUsd: 0.001,
               createdAt: '2026-03-09T00:00:00Z',
@@ -66,6 +69,7 @@ describe('ChatApiClient', () => {
 
       const session = await client.getSession('chat-123-abc');
       expect(session.id).toBe('chat-123-abc');
+      expect(session.socketToken).toBe('socket-token-2');
       expect(session.transcript).toHaveLength(1);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/v1/chat/sessions/chat-123-abc',
@@ -126,10 +130,10 @@ describe('ChatApiClient', () => {
     });
   });
 
-  describe('streamUrl', () => {
-    it('returns the SSE stream URL for a session', () => {
-      const url = client.streamUrl('sess-1');
-      expect(url).toBe('http://localhost:3000/v1/chat/sessions/sess-1/stream');
+  describe('socketUrl', () => {
+    it('returns the websocket URL for a session', () => {
+      const url = client.socketUrl('sess-1', 'signed-token');
+      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1&token=signed-token');
     });
   });
 

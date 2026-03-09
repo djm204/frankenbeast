@@ -1,31 +1,60 @@
-import { useRef, useEffect } from 'react';
-import type { TranscriptMessage } from '../lib/api';
+import { useEffect, useRef } from 'react';
+import type { ChatMessage } from '../hooks/use-chat-session';
 
 export interface TranscriptPaneProps {
-  messages: TranscriptMessage[];
+  messages: ChatMessage[];
+  showTypingIndicator: boolean;
 }
 
-export function TranscriptPane({ messages }: TranscriptPaneProps) {
+export function TranscriptPane({ messages, showTypingIndicator }: TranscriptPaneProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth' });
+      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [messages.length]);
+  }, [messages.length, showTypingIndicator]);
 
   return (
-    <section aria-label="Transcript">
-      {messages.map((msg, i) => (
-        <div key={i} className={`message message--${msg.role}`}>
-          <span className="message__role">{msg.role}</span>
-          {msg.modelTier && (
-            <span className="message__tier">{msg.modelTier}</span>
-          )}
-          <p className="message__content">{msg.content}</p>
+    <section className="transcript-pane" aria-label="Transcript">
+      <div className="transcript-pane__header">
+        <div>
+          <p className="eyebrow">Command Console</p>
+          <h1>Chat</h1>
         </div>
-      ))}
-      <div ref={endRef} />
+        <p className="transcript-pane__meta">CLI-parity conversation stream with live execution telemetry.</p>
+      </div>
+
+      <div className="transcript-pane__body">
+        {messages.length === 0 && (
+          <div className="empty-state">
+            <p>No messages yet.</p>
+            <span>Start with a direct request or a slash command like `/plan`.</span>
+          </div>
+        )}
+
+        {messages.map((message) => (
+          <article key={message.id} className={`message-card message-card--${message.role}`}>
+            <div className="message-card__meta">
+              <span className="message-card__role">{message.role}</span>
+              {message.modelTier && <span className="message-card__tier">{message.modelTier}</span>}
+              {message.receipt && <span className="message-card__receipt">{message.receipt}</span>}
+            </div>
+            <p className="message-card__content">{message.content}</p>
+          </article>
+        ))}
+
+        {showTypingIndicator && (
+          <article className="message-card message-card--assistant message-card--typing">
+            <div className="message-card__meta">
+              <span className="message-card__role">assistant</span>
+            </div>
+            <p className="message-card__content">Frankenbeast is typing…</p>
+          </article>
+        )}
+
+        <div ref={endRef} />
+      </div>
     </section>
   );
 }

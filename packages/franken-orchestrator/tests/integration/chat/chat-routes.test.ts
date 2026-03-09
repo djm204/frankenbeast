@@ -11,12 +11,14 @@ const TMP = join(__dirname, '__fixtures__/http-chat');
 
 describe('Chat HTTP Routes', () => {
   let app: ReturnType<typeof createChatApp>;
+  let llmComplete: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mkdirSync(TMP, { recursive: true });
+    llmComplete = vi.fn().mockResolvedValue('Mock reply');
     app = createChatApp({
       sessionStoreDir: TMP,
-      llm: { complete: vi.fn().mockResolvedValue('Mock reply') },
+      llm: { complete: llmComplete },
       projectName: 'test-project',
     });
   });
@@ -127,6 +129,24 @@ describe('Chat HTTP Routes', () => {
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript).toHaveLength(2);
     expect(sessionBody.data.state).toBe('active');
+  });
+
+  it('uses the default LLM-backed executor for code-request turns', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'implement the dashboard shell' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(llmComplete).toHaveBeenCalledWith('implement the dashboard shell');
   });
 
   it('POST /v1/chat/sessions/:id/messages returns 404 for unknown session', async () => {

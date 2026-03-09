@@ -1,85 +1,91 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useChatSession } from '../../src/hooks/use-chat-session';
-import type { ChatApiClient } from '../../src/lib/api';
 
-// --- Mock API client ---
 const mockCreateSession = vi.fn();
 const mockGetSession = vi.fn();
-const mockSendMessage = vi.fn();
-const mockApprove = vi.fn();
-const mockStreamUrl = vi.fn();
+const mockSocketUrl = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
   ChatApiClient: vi.fn().mockImplementation(() => ({
     createSession: mockCreateSession,
     getSession: mockGetSession,
-    sendMessage: mockSendMessage,
-    approve: mockApprove,
-    streamUrl: mockStreamUrl,
+    socketUrl: mockSocketUrl,
   })),
 }));
 
-// --- Mock EventSource ---
-let eventSourceInstance: {
-  addEventListener: ReturnType<typeof vi.fn>;
-  removeEventListener: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  readyState: number;
-};
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
 
-const MockEventSource = vi.fn().mockImplementation(() => {
-  eventSourceInstance = {
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    close: vi.fn(),
-    readyState: 1,
-  };
-  return eventSourceInstance;
-});
+  readonly url: string;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  readyState = 0;
+  sent: string[] = [];
+  close = vi.fn(() => {
+    this.readyState = 3;
+  });
 
-vi.stubGlobal('EventSource', MockEventSource);
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  send(data: string) {
+    this.sent.push(data);
+  }
+
+  open() {
+    this.readyState = 1;
+    this.onopen?.(new Event('open'));
+  }
+
+  message(payload: unknown) {
+    this.onmessage?.(
+      new MessageEvent('message', { data: JSON.stringify(payload) }),
+    );
+  }
+
+  error() {
+    this.onerror?.(new Event('error'));
+  }
+
+  shutdown() {
+    this.readyState = 3;
+    this.onclose?.(new CloseEvent('close'));
+  }
+}
+
+vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
 
 describe('useChatSession', () => {
   const opts = { baseUrl: 'http://localhost:3000', projectId: 'test-proj' };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    MockWebSocket.instances = [];
     mockCreateSession.mockResolvedValue({
       id: 'chat-1',
       projectId: 'test-proj',
       transcript: [],
       state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
       tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
       costUsd: 0,
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:00Z',
     });
-    mockStreamUrl.mockReturnValue('http://localhost:3000/v1/chat/sessions/chat-1/stream');
+    mockSocketUrl.mockReturnValue('ws://localhost:3000/v1/chat/ws?sessionId=chat-1&token=signed-token');
   });
 
-  it('starts with empty transcript and idle status', () => {
-    const { result } = renderHook(() => useChatSession(opts));
-    expect(result.current.transcript).toEqual([]);
-    expect(result.current.status).toBe('idle');
+  afterEach(() => {
+    MockWebSocket.instances = [];
   });
 
-  it('exposes send function', () => {
-    const { result } = renderHook(() => useChatSession(opts));
-    expect(typeof result.current.send).toBe('function');
-  });
-
-  it('exposes approve function', () => {
-    const { result } = renderHook(() => useChatSession(opts));
-    expect(typeof result.current.approve).toBe('function');
-  });
-
-  it('exposes tier as null initially', () => {
-    const { result } = renderHook(() => useChatSession(opts));
-    expect(result.current.tier).toBeNull();
-  });
-
-  it('creates session on mount and sets sessionId', async () => {
+  it('creates a session and opens a websocket connection', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -87,127 +93,143 @@ describe('useChatSession', () => {
     });
 
     expect(mockCreateSession).toHaveBeenCalledWith('test-proj');
-  });
-
-  it('sets up EventSource after session creation', async () => {
-    const { result } = renderHook(() => useChatSession(opts));
-
-    await waitFor(() => {
-      expect(result.current.sessionId).toBe('chat-1');
-    });
-
-    expect(MockEventSource).toHaveBeenCalledWith(
-      'http://localhost:3000/v1/chat/sessions/chat-1/stream',
+    expect(mockSocketUrl).toHaveBeenCalledWith('chat-1', 'signed-token');
+    expect(MockWebSocket.instances[0]?.url).toBe(
+      'ws://localhost:3000/v1/chat/ws?sessionId=chat-1&token=signed-token',
     );
   });
 
-  it('closes EventSource on unmount', async () => {
-    const { result, unmount } = renderHook(() => useChatSession(opts));
-
-    await waitFor(() => {
-      expect(result.current.sessionId).toBe('chat-1');
-    });
-
-    unmount();
-    expect(eventSourceInstance.close).toHaveBeenCalled();
-  });
-
-  it('send() calls API and updates transcript', async () => {
-    mockSendMessage.mockResolvedValue({
-      outcome: { kind: 'reply', content: 'Hello!', modelTier: 'cheap' },
-      tier: 'cheap',
-      state: 'active',
-    });
-
+  it('streams assistant messages and updates receipts', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
       expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+      });
     });
 
     await act(async () => {
-      await result.current.send('hi there');
+      await result.current.send('Ship the dashboard shell');
     });
 
-    expect(mockSendMessage).toHaveBeenCalledWith('chat-1', 'hi there');
-    expect(result.current.transcript).toHaveLength(2); // user msg + assistant reply
-    expect(result.current.transcript[0]!.role).toBe('user');
-    expect(result.current.transcript[0]!.content).toBe('hi there');
-    expect(result.current.transcript[1]!.role).toBe('assistant');
-    expect(result.current.transcript[1]!.content).toBe('Hello!');
-    expect(result.current.tier).toBe('cheap');
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]?.role).toBe('user');
+    expect(result.current.messages[0]?.receipt).toBe('sending');
+
+    const outbound = JSON.parse(socket.sent[0] ?? '{}') as { type: string; clientMessageId: string };
+    expect(outbound.type).toBe('message.send');
+
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        clientMessageId: outbound.clientMessageId,
+        sessionId: 'chat-1',
+        timestamp: '2026-03-09T00:00:01Z',
+      });
+      socket.message({
+        type: 'message.delivered',
+        clientMessageId: outbound.clientMessageId,
+        timestamp: '2026-03-09T00:00:02Z',
+      });
+      socket.message({
+        type: 'message.read',
+        clientMessageId: outbound.clientMessageId,
+        timestamp: '2026-03-09T00:00:03Z',
+      });
+      socket.message({
+        type: 'assistant.typing.start',
+        timestamp: '2026-03-09T00:00:04Z',
+      });
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'assistant-1',
+        chunk: 'Working ',
+        modelTier: 'premium_execution',
+      });
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'assistant-1',
+        chunk: 'through it.',
+        modelTier: 'premium_execution',
+      });
+      socket.message({
+        type: 'assistant.message.complete',
+        messageId: 'assistant-1',
+        content: 'Working through it.',
+        modelTier: 'premium_execution',
+        timestamp: '2026-03-09T00:00:05Z',
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0]?.receipt).toBe('read');
+    expect(result.current.messages[1]).toMatchObject({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'Working through it.',
+      modelTier: 'premium_execution',
+      streaming: false,
+    });
+    expect(result.current.status).toBe('idle');
+    expect(result.current.connectionStatus).toBe('connected');
   });
 
-  it('approve() calls API approve method', async () => {
-    mockApprove.mockResolvedValue({ id: 'chat-1', approved: true, state: 'approved' });
-
+  it('surfaces pending approvals and sends approval responses over the socket', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
       expect(result.current.sessionId).toBe('chat-1');
     });
+
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
 
     await act(async () => {
       await result.current.approve(true);
     });
 
-    expect(mockApprove).toHaveBeenCalledWith('chat-1', true);
-  });
-
-  it('sets status to error when session creation fails', async () => {
-    mockCreateSession.mockRejectedValueOnce(new Error('Network error'));
-
-    const { result } = renderHook(() => useChatSession(opts));
-
-    await waitFor(() => {
-      expect(result.current.status).toBe('error');
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      type: 'approval.respond',
+      approved: true,
     });
   });
 
-  it('sets status to loading during send', async () => {
-    let resolveMsg: (v: unknown) => void;
-    mockSendMessage.mockReturnValue(
-      new Promise((r) => {
-        resolveMsg = r;
-      }),
-    );
-
-    const { result } = renderHook(() => useChatSession(opts));
-
-    await waitFor(() => {
-      expect(result.current.sessionId).toBe('chat-1');
-    });
-
-    let sendPromise: Promise<void>;
-    act(() => {
-      sendPromise = result.current.send('test');
-    });
-
-    expect(result.current.status).toBe('loading');
-
-    await act(async () => {
-      resolveMsg!({
-        outcome: { kind: 'reply', content: 'ok', modelTier: 'cheap' },
-        tier: 'cheap',
-        state: 'active',
-      });
-      await sendPromise!;
-    });
-
-    expect(result.current.status).toBe('idle');
-  });
-
-  it('resumes session if sessionId provided', async () => {
+  it('resumes an existing session and marks the socket disconnected when it closes', async () => {
     mockGetSession.mockResolvedValue({
       id: 'existing-sess',
       projectId: 'test-proj',
-      transcript: [{ role: 'user', content: 'old message', timestamp: '2026-03-09T00:00:00Z' }],
+      transcript: [{ id: 'u1', role: 'user', content: 'old message', timestamp: '2026-03-09T00:00:00Z' }],
       state: 'active',
+      pendingApproval: null,
+      socketToken: 'resume-token',
       tokenTotals: { cheap: 5, premiumReasoning: 0, premiumExecution: 0 },
       costUsd: 0,
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:00Z',
     });
+    mockSocketUrl.mockReturnValue('ws://localhost:3000/v1/chat/ws?sessionId=existing-sess&token=resume-token');
 
     const { result } = renderHook(() =>
       useChatSession({ ...opts, sessionId: 'existing-sess' }),
@@ -217,8 +239,18 @@ describe('useChatSession', () => {
       expect(result.current.sessionId).toBe('existing-sess');
     });
 
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.shutdown();
+    });
+
     expect(mockGetSession).toHaveBeenCalledWith('existing-sess');
-    expect(mockCreateSession).not.toHaveBeenCalled();
-    expect(result.current.transcript).toHaveLength(1);
+    expect(result.current.messages[0]?.content).toBe('old message');
+    expect(result.current.connectionStatus).toBe('disconnected');
   });
 });
