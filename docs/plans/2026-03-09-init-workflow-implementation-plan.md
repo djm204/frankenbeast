@@ -4,17 +4,18 @@
 **Status:** Proposed
 **Scope:** Cross-module
 **Depends On:**
-- [2026-03-08 Dashboard Implementation Plan](./2026-03-08-dashboard-implementation-plan.md)
-- [2026-03-09 Dashboard Agent Configuration — Implementation Plan](./2026-03-09-dashboard-agent-configuration-implementation-plan.md)
-- [2026-03-08 Chatbot Implementation Plan — Frankenbeast](./2026-03-08-chatbot-implementation-plan.md)
-- [2026-03-08 External Communication Channels — Implementation Plan](./2026-03-08-channel-integrations-implementation-plan.md)
-- [2026-03-08 Secure File Store Integrations — Implementation Plan](./2026-03-08-file-store-integrations-implementation-plan.md)
-- [2026-03-08 Productivity Integrations — Implementation Plan](./2026-03-08-productivity-integrations-implementation-plan.md)
-- [2026-03-09 LLM Error Awareness Memory Injection Plan](./2026-03-09-llm-error-awareness-memory-injection-plan.md)
+- [2026-03-08 Dashboard Implementation Plan](./2026-03-08-dashboard-implementation-plan.md) — partially superseded in practice by shipped `franken-web` dashboard work
+- [2026-03-09 Dashboard Agent Configuration — Implementation Plan](./2026-03-09-dashboard-agent-configuration-implementation-plan.md) — still planned
+- [2026-03-08 Chatbot Implementation Plan — Frankenbeast](./2026-03-08-chatbot-implementation-plan.md) — materially landed for CLI chat plus dashboard WebSocket chat
+- [2026-03-09 Franken Web Dashboard Chat — Implementation Plan](./2026-03-09-franken-web-dashboard-chat-implementation-plan.md) — shipped on `main`
+- [2026-03-08 External Communication Channels — Implementation Plan](./2026-03-08-channel-integrations-implementation-plan.md) — actively in flight on `feature/channel-integrations`
+- [2026-03-08 Secure File Store Integrations — Implementation Plan](./2026-03-08-file-store-integrations-implementation-plan.md) — still planned
+- [2026-03-08 Productivity Integrations — Implementation Plan](./2026-03-08-productivity-integrations-implementation-plan.md) — still planned
+- [2026-03-09 LLM Error Awareness Memory Injection Plan](./2026-03-09-llm-error-awareness-memory-injection-plan.md) — still planned
 
 ## Goal
 
-Add a first-class init workflow that bootstraps Frankenbeast after the outstanding platform work is complete.
+Add a first-class init workflow that bootstraps Frankenbeast from the platform as it exists now, while leaving clear extension points for the connector and configuration work that is still in flight.
 
 The init flow should establish everything required for Frankenbeast to run safely and predictably:
 
@@ -27,7 +28,7 @@ The init flow should establish everything required for Frankenbeast to run safel
 - external connector setup for enabled features
 - readiness verification
 
-The result should be one canonical bootstrap path, not a collection of disconnected setup steps across docs, ad hoc scripts, and CLI flags.
+The result should be one canonical bootstrap path, not a collection of disconnected setup steps across docs, ad hoc scripts, CLI flags, and dashboard-only setup affordances.
 
 Security is a first-class citizen throughout this workflow, especially anywhere init touches credentials, auth state, provider tokens, webhook secrets, encryption keys, or persisted connector metadata.
 
@@ -59,6 +60,37 @@ Once the dashboard, chat, connector, and agent-profile work is complete, Franken
 - is the system actually ready right now?
 
 If init cannot answer those questions deterministically, the platform will remain brittle.
+
+---
+
+## Current State Snapshot (Updated 2026-03-09)
+
+This plan needs to start from the repo that exists today, not from the repo implied by the older dashboard/chat plans.
+
+### Already landed on `main`
+
+- `franken-web` now exists as the dashboard application shell
+- dashboard chat is already wired to the shared chat runtime over HTTP bootstrap plus WebSocket streaming
+- `franken-orchestrator` now exposes a real `frankenbeast chat-server` command
+- the local run path is documented in `docs/guides/run-dashboard-chat.md`
+- ADR-016 records the decision that dashboard chat is a thin client over the CLI-chat-compatible runtime
+
+### In flight on the current `feature/channel-integrations` worktree
+
+- `franken-comms` already exists on this branch
+- the branch contains core comms abstractions, a `ChatSocketBridge`, session mapping, Hono server scaffolding, and Slack/Discord adapters
+- Slack signature verification is already implemented on the branch
+- Discord integration and Ed25519 request verification are also in flight on the branch
+
+### Still not landed
+
+- dashboard-managed durable agent profile configuration is still plan-stage
+- file-store and productivity integrations are still plan-stage
+- a canonical `frankenbeast init` entrypoint does not exist yet
+
+### Implication for this plan
+
+The init workflow should not wait for a hypothetical future dashboard/chat stack. It should treat the current dashboard chat server path as an existing service to bootstrap and verify, and it should phase channel/file/productivity setup behind the abstractions that are already landing.
 
 ---
 
@@ -373,10 +405,10 @@ The init workflow should own readiness for all required services, whether local 
 
 Examples of services and dependencies:
 
-- dashboard API and UI
+- dashboard API and UI (`franken-web`)
 - analytics and dashboard storage
-- chat backend
-- channel webhook server
+- chat backend (`frankenbeast chat-server`)
+- channel webhook server (`franken-comms`, currently in flight)
 - file-store gateway
 - productivity gateway
 - firewall service
@@ -520,7 +552,7 @@ packages/franken-orchestrator/src/
 The dashboard layer should add:
 
 ```text
-packages/franken-dashboard/src/
+packages/franken-web/src/
   pages/
     setup.tsx
     project-onboarding.tsx
@@ -546,9 +578,9 @@ interface InitContributor {
 
 This allows:
 
+- `franken-comms`
 - `franken-files`
 - `franken-productivity`
-- `franken-comms`
 - dashboard storage/backend
 - chat/session storage
 
@@ -590,11 +622,28 @@ Deliverables:
 Done when:
 
 - current quickstart setup can be completed through `frankenbeast init`
+- the existing dashboard chat run path can be completed through `frankenbeast init` plus one follow-on launch command
 - `scripts/verify-setup.ts` is either delegated to the new readiness engine or retired
 
-## Phase 3: Agent profile and provider auth
+## Phase 3: Existing chat and dashboard foundation
 
-Integrate dashboard-managed agent profiles and provider-specific auth verification.
+Integrate the already-shipped dashboard chat foundation into init.
+
+Deliverables:
+
+- `chat-server` readiness checks
+- dashboard API/UI readiness checks
+- project-level chat/session storage bootstrap
+- verification that the active provider/runtime configuration is sufficient for chat to answer turns
+
+Done when:
+
+- the current `docs/guides/run-dashboard-chat.md` flow can be reduced to a guided init plus launch path
+- a new operator can get to a working dashboard chat session without piecing together chat-specific setup manually
+
+## Phase 4: Agent profile and provider auth
+
+Integrate dashboard-managed agent profiles once that work lands, while still covering provider-specific auth deterministically.
 
 Deliverables:
 
@@ -608,38 +657,44 @@ Done when:
 - enabled providers can be verified deterministically before first run
 - profile-to-runtime translation is validated during init rather than failing late during execution
 
-## Phase 4: Chat and dashboard onboarding
+## Phase 5: Dashboard onboarding over the shared init engine
 
-Bring in the completed chat and dashboard surfaces.
+Expose the same init state and repair surface through the existing `franken-web` dashboard.
 
 Deliverables:
 
-- chat config bootstrap
-- dashboard setup wizard and API wiring
+- setup wizard and API wiring in `franken-web`
 - project onboarding path
+- repair and re-verify actions backed by the shared init engine
 
 Done when:
 
 - a new operator can onboard through either CLI or dashboard and reach the same resulting state
 
-## Phase 5: External connector setup
+## Phase 6: External connector setup
 
-Integrate channels, file stores, and productivity systems.
+Integrate channels, file stores, and productivity systems in the order their underlying packages actually exist.
 
 Deliverables:
 
-- connector registration flow
+- channel connector registration flow over `franken-comms` first
 - OAuth or secret prerequisites
 - scope validation
 - allowlist capture
 - per-project bindings
+- later hooks for file-store and productivity providers as those packages land
 
 Done when:
 
 - enabled connectors are validated during init with clear pass/fail status
 - risky write-capable integrations are blocked until required policy fields exist
 
-## Phase 6: Repair and drift detection
+Notes:
+
+- for channels, the first init target should be the currently in-flight Slack and Discord surfaces
+- do not block Phase 6 on Telegram/WhatsApp, file-store, or productivity work that does not exist yet
+
+## Phase 7: Repair and drift detection
 
 Support long-lived operation after initial setup.
 
