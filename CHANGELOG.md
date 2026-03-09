@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.5.0...frankenbeast-v0.6.0) (2026-03-09)
+
+
+### Features
+
+* eslint configs, gitignore hygiene, CLI guard fix ([#99](https://github.com/djm204/frankenbeast/issues/99)) ([87d7427](https://github.com/djm204/frankenbeast/commit/87d74276a909b272141119ce151647118725ce2e))
+
+
+### Miscellaneous
+
+* remove stale per-package release-please workflows ([#101](https://github.com/djm204/frankenbeast/issues/101)) ([f7516df](https://github.com/djm204/frankenbeast/commit/f7516df5f68584c1cc56aa1faae5994f9a5eae1b))
+
 ## [0.5.0](https://github.com/djm204/frankenbeast/compare/frankenbeast-v0.4.1...frankenbeast-v0.5.0) (2026-03-09)
 
 

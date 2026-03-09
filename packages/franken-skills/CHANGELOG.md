@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.2.0...franken-skills-v0.3.0) (2026-03-09)
+
+
+### Features
+
+* eslint configs, gitignore hygiene, CLI guard fix ([#99](https://github.com/djm204/frankenbeast/issues/99)) ([87d7427](https://github.com/djm204/frankenbeast/commit/87d74276a909b272141119ce151647118725ce2e))
+
 ## [0.2.0](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.1.0...franken-skills-v0.2.0) (2026-03-09)
 
 

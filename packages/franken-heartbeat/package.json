@@ -1,6 +1,6 @@
 {
   "name": "franken-heartbeat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MOD-08: Heartbeat Loop — Proactive self-reflection for the Frankenbeast agent system",
   "type": "module",
   "main": "dist/index.js",
