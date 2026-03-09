@@ -93,6 +93,14 @@ export interface CircuitBreaker {
   check(spendUsd: number): CircuitBreakerResult;
 }
 
+export interface ContextWindowUsage {
+  readonly usedTokens: number;
+  readonly maxTokens: number;
+  readonly usageRatio: number;
+  readonly threshold: number;
+  readonly shouldCompact: boolean;
+}
+
 export interface LoopDetector {
   check(spanName: string): { detected: boolean };
 }
@@ -103,6 +111,12 @@ export interface ObserverDeps {
   readonly costCalc: CostCalculator;
   readonly breaker: CircuitBreaker;
   readonly loopDetector: LoopDetector;
+  estimateContextWindow(input: {
+    renderedPrompt: string;
+    provider: string;
+    maxTokens: number;
+    threshold?: number;
+  }): ContextWindowUsage;
   startSpan(trace: Trace, opts: { name: string; parentSpanId?: string }): Span;
   endSpan(span: Span, opts?: { status?: string; errorMessage?: string }, loopDetector?: LoopDetector): void;
   recordTokenUsage(span: Span, usage: TokenUsage, counter?: TokenCounter): void;

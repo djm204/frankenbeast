@@ -9,7 +9,7 @@ import {
 } from '@frankenbeast/observer';
 import type { Trace, Span } from '@frankenbeast/observer';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
-import type { ObserverDeps } from '../skills/cli-skill-executor.js';
+import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';
 
 export interface CliObserverBridgeConfig {
   budgetLimitUsd: number;
@@ -61,6 +61,26 @@ export class CliObserverBridge implements IObserverModule {
     };
   }
 
+  estimateContextWindow(input: {
+    renderedPrompt: string;
+    provider: string;
+    maxTokens: number;
+    threshold?: number;
+  }): ContextWindowUsage {
+    const divisor = input.provider === 'codex' ? 16 : 4;
+    const usedTokens = Math.ceil(input.renderedPrompt.length / divisor);
+    const threshold = input.threshold ?? 0.85;
+    const usageRatio = input.maxTokens > 0 ? usedTokens / input.maxTokens : 1;
+
+    return {
+      usedTokens,
+      maxTokens: input.maxTokens,
+      usageRatio,
+      threshold,
+      shouldCompact: usageRatio >= threshold,
+    };
+  }
+
   get observerDeps(): ObserverDeps {
     const trace = this.requireTrace();
     return {
@@ -69,6 +89,7 @@ export class CliObserverBridge implements IObserverModule {
       costCalc: this.costCalc,
       breaker: this.breaker,
       loopDetector: this.loopDet,
+      estimateContextWindow: (input) => this.estimateContextWindow(input),
       startSpan: (t: Trace, opts: { name: string; parentSpanId?: string }) =>
         TraceContext.startSpan(t, opts),
       endSpan: (span: Span, opts?: { status?: string; errorMessage?: string }, loopDetector?: LoopDetector) =>

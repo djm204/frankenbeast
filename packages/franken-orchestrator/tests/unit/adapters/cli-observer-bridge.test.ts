@@ -176,6 +176,20 @@ describe('CliObserverBridge', () => {
 
       deps.endSpan(span);
     });
+
+    it('requests compaction when usage reaches 85 percent', () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-1');
+
+      const usage = bridge.estimateContextWindow({
+        renderedPrompt: 'x'.repeat(4000),
+        provider: 'claude',
+        maxTokens: 1000,
+      });
+
+      expect(usage.usageRatio).toBeGreaterThanOrEqual(0.85);
+      expect(usage.shouldCompact).toBe(true);
+    });
   });
 
   // ── Hardening ──
