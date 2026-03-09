@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
 
 describe('project-root', () => {
   const testDir = resolve(tmpdir(), 'fb-test-project-root');
@@ -31,17 +31,46 @@ describe('project-root', () => {
   });
 
   describe('getProjectPaths', () => {
-    it('returns all conventional paths', () => {
+    it('returns flat plans dir when no plan name provided', () => {
       const paths = getProjectPaths(testDir);
       expect(paths.root).toBe(testDir);
       expect(paths.frankenbeastDir).toBe(resolve(testDir, '.frankenbeast'));
       expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans'));
       expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
-      expect(paths.checkpointFile).toBe(resolve(testDir, '.frankenbeast/.build/.checkpoint'));
-      expect(paths.tracesDb).toBe(resolve(testDir, '.frankenbeast/.build/build-traces.db'));
-      expect(paths.logFile).toBe(resolve(testDir, '.frankenbeast/.build/build.log'));
       expect(paths.designDocFile).toBe(resolve(testDir, '.frankenbeast/plans/design.md'));
+      expect(paths.llmResponseFile).toBe(resolve(testDir, '.frankenbeast/plans/llm-response.json'));
       expect(paths.configFile).toBe(resolve(testDir, '.frankenbeast/config.json'));
+    });
+
+    it('scopes plans dir by plan name when provided', () => {
+      const paths = getProjectPaths(testDir, 'monorepo-migration');
+      expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration'));
+      expect(paths.designDocFile).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration/design.md'));
+      expect(paths.llmResponseFile).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration/llm-response.json'));
+      // build dir is shared, not plan-scoped
+      expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
+    });
+  });
+
+  describe('generatePlanName', () => {
+    it('derives name from design doc filename', () => {
+      expect(generatePlanName('docs/plans/2026-03-08-monorepo-migration-design.md'))
+        .toBe('monorepo-migration-design');
+    });
+
+    it('strips date prefix from filename', () => {
+      expect(generatePlanName('2026-03-08-chatbot-plan.md'))
+        .toBe('chatbot-plan');
+    });
+
+    it('handles filename without date prefix', () => {
+      expect(generatePlanName('my-feature.md'))
+        .toBe('my-feature');
+    });
+
+    it('falls back to date-based name when no path provided', () => {
+      const name = generatePlanName();
+      expect(name).toMatch(/^plan-\d{4}-\d{2}-\d{2}$/);
     });
   });
 

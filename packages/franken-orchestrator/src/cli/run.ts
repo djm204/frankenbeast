@@ -7,7 +7,7 @@ import type { CliArgs } from './args.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
@@ -71,7 +71,7 @@ export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> 
   return loadConfig(args);
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const args = parseArgs();
 
   if (args.help) {
@@ -105,8 +105,9 @@ async function main(): Promise<void> {
     console.log('Config:', JSON.stringify(config, null, 2));
   }
 
-  // Resolve project root
-  const paths = getProjectPaths(root);
+  // Resolve project root — scope plans by name unless --plan-dir overrides
+  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
   // Create IO for interactive prompts
@@ -164,7 +165,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error('Fatal:', error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error('Fatal:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

@@ -1,7 +1,7 @@
 // Beast Loop orchestrator
 export { BeastLoop } from './beast-loop.js';
 export { parseArgs, printUsage } from './cli/args.js';
-export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
+export { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './cli/project-root.js';
 export { detectCurrentBranch, resolveBaseBranch } from './cli/base-branch.js';
 // Config
 export { OrchestratorConfigSchema, defaultConfig } from './config/orchestrator-config.js';

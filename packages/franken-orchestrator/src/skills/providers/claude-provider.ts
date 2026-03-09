@@ -36,8 +36,7 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   normalizeOutput(raw: string): string {
-    // Strip hook output blocks (multi-line formatted JSON containing hookSpecificOutput)
-    const cleaned = raw.replace(/\{[\s\S]*?"hookSpecificOutput"[\s\S]*?\n\}/g, '');
+    const cleaned = stripHookBlocks(raw);
     const lines = cleaned.split('\n');
     const extracted: string[] = [];
 
@@ -119,4 +118,56 @@ export class ClaudeProvider implements ICliProvider {
   supportsStreamJson(): boolean {
     return true;
   }
+}
+
+/**
+ * Strip JSON blocks containing "hookSpecificOutput" from raw CLI output.
+ * Uses brace-depth matching to correctly handle multi-line pretty-printed
+ * hook JSON with nested braces in string values.
+ */
+function stripHookBlocks(raw: string): string {
+  const MARKER = '"hookSpecificOutput"';
+  let result = raw;
+
+  while (true) {
+    const markerIdx = result.indexOf(MARKER);
+    if (markerIdx === -1) break;
+
+    // Walk backward from marker to find the opening '{' of the enclosing object
+    let start = -1;
+    for (let i = markerIdx - 1; i >= 0; i--) {
+      if (result[i] === '{') {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) break;
+
+    // Walk forward from start using brace-depth matching to find the closing '}'
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let end = -1;
+
+    for (let i = start; i < result.length; i++) {
+      const ch = result[i]!;
+
+      if (escape) { escape = false; continue; }
+      if (ch === '\\' && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+
+    if (end === -1) break;
+
+    result = result.slice(0, start) + result.slice(end + 1);
+  }
+
+  return result;
 }

@@ -11,6 +11,7 @@ export interface CliArgs {
   providers?: string[] | undefined;
   designDoc?: string | undefined;
   planDir?: string | undefined;
+  planName?: string | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -46,6 +47,7 @@ Options:
   --providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
   --design-doc <path>     Path to design document
   --plan-dir <path>       Path to chunk files directory
+  --plan-name <name>      Plan name (default: auto-generated from date)
   --config <path>         Path to config file (JSON)
   --no-pr                 Skip PR creation
   --verbose               Debug logs + trace viewer
@@ -99,6 +101,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       providers: { type: 'string' },
       'design-doc': { type: 'string' },
       'plan-dir': { type: 'string' },
+      'plan-name': { type: 'string' },
       config: { type: 'string' },
       'no-pr': { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
@@ -151,6 +154,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     providers,
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],
+    planName: values['plan-name'],
     config: values.config,
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,
