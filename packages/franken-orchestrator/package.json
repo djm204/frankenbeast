@@ -1,6 +1,6 @@
 {
   "name": "franken-orchestrator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The Beast Loop — orchestrator wiring all Frankenbeast modules into a unified agent pipeline",
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,9 @@
   "bin": {
     "frankenbeast": "./dist/cli/run.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -25,7 +27,12 @@
     "test:e2e": "E2E=true vitest run",
     "lint": "eslint src/ tests/"
   },
-  "keywords": ["frankenbeast", "orchestrator", "agent", "beast-loop"],
+  "keywords": [
+    "frankenbeast",
+    "orchestrator",
+    "agent",
+    "beast-loop"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
