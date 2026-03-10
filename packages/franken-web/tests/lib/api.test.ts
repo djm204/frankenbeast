@@ -78,6 +78,37 @@ describe('ChatApiClient', () => {
     });
   });
 
+  describe('listSessions', () => {
+    it('loads session summaries with optional project filtering', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              sessions: [
+                {
+                  id: 'chat-123-abc',
+                  projectId: 'proj-1',
+                  state: 'active',
+                  messageCount: 2,
+                  preview: 'latest turn',
+                  createdAt: '2026-03-09T00:00:00Z',
+                  updatedAt: '2026-03-09T00:00:05Z',
+                },
+              ],
+            },
+          }),
+      });
+
+      const sessions = await client.listSessions('proj-1');
+      expect(sessions[0]?.id).toBe('chat-123-abc');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/v1/chat/sessions?projectId=proj-1',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+  });
+
   describe('sendMessage', () => {
     it('sends POST to /v1/chat/sessions/:id/messages with content', async () => {
       mockFetch.mockResolvedValueOnce({

@@ -59,6 +59,31 @@ describe('Chat HTTP Routes', () => {
     expect(body.data.socketToken).toEqual(expect.any(String));
   });
 
+  it('GET /v1/chat/sessions lists session summaries and filters by project', async () => {
+    await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'alpha' }),
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'beta' }),
+    });
+    const { data: latest } = await createRes.json();
+
+    const response = await app.request('/v1/chat/sessions?projectId=beta');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.sessions).toEqual([
+      expect.objectContaining({
+        id: latest.id,
+        projectId: 'beta',
+        messageCount: 0,
+      }),
+    ]);
+  });
+
   // --- Get session ---
 
   it('GET /v1/chat/sessions/:id returns session', async () => {

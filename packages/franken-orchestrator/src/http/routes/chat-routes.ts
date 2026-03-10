@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import type { ChatRuntime } from '../../chat/runtime.js';
-import type { TurnRunner, TurnRunResult } from '../../chat/turn-runner.js';
+import type { TurnRunner } from '../../chat/turn-runner.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 
@@ -35,17 +35,6 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
   return session;
 }
 
-function sessionStateFromRunStatus(status: TurnRunResult['status']): string {
-  switch (status) {
-    case 'pending_approval':
-      return 'pending_approval';
-    case 'failed':
-      return 'failed';
-    case 'completed':
-      return 'active';
-  }
-}
-
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketToken } = deps;
   const app = new Hono();
@@ -62,6 +51,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
     return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } }, 201);
+  });
+
+  app.get('/v1/chat/sessions', (c) => {
+    const projectId = c.req.query('projectId');
+    const sessions = sessionStore.listSessions(projectId).map((session) => ({
+      id: session.id,
+      projectId: session.projectId,
+      state: session.state,
+      messageCount: session.transcript.length,
+      preview: [...session.transcript].reverse().find((message) => message.role !== 'system')?.content ?? '',
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    }));
+    return c.json({ data: { sessions } });
   });
 
   // Get session
