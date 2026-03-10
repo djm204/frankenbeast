@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/v0.12.0...v0.13.0) (2026-03-10)
+
+
+### Features
+
+* **arch:** reconcile mirage by wiring real modules and hardening security ([4852a34](https://github.com/djm204/frankenbeast/commit/4852a348640d37b1717691a3e47a0aeb86999f0b))
+* **arch:** reconcile mirage by wiring real modules and hardening security ([86a39f5](https://github.com/djm204/frankenbeast/commit/86a39f5932ec34f0fa16de47b597052ca786c3ce))
+* **network:** add config-driven network operator control plane ([816ef85](https://github.com/djm204/frankenbeast/commit/816ef853cb0a74ef3d700dc365c2ad4fd198dba4))
+* **network:** support managed service config overrides ([57974f1](https://github.com/djm204/frankenbeast/commit/57974f16a8a6cdc909f74cb1c1be47a6c7ae14ae))
+* **web:** add dashboard network operator controls ([1cafbba](https://github.com/djm204/frankenbeast/commit/1cafbba2f7542e5561fb3bc8863fe1458fce0575))
+
+
+### Bug Fixes
+
+* **comms:** resolve build errors and unify websocket types ([2669d44](https://github.com/djm204/frankenbeast/commit/2669d4487bdfab9ef3ba522ce5a2dfa4b929cc7f))
+* **comms:** resolve build errors and unify websocket types ([bfd0fb8](https://github.com/djm204/frankenbeast/commit/bfd0fb8cbb4656a719d9024a96bb5ca60734c40d))
+
+
+### Miscellaneous
+
+* **main:** release franken-critique 0.4.0 ([3329e93](https://github.com/djm204/frankenbeast/commit/3329e93066bb40ebc8f4cd47839a1052ae78d807))
+* **main:** release franken-critique 0.4.0 ([9b62707](https://github.com/djm204/frankenbeast/commit/9b627076d79f8b6ab92d13ccedb5294b12f35bde))
+* **main:** release franken-orchestrator 0.11.0 ([dbba9e9](https://github.com/djm204/frankenbeast/commit/dbba9e95f25530db1c3a5a6de738eae6c568ffe3))
+* **main:** release franken-orchestrator 0.11.0 ([0a8862e](https://github.com/djm204/frankenbeast/commit/0a8862e02dbb6adf852d687386d3cbb4ded1ba9f))
+* **main:** release franken-types 0.3.2 ([f5e8572](https://github.com/djm204/frankenbeast/commit/f5e8572a4a4dc044e38520a5f54ffe31faedd39f))
+* **main:** release franken-types 0.3.2 ([1412544](https://github.com/djm204/frankenbeast/commit/1412544ec61add96aa25c92a8b57e51c8e429cd8))
+
+
+### Documentation
+
+* **network:** add operator guide and ADR ([a396268](https://github.com/djm204/frankenbeast/commit/a396268d0893e131a7de7c9ff4ed4ca8ed310cc9))
+* **plan:** add network operator design and implementation plan ([eef8acc](https://github.com/djm204/frankenbeast/commit/eef8acc2e0b435d3a9a1a0e3c4f38c870500da79))
+* update README, RAMP_UP, and ARCHITECTURE for current project state ([24f9952](https://github.com/djm204/frankenbeast/commit/24f9952f25e3b77d3cc7e768c2e35415eff71b5a))
+
+
+### Tests
+
+* **comms:** remove real socket listeners from websocket unit tests ([130b607](https://github.com/djm204/frankenbeast/commit/130b6070af14e8b8e40c2dddb6cf0769e7c5ffb5))
+* **comms:** remove real socket listeners from websocket unit tests ([595cd07](https://github.com/djm204/frankenbeast/commit/595cd0799a7c2f389e3e86f10fa98154df99d26d))
+
 ## [0.12.0](https://github.com/djm204/frankenbeast/compare/v0.11.0...v0.12.0) (2026-03-10)
 
 
