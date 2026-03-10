@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.15.0](https://github.com/djm204/frankenbeast/compare/v0.14.1...v0.15.0) (2026-03-10)
+
+
+### Features
+
+* add beasts dispatch station ([5d87015](https://github.com/djm204/frankenbeast/commit/5d87015b72c714481f846547bdfb847068478e00))
+* **dashboard:** add beasts dispatch station ([2e5537a](https://github.com/djm204/frankenbeast/commit/2e5537a3cdecc078e55d2ecdfb84c62735bdf265))
+* **orchestrator:** persist beast runs attempts and logs ([b8344e8](https://github.com/djm204/frankenbeast/commit/b8344e8767b4b3bbc5fdb9db67cbf34a645abf5b))
+
+
+### Miscellaneous
+
+* add docs ([72d0814](https://github.com/djm204/frankenbeast/commit/72d0814a39970990887bea0aff431c5030a89271))
+* **main:** release 0.14.2 ([84bff28](https://github.com/djm204/frankenbeast/commit/84bff28f92c869bff0e46bbdc03c42d41b85cf34))
+* **main:** release 0.14.2 ([8351789](https://github.com/djm204/frankenbeast/commit/835178959e3a387c8122992fef8f74d17e9626ee))
+* **main:** release franken-orchestrator 0.12.0 ([de2c822](https://github.com/djm204/frankenbeast/commit/de2c822d4dde5b70e98db06678646be8e98ea53b))
+* **main:** release franken-orchestrator 0.12.0 ([b56a34d](https://github.com/djm204/frankenbeast/commit/b56a34d554b495278b4037cc6c5cefb9d56e33df))
+
+
+### Documentation
+
+* add beasts dispatch design and implementation plan ([a2c2b77](https://github.com/djm204/frankenbeast/commit/a2c2b770b97c60f98a20a764f2c22563e851555d))
+
 ## [0.14.2](https://github.com/djm204/frankenbeast/compare/v0.14.1...v0.14.2) (2026-03-10)
 
 
