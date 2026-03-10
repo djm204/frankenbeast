@@ -42,7 +42,15 @@
     "@franken/types": "*",
     "@frankenbeast/observer": "*",
     "hono": "^4.12.5",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "@franken/firewall": "*",
+    "franken-brain": "*",
+    "@franken/critique": "*",
+    "@franken/governor": "*",
+    "franken-planner": "*",
+    "@franken/skills": "*",
+    "franken-heartbeat": "*",
+    "@franken/mcp": "*"
   },
   "devDependencies": {
     "@types/node": "^22.15.2",

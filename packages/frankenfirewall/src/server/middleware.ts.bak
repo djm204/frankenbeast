@@ -9,31 +9,6 @@ export const requestId = createMiddleware(async (c, next) => {
   await next();
 });
 
-/** Secure the endpoints — skips if no apiKey is configured. */
-export function authMiddleware(apiKey?: string) {
-  return createMiddleware(async (c, next) => {
-    if (!apiKey) {
-      return await next();
-    }
-
-    const authHeader = c.req.header('Authorization');
-    if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
-      return c.json(
-        {
-          error: {
-            message: 'Unauthorized',
-            type: 'authentication_error',
-            request_id: c.get('requestId') ?? 'unknown',
-          },
-        },
-        401,
-      );
-    }
-
-    return await next();
-  });
-}
-
 /** Global error handler — returns structured JSON error responses. */
 export const errorHandler = createMiddleware(async (c, next) => {
   try {

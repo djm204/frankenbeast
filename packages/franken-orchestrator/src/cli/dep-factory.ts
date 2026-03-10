@@ -23,10 +23,13 @@ import type { ReviewIO } from '../issues/issue-review.js';
 import { IssueRunner } from '../issues/issue-runner.js';
 import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
+import { scanForInjection, maskPii } from '@franken/firewall';
+import { MemoryOrchestrator, EpisodicMemoryStore, SemanticMemoryStore, WorkingMemoryStore } from 'franken-brain';
+import { createReviewer } from '@franken/critique';
 import type {
   BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
   IPlannerModule, ICritiqueModule, IGovernorModule,
-  IHeartbeatModule,
+  IHeartbeatModule, FirewallResult, PlanGraph, CritiqueResult,
 } from '../deps.js';
 import type { ProjectPaths } from './project-root.js';
 
@@ -82,11 +85,109 @@ export interface CliDeps {
   issueDeps?: IssueCliDeps | undefined;
 }
 
+// ── Real Module Implementations ──
+
+class RealFirewallModule implements IFirewallModule {
+  async runPipeline(input: string): Promise<FirewallResult> {
+    const request = {
+      id: 'cli-session',
+      provider: 'claude',
+      model: 'claude-3-sonnet',
+      messages: [{ role: 'user', content: input }],
+      session_id: 'cli-session',
+    };
+
+    const injection = scanForInjection(request as any, 'STRICT');
+    const masked = maskPii(request as any, true);
+    const sanitized = masked.passed && masked.value && masked.value.messages[0]
+      ? (typeof masked.value.messages[0].content === 'string'
+          ? masked.value.messages[0].content
+          : input)
+      : input;
+
+    const violations = [
+      ...(injection.passed ? [] : injection.violations),
+      ...(masked.passed ? [] : (masked.violations || [])),
+    ].map((v: any) => ({
+      rule: v.code || v.interceptor || 'UNKNOWN',
+      severity: (v.code === 'INJECTION_DETECTED' ? 'block' : 'warn') as 'block' | 'warn',
+      detail: v.message,
+    }));
+
+    return {
+      sanitizedText: sanitized,
+      violations,
+      blocked: !injection.passed,
+    };
+  }
+}
+
+class RealCritiqueModule implements ICritiqueModule {
+  constructor(private readonly observer: CliObserverBridge) {}
+
+  async reviewPlan(plan: PlanGraph): Promise<CritiqueResult> {
+    const guardrailsPort = {
+      getSafetyRules: async () => [
+        { id: '1', pattern: 'rm -rf /', description: 'Recursive root deletion', severity: 'block' as const },
+        { id: '2', pattern: 'chmod 777', description: 'World-writable permissions', severity: 'warn' as const },
+      ],
+      executeSandbox: async () => ({ success: false, output: 'Sandbox not available in CLI', exitCode: 1, timedOut: false }),
+    };
+
+    const memoryPort = {
+      searchADRs: async () => [],
+      searchEpisodic: async () => [],
+      recordLesson: async () => {},
+    };
+
+    const observabilityPort = {
+      getTokenSpend: async () => {
+        const spend = await this.observer.getTokenSpend('cli-session');
+        return spend;
+      },
+    };
+
+    const reviewer = createReviewer({
+      guardrails: guardrailsPort,
+      memory: memoryPort,
+      observability: observabilityPort,
+      knownPackages: [],
+    });
+
+    const input = {
+      content: JSON.stringify(plan),
+      context: { taskId: 'planning' },
+    };
+
+    const result = await reviewer.review(input as any, {
+      taskId: 'planning' as any,
+      maxIterations: 3,
+      tokenBudget: 10,
+      consensusThreshold: 0.5,
+      sessionId: 'cli-session',
+    });
+
+    const lastIter = result.iterations[result.iterations.length - 1];
+    if (!lastIter) {
+      return { verdict: 'fail', findings: [], score: 0 };
+    }
+
+    return {
+      verdict: result.verdict === 'pass' ? 'pass' : 'fail',
+      findings: lastIter.result.results.flatMap((r: any) =>
+        r.findings.map((f: any) => ({
+          evaluator: r.evaluatorName,
+          severity: f.severity,
+          message: f.message,
+        })),
+      ),
+      score: lastIter.result.overallScore,
+    };
+  }
+}
+
 // ── Passthrough Stubs ──
 
-const stubFirewall: IFirewallModule = {
-  runPipeline: async (input) => ({ sanitizedText: input, violations: [], blocked: false }),
-};
 const stubMemory: IMemoryModule = {
   frontload: async () => {},
   getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }),
@@ -94,9 +195,6 @@ const stubMemory: IMemoryModule = {
 };
 const stubPlanner: IPlannerModule = {
   createPlan: async () => { throw new Error('Planner not available in CLI mode; use graphBuilder'); },
-};
-const stubCritique: ICritiqueModule = {
-  reviewPlan: async () => ({ verdict: 'pass' as const, findings: [], score: 1.0 }),
 };
 const stubGovernor: IGovernorModule = {
   requestApproval: async () => ({ decision: 'approved' as const }),
@@ -241,12 +339,12 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   };
 
   const deps: BeastLoopDeps = {
-    firewall: stubFirewall,
+    firewall: new RealFirewallModule(),
     skills: createStubSkills(options.planDirOverride ?? paths.plansDir),
     memory: stubMemory,
     planner: stubPlanner,
     observer: observerBridge,
-    critique: stubCritique,
+    critique: new RealCritiqueModule(observerBridge),
     governor: stubGovernor,
     heartbeat: stubHeartbeat,
     logger,
