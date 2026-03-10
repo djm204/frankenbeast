@@ -202,11 +202,21 @@ export async function main(): Promise<void> {
     const { chatLlm, execLlm, finalize, projectId, sessionStoreDir } = await createChatSurfaceDeps(args, config, paths);
 
     if (args.subcommand === 'chat-server') {
+      let mutableConfig = config;
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
         executionLlm: execLlm,
         projectName: projectId,
+        networkControl: {
+          root,
+          frankenbeastDir: paths.frankenbeastDir,
+          configFile: paths.configFile,
+          getConfig: () => mutableConfig,
+          setConfig: (nextConfig) => {
+            mutableConfig = nextConfig;
+          },
+        },
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),

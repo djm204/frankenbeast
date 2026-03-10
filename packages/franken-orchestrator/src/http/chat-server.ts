@@ -8,6 +8,7 @@ import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-
 import { createChatApp } from './chat-app.js';
 import { attachChatWebSocketServer } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
+import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -20,6 +21,13 @@ export interface StartChatServerOptions {
   executionLlm?: ILlmClient;
   projectName: string;
   sessionContinuation?: boolean;
+  networkControl?: {
+    root: string;
+    frankenbeastDir: string;
+    configFile: string;
+    getConfig(): OrchestratorConfig;
+    setConfig(config: OrchestratorConfig): void;
+  };
 }
 
 export interface ChatServerHandle {
@@ -58,6 +66,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     runtime: runtime.runtime,
     turnRunner: runtime.turnRunner,
     sessionTokenSecret: tokenSecret,
+    ...(options.networkControl ? { networkControl: options.networkControl } : {}),
   });
   const server = createServer((request, response) => {
     void handleHttpRequest(app, request, response);
