@@ -1,38 +1,58 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { WebSocketServer } from 'ws';
-import { ChatGateway } from '../../src/gateway/chat-gateway.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelAdapter } from '../../src/core/types.js';
-import type { AddressInfo } from 'node:net';
+
+function getBridgeInstances(): Array<{
+  options: { url: string; sessionId: string; token?: string | undefined };
+  connect: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  respondToApproval: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  emit: (event: string, ...args: unknown[]) => boolean;
+}> {
+  const state = globalThis as typeof globalThis & {
+    __frankenBridgeInstances?: Array<{
+      options: { url: string; sessionId: string; token?: string | undefined };
+      connect: ReturnType<typeof vi.fn>;
+      send: ReturnType<typeof vi.fn>;
+      respondToApproval: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      emit: (event: string, ...args: unknown[]) => boolean;
+    }>;
+  };
+  state.__frankenBridgeInstances ??= [];
+  return state.__frankenBridgeInstances;
+}
+
+vi.mock('../../src/core/chat-socket-bridge.js', async () => {
+  const { EventEmitter } = await import('node:events');
+
+  class MockChatSocketBridge extends EventEmitter {
+    readonly options: { url: string; sessionId: string; token?: string | undefined };
+    connect = vi.fn(async () => {});
+    send = vi.fn(async () => 'client-message-id');
+    respondToApproval = vi.fn(async () => {});
+    close = vi.fn();
+
+    constructor(options: { url: string; sessionId: string; token?: string | undefined }) {
+      super();
+      this.options = options;
+      getBridgeInstances().push(this);
+    }
+  }
+
+  return { ChatSocketBridge: MockChatSocketBridge };
+});
+
+import { ChatGateway } from '../../src/gateway/chat-gateway.js';
 
 describe('ChatGateway', () => {
-  let wss: WebSocketServer;
-  let port: number;
-
-  beforeEach(async () => {
-    wss = new WebSocketServer({ port: 0 });
-    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
-    port = (wss.address() as AddressInfo).port;
-  });
-
-
-  afterEach(() => {
-    wss.close();
+  beforeEach(() => {
+    getBridgeInstances().length = 0;
   });
 
   it('relays inbound messages to the orchestrator', async () => {
     const gateway = new ChatGateway({
-      orchestratorWsUrl: `ws://localhost:${port}`,
-    });
-
-    const orchestratorReceived = new Promise<void>((resolve) => {
-      wss.on('connection', (ws) => {
-        ws.on('message', (data) => {
-          const event = JSON.parse(data.toString());
-          if (event.type === 'message.send' && event.content === 'ping') {
-            resolve();
-          }
-        });
-      });
+      orchestratorWsUrl: 'ws://orchestrator.test/socket',
     });
 
     await gateway.handleInbound({
@@ -45,13 +65,16 @@ describe('ChatGateway', () => {
       rawEvent: {},
     });
 
-    await orchestratorReceived;
+    expect(getBridgeInstances()).toHaveLength(1);
+    expect(getBridgeInstances()[0].options.url).toBe('ws://orchestrator.test/socket');
+    expect(getBridgeInstances()[0].connect).toHaveBeenCalledTimes(1);
+    expect(getBridgeInstances()[0].send).toHaveBeenCalledWith('ping');
     gateway.close();
   });
 
   it('relays assistant messages back to the channel adapter', async () => {
     const gateway = new ChatGateway({
-      orchestratorWsUrl: `ws://localhost:${port}`,
+      orchestratorWsUrl: 'ws://orchestrator.test/socket',
     });
 
     const mockAdapter: ChannelAdapter = {
@@ -69,18 +92,6 @@ describe('ChatGateway', () => {
 
     gateway.registerAdapter(mockAdapter);
 
-    const bridgeConnected = new Promise<void>((resolve) => {
-      wss.on('connection', (ws) => {
-        ws.send(JSON.stringify({
-          type: 'assistant.message.complete',
-          messageId: 'AM1',
-          content: 'pong',
-          timestamp: new Date().toISOString(),
-        }));
-        resolve();
-      });
-    });
-
     await gateway.handleInbound({
       channelType: 'slack',
       externalUserId: 'U1',
@@ -91,10 +102,12 @@ describe('ChatGateway', () => {
       rawEvent: {},
     });
 
-    await bridgeConnected;
-    
-    // Wait for the event to be processed and adapter.send to be called
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    getBridgeInstances()[0].emit('assistant.message.complete', {
+      type: 'assistant.message.complete',
+      messageId: 'AM1',
+      content: 'pong',
+      timestamp: new Date().toISOString(),
+    });
 
     expect(mockAdapter.send).toHaveBeenCalledWith(
       expect.any(String),

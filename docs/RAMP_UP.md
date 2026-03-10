@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All 11 packages live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **3 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`). Cross-package dependencies use workspace references (e.g., `@frankenbeast/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **13 packages** live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **5 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, `franken-web`). Cross-package dependencies use workspace references (e.g., `@frankenbeast/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 ## Modules
 
@@ -20,6 +20,8 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 | MOD-08 | `packages/franken-heartbeat/` | Proactive reflection, morning briefs, checklists |
 | shared | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
 | MCP | `packages/franken-mcp/` | MCP server client & registry |
+| comms | `packages/franken-comms/` | External comms gateway — Slack, Discord, Telegram, WhatsApp adapters with signature verification |
+| web | `packages/franken-web/` | React web dashboard — chat UI, config, metrics (dev tool, not published) |
 | orch | `packages/franken-orchestrator/` | Beast Loop, CLI, phases, circuit breakers, skill execution, crash recovery |
 
 ## The Beast Loop (4 Phases)
@@ -66,7 +68,8 @@ packages/franken-orchestrator/src/
 ├── issues/               # IssueFetcher, IssueTriage, IssueGraphBuilder, IssueReview, IssueRunner
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
-├── chat/                  # ConversationEngine, IntentRouter, EscalationPolicy, ChatAgentExecutor, TurnRunner, session-store
+├── chat/                  # ConversationEngine, IntentRouter, EscalationPolicy, ChatRuntime, ChatAgentExecutor, TurnRunner, session-store, output-sanitizer, chat-runtime-factory
+├── http/                  # chat-server.ts, chat-app.ts, ws-chat-server.ts, sse.ts, middleware.ts (HTTP + WebSocket for franken-web)
 ├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, chat-repl.ts, spinner.ts, review-loop.ts, cleanup.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
@@ -92,9 +95,15 @@ packages/franken-orchestrator/src/
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
 - `frankenbeast chat` — interactive two-tier REPL:
-  - **Tier 1 (Conversational)**: Simple chat uses cheap model with `chatMode` (no tool permissions), spinner while waiting
+  - **Tier 1 (Conversational)**: Cheap model with `chatMode`, session continuation (`--continue`), quirky spinner, colored output (cyan prompt, green replies)
   - **Tier 2 (Execution)**: `/run <desc>` spawns a full-permissions CLI agent. `/plan <desc>` dispatches to planning. Natural language also triggers execution via IntentRouter → EscalationPolicy
-  - `ChatAgentExecutor` implements `ITaskExecutor`, `ConversationEngine` handles LLM replies, `TurnRunner` handles execution dispatch
+  - `ChatRuntime` orchestrates all turn processing (slash commands, engine dispatch, execution). `ConversationEngine` handles LLM replies. `TurnRunner` handles execution dispatch. `ChatAgentExecutor` implements `ITaskExecutor`
+  - `sanitizeChatOutput()` strips raw web search JSON and REMINDER instruction blocks from Claude CLI output
+  - `chat-runtime-factory.ts` wires the engine, runtime, and turn runner from config
+- `frankenbeast chat-server` — HTTP + WebSocket server for franken-web dashboard:
+  - `startChatServer()` binds TCP, wires auth (session tokens), session persistence, and WebSocket attachment
+  - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
+  - Shares the same `ChatRuntime` as the CLI REPL
 - `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
@@ -149,8 +158,8 @@ All modules use `tsc` for builds.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 17 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, network operator control plane) |
-| `docs/guides/` | quickstart, run-dashboard-chat, run-network-operator, add-llm-provider, wrap-external-agent, fix-github-issues |
+| `docs/adr/` | 16 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway) |
+| `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Development Practices

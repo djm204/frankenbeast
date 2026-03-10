@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { requestId, errorHandler } from './middleware.js';
+import { requestId, errorHandler, authMiddleware } from './middleware.js';
 import type { GuardrailsConfig } from '../config/index.js';
 import type { IAdapter } from '../adapters/index.js';
 import type { UnifiedRequest } from '../types/index.js';
@@ -10,6 +10,7 @@ export interface FirewallAppOptions {
   config: GuardrailsConfig;
   adapters: Record<string, IAdapter>;
   defaultProvider?: string;
+  apiKey?: string;
 }
 
 type AppEnv = {
@@ -24,7 +25,7 @@ export function createFirewallApp(options: FirewallAppOptions): Hono<AppEnv> {
   app.use('*', requestId);
   app.use('*', errorHandler);
 
-  // Health check
+  // Health check — remains public
   app.get('/health', (c) => {
     return c.json({
       status: 'ok',
@@ -32,6 +33,9 @@ export function createFirewallApp(options: FirewallAppOptions): Hono<AppEnv> {
       timestamp: new Date().toISOString(),
     });
   });
+
+  // Authentication — applied to all other routes
+  app.use('/v1/*', authMiddleware(options.apiKey));
 
   // OpenAI-compatible completions proxy
   app.post('/v1/chat/completions', async (c) => {

@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. All 11 packages live under `packages/`. See [ADR-011](adr/011-monorepo-migration.md).
+Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. All 13 packages live under `packages/`. See [ADR-011](adr/011-monorepo-migration.md).
 
 This document mixes two views:
 
@@ -24,6 +24,8 @@ Unless a section explicitly says otherwise, diagrams should be read as target ar
 | `franken-mcp` | MCP server registry — stdio transport, tool discovery, constraint-aware tool execution |
 | `franken-types` | Shared type definitions (TaskId, Severity, Result, TokenSpend, etc.) |
 | `franken-orchestrator` | The Beast Loop — wires all modules into a 4-phase agent pipeline |
+| `franken-comms` | External communications gateway — Slack, Discord, Telegram, WhatsApp with signature verification |
+| `franken-web` | React web dashboard — chat UI, configuration, metrics visualization (dev tool) |
 
 ## The Beast Loop (franken-orchestrator)
 
@@ -442,13 +444,14 @@ The issues pipeline does not run through `BeastLoop`. Instead, `Session.runIssue
 
 ## HTTP Services (Hono)
 
-Three modules expose HTTP servers:
+Four modules expose HTTP servers:
 
 | Service | Port | Endpoints |
 |---------|------|-----------|
 | Firewall | 9090 | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
 | Critique | — | `POST /v1/review`, `GET /health` |
 | Governor | — | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
+| Chat Server | 3000 | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
 
 ## Shared Types (@franken/types)
 
@@ -840,3 +843,126 @@ Create Adapter → Build UnifiedRequest → transformRequest() → execute() →
 | Example | Purpose |
 |---------|---------|
 | `openclaw-integration` | Docker Compose: Frankenbeast firewall as proxy for OpenClaw agent framework |
+
+## Chat System Architecture
+
+The chat system provides a two-tier interactive experience available via CLI REPL and HTTP+WebSocket server.
+
+### Two-Tier Dispatch
+
+```mermaid
+flowchart TD
+    subgraph "Input"
+        CLI["frankenbeast chat<br/>(CLI REPL)"]
+        WS["frankenbeast chat-server<br/>(HTTP + WebSocket)"]
+    end
+
+    subgraph "Chat Runtime"
+        CR["ChatRuntime<br/>slash commands + dispatch"]
+        CE["ConversationEngine<br/>LLM replies + intent routing"]
+        IR["IntentRouter<br/>classify user intent"]
+        EP["EscalationPolicy<br/>determine tier"]
+        TR["TurnRunner<br/>execution dispatch"]
+        CAE["ChatAgentExecutor<br/>ITaskExecutor impl"]
+    end
+
+    subgraph "Tier 1: Conversational"
+        T1["Cheap model (chatMode)<br/>session continuation (--continue)<br/>output sanitization"]
+    end
+
+    subgraph "Tier 2: Execution"
+        T2["Full CLI agent<br/>(--dangerously-skip-permissions)<br/>MartinLoop + GitBranchIsolator"]
+    end
+
+    CLI --> CR
+    WS --> CR
+    CR --> CE
+    CE --> IR --> EP
+    EP -->|"reply / clarify"| T1
+    EP -->|"execute / plan"| TR
+    TR --> CAE --> T2
+
+    classDef runtime fill:#2d3436,stroke:#636e72,color:#fff
+    classDef tier1 fill:#10ac84,stroke:#0a3d62,color:#fff
+    classDef tier2 fill:#54a0ff,stroke:#2e86de,color:#fff
+    class CR,CE,IR,EP,TR,CAE runtime
+    class T1 tier1
+    class T2 tier2
+```
+
+### Key Components
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| `ChatRuntime` | `src/chat/runtime.ts` | Orchestrates all turn processing: slash commands, engine dispatch, execution. Returns `ChatRuntimeResult` with display messages, events, tier |
+| `ConversationEngine` | `src/chat/conversation-engine.ts` | LLM completions via PromptBuilder. Session continuation skips full prompt after first turn |
+| `IntentRouter` | `src/chat/intent-router.ts` | Classifies user input as reply, execute, plan, or clarify |
+| `EscalationPolicy` | `src/chat/escalation-policy.ts` | Determines model tier (cheap vs premium) based on intent |
+| `ChatAgentExecutor` | `src/chat/chat-agent-executor.ts` | `ITaskExecutor` implementation that spawns full-permissions CLI agent |
+| `ChatRepl` | `src/cli/chat-repl.ts` | CLI REPL with colored output (cyan prompt, green replies), quirky spinner, input blocking |
+| `sanitizeChatOutput` | `src/chat/output-sanitizer.ts` | Strips web search JSON blobs and REMINDER instruction blocks from Claude CLI output |
+| `createChatRuntime` | `src/chat/chat-runtime-factory.ts` | Factory wiring engine, runtime, and turn runner from config options |
+
+### Chat Server (HTTP + WebSocket)
+
+The `frankenbeast chat-server` subcommand exposes the ChatRuntime over HTTP and WebSocket for the `franken-web` dashboard.
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| `startChatServer` | `src/http/chat-server.ts` | Bootstrap: TCP binding, token auth, session persistence, WebSocket attachment |
+| `ChatSocketController` | `src/http/ws-chat-server.ts` | WebSocket connection management, chunk-based content delivery, turn event streaming |
+| `chat-app.ts` | `src/http/chat-app.ts` | Hono HTTP routes for REST-based chat interactions |
+
+**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md) and [ADR-016](adr/016-chat-server-entrypoint.md).
+
+## Communications Gateway (franken-comms)
+
+Multi-channel external communications with deterministic session mapping (SHA256-based). See [ADR-016](adr/016-external-comms-gateway.md).
+
+### Architecture
+
+```mermaid
+flowchart TD
+    subgraph "External Channels"
+        SL["Slack<br/>Events API + Interactivity"]
+        DC["Discord<br/>Gateway events"]
+        TG["Telegram<br/>Webhook"]
+        WA["WhatsApp<br/>Cloud API"]
+    end
+
+    subgraph "franken-comms"
+        direction TB
+        SR["Channel Routers<br/>slack-router, discord-router,<br/>telegram-router, whatsapp-router"]
+        SIG["Signature Verification<br/>HMAC-SHA256 (Slack)<br/>ED25519 (Discord)<br/>SHA256 (WhatsApp)"]
+        AD["Channel Adapters<br/>Normalize to unified message format"]
+        CG["ChatGateway<br/>Unified routing"]
+        SB["SocketBridge<br/>WebSocket transport"]
+        SM["SessionMapper<br/>Channel user → session ID"]
+    end
+
+    SL --> SR
+    DC --> SR
+    TG --> SR
+    WA --> SR
+    SR --> SIG --> AD --> CG
+    CG --> SB
+    CG --> SM
+
+    classDef channel fill:#54a0ff,stroke:#2e86de,color:#fff
+    classDef comms fill:#ff9f43,stroke:#ee5a24,color:#fff
+    class SL,DC,TG,WA channel
+    class SR,SIG,AD,CG,SB,SM comms
+```
+
+### Channel Security
+
+| Channel | Verification Method |
+|---------|-------------------|
+| Slack | HMAC-SHA256 signature over request body with signing secret |
+| Discord | ED25519 signature over timestamp + body with public key |
+| Telegram | Token-based authentication |
+| WhatsApp | SHA256 signature over payload with app secret |
+
+## Web Dashboard (franken-web)
+
+React-based development tool for chat, configuration, and metrics visualization. Scaffold in place (`packages/franken-web/`), connects to `frankenbeast chat-server` via WebSocket. Not published to npm; private monorepo package for local development.
