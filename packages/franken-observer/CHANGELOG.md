@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.3.1...franken-observer-v0.3.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* **observer:** fix cost tracking and document implementation gaps ([7054989](https://github.com/djm204/frankenbeast/commit/7054989522894d5bd2429d71ef73d041e9599725))
+* **observer:** fix zero-cost tracking and document implementation gaps ([c75c322](https://github.com/djm204/frankenbeast/commit/c75c322b46dc804873cff78c1ae8756104092cb7))
+
 ## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.3.0...franken-observer-v0.3.1) (2026-03-09)
 
 
