@@ -27,6 +27,7 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
       <label className="composer__field">
         <span className="eyebrow">Dispatch Input</span>
         <textarea
+          className="field-control composer__textarea"
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="Ask Frankenbeast to plan, explain, execute, or use slash commands like /run or /plan."
@@ -39,7 +40,7 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
           <span>{connectionStatus}</span>
           <span>{status}</span>
         </p>
-        <button type="submit" disabled={disabled}>
+        <button className="button button--primary" type="submit" disabled={disabled}>
           Dispatch
         </button>
       </div>

@@ -16,10 +16,11 @@ export interface ChatShellProps {
   version: string;
 }
 
-type RouteId = 'chat' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
+type RouteId = 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
 
 const ROUTES: Array<{ id: RouteId; label: string; summary: string }> = [
   { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console' },
+  { id: 'beasts', label: 'Beasts', summary: 'Coming soon: active runs first, then finished runs by start date' },
   { id: 'network', label: 'Network', summary: 'Service controls and operator config' },
   { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands' },
   { id: 'analytics', label: 'Analytics', summary: 'Usage and routing breakdowns are staged next' },
@@ -48,6 +49,7 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
 
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
     mode: 'secure',
     secureBackend: 'local-encrypted',
@@ -97,47 +99,111 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
     function handleHashChange() {
       setRoute(routeFromHash(window.location.hash));
+      setIsSidebarOpen(false);
     }
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsSidebarOpen(false);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const activeRoute = ROUTES.find((item) => item.id === route) ?? ROUTES[0]!;
+
   return (
-    <div className="dashboard-shell">
-      <aside className="sidebar">
-        <div className="sidebar__brand">
-          <img src={brandMark} alt="Frankenbeast" />
-          <div>
-            <p className="eyebrow">Operator Dashboard</p>
-            <span className="version-chip">v{version}</span>
+    <div className={`dashboard-shell ${isSidebarOpen ? 'dashboard-shell--nav-open' : ''}`}>
+      <button
+        aria-hidden={!isSidebarOpen}
+        aria-label="Close navigation overlay"
+        className={`sidebar-backdrop ${isSidebarOpen ? 'sidebar-backdrop--visible' : ''}`}
+        onClick={() => setIsSidebarOpen(false)}
+        tabIndex={isSidebarOpen ? 0 : -1}
+        type="button"
+      />
+
+      <aside
+        aria-label="Primary"
+        className={`sidebar ${isSidebarOpen ? 'sidebar--open' : ''}`}
+        id="dashboard-sidebar"
+      >
+        <div className="sidebar__header">
+          <div className="sidebar__brand">
+            <img src={brandMark} alt="Frankenbeast" />
+            <div>
+              <p className="eyebrow">Operator Dashboard</p>
+              <p className="sidebar__tagline">Dispatch, inspect, and govern active Frankenbeast runs.</p>
+            </div>
           </div>
+
+          <button
+            aria-label="Close navigation menu"
+            className="button button--secondary button--compact sidebar__close"
+            onClick={() => setIsSidebarOpen(false)}
+            type="button"
+          >
+            Close
+          </button>
         </div>
 
         <nav className="sidebar__nav" aria-label="Dashboard navigation">
           {ROUTES.map((item) => (
             <a
+              aria-current={route === item.id ? 'page' : undefined}
               key={item.id}
               className={`sidebar__link ${route === item.id ? 'sidebar__link--active' : ''}`}
               href={`#/${item.id}`}
             >
-              <span>{item.label}</span>
-              {item.id !== 'chat' && <small>Soon</small>}
+              <span className="sidebar__linkText">
+                <strong>{item.label}</strong>
+                <small>{item.summary}</small>
+              </span>
+              {item.id !== 'chat' && <span className="sidebar__status">Soon</span>}
             </a>
           ))}
         </nav>
 
         <div className="sidebar__footer">
           <p>Frankenbeast dashboard chrome with the chat surface as the first live module.</p>
+          <div className="sidebar__meta">
+            <span className="version-chip">v{version}</span>
+            <span>Accessibility-tuned operator shell</span>
+          </div>
         </div>
       </aside>
 
       <div className="workspace-shell">
         <header className="topbar">
-          <div className="topbar__title">
-            <p className="eyebrow">Project</p>
-            <h1>{activeProjectId}</h1>
+          <div className="topbar__identity">
+            <button
+              aria-controls="dashboard-sidebar"
+              aria-expanded={isSidebarOpen ? 'true' : 'false'}
+              aria-label="Open navigation menu"
+              className="button button--secondary button--compact sidebar__toggle"
+              onClick={() => setIsSidebarOpen(true)}
+              type="button"
+            >
+              Menu
+            </button>
+
+            <div className="topbar__title">
+              <p className="eyebrow">Project</p>
+              <h1>{activeProjectId}</h1>
+              <p className="topbar__summary">
+                <span>{activeRoute.label}</span>
+                <span>{activeRoute.summary}</span>
+              </p>
+            </div>
           </div>
+
           <dl className="topbar__stats">
             <div>
               <dt>Session</dt>
