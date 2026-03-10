@@ -30,6 +30,7 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -116,7 +117,7 @@ async function createChatSurfaceDeps(
     verbose: args.verbose,
     reset: false,
     adapterWorkingDir: tmpdir(),
-    adapterModel: resolvedProvider.chatModel,
+    adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
     chatMode: true,
   };
   const { cliLlmAdapter, finalize } = await createCliDeps(chatDepOpts);
@@ -183,6 +184,21 @@ export async function main(): Promise<void> {
   }
 
   if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
+    if (args.subcommand === 'chat') {
+      const managedAttachment = await resolveManagedChatAttachment({
+        config,
+        frankenbeastDir: paths.frankenbeastDir,
+      });
+      if (managedAttachment) {
+        await runManagedChatRepl({
+          attachment: managedAttachment,
+          projectId: paths.root.split('/').pop() ?? 'unknown',
+          verbose: args.verbose,
+        });
+        return;
+      }
+    }
+
     const { chatLlm, execLlm, finalize, projectId, sessionStoreDir } = await createChatSurfaceDeps(args, config, paths);
 
     if (args.subcommand === 'chat-server') {
