@@ -13,6 +13,7 @@ import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
+import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -50,6 +51,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     : createChatRuntime({
         chatLlm: required(opts.llm, 'llm'),
         projectName: required(opts.projectName, 'projectName'),
+        ...(opts.beastControl
+          ? {
+              beastDispatchAdapter: new ChatBeastDispatchAdapter({
+                catalog: opts.beastControl.catalog,
+                interviews: opts.beastControl.interviews,
+                dispatch: opts.beastControl.dispatch,
+              }),
+            }
+          : {}),
         ...(opts.executionLlm ? { executionLlm: opts.executionLlm } : {}),
         ...(opts.sessionContinuation !== undefined
           ? { sessionContinuation: opts.sessionContinuation }
@@ -67,6 +77,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const routes = chatRoutes({
     sessionStore,
     engine: runtimeBundle.engine,
+    runtime: runtimeBundle.runtime,
     turnRunner: runtimeBundle.turnRunner,
     issueSocketToken: (sessionId) => issueSessionToken({
       secret: sessionTokenSecret,

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
+import type { ChatRuntime } from '../../chat/runtime.js';
 import type { TurnRunner, TurnRunResult } from '../../chat/turn-runner.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
@@ -21,6 +22,7 @@ const ApproveBody = z.object({
 export interface ChatRoutesDeps {
   sessionStore: ISessionStore;
   engine: ConversationEngine;
+  runtime: ChatRuntime;
   turnRunner: TurnRunner;
   issueSocketToken: (sessionId: string) => string;
 }
@@ -45,7 +47,7 @@ function sessionStateFromRunStatus(status: TurnRunResult['status']): string {
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, engine, turnRunner, issueSocketToken } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketToken } = deps;
   const app = new Hono();
 
   // Health check
@@ -76,16 +78,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { content } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    const result = await engine.processTurn(content, session.transcript);
-    let state = session.state;
+    const result = await runtime.run(content, {
+      sessionId: session.id,
+      pendingApproval: Boolean(session.pendingApproval),
+      projectId: session.projectId,
+      transcript: session.transcript,
+      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+    });
 
-    if (result.outcome.kind === 'execute') {
-      const runResult = await turnRunner.run(result.outcome);
-      state = sessionStateFromRunStatus(runResult.status);
-    }
-
-    session.transcript.push(...result.newMessages);
-    session.state = state;
+    session.transcript = result.transcript;
+    session.state = result.state;
+    session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
+      ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+      : null;
+    session.beastContext = result.beastContext ?? null;
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 

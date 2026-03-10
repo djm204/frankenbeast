@@ -106,6 +106,7 @@ export class ChatRepl {
       result = await withSpinner(
         QUIRKY_PHRASES,
         () => this.runtime.run(input, {
+          sessionId: this.projectId,
           pendingApproval: this.pendingApproval,
           projectId: this.projectId,
           transcript: this.transcript,

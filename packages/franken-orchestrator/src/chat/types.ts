@@ -46,6 +46,13 @@ export interface ExecuteOutcome {
 
 export type TurnOutcome = ReplyOutcome | ClarifyOutcome | PlanOutcome | ExecuteOutcome;
 
+export const ChatBeastContextSchema = z.object({
+  definitionId: z.string().min(1),
+  interviewSessionId: z.string().min(1),
+  status: z.enum(['interviewing']),
+});
+export type ChatBeastContext = z.infer<typeof ChatBeastContextSchema>;
+
 // --- Zod schemas ---
 
 export const TranscriptMessageSchema = z.object({
@@ -74,6 +81,7 @@ export const ChatSessionSchema = z.object({
     description: z.string(),
     requestedAt: z.string(),
   }).nullable().optional(),
+  beastContext: ChatBeastContextSchema.nullable().optional(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
   createdAt: z.string(),

@@ -208,9 +208,11 @@ export class ChatSocketController {
     });
 
     const result = await this.runtime.run(content, {
+      sessionId: session.id,
       pendingApproval: Boolean(session.pendingApproval),
       projectId: session.projectId,
       transcript: session.transcript,
+      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
     });
 
     session.transcript = result.transcript;
@@ -218,6 +220,7 @@ export class ChatSocketController {
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
       ? { description: result.pendingApprovalDescription, requestedAt: nowIso() }
       : null;
+    session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 
@@ -286,12 +289,15 @@ export class ChatSocketController {
     }
 
     const result = await this.runtime.run('/approve', {
+      sessionId: session.id,
       pendingApproval: Boolean(session.pendingApproval),
       projectId: session.projectId,
       transcript: session.transcript,
+      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
     });
     session.pendingApproval = null;
     session.state = result.state;
+    session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 

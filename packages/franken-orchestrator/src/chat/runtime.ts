@@ -1,7 +1,8 @@
 import type { ConversationEngine } from './conversation-engine.js';
 import type { TurnRunner, TurnEvent, TurnRunResult } from './turn-runner.js';
-import type { ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
+import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
 import { sanitizeChatOutput } from './output-sanitizer.js';
+import type { ChatBeastDispatchAdapter } from './beast-dispatch-adapter.js';
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -13,9 +14,11 @@ const SLASH_COMMANDS = new Set([
 ]);
 
 export interface ChatRuntimeState {
+  sessionId: string;
   pendingApproval: boolean;
   projectId: string;
   transcript: TranscriptMessage[];
+  beastContext?: ChatBeastContext | null | undefined;
 }
 
 export interface ChatDisplayMessage {
@@ -26,6 +29,7 @@ export interface ChatDisplayMessage {
 }
 
 export interface ChatRuntimeResult {
+  beastContext?: ChatBeastContext | null | undefined;
   displayMessages: ChatDisplayMessage[];
   events: TurnEvent[];
   pendingApproval: boolean;
@@ -37,6 +41,7 @@ export interface ChatRuntimeResult {
 }
 
 export interface ChatRuntimeOptions {
+  beastDispatchAdapter?: ChatBeastDispatchAdapter;
   engine: ConversationEngine;
   turnRunner: TurnRunner;
 }
@@ -58,9 +63,11 @@ function stateFromRunResult(runResult: TurnRunResult): string {
 
 export class ChatRuntime {
   private readonly engine: ConversationEngine;
+  private readonly beastDispatchAdapter: ChatBeastDispatchAdapter | undefined;
   private readonly turnRunner: TurnRunner;
 
   constructor(options: ChatRuntimeOptions) {
+    this.beastDispatchAdapter = options.beastDispatchAdapter;
     this.engine = options.engine;
     this.turnRunner = options.turnRunner;
   }
@@ -151,6 +158,31 @@ export class ChatRuntime {
   }
 
   private async runTurn(input: string, state: ChatRuntimeState): Promise<ChatRuntimeResult> {
+    if (this.beastDispatchAdapter) {
+      const beastResult = await this.beastDispatchAdapter.handle(input, {
+        projectId: state.projectId,
+        sessionId: state.sessionId,
+        transcript: state.transcript,
+        ...(state.beastContext !== undefined ? { beastContext: state.beastContext } : {}),
+      });
+      if (beastResult) {
+        const transcript = appendTranscript(state.transcript, input, beastResult.assistantMessage);
+        return this.result(
+          {
+            ...state,
+            transcript,
+            beastContext: beastResult.beastContext,
+          },
+          [{ kind: 'reply', content: beastResult.assistantMessage }],
+          {
+            beastContext: beastResult.beastContext,
+            outcome: { kind: 'reply', content: beastResult.assistantMessage, modelTier: 'premium_execution' },
+            tier: 'premium_execution',
+          },
+        );
+      }
+    }
+
     const result = await this.engine.processTurn(input, state.transcript);
     const transcript = [...state.transcript, ...result.newMessages];
 
@@ -218,6 +250,7 @@ export class ChatRuntime {
 
     return this.result(
       {
+        beastContext: state.beastContext ?? null,
         ...state,
         pendingApproval,
       },
@@ -237,6 +270,7 @@ export class ChatRuntime {
     displayMessages: ChatDisplayMessage[],
     extra?: {
       events?: TurnEvent[];
+      beastContext?: ChatBeastContext | null | undefined;
       outcome?: TurnOutcome;
       pendingApprovalDescription?: string;
       state?: string;
@@ -244,6 +278,7 @@ export class ChatRuntime {
     },
   ): ChatRuntimeResult {
     return {
+      ...(extra?.beastContext !== undefined ? { beastContext: extra.beastContext } : {}),
       displayMessages,
       events: extra?.events ?? [],
       pendingApproval: state.pendingApproval,
@@ -256,4 +291,26 @@ export class ChatRuntime {
       ...(extra?.outcome ? { outcome: extra.outcome } : {}),
     };
   }
+}
+
+function appendTranscript(
+  transcript: TranscriptMessage[],
+  userInput: string,
+  assistantMessage: string,
+): TranscriptMessage[] {
+  const now = new Date().toISOString();
+  return [
+    ...transcript,
+    {
+      role: 'user',
+      content: userInput,
+      timestamp: now,
+    },
+    {
+      role: 'assistant',
+      content: assistantMessage,
+      timestamp: now,
+      modelTier: 'premium_execution',
+    },
+  ];
 }

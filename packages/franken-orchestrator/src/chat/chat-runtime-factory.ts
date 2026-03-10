@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import { ConversationEngine } from './conversation-engine.js';
+import type { ChatBeastDispatchAdapter } from './beast-dispatch-adapter.js';
 import { ChatRuntime } from './runtime.js';
 import { ChatAgentExecutor } from './chat-agent-executor.js';
 import { TurnRunner } from './turn-runner.js';
@@ -7,6 +8,7 @@ import { TurnRunner } from './turn-runner.js';
 export interface CreateChatRuntimeOptions {
   chatLlm: ILlmClient;
   executionLlm?: ILlmClient;
+  beastDispatchAdapter?: ChatBeastDispatchAdapter;
   projectName: string;
   sessionContinuation?: boolean;
   turnRunner?: TurnRunner;
@@ -29,7 +31,11 @@ export function createChatRuntime(options: CreateChatRuntimeOptions): ChatRuntim
   const turnRunner = options.turnRunner ?? new TurnRunner(new ChatAgentExecutor({
     llm: options.executionLlm ?? options.chatLlm,
   }));
-  const runtime = new ChatRuntime({ engine, turnRunner });
+  const runtime = new ChatRuntime({
+    engine,
+    turnRunner,
+    ...(options.beastDispatchAdapter ? { beastDispatchAdapter: options.beastDispatchAdapter } : {}),
+  });
 
   return {
     engine,
