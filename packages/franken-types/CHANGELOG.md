@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.3.1...franken-types-v0.3.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* **comms:** resolve build errors and unify websocket types ([2669d44](https://github.com/djm204/frankenbeast/commit/2669d4487bdfab9ef3ba522ce5a2dfa4b929cc7f))
+* **comms:** resolve build errors and unify websocket types ([bfd0fb8](https://github.com/djm204/frankenbeast/commit/bfd0fb8cbb4656a719d9024a96bb5ca60734c40d))
+
 ## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.3.0...franken-types-v0.3.1) (2026-03-09)
 
 
