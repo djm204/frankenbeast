@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/djm204/frankenbeast/compare/v0.14.1...v0.14.2) (2026-03-10)
+
+
+### Miscellaneous
+
+* add docs ([72d0814](https://github.com/djm204/frankenbeast/commit/72d0814a39970990887bea0aff431c5030a89271))
+
 ## [0.14.1](https://github.com/djm204/frankenbeast/compare/v0.14.0...v0.14.1) (2026-03-10)
 
 
