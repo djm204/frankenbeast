@@ -26,25 +26,68 @@ export interface IAdapter {
   validateCapabilities(feature: string): boolean;
 }
 
+export interface ILlmObserver {
+  counter: {
+    record(entry: { model: string; promptTokens: number; completionTokens: number }): void;
+  };
+  startSpan(trace: any, opts: { name: string }): any;
+  endSpan(span: any, opts: { status: string }): void;
+  recordTokenUsage(span: any, usage: { promptTokens: number; completionTokens: number; model: string }, counter: any): void;
+  trace: any;
+}
+
 export class AdapterLlmClient implements ILlmClient {
   private readonly adapter: IAdapter;
+  private readonly observer?: ILlmObserver | undefined;
+  private readonly defaultModel: string;
 
-  constructor(adapter: IAdapter) {
+  constructor(adapter: IAdapter, observer?: ILlmObserver, defaultModel = 'claude') {
     this.adapter = adapter;
+    this.observer = observer;
+    this.defaultModel = defaultModel;
   }
 
   async complete(prompt: string): Promise<string> {
     const requestId = `llm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const model = this.defaultModel;
+    
     const request: UnifiedRequest = {
       id: requestId,
       provider: 'adapter',
-      model: 'adapter',
+      model,
       messages: [{ role: 'user', content: prompt }],
     };
 
-    const providerRequest = this.adapter.transformRequest(request);
-    const providerResponse = await this.adapter.execute(providerRequest);
-    const response = this.adapter.transformResponse(providerResponse, requestId);
-    return response.content ?? '';
+    let span: any;
+    if (this.observer) {
+      span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
+    }
+
+    try {
+      const providerRequest = this.adapter.transformRequest(request);
+      const providerResponse = await this.adapter.execute(providerRequest);
+      const response = this.adapter.transformResponse(providerResponse, requestId);
+      const content = response.content ?? '';
+
+      if (this.observer && span) {
+        const promptTokens = Math.ceil(prompt.length / 4);
+        const completionTokens = Math.ceil(content.length / 4);
+        this.observer.recordTokenUsage(
+          span,
+          {
+            model,
+            promptTokens,
+            completionTokens,
+          },
+          this.observer.counter,
+        );
+      }
+
+      return content;
+    } finally {
+      if (this.observer && span) {
+        this.observer.endSpan(span, { status: 'completed' });
+      }
+    }
   }
 }

@@ -452,6 +452,7 @@ export class MartinLoop {
 
       const iterResult: IterationResult = {
         iteration,
+        provider: activeProvider,
         exitCode: result.exitCode,
         stdout: normalizedStdout,
         stderr: result.stderr,
