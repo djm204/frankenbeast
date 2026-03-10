@@ -4,7 +4,7 @@ import type { InitState } from './init-types.js';
 import { createEmptyInitState } from './init-types.js';
 
 export class FileInitStateStore {
-  constructor(private readonly filePath: string) {}
+  constructor(readonly filePath: string) {}
 
   async load(configPath: string): Promise<InitState> {
     try {

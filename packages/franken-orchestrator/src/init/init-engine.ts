@@ -5,6 +5,7 @@ import { OrchestratorConfigSchema, defaultConfig, type OrchestratorConfig } from
 import { FileInitStateStore } from './init-state-store.js';
 import { runInitWizard } from './init-wizard.js';
 import type { InitState } from './init-types.js';
+import { verifyInit } from './init-verify.js';
 
 export interface InitEngineResult {
   config: OrchestratorConfig;
@@ -16,6 +17,8 @@ interface RunInteractiveInitOptions {
   stateStore: FileInitStateStore;
   io: InterviewIO;
 }
+
+interface RunRepairInitOptions extends RunInteractiveInitOptions {}
 
 async function loadExistingConfig(configFile: string): Promise<OrchestratorConfig> {
   try {
@@ -41,6 +44,54 @@ export async function runInteractiveInit(options: RunInteractiveInitOptions): Pr
     io: options.io,
     initialState,
     baseConfig,
+  });
+
+  await saveConfig(options.configFile, result.config);
+  const state = await options.stateStore.save(result.state);
+
+  return {
+    config: result.config,
+    state,
+  };
+}
+
+export async function runRepairInit(options: RunRepairInitOptions): Promise<InitEngineResult> {
+  const verification = await verifyInit({
+    configFile: options.configFile,
+    stateStore: options.stateStore,
+  });
+
+  if (verification.ok) {
+    const state = await options.stateStore.load(options.configFile);
+    return {
+      config: verification.config ?? defaultConfig(),
+      state,
+    };
+  }
+
+  const needsFullWizard = verification.issues.some((issue) =>
+    issue.code === 'missing-config' || issue.code === 'missing-init-state');
+  if (needsFullWizard) {
+    return runInteractiveInit(options);
+  }
+
+  const initialState = await options.stateStore.load(options.configFile);
+  const baseConfig = await loadExistingConfig(options.configFile);
+  const scope = verification.issues.flatMap((issue) => {
+    switch (issue.code) {
+      case 'slack-incomplete':
+        return ['slack'] as const;
+      case 'discord-incomplete':
+        return ['discord'] as const;
+      default:
+        return [] as const;
+    }
+  });
+  const result = await runInitWizard({
+    io: options.io,
+    initialState,
+    baseConfig,
+    scope,
   });
 
   await saveConfig(options.configFile, result.config);

@@ -8,10 +8,13 @@ export interface InitWizardResult {
   state: InitState;
 }
 
+export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'discord';
+
 interface RunInitWizardOptions {
   io: InterviewIO;
   initialState: InitState;
   baseConfig?: OrchestratorConfig;
+  scope?: readonly InitWizardScope[];
 }
 
 function stateValue<T>(state: InitState, key: string): T | undefined {
@@ -88,36 +91,35 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
 
 export async function runInitWizard(options: RunInitWizardOptions): Promise<InitWizardResult> {
   const config = options.baseConfig ?? defaultConfig();
+  const scope = new Set<InitWizardScope>(options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord']);
+
+  let enableChat = moduleDefault(options.initialState, config, 'chat');
+  let enableDashboard = moduleDefault(options.initialState, config, 'dashboard');
+  let enableComms = moduleDefault(options.initialState, config, 'comms');
+  if (scope.has('modules')) {
+    enableChat = await askBoolean(options.io, 'Enable Chat? [Y/n]', enableChat);
+    enableDashboard = await askBoolean(options.io, 'Enable Dashboard? [Y/n]', enableDashboard);
+    enableComms = await askBoolean(options.io, 'Enable Comms? [y/N]', enableComms);
+  }
   const selectedModules: Array<'chat' | 'dashboard' | 'comms'> = [];
+  if (enableChat) selectedModules.push('chat');
+  if (enableDashboard) selectedModules.push('dashboard');
+  if (enableComms) selectedModules.push('comms');
 
-  const enableChat = await askBoolean(options.io, 'Enable Chat? [Y/n]', moduleDefault(options.initialState, config, 'chat'));
-  if (enableChat) {
-    selectedModules.push('chat');
-  }
+  const currentProviderDefault = String(stateValue(options.initialState, 'providers.default') ?? config.providers.default);
+  const providerDefault = scope.has('provider')
+    ? await askText(options.io, `Default provider [${currentProviderDefault}]`, currentProviderDefault)
+    : currentProviderDefault;
 
-  const enableDashboard = await askBoolean(options.io, 'Enable Dashboard? [Y/n]', moduleDefault(options.initialState, config, 'dashboard'));
-  if (enableDashboard) {
-    selectedModules.push('dashboard');
-  }
+  const securityMode = scope.has('security')
+    ? await askText(options.io, 'Security mode [secure/insecure] (default: secure)', options.initialState.securityMode) as 'secure' | 'insecure'
+    : options.initialState.securityMode;
 
-  const enableComms = await askBoolean(options.io, 'Enable Comms? [y/N]', moduleDefault(options.initialState, config, 'comms'));
-  if (enableComms) {
-    selectedModules.push('comms');
-  }
-
-  const providerDefault = await askText(
-    options.io,
-    `Default provider [${String(stateValue(options.initialState, 'providers.default') ?? config.providers.default)}]`,
-    String(stateValue(options.initialState, 'providers.default') ?? config.providers.default),
-  );
-
-  const securityMode = await askText(
-    options.io,
-    'Security mode [secure/insecure] (default: secure)',
-    options.initialState.securityMode,
-  ) as 'secure' | 'insecure';
-
-  const selectedCommsTransports: SupportedCommsTransportId[] = [];
+  const selectedCommsTransports: SupportedCommsTransportId[] = enableComms
+    ? listSupportedCommsTransports()
+      .filter((transport) => transportDefault(options.initialState, config, transport.id))
+      .map((transport) => transport.id)
+    : [];
   const answers: Record<string, unknown> = {
     ...options.initialState.answers,
     'providers.default': providerDefault,
@@ -125,52 +127,61 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
 
   if (enableComms) {
     for (const transport of listSupportedCommsTransports()) {
-      const enabled = await askBoolean(
-        options.io,
-        `Enable ${transport.label}? [y/N]`,
-        transportDefault(options.initialState, config, transport.id),
-      );
+      const targetedTransportOnly = options.scope !== undefined
+        && !options.scope.includes('modules')
+        && !options.scope.includes('provider')
+        && !options.scope.includes('security')
+        && options.scope.includes(transport.id);
+      const enabled = targetedTransportOnly
+        ? transportDefault(options.initialState, config, transport.id)
+        : await askBoolean(
+          options.io,
+          `Enable ${transport.label}? [y/N]`,
+          transportDefault(options.initialState, config, transport.id),
+        );
 
       if (!enabled) {
+        if (!targetedTransportOnly) {
+          const index = selectedCommsTransports.indexOf(transport.id);
+          if (index >= 0) {
+            selectedCommsTransports.splice(index, 1);
+          }
+        }
         continue;
       }
 
-      selectedCommsTransports.push(transport.id);
+      if (!selectedCommsTransports.includes(transport.id)) {
+        selectedCommsTransports.push(transport.id);
+      }
 
       if (transport.id === 'slack') {
-        answers['comms.slack.appId'] = await askText(
-          options.io,
-          'Slack app ID',
-          String(stateValue(options.initialState, 'comms.slack.appId') ?? ''),
-        );
-        answers['comms.slack.botTokenRef'] = await askText(
-          options.io,
-          'Slack bot token ref',
-          String(stateValue(options.initialState, 'comms.slack.botTokenRef') ?? ''),
-        );
-        answers['comms.slack.signingSecretRef'] = await askText(
-          options.io,
-          'Slack signing secret ref',
-          String(stateValue(options.initialState, 'comms.slack.signingSecretRef') ?? ''),
-        );
+        const currentAppId = String(stateValue(options.initialState, 'comms.slack.appId') ?? '');
+        if (!scope.has('slack') || currentAppId.length === 0) {
+          answers['comms.slack.appId'] = await askText(options.io, 'Slack app ID', currentAppId);
+        }
+        const currentBotTokenRef = String(stateValue(options.initialState, 'comms.slack.botTokenRef') ?? '');
+        if (!scope.has('slack') || currentBotTokenRef.length === 0) {
+          answers['comms.slack.botTokenRef'] = await askText(options.io, 'Slack bot token ref', currentBotTokenRef);
+        }
+        const currentSigningSecretRef = String(stateValue(options.initialState, 'comms.slack.signingSecretRef') ?? '');
+        if (!scope.has('slack') || currentSigningSecretRef.length === 0) {
+          answers['comms.slack.signingSecretRef'] = await askText(options.io, 'Slack signing secret ref', currentSigningSecretRef);
+        }
       }
 
       if (transport.id === 'discord') {
-        answers['comms.discord.applicationId'] = await askText(
-          options.io,
-          'Discord application ID',
-          String(stateValue(options.initialState, 'comms.discord.applicationId') ?? ''),
-        );
-        answers['comms.discord.botTokenRef'] = await askText(
-          options.io,
-          'Discord bot token ref',
-          String(stateValue(options.initialState, 'comms.discord.botTokenRef') ?? ''),
-        );
-        answers['comms.discord.publicKeyRef'] = await askText(
-          options.io,
-          'Discord public key ref',
-          String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? ''),
-        );
+        const currentApplicationId = String(stateValue(options.initialState, 'comms.discord.applicationId') ?? '');
+        if (!scope.has('discord') || currentApplicationId.length === 0) {
+          answers['comms.discord.applicationId'] = await askText(options.io, 'Discord application ID', currentApplicationId);
+        }
+        const currentBotTokenRef = String(stateValue(options.initialState, 'comms.discord.botTokenRef') ?? '');
+        if (!scope.has('discord') || currentBotTokenRef.length === 0) {
+          answers['comms.discord.botTokenRef'] = await askText(options.io, 'Discord bot token ref', currentBotTokenRef);
+        }
+        const currentPublicKeyRef = String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? '');
+        if (!scope.has('discord') || currentPublicKeyRef.length === 0) {
+          answers['comms.discord.publicKeyRef'] = await askText(options.io, 'Discord public key ref', currentPublicKeyRef);
+        }
       }
     }
   }

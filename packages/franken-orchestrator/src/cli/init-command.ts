@@ -4,7 +4,8 @@ import type { CliArgs } from './args.js';
 import type { ProjectPaths } from './project-root.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { FileInitStateStore } from '../init/init-state-store.js';
-import { runInteractiveInit } from '../init/init-engine.js';
+import { runInteractiveInit, runRepairInit } from '../init/init-engine.js';
+import { verifyInit } from '../init/init-verify.js';
 
 export interface InitCommandOptions {
   args: CliArgs;
@@ -15,17 +16,32 @@ export interface InitCommandOptions {
 }
 
 export async function handleInitCommand(options: InitCommandOptions): Promise<void> {
+  const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
+
   if (options.args.initVerify) {
-    options.print(`Init verify is not implemented yet for ${options.paths.configFile}.`);
+    const verification = await verifyInit({
+      configFile: options.paths.configFile,
+      stateStore,
+    });
+    options.print(
+      verification.ok
+        ? `Init verify passed for ${options.paths.configFile}.`
+        : verification.messages.join('\n'),
+    );
     return;
   }
 
   if (options.args.initRepair) {
-    options.print(`Init repair is not implemented yet for ${options.paths.configFile}.`);
+    const result = await runRepairInit({
+      configFile: options.paths.configFile,
+      stateStore,
+      io: options.io,
+    });
+    options.print(
+      `Repaired init config at ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
+    );
     return;
   }
-
-  const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
   const result = await runInteractiveInit({
     configFile: options.paths.configFile,
     stateStore,
