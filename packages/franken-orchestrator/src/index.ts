@@ -119,10 +119,14 @@ export { BeastLogStore } from './beasts/events/beast-log-store.js';
 export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
 export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
 export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
+export { BeastDispatchService } from './beasts/services/beast-dispatch-service.js';
+export { BeastRunService } from './beasts/services/beast-run-service.js';
 export type { BeastExecutor } from './beasts/execution/beast-executor.js';
 export { ProcessSupervisor } from './beasts/execution/process-supervisor.js';
 export { ProcessBeastExecutor } from './beasts/execution/process-beast-executor.js';
 export { ContainerBeastExecutor } from './beasts/execution/container-beast-executor.js';
+export type { BeastMetrics } from './beasts/telemetry/beast-metrics.js';
+export { PrometheusBeastMetrics } from './beasts/telemetry/prometheus-beast-metrics.js';
 
 // Logging
 export {
