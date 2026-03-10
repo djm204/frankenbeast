@@ -33,9 +33,9 @@ export function NetworkServiceList({
               {service.url && <small>{service.url}</small>}
             </div>
             <div className="network-services__actions">
-              <button type="button" onClick={() => onStart(service.id)} aria-label={`Start ${service.id}`}>Start</button>
-              <button type="button" onClick={() => onStop(service.id)} aria-label={`Stop ${service.id}`}>Stop</button>
-              <button type="button" onClick={() => onRestart(service.id)} aria-label={`Restart ${service.id}`}>Restart</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => onStart(service.id)} aria-label={`Start ${service.id}`}>Start</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => onStop(service.id)} aria-label={`Stop ${service.id}`}>Stop</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => onRestart(service.id)} aria-label={`Restart ${service.id}`}>Restart</button>
             </div>
           </article>
         ))}

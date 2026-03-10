@@ -26,8 +26,8 @@ export function ApprovalCard({ pending, description, onApprove, onReject }: Appr
       </div>
       <p className="approval-card__description">{description}</p>
       <div className="approval-card__actions">
-        <button onClick={onApprove}>Approve</button>
-        <button className="button-secondary" onClick={onReject}>Reject</button>
+        <button className="button button--primary" onClick={onApprove}>Approve</button>
+        <button className="button button--secondary" onClick={onReject}>Reject</button>
       </div>
     </section>
   );

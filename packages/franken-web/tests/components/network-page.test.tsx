@@ -34,6 +34,8 @@ describe('NetworkPage', () => {
     expect(screen.getByText('chat-server')).toBeDefined();
     expect(screen.getByText('/tmp/chat-server.log')).toBeDefined();
     expect(screen.getByDisplayValue('claude-sonnet-4-6')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Refresh' }).getAttribute('class')).toContain('button--secondary');
+    expect(screen.getByRole('button', { name: 'Save config' }).getAttribute('class')).toContain('button--primary');
   });
 
   it('invokes service controls and config save interactions', () => {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.3.1...franken-governor-v0.4.0) (2026-03-10)
+
+
+### Features
+
+* **arch:** reconcile mirage by wiring real modules and hardening security ([4852a34](https://github.com/djm204/frankenbeast/commit/4852a348640d37b1717691a3e47a0aeb86999f0b))
+* **arch:** reconcile mirage by wiring real modules and hardening security ([86a39f5](https://github.com/djm204/frankenbeast/commit/86a39f5932ec34f0fa16de47b597052ca786c3ce))
+
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.3.1...franken-governor-v0.4.0) (2026-03-10)
+
+
+### Features
+
+* **arch:** reconcile mirage by wiring real modules and hardening security ([4852a34](https://github.com/djm204/frankenbeast/commit/4852a348640d37b1717691a3e47a0aeb86999f0b))
+* **arch:** reconcile mirage by wiring real modules and hardening security ([86a39f5](https://github.com/djm204/frankenbeast/commit/86a39f5932ec34f0fa16de47b597052ca786c3ce))
+
 ## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.3.0...franken-governor-v0.3.1) (2026-03-09)
 
 
