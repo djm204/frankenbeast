@@ -57,7 +57,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   });
   const [networkConfig, setNetworkConfig] = useState<NetworkConfigResponse>({
     network: { mode: 'secure', secureBackend: 'local-encrypted' },
-    chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3000 },
+    chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
   });
   const [networkLogs, setNetworkLogs] = useState<string[]>([]);
   const {

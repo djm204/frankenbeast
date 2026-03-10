@@ -451,7 +451,7 @@ Four modules expose HTTP servers:
 | Firewall | 9090 | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
 | Critique | — | `POST /v1/review`, `GET /health` |
 | Governor | — | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
-| Chat Server | 3000 | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
+| Chat Server | 3737 | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
 
 ## Shared Types (@franken/types)
 

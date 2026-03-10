@@ -16,10 +16,13 @@ export const chatServerService: NetworkServiceDefinition = {
     url: `http://${config.chat.host}:${config.chat.port}`,
     healthUrl: `http://${config.chat.host}:${config.chat.port}/health`,
     wsUrl: `ws://${config.chat.host}:${config.chat.port}/v1/chat/ws`,
+    serviceIdentity: 'chat-server',
+    suppressManagedBanner: true,
     model: config.chat.model,
     process: {
       command: 'npm',
       args: [
+        '--silent',
         '--workspace',
         'franken-orchestrator',
         'run',
@@ -31,6 +34,9 @@ export const chatServerService: NetworkServiceDefinition = {
         String(config.chat.port),
       ],
       cwd: context.repoRoot,
+      env: {
+        FRANKENBEAST_NETWORK_MANAGED: '1',
+      },
     },
   }),
 };

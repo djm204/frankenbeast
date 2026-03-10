@@ -21,7 +21,7 @@ The server entrypoint:
 - mounts the existing Hono chat app
 - attaches the WebSocket chat transport on `/v1/chat/ws`
 - uses the same chat runtime wiring as CLI chat
-- defaults to `127.0.0.1:3000`
+- defaults to `127.0.0.1:3737`
 - only opens cross-origin WebSocket access when explicitly allowlisted
 
 `franken-web` remains a presentation layer. It connects over HTTP for session bootstrap and WebSocket for live chat streaming, but it does not own a separate chat runtime.

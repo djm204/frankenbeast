@@ -12,6 +12,11 @@ export interface StartServiceOptions {
   logFile?: string | undefined;
 }
 
+export interface PreflightServiceResult {
+  action: 'start' | 'reuse' | 'conflict';
+  reason?: string | undefined;
+}
+
 export interface NetworkSupervisorDeps {
   stateStore: NetworkStateStore;
   logStore: NetworkLogStore;
@@ -21,7 +26,10 @@ export interface NetworkSupervisorDeps {
   ) => Promise<{ pid: number }>;
   stopService: (service: ManagedNetworkServiceState) => Promise<void>;
   healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean>;
+  preflightService?: (service: ResolvedNetworkService) => Promise<PreflightServiceResult>;
   now?: () => string;
+  startupAttempts?: number;
+  startupDelayMs?: number;
 }
 
 export interface NetworkSupervisorStatus {
@@ -51,9 +59,13 @@ function collectDependents(services: ManagedNetworkServiceState[], target: strin
 
 export class NetworkSupervisor {
   private readonly now: () => string;
+  private readonly startupAttempts: number;
+  private readonly startupDelayMs: number;
 
   constructor(private readonly deps: NetworkSupervisorDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.startupAttempts = deps.startupAttempts ?? 20;
+    this.startupDelayMs = deps.startupDelayMs ?? 250;
   }
 
   async up(options: {
@@ -63,22 +75,65 @@ export class NetworkSupervisor {
     secureBackend: string;
   }): Promise<NetworkOperatorState> {
     const startedAt = this.now();
+    const existingState = await this.deps.stateStore.load();
     const services: ManagedNetworkServiceState[] = [];
 
-    for (const service of options.services) {
-      const logFile = options.detached ? await this.deps.logStore.register(service.id) : undefined;
-      const { pid } = await this.deps.startService(service, {
+    try {
+      for (const service of options.services) {
+        const preflight = await this.resolvePreflight(service);
+        if (preflight.action === 'conflict') {
+          throw new Error(preflight.reason ?? `Port conflict for ${service.id}`);
+        }
+
+        if (preflight.action === 'reuse') {
+          const existingService = existingState?.services.find((candidate) => candidate.id === service.id);
+          services.push({
+            id: existingService?.id ?? service.id,
+            pid: existingService?.pid ?? 0,
+            detached: existingService?.detached ?? options.detached,
+            dependsOn: existingService?.dependsOn ?? [...service.dependsOn],
+            startedAt: existingService?.startedAt ?? startedAt,
+            status: 'already-running',
+            ...(existingService?.logFile ? { logFile: existingService.logFile } : {}),
+            ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : existingService?.url ? { url: existingService.url } : {}),
+            ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
+            ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
+          });
+          continue;
+        }
+
+        const logFile = options.detached ? await this.deps.logStore.register(service.id) : undefined;
+        const { pid } = await this.deps.startService(service, {
+          detached: options.detached,
+          ...(logFile ? { logFile } : {}),
+        });
+        const serviceState: ManagedNetworkServiceState = {
+          id: service.id,
+          pid,
+          detached: options.detached,
+          dependsOn: [...service.dependsOn],
+          startedAt,
+          status: 'started',
+          ...(logFile ? { logFile } : {}),
+          ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+          ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+          ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+        };
+        services.push(serviceState);
+        const healthy = await this.waitForHealthy(serviceState);
+        if (!healthy) {
+          throw new Error(`Service ${service.id} failed healthcheck during startup`);
+        }
+      }
+    } catch (error) {
+      await this.stopAll({
+        mode: options.mode,
+        secureBackend: options.secureBackend,
         detached: options.detached,
-        ...(logFile ? { logFile } : {}),
-      });
-      services.push({
-        id: service.id,
-        pid,
-        dependsOn: [...service.dependsOn],
         startedAt,
-        ...(logFile ? { logFile } : {}),
-        ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+        services: services.filter((service) => service.status === 'started'),
       });
+      throw error;
     }
 
     const state: NetworkOperatorState = {
@@ -167,4 +222,27 @@ export class NetworkSupervisor {
       services,
     };
   }
+
+  private async resolvePreflight(service: ResolvedNetworkService): Promise<PreflightServiceResult> {
+    if (!this.deps.preflightService) {
+      return { action: 'start' };
+    }
+    return this.deps.preflightService(service);
+  }
+
+  private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
+    for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
+      if (await this.deps.healthcheck(service)) {
+        return true;
+      }
+      if (attempt < this.startupAttempts - 1) {
+        await sleep(this.startupDelayMs);
+      }
+    }
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -7,6 +7,7 @@ import {
   logHeader,
   BANNER,
   renderBanner,
+  shouldRenderGraphicBanner,
 } from '../../../src/logging/beast-logger.js';
 
 // ── stripAnsi ──
@@ -137,6 +138,20 @@ describe('BANNER', () => {
     const plain = stripAnsi(banner);
     expect(plain).toContain('FRANKENBEAST');
     expect(plain).toContain('vdev');
+  });
+
+  it('prefers the graphic banner when the logo exists and plain mode is not forced', () => {
+    expect(shouldRenderGraphicBanner({
+      logoExists: true,
+      forcePlainBanner: false,
+    })).toBe(true);
+  });
+
+  it('falls back to the text banner when plain mode is forced', () => {
+    expect(shouldRenderGraphicBanner({
+      logoExists: true,
+      forcePlainBanner: true,
+    })).toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
     host: config.dashboard.host,
     port: config.dashboard.port,
     url: `http://${config.dashboard.host}:${config.dashboard.port}`,
+    serviceIdentity: 'dashboard-web',
     apiUrl: config.dashboard.apiUrl,
     process: {
       command: 'npm',
@@ -30,7 +31,8 @@ export const dashboardWebService: NetworkServiceDefinition = {
       ],
       cwd: context.repoRoot,
       env: {
-        VITE_API_URL: config.dashboard.apiUrl,
+        VITE_API_URL: '',
+        VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
       },
     },
   }),

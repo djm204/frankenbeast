@@ -52,8 +52,8 @@ const {
     this.start = mockSessionStart;
   });
   const mockStartChatServer = vi.fn(async () => ({
-    url: 'http://127.0.0.1:3000',
-    wsUrl: 'ws://127.0.0.1:3000/v1/chat/ws',
+    url: 'http://127.0.0.1:3737',
+    wsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
     close: vi.fn(async () => undefined),
     server: {},
   }));
@@ -332,7 +332,7 @@ describe('main() execution', () => {
       planName: undefined,
       config: undefined,
       host: '127.0.0.1',
-      port: 3000,
+      port: 3737,
       allowOrigin: 'http://localhost:5173',
       noPr: false,
       verbose: false,
@@ -351,13 +351,13 @@ describe('main() execution', () => {
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       host: '127.0.0.1',
-      port: 3000,
+      port: 3737,
       allowedOrigins: ['http://localhost:5173'],
       sessionStoreDir: '/mock/project/.frankenbeast/chat',
       projectName: 'project',
     }));
     expect(MockSession).not.toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3000'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
     logSpy.mockRestore();
   });
 
@@ -391,5 +391,24 @@ describe('main() execution', () => {
     await main();
 
     expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the banner when running as a network-managed child process', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const originalManaged = process.env.FRANKENBEAST_NETWORK_MANAGED;
+    process.env.FRANKENBEAST_NETWORK_MANAGED = '1';
+
+    try {
+      await main();
+    } finally {
+      if (originalManaged === undefined) {
+        delete process.env.FRANKENBEAST_NETWORK_MANAGED;
+      } else {
+        process.env.FRANKENBEAST_NETWORK_MANAGED = originalManaged;
+      }
+    }
+
+    expect(logSpy).not.toHaveBeenCalledWith('[BANNER]');
+    logSpy.mockRestore();
   });
 });

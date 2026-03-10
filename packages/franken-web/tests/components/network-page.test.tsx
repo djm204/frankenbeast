@@ -10,7 +10,7 @@ describe('NetworkPage', () => {
       <NetworkPage
         config={{
           network: { mode: 'secure', secureBackend: 'local-encrypted' },
-          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3000 },
+          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
         }}
         logs={['/tmp/chat-server.log']}
         onRefresh={vi.fn()}
@@ -23,7 +23,7 @@ describe('NetworkPage', () => {
             id: 'chat-server',
             status: 'running',
             explanation: 'CLI-parity websocket chat',
-            url: 'http://127.0.0.1:3000',
+            url: 'http://127.0.0.1:3737',
           },
         ]}
         status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
@@ -48,7 +48,7 @@ describe('NetworkPage', () => {
       <NetworkPage
         config={{
           network: { mode: 'secure', secureBackend: 'local-encrypted' },
-          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3000 },
+          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
         }}
         logs={[]}
         onRefresh={vi.fn()}
@@ -61,7 +61,7 @@ describe('NetworkPage', () => {
             id: 'chat-server',
             status: 'running',
             explanation: 'CLI-parity websocket chat',
-            url: 'http://127.0.0.1:3000',
+            url: 'http://127.0.0.1:3737',
           },
         ]}
         status={{ mode: 'secure', secureBackend: 'local-encrypted' }}

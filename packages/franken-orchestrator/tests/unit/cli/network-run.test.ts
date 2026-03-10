@@ -64,7 +64,10 @@ describe('runNetworkCommand', () => {
       secureBackend: 'local-encrypted',
       detached: true,
       startedAt: '2026-03-09T00:00:00.000Z',
-      services: [],
+      services: [
+        { id: 'chat-server', pid: 101, dependsOn: [], startedAt: '2026-03-09T00:00:00.000Z', url: 'http://127.0.0.1:3737', status: 'started' },
+        { id: 'dashboard-web', pid: 102, dependsOn: ['chat-server'], startedAt: '2026-03-09T00:00:00.000Z', url: 'http://127.0.0.1:5173', status: 'started' },
+      ],
     }));
     const print = vi.fn();
 
@@ -96,6 +99,72 @@ describe('runNetworkCommand', () => {
       detached: true,
     }));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('Started 2 service'));
+    expect(print).toHaveBeenCalledWith('chat-server: http://127.0.0.1:3737');
+  });
+
+  it('up reports reused services distinctly', async () => {
+    const services = [makeService('chat-server')];
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'up', networkDetached: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      {
+        resolveServices: vi.fn(() => services),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(async () => ({
+            mode: 'secure' as const,
+            secureBackend: 'local-encrypted',
+            detached: true,
+            startedAt: '2026-03-10T00:00:00.000Z',
+            services: [
+              { id: 'chat-server', pid: 0, dependsOn: [], startedAt: '2026-03-10T00:00:00.000Z', url: 'http://127.0.0.1:3737', status: 'already-running' },
+            ],
+          })),
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    expect(print).toHaveBeenCalledWith('Already running 1 service.');
+  });
+
+  it('up does not print started when the supervisor rejects startup', async () => {
+    const print = vi.fn();
+
+    await expect(runNetworkCommand(
+      makeArgs({ networkAction: 'up', networkDetached: true }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      {
+        resolveServices: vi.fn(() => [makeService('chat-server')]),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(async () => {
+            throw new Error('Port conflict for chat-server on 127.0.0.1:3737');
+          }),
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    )).rejects.toThrow(/Port conflict/);
+
+    expect(print).not.toHaveBeenCalledWith(expect.stringContaining('Started'));
   });
 
   it('down tears down detached services', async () => {

@@ -74,12 +74,31 @@ export const BANNER = `\n${A.green}${A.bold}` +
   '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
   `${A.reset}\n`;
 
+export function shouldRenderGraphicBanner(options: {
+  logoExists: boolean;
+  forcePlainBanner?: boolean | undefined;
+}): boolean {
+  if (!options.logoExists) {
+    return false;
+  }
+
+  if (options.forcePlainBanner) {
+    return false;
+  }
+
+  return true;
+}
+
 export async function renderBanner(root: string): Promise<string> {
   const version = readBannerVersion(root);
   const fallback = buildFallbackBanner(version);
   const logoPath = resolve(root, 'assets', 'img', 'frankenbeast-github-logo-478x72.png');
+  const renderGraphic = shouldRenderGraphicBanner({
+    logoExists: existsSync(logoPath),
+    forcePlainBanner: process.env.FRANKENBEAST_PLAIN_BANNER === '1',
+  });
 
-  if (!process.stdout.isTTY || !existsSync(logoPath)) {
+  if (!renderGraphic) {
     return fallback;
   }
 

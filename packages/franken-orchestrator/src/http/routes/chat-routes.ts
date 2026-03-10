@@ -49,7 +49,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const app = new Hono();
 
   // Health check
-  app.get('/health', (c) => c.json({ status: 'ok' }));
+  app.get('/health', (c) => {
+    c.header('x-frankenbeast-service', 'chat-server');
+    return c.json({ status: 'ok', service: 'chat-server' });
+  });
 
   // Create session
   app.post('/v1/chat/sessions', async (c) => {

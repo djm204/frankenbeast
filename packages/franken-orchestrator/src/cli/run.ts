@@ -31,6 +31,12 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
+import {
+  healthcheckNetworkService,
+  preflightNetworkService,
+  startNetworkService,
+  stopNetworkService,
+} from '../network/network-supervisor-runtime.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -158,7 +164,9 @@ export async function main(): Promise<void> {
   }
 
   const root = resolveProjectRoot(args.baseDir);
-  console.log(await renderBanner(root));
+  if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
+    console.log(await renderBanner(root));
+  }
 
   const config = await resolveConfig(args);
 
@@ -307,7 +315,7 @@ export interface NetworkCommandSupervisorLike {
     detached: boolean;
     mode: 'secure' | 'insecure';
     secureBackend: string;
-  }): Promise<{ services: { id: string; url?: string | undefined }[] }>;
+  }): Promise<{ services: { id: string; url?: string | undefined; status?: 'started' | 'already-running' | undefined }[] }>;
   down(): Promise<void>;
   status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
   stop(target: string | 'all'): Promise<void>;
@@ -332,9 +340,10 @@ function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
       return new NetworkSupervisor({
         stateStore,
         logStore,
-        startService: defaultStartService,
-        stopService: defaultStopService,
-        healthcheck: defaultHealthcheck,
+        startService: startNetworkService,
+        stopService: stopNetworkService,
+        healthcheck: healthcheckNetworkService,
+        preflightService: preflightNetworkService,
       });
     },
     print: (message: string) => console.log(message),
@@ -342,73 +351,6 @@ function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
     renderHelp: renderNetworkHelp,
     waitForShutdown: () => waitForTerminationSignal(root),
   };
-}
-
-async function defaultStartService(
-  service: ResolvedNetworkService,
-  options: { detached: boolean; logFile?: string | undefined },
-): Promise<{ pid: number }> {
-  const processSpec = service.runtimeConfig.process;
-  if (!processSpec) {
-    throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
-  }
-
-  if (options.detached) {
-    const handle = await open(options.logFile ?? '/dev/null', 'a');
-    const child = spawn(processSpec.command, processSpec.args, {
-      cwd: processSpec.cwd,
-      env: {
-        ...process.env,
-        ...processSpec.env,
-      },
-      detached: true,
-      stdio: ['ignore', handle.fd, handle.fd],
-    });
-    child.unref();
-    await handle.close();
-    if (!child.pid) {
-      throw new Error(`Failed to start detached service ${service.id}`);
-    }
-    return { pid: child.pid };
-  }
-
-  const child = spawn(processSpec.command, processSpec.args, {
-    cwd: processSpec.cwd,
-    env: {
-      ...process.env,
-      ...processSpec.env,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  child.stdout?.on('data', (chunk) => process.stdout.write(`[${service.id}] ${chunk}`));
-  child.stderr?.on('data', (chunk) => process.stderr.write(`[${service.id}] ${chunk}`));
-
-  if (!child.pid) {
-    throw new Error(`Failed to start service ${service.id}`);
-  }
-
-  return { pid: child.pid };
-}
-
-async function defaultStopService(service: { pid: number }): Promise<void> {
-  try {
-    process.kill(service.pid, 'SIGTERM');
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ESRCH') {
-      throw error;
-    }
-  }
-}
-
-async function defaultHealthcheck(service: { pid: number }): Promise<boolean> {
-  try {
-    process.kill(service.pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function waitForTerminationSignal(root: string): Promise<void> {
@@ -512,7 +454,14 @@ export async function runNetworkCommand(
       mode: config.network.mode,
       secureBackend: config.network.secureBackend,
     });
-    deps.print(`Started ${services.length} service${services.length === 1 ? '' : 's'}.`);
+    const startedServices = state.services.filter((service) => service.status !== 'already-running');
+    const reusedServices = state.services.filter((service) => service.status === 'already-running');
+    if (startedServices.length > 0) {
+      deps.print(`Started ${startedServices.length} service${startedServices.length === 1 ? '' : 's'}.`);
+    }
+    if (reusedServices.length > 0) {
+      deps.print(`Already running ${reusedServices.length} service${reusedServices.length === 1 ? '' : 's'}.`);
+    }
     for (const service of state.services) {
       if (service.url) {
         deps.print(`${service.id}: ${service.url}`);

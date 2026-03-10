@@ -41,7 +41,7 @@ export interface ChatServerHandle {
 }
 
 const DEFAULT_HOST = '127.0.0.1';
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 3737;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
 
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {

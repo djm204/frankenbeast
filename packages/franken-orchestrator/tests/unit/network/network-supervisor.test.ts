@@ -121,4 +121,74 @@ describe('NetworkSupervisor', () => {
       }),
     ]);
   });
+
+  it('reuses a managed running service instead of spawning it again', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const services = resolveNetworkServices(defaultConfig(), { repoRoot: '/repo/frankenbeast' });
+    const startService = vi.fn(async (service) => ({ pid: service.id === 'dashboard-web' ? 202 : 201 }));
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService: vi.fn(async () => undefined),
+      healthcheck: vi.fn(async () => true),
+      preflightService: vi.fn(async (service) => service.id === 'chat-server'
+        ? { action: 'reuse' as const }
+        : { action: 'start' as const }),
+      now: () => '2026-03-10T00:00:00.000Z',
+    });
+
+    const state = await supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    });
+
+    expect(startService).toHaveBeenCalledTimes(1);
+    expect(startService).toHaveBeenCalledWith(expect.objectContaining({ id: 'dashboard-web' }), expect.any(Object));
+    expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'chat-server',
+        pid: 0,
+        status: 'already-running',
+      }),
+      expect.objectContaining({
+        id: 'dashboard-web',
+        status: 'started',
+      }),
+    ]));
+  });
+
+  it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const services = resolveNetworkServices(defaultConfig(), { repoRoot: '/repo/frankenbeast' });
+    const stopService = vi.fn(async () => undefined);
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(async () => ({ pid: 501 })),
+      stopService,
+      healthcheck: vi.fn(async () => true),
+      preflightService: vi.fn(async (service) => service.id === 'dashboard-web'
+        ? { action: 'conflict' as const, reason: 'Port conflict for dashboard-web on 127.0.0.1:5173' }
+        : { action: 'start' as const }),
+      now: () => '2026-03-10T00:00:00.000Z',
+    });
+
+    await expect(supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    })).rejects.toThrow(/Port conflict for dashboard-web/);
+
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+  });
 });
