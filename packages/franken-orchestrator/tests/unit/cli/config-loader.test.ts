@@ -22,6 +22,10 @@ describe('Config loader', () => {
   function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
     return {
       subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
       baseDir: '/test',
       budget: 10,
       provider: 'claude',
@@ -51,6 +55,34 @@ describe('Config loader', () => {
     const config = await loadConfig(makeArgs({ config: filePath }));
     expect(config.maxTotalTokens).toBe(50_000);
     expect(config.maxCritiqueIterations).toBe(5);
+  });
+
+  it('deep merges nested network config from file', async () => {
+    const filePath = join(tmpdir(), `beast-network-config-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({
+      chat: { port: 4242 },
+      comms: {
+        slack: { enabled: true },
+      },
+    }));
+
+    const config = await loadConfig(makeArgs({ config: filePath }));
+    expect(config.chat.port).toBe(4242);
+    expect(config.chat.host).toBe('127.0.0.1');
+    expect(config.comms.slack.enabled).toBe(true);
+    expect(config.comms.discord.enabled).toBe(false);
+  });
+
+  it('applies network config --set overrides from CLI', async () => {
+    const config = await loadConfig(makeArgs({
+      subcommand: 'network',
+      networkAction: 'config',
+      networkSet: ['chat.model=gpt-5', 'comms.slack.enabled=true'],
+    }));
+
+    expect(config.chat.model).toBe('gpt-5');
+    expect(config.comms.slack.enabled).toBe(true);
   });
 
   it('env vars override file config', async () => {

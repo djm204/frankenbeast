@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "start:network": "npm run build && node dist/server/start-comms-server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -6,6 +6,8 @@ import { Composer } from './composer';
 import { ActivityPane } from './activity-pane';
 import { ApprovalCard } from './approval-card';
 import { CostBadge } from './cost-badge';
+import { NetworkPage } from '../pages/network-page';
+import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 
 export interface ChatShellProps {
   baseUrl: string;
@@ -14,10 +16,11 @@ export interface ChatShellProps {
   version: string;
 }
 
-type RouteId = 'chat' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
+type RouteId = 'chat' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
 
 const ROUTES: Array<{ id: RouteId; label: string; summary: string }> = [
   { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console' },
+  { id: 'network', label: 'Network', summary: 'Service controls and operator config' },
   { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands' },
   { id: 'analytics', label: 'Analytics', summary: 'Usage and routing breakdowns are staged next' },
   { id: 'costs', label: 'Costs', summary: 'Token and provider reporting will live here' },
@@ -45,6 +48,16 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
 
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
+    mode: 'secure',
+    secureBackend: 'local-encrypted',
+    services: [],
+  });
+  const [networkConfig, setNetworkConfig] = useState<NetworkConfigResponse>({
+    network: { mode: 'secure', secureBackend: 'local-encrypted' },
+    chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3000 },
+  });
+  const [networkLogs, setNetworkLogs] = useState<string[]>([]);
   const {
     activity,
     approve,
@@ -64,6 +77,18 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     projectId,
     sessionId,
   });
+
+  useEffect(() => {
+    const client = new NetworkApiClient(baseUrl);
+    void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
+      if (statusResult.status === 'fulfilled') {
+        setNetworkStatus(statusResult.value);
+      }
+      if (configResult.status === 'fulfilled') {
+        setNetworkConfig(configResult.value);
+      }
+    });
+  }, [baseUrl]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -162,6 +187,33 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               />
             </aside>
           </main>
+        ) : route === 'network' ? (
+          <NetworkPage
+            config={networkConfig}
+            logs={networkLogs}
+            onRefresh={() => {
+              const client = new NetworkApiClient(baseUrl);
+              void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+            }}
+            onRestart={(serviceId) => {
+              const client = new NetworkApiClient(baseUrl);
+              void client.restart(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
+            }}
+            onSaveConfig={(assignments) => {
+              const client = new NetworkApiClient(baseUrl);
+              void client.updateConfig(assignments).then(setNetworkConfig).catch(() => undefined);
+            }}
+            onStart={(serviceId) => {
+              const client = new NetworkApiClient(baseUrl);
+              void client.start(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
+            }}
+            onStop={(serviceId) => {
+              const client = new NetworkApiClient(baseUrl);
+              void client.stop(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
+            }}
+            services={networkStatus.services}
+            status={networkStatus}
+          />
         ) : (
           <main className="chat-page">
             <PlaceholderPage routeId={route} />

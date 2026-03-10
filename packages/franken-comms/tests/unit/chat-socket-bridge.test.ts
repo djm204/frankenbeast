@@ -1,45 +1,73 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { WebSocketServer } from 'ws';
-import { ChatSocketBridge } from '../../src/core/chat-socket-bridge.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerSocketEvent } from '@franken/types';
-import type { AddressInfo } from 'node:net';
+
+function getMockSockets(): Array<{
+  url: string;
+  readyState: number;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  emit: (event: string, ...args: unknown[]) => boolean;
+}> {
+  const state = globalThis as typeof globalThis & {
+    __frankenMockSockets?: Array<{
+      url: string;
+      readyState: number;
+      send: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      emit: (event: string, ...args: unknown[]) => boolean;
+    }>;
+  };
+  state.__frankenMockSockets ??= [];
+  return state.__frankenMockSockets;
+}
+
+vi.mock('ws', async () => {
+  const { EventEmitter } = await import('node:events');
+
+  class MockWebSocket extends EventEmitter {
+    static OPEN = 1;
+    readonly url: string;
+    readyState = MockWebSocket.OPEN;
+    send = vi.fn();
+    close = vi.fn(() => {
+      this.readyState = 3;
+      this.emit('close');
+    });
+
+    constructor(url: string) {
+      super();
+      this.url = url;
+      getMockSockets().push(this);
+      queueMicrotask(() => this.emit('open'));
+    }
+  }
+
+  return { WebSocket: MockWebSocket };
+});
+
+import { ChatSocketBridge } from '../../src/core/chat-socket-bridge.js';
 
 describe('ChatSocketBridge', () => {
-  let wss: WebSocketServer;
-  let port: number;
-
-  beforeEach(async () => {
-    wss = new WebSocketServer({ port: 0 });
-    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
-    port = (wss.address() as AddressInfo).port;
-  });
-
-  afterEach(() => {
-    wss.close();
+  beforeEach(() => {
+    getMockSockets().length = 0;
   });
 
   it('connects to the server with sessionId', async () => {
     const bridge = new ChatSocketBridge({
-      url: `ws://localhost:${port}`,
+      url: 'ws://orchestrator.test/socket',
       sessionId: 'session-123',
     });
 
-    const connectPromise = new Promise<void>((resolve) => {
-      wss.on('connection', (ws, req) => {
-        const url = new URL(req.url!, 'http://localhost');
-        expect(url.searchParams.get('sessionId')).toBe('session-123');
-        resolve();
-      });
-    });
-
     await bridge.connect();
-    await connectPromise;
+
+    expect(getMockSockets()).toHaveLength(1);
+    expect(getMockSockets()[0].url).toContain('sessionId=session-123');
     bridge.close();
   });
 
   it('receives events from the server', async () => {
     const bridge = new ChatSocketBridge({
-      url: `ws://localhost:${port}`,
+      url: 'ws://orchestrator.test/socket',
       sessionId: 'session-123',
     });
 
@@ -59,31 +87,24 @@ describe('ChatSocketBridge', () => {
     });
 
     await bridge.connect();
-    wss.clients.forEach((client) => client.send(JSON.stringify(event)));
+    getMockSockets()[0].emit('message', Buffer.from(JSON.stringify(event)));
     await eventPromise;
     bridge.close();
   });
 
   it('sends messages to the server', async () => {
     const bridge = new ChatSocketBridge({
-      url: `ws://localhost:${port}`,
+      url: 'ws://orchestrator.test/socket',
       sessionId: 'session-123',
-    });
-
-    const messagePromise = new Promise<void>((resolve) => {
-      wss.on('connection', (ws) => {
-        ws.on('message', (data) => {
-          const payload = JSON.parse(data.toString());
-          expect(payload.type).toBe('message.send');
-          expect(payload.content).toBe('hello');
-          resolve();
-        });
-      });
     });
 
     await bridge.connect();
     await bridge.send('hello');
-    await messagePromise;
+
+    expect(getMockSockets()[0].send).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(getMockSockets()[0].send.mock.calls[0][0] as string);
+    expect(payload.type).toBe('message.send');
+    expect(payload.content).toBe('hello');
     bridge.close();
   });
 });

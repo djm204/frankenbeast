@@ -4,6 +4,7 @@ export * from './core/session-mapper.js';
 export * from './gateway/chat-gateway.js';
 export * from './config/comms-config.js';
 export * from './server/app.js';
+export * from './server/start-comms-server.js';
 
 // Adapters
 export * from './channels/slack/slack-adapter.js';
