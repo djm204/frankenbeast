@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
+const RELEASE_AUTO_MERGE_PATH = resolve(ROOT, '.github/workflows/release-auto-merge.yml');
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
@@ -82,5 +83,31 @@ describe('release-please.yml (unchanged)', () => {
   it('references correct manifest-file path', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content).toContain('manifest-file: .release-please-manifest.json');
+  });
+});
+
+describe('release-auto-merge.yml', () => {
+  it('release-auto-merge.yml exists', () => {
+    expect(existsSync(RELEASE_AUTO_MERGE_PATH)).toBe(true);
+  });
+
+  it('watches release PR events and CI completion', () => {
+    const content = readFileSync(RELEASE_AUTO_MERGE_PATH, 'utf-8');
+    expect(content).toContain('pull_request_target:');
+    expect(content).toContain('workflow_run:');
+    expect(content).toContain('workflows: [CI]');
+  });
+
+  it('gates on autorelease labeling and CI success', () => {
+    const content = readFileSync(RELEASE_AUTO_MERGE_PATH, 'utf-8');
+    expect(content).toContain('autorelease: pending');
+    expect(content).toContain("github.event.workflow_run.conclusion == 'success'");
+  });
+
+  it('uses the GitHub App token, auto-approves, and enables automerge', () => {
+    const content = readFileSync(RELEASE_AUTO_MERGE_PATH, 'utf-8');
+    expect(content).toContain('actions/create-github-app-token@v1');
+    expect(content).toContain('hmarr/auto-approve-action@v4');
+    expect(content).toContain('peter-evans/enable-pull-request-automerge@v3');
   });
 });
