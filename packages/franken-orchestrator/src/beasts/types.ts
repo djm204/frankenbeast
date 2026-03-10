@@ -1,3 +1,5 @@
+import type { ZodType } from 'zod';
+
 export type BeastDispatchSource = 'cli' | 'dashboard' | 'chat' | 'api';
 
 export type BeastExecutionMode = 'process' | 'container';
@@ -11,12 +13,22 @@ export type BeastRunStatus =
   | 'failed'
   | 'stopped';
 
+export interface BeastInterviewPrompt {
+  readonly key: string;
+  readonly prompt: string;
+  readonly kind: 'string' | 'boolean';
+  readonly required?: boolean | undefined;
+  readonly options?: readonly string[] | undefined;
+}
+
 export interface BeastDefinition {
   readonly id: string;
   readonly version: number;
   readonly label: string;
   readonly description: string;
   readonly executionModeDefault: BeastExecutionMode;
+  readonly configSchema: ZodType<Readonly<Record<string, unknown>>>;
+  readonly interviewPrompts: readonly BeastInterviewPrompt[];
   readonly telemetryLabels: Readonly<Record<string, string>>;
 }
 

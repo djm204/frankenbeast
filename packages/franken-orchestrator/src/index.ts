@@ -106,6 +106,7 @@ export type {
   BeastDefinition,
   BeastDispatchSource,
   BeastExecutionMode,
+  BeastInterviewPrompt,
   BeastInterviewSession,
   BeastRun,
   BeastRunAttempt,
@@ -115,6 +116,9 @@ export type {
 export { BEAST_SQLITE_SCHEMA_STATEMENTS } from './beasts/repository/sqlite-schema.js';
 export { SQLiteBeastRepository } from './beasts/repository/sqlite-beast-repository.js';
 export { BeastLogStore } from './beasts/events/beast-log-store.js';
+export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
+export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
+export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
 
 // Logging
 export {

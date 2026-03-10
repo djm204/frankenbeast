@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import type {
   BeastDispatchSource,
   BeastExecutionMode,
+  BeastInterviewSession,
   BeastRun,
   BeastRunAttempt,
   BeastRunEvent,
@@ -97,6 +98,15 @@ type BeastEventRow = {
   type: string;
   payload: string;
   created_at: string;
+};
+
+type BeastInterviewSessionRow = {
+  id: string;
+  definition_id: string;
+  status: BeastInterviewSession['status'];
+  answers: string;
+  created_at: string;
+  updated_at: string;
 };
 
 function prefixedId(prefix: string): string {
@@ -302,6 +312,72 @@ export class SQLiteBeastRepository {
     return rows.map(mapEvent);
   }
 
+  createInterviewSession(input: Omit<BeastInterviewSession, 'id'>): BeastInterviewSession {
+    const session: BeastInterviewSession = {
+      id: prefixedId('interview'),
+      ...input,
+    };
+
+    this.db.prepare(
+      `INSERT INTO beast_interview_sessions (
+        id,
+        definition_id,
+        status,
+        answers,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      session.id,
+      session.definitionId,
+      session.status,
+      JSON.stringify(session.answers),
+      session.createdAt,
+      session.updatedAt,
+    );
+
+    return session;
+  }
+
+  getInterviewSession(sessionId: string): BeastInterviewSession | undefined {
+    const row = this.db.prepare(
+      'SELECT * FROM beast_interview_sessions WHERE id = ?',
+    ).get(sessionId) as BeastInterviewSessionRow | undefined;
+    return row ? mapInterviewSession(row) : undefined;
+  }
+
+  updateInterviewSession(
+    sessionId: string,
+    patch: Partial<Pick<BeastInterviewSession, 'status' | 'answers' | 'updatedAt'>>,
+  ): BeastInterviewSession {
+    const current = this.getInterviewSession(sessionId);
+    if (!current) {
+      throw new Error(`Unknown Beast interview session: ${sessionId}`);
+    }
+
+    const next: BeastInterviewSession = {
+      ...current,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.answers !== undefined ? { answers: patch.answers } : {}),
+      ...(patch.updatedAt !== undefined ? { updatedAt: patch.updatedAt } : {}),
+    };
+
+    this.db.prepare(
+      `UPDATE beast_interview_sessions
+         SET status = ?,
+             answers = ?,
+             updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      next.status,
+      JSON.stringify(next.answers),
+      next.updatedAt,
+      sessionId,
+    );
+
+    return next;
+  }
+
   close(): void {
     this.db.close();
   }
@@ -419,5 +495,16 @@ function mapEvent(row: BeastEventRow): BeastRunEvent {
     type: row.type,
     payload: JSON.parse(row.payload) as Readonly<Record<string, unknown>>,
     createdAt: row.created_at,
+  };
+}
+
+function mapInterviewSession(row: BeastInterviewSessionRow): BeastInterviewSession {
+  return {
+    id: row.id,
+    definitionId: row.definition_id,
+    status: row.status,
+    answers: JSON.parse(row.answers) as Readonly<Record<string, unknown>>,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
