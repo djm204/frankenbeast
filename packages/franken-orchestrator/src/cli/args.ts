@@ -1,6 +1,7 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
 export type Subcommand =
+  | 'init'
   | 'interview'
   | 'plan'
   | 'run'
@@ -67,9 +68,12 @@ export interface CliArgs {
   issueLimit?: number | undefined;
   issueRepo?: string | undefined;
   dryRun?: boolean | undefined;
+  initVerify: boolean;
+  initRepair: boolean;
+  initNonInteractive: boolean;
 }
 
-const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart']);
 
@@ -77,6 +81,7 @@ const USAGE = `
 Usage: frankenbeast [subcommand] [options]
 
 Subcommands:
+  init                    Guided setup for canonical Frankenbeast config
   interview               Gather requirements interactively, generate design doc
   plan --design-doc <f>   Decompose design doc into chunk files
   run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
@@ -104,6 +109,9 @@ Options:
   --reset                 Clear checkpoint and traces
   --resume                Resume from checkpoint
   --cleanup               Remove all build logs, checkpoints, and traces
+  --verify                Verify init config and readiness
+  --repair                Re-run only missing or failed init steps
+  --non-interactive       Disable interactive prompts for init
   --help                  Show this help message
 
 Issue Flags (for 'issues' subcommand):
@@ -144,6 +152,8 @@ Examples:
   frankenbeast plan --design-doc design.md  # plan only
   frankenbeast run                          # execute only
   frankenbeast run --resume                 # resume execution
+  frankenbeast init                         # guided init wizard
+  frankenbeast init --verify                # verify init readiness
   frankenbeast beasts spawn martin-loop     # spawn a martin-loop beast
   frankenbeast chat-server                  # local chat server
   frankenbeast chat-server --port 4242      # local chat server on custom port
@@ -163,7 +173,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server';
+    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network';
     flagArgs = argv.slice(1);
   }
 
@@ -188,6 +198,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       reset: { type: 'boolean', default: false },
       resume: { type: 'boolean', default: false },
       cleanup: { type: 'boolean', default: false },
+      verify: { type: 'boolean', default: false },
+      repair: { type: 'boolean', default: false },
+      'non-interactive': { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
       label: { type: 'string' },
       milestone: { type: 'string' },
@@ -278,6 +291,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     reset: values.reset ?? false,
     resume: values.resume ?? false,
     cleanup: values.cleanup ?? false,
+    initVerify: values.verify ?? false,
+    initRepair: values.repair ?? false,
+    initNonInteractive: values['non-interactive'] ?? false,
     help: values.help ?? false,
     issueLabel,
     issueMilestone: values.milestone,
