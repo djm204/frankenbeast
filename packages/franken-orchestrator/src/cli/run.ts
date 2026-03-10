@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
+import { handleBeastCommand } from './beast-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -188,6 +189,16 @@ export async function main(): Promise<void> {
 
   if (args.subcommand === 'network') {
     await runNetworkCommand(args, config, root, paths);
+    return;
+  }
+
+  if (args.subcommand === 'beasts') {
+    await handleBeastCommand({
+      args,
+      io: createStdinIO(),
+      paths,
+      print: console.log,
+    });
     return;
   }
 

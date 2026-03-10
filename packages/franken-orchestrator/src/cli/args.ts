@@ -4,6 +4,7 @@ export type Subcommand =
   | 'interview'
   | 'plan'
   | 'run'
+  | 'beasts'
   | 'issues'
   | 'chat'
   | 'chat-server'
@@ -22,8 +23,21 @@ export type NetworkAction =
   | 'help'
   | undefined;
 
+export type BeastAction =
+  | 'catalog'
+  | 'spawn'
+  | 'list'
+  | 'status'
+  | 'logs'
+  | 'stop'
+  | 'kill'
+  | 'restart'
+  | undefined;
+
 export interface CliArgs {
   subcommand: Subcommand;
+  beastAction?: BeastAction;
+  beastTarget?: string | undefined;
   networkAction?: NetworkAction;
   networkTarget?: string | undefined;
   networkDetached: boolean;
@@ -55,8 +69,9 @@ export interface CliArgs {
   dryRun?: boolean | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues', 'chat', 'chat-server', 'network']);
+const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
+const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -65,6 +80,7 @@ Subcommands:
   interview               Gather requirements interactively, generate design doc
   plan --design-doc <f>   Decompose design doc into chunk files
   run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
+  beasts                  Dispatch and control Beast runs
   issues                  Fetch and filter GitHub issues
   chat                    Interactive chat REPL with ConversationEngine
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
@@ -110,6 +126,16 @@ Network Commands:
   network config [--set a.b.c=value]  Inspect or update operator config
   network help                        Show network command help
 
+Beast Commands:
+  beasts catalog                      List fixed Beast definitions
+  beasts spawn <definition-id>        Spawn a Beast run via interactive prompts
+  beasts list                         List Beast runs
+  beasts status <run-id>              Show one Beast run
+  beasts logs <run-id>                Show logs for the current attempt
+  beasts stop <run-id>                Stop a running Beast
+  beasts kill <run-id>                Force-stop a Beast
+  beasts restart <run-id>             Restart a Beast with a new attempt
+
 Examples:
   frankenbeast                              # full interactive flow
   frankenbeast --design-doc design.md       # skip interview
@@ -118,6 +144,7 @@ Examples:
   frankenbeast plan --design-doc design.md  # plan only
   frankenbeast run                          # execute only
   frankenbeast run --resume                 # resume execution
+  frankenbeast beasts spawn martin-loop     # spawn a martin-loop beast
   frankenbeast chat-server                  # local chat server
   frankenbeast chat-server --port 4242      # local chat server on custom port
   frankenbeast network up                   # start managed services
@@ -136,7 +163,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'interview' | 'plan' | 'run' | 'issues' | 'chat' | 'chat-server';
+    subcommand = first as 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server';
     flagArgs = argv.slice(1);
   }
 
@@ -176,6 +203,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   });
   let networkAction: NetworkAction;
   let networkTarget: string | undefined;
+  let beastAction: BeastAction;
+  let beastTarget: string | undefined;
 
   if (subcommand === 'network') {
     const actionCandidate = positionals[0];
@@ -186,6 +215,15 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       networkAction = actionCandidate as NetworkAction;
     }
     networkTarget = positionals[1];
+  } else if (subcommand === 'beasts') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_BEAST_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown beast action: ${actionCandidate}`);
+      }
+      beastAction = actionCandidate as BeastAction;
+    }
+    beastTarget = positionals[1];
   } else if (positionals.length > 0) {
     throw new TypeError(`Unexpected argument '${positionals[0]}'. This command does not take positional arguments`);
   }
@@ -217,6 +255,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
 
   return {
     subcommand,
+    beastAction,
+    beastTarget,
     networkAction,
     networkTarget,
     networkDetached: values.detached ?? false,
