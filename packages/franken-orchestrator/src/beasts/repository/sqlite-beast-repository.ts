@@ -193,6 +193,11 @@ export class SQLiteBeastRepository {
     return rows.map(mapAttempt);
   }
 
+  getAttempt(attemptId: string): BeastRunAttempt | undefined {
+    const row = this.db.prepare('SELECT * FROM beast_run_attempts WHERE id = ?').get(attemptId) as BeastAttemptRow | undefined;
+    return row ? mapAttempt(row) : undefined;
+  }
+
   updateRun(runId: string, patch: UpdateRunPatch): BeastRun {
     const current = this.getRunOrThrow(runId);
     const next: BeastRun = {
@@ -433,11 +438,11 @@ export class SQLiteBeastRepository {
   }
 
   private getAttemptOrThrow(attemptId: string): BeastRunAttempt {
-    const row = this.db.prepare('SELECT * FROM beast_run_attempts WHERE id = ?').get(attemptId) as BeastAttemptRow | undefined;
-    if (!row) {
+    const attempt = this.getAttempt(attemptId);
+    if (!attempt) {
       throw new Error(`Unknown Beast attempt: ${attemptId}`);
     }
-    return mapAttempt(row);
+    return attempt;
   }
 }
 

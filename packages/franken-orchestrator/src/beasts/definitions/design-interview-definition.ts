@@ -25,6 +25,10 @@ export const designInterviewDefinition: BeastDefinition = {
       required: true,
     },
   ],
+  buildProcessSpec: () => ({
+    command: 'node',
+    args: ['-e', 'setTimeout(() => process.exit(0), 50)'],
+  }),
   telemetryLabels: {
     family: 'design-interview',
   },

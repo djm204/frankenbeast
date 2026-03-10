@@ -21,6 +21,13 @@ export interface BeastInterviewPrompt {
   readonly options?: readonly string[] | undefined;
 }
 
+export interface BeastProcessSpec {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd?: string | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
+}
+
 export interface BeastDefinition {
   readonly id: string;
   readonly version: number;
@@ -29,6 +36,7 @@ export interface BeastDefinition {
   readonly executionModeDefault: BeastExecutionMode;
   readonly configSchema: ZodType<Readonly<Record<string, unknown>>>;
   readonly interviewPrompts: readonly BeastInterviewPrompt[];
+  buildProcessSpec(config: Readonly<Record<string, unknown>>): BeastProcessSpec;
   readonly telemetryLabels: Readonly<Record<string, string>>;
 }
 

@@ -26,6 +26,13 @@ export const martinLoopDefinition: BeastDefinition = {
       required: true,
     },
   ],
+  buildProcessSpec: (config) => ({
+    command: 'node',
+    args: ['-e', `console.log("martin-loop:${String(config.objective ?? '')}")`],
+    env: {
+      FRANKENBEAST_PROVIDER: String(config.provider ?? ''),
+    },
+  }),
   telemetryLabels: {
     family: 'martin-loop',
   },

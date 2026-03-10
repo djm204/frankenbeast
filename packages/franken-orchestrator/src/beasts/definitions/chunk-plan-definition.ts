@@ -25,6 +25,10 @@ export const chunkPlanDefinition: BeastDefinition = {
       required: true,
     },
   ],
+  buildProcessSpec: () => ({
+    command: 'node',
+    args: ['-e', 'setTimeout(() => process.exit(0), 50)'],
+  }),
   telemetryLabels: {
     family: 'chunk-plan',
   },
