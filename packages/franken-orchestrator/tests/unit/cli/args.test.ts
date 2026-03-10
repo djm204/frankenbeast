@@ -31,6 +31,22 @@ describe('parseArgs', () => {
     expect(args.resume).toBe(true);
   });
 
+  it('parses init subcommand', () => {
+    const args = parseArgs(['init']);
+    expect(args.subcommand).toBe('init');
+    expect(args.initVerify).toBe(false);
+    expect(args.initRepair).toBe(false);
+    expect(args.initNonInteractive).toBe(false);
+  });
+
+  it('parses init verify/repair/non-interactive flags', () => {
+    const args = parseArgs(['init', '--verify', '--repair', '--non-interactive']);
+    expect(args.subcommand).toBe('init');
+    expect(args.initVerify).toBe(true);
+    expect(args.initRepair).toBe(true);
+    expect(args.initNonInteractive).toBe(true);
+  });
+
   it('parses chat-server subcommand with local defaults', () => {
     const args = parseArgs(['chat-server']);
     expect(args.subcommand).toBe('chat-server');
@@ -194,12 +210,13 @@ describe('parseArgs', () => {
     expect(args.help).toBe(true);
   });
 
-  it('prints usage text including network and chat-server', () => {
+  it('prints usage text including init, network, and chat-server', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     printUsage();
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('chat-server'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('init'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('network'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('beasts'));
     logSpy.mockRestore();
