@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 import type { Hono } from 'hono';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { createChatApp } from './chat-app.js';

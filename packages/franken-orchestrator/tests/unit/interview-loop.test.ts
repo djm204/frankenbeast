@@ -3,7 +3,7 @@ import { InterviewLoop } from '../../src/planning/interview-loop.js';
 import type { InterviewIO } from '../../src/planning/interview-loop.js';
 import type { LlmGraphBuilder } from '../../src/planning/llm-graph-builder.js';
 import type { PlanIntent, PlanGraph, PlanTask } from '../../src/deps.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 
 /** Builds a mock ILlmClient with sequential responses. */
 function mockLlm(...responses: string[]): ILlmClient {

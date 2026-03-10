@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LlmGraphBuilder } from '../../src/planning/llm-graph-builder.js';
 import type { PlanTask } from '../../src/deps.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 
 function taskById(tasks: readonly PlanTask[], id: string): PlanTask | undefined {
   return tasks.find((t) => t.id === id);

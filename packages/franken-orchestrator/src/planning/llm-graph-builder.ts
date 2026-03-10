@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';

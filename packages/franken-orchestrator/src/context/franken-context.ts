@@ -1,4 +1,4 @@
-import type { TokenSpend } from '@franken/types';
+import type { TokenSpend } from '@franken/core';
 import type { BeastPhase } from '../types.js';
 import type { PlanGraph } from '../deps.js';
 

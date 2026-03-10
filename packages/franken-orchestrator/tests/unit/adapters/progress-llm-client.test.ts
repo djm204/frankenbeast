@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import { ProgressLlmClient } from '../../../src/adapters/progress-llm-client.js';
 
 function mockLlm(response: string, delayMs = 0): ILlmClient {

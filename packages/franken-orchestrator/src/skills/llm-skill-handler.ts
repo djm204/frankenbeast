@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { MemoryContext } from '../deps.js';
 
 type LlmSkillResult = { output: string; tokensUsed: number };

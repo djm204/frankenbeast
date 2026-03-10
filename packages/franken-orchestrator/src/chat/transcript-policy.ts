@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { TranscriptMessage } from './types.js';
 
 export interface TranscriptPolicyOptions {

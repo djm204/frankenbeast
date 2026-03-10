@@ -1,4 +1,4 @@
-import type { TokenSpend } from '@franken/types';
+import type { TokenSpend } from '@franken/core';
 
 /** Phases of the Beast Loop pipeline. */
 export type BeastPhase = 'ingestion' | 'planning' | 'execution' | 'closure';

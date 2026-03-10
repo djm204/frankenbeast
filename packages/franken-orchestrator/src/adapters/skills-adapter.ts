@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { IMcpModule, ISkillsModule, SkillDescriptor, SkillInput, SkillResult } from '../deps.js';
 
 export interface SkillContract {

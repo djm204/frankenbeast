@@ -1,0 +1,33 @@
+{
+  "name": "@franken/core",
+  "version": "0.4.0",
+  "description": "Foundational types and observability for the Frankenbeast system",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./observer": {
+      "import": "./dist/observer/index.js",
+      "types": "./dist/observer/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.2",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18",
+    "@types/better-sqlite3": "^7.6.13"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
+  }
+}

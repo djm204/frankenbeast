@@ -4,7 +4,7 @@ import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 
 /**
  * Locally compatible GraphBuilder interface.
- * Mirrors franken-planner's GraphBuilder without importing it directly.
+ * Mirrors @franken/brain/planner's GraphBuilder without importing it directly.
  */
 export interface GraphBuilder {
   build(intent: PlanIntent): Promise<PlanGraph>;

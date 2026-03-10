@@ -2,7 +2,7 @@ import { writeFile, readFile } from 'node:fs/promises';
 import { BeastContext, type AuditEntry } from '../context/franken-context.js';
 import type { BeastPhase } from '../types.js';
 import type { PlanGraph } from '../deps.js';
-import type { TokenSpend } from '@franken/types';
+import type { TokenSpend } from '@franken/core';
 
 /** Serializable snapshot of a BeastContext. */
 export interface ContextSnapshot {

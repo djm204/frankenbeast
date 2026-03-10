@@ -7,7 +7,7 @@ export interface TraceViewerHandle {
 }
 
 /**
- * Dynamically imports SQLiteAdapter and TraceServer from @frankenbeast/observer
+ * Dynamically imports SQLiteAdapter and TraceServer from @franken/core/observer
  * and starts a trace viewer HTTP server on port 4040.
  *
  * Returns a handle for cleanup, or null if setup fails
@@ -24,7 +24,7 @@ export async function setupTraceViewer(
       return null;
     }
 
-    const { SQLiteAdapter, TraceServer } = await import('@frankenbeast/observer');
+    const { SQLiteAdapter, TraceServer } = await import('@franken/core/observer');
     const sqliteAdapter = new SQLiteAdapter(tracesDbPath);
     const traceServer = new TraceServer({ adapter: sqliteAdapter, port: 4040 });
 

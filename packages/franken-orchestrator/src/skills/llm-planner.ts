@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
 
 type RawPlanResponse = { tasks?: unknown };

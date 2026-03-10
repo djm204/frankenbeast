@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { ModelTier } from '../../../src/chat/types.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 
 function mockLlm(response = 'Mock response'): ILlmClient {
   return { complete: vi.fn().mockResolvedValue(response) };

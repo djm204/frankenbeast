@@ -67,19 +67,19 @@ vi.mock('../../../src/cli/trace-viewer.js', () => ({
   setupTraceViewer: vi.fn(async () => ({ stop: vi.fn() })),
 }));
 
-vi.mock('@franken/firewall', () => ({
+vi.mock('@franken/safety', () => ({
   scanForInjection: vi.fn(() => ({ passed: true, violations: [] })),
   maskPii: vi.fn((request: unknown) => ({ passed: true, value: request, violations: [] })),
 }));
 
-vi.mock('franken-brain', () => ({
+vi.mock('@franken/brain', () => ({
   MemoryOrchestrator: vi.fn(function () {}),
   EpisodicMemoryStore: vi.fn(function () {}),
   SemanticMemoryStore: vi.fn(function () {}),
   WorkingMemoryStore: vi.fn(function () {}),
 }));
 
-vi.mock('@franken/critique', () => ({
+vi.mock('@franken/safety/critique', () => ({
   createReviewer: vi.fn(() => ({
     review: vi.fn(async () => ({
       verdict: 'pass',

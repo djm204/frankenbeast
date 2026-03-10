@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerSocketEvent } from '@franken/types';
+import type { ServerSocketEvent } from '@franken/core';
 
 function getMockSockets(): Array<{
   url: string;

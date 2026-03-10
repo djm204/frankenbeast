@@ -35,7 +35,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@franken/types": "*",
+    "@franken/core": "*",
     "hono": "^4.12.5",
     "ws": "^8.18.1",
     "zod": "^3.24.0"

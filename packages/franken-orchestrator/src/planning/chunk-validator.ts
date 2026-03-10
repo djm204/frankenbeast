@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import type { PlanContext } from './plan-context-gatherer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';

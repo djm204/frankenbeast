@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ChunkDecomposer } from '../../src/planning/chunk-decomposer.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { PlanContext } from '../../src/planning/plan-context-gatherer.js';
 
 function mockLlm(response: string): ILlmClient {

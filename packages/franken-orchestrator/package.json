@@ -39,18 +39,18 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@franken/types": "*",
-    "@frankenbeast/observer": "*",
+    "@franken/core": "*",
+    "@franken/core": "*",
     "hono": "^4.12.5",
     "zod": "^3.24.0",
     "@franken/firewall": "*",
-    "franken-brain": "*",
+    "@franken/brain": "*",
     "@franken/critique": "*",
     "@franken/governor": "*",
-    "franken-planner": "*",
+    "@franken/brain": "*",
     "@franken/skills": "*",
     "franken-heartbeat": "*",
-    "@franken/mcp": "*"
+    "@franken/brain": "*"
   },
   "devDependencies": {
     "@types/node": "^22.15.2",

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ChunkValidator } from '../../src/planning/chunk-validator.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { ChunkDefinition } from '../../src/cli/file-writer.js';
 import type { PlanContext } from '../../src/planning/plan-context-gatherer.js';
 

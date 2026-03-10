@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import { FileSessionStore } from '../chat/session-store.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ConversationEngine } from '../chat/conversation-engine.js';

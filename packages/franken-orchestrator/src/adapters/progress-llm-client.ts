@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import { Spinner } from '../cli/spinner.js';
 
 export interface ProgressLlmClientOptions {

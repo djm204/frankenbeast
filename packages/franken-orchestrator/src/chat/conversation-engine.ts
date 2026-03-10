@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type {
   ModelTierValue,
   TranscriptMessage,

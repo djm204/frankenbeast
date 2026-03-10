@@ -46,7 +46,7 @@ export function writeProgress(
   }
 }
 
-// ── Observer interfaces (no direct @frankenbeast/observer import) ──
+// ── Observer interfaces (no direct @franken/core/observer import) ──
 
 export interface Span {
   readonly id: string;

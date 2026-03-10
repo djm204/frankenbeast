@@ -13,7 +13,7 @@ import {
 import {
   ClientSocketEventSchema,
   type ServerSocketEvent,
-} from '@franken/types';
+} from '@franken/core';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;

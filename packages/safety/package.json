@@ -1,0 +1,39 @@
+{
+  "name": "@franken/safety",
+  "version": "0.4.0",
+  "description": "Safety layer: Firewall, Self-Critique, and Governor",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./critique": {
+      "import": "./dist/critique/index.js",
+      "types": "./dist/critique/index.d.ts"
+    },
+    "./governor": {
+      "import": "./dist/governor/index.js",
+      "types": "./dist/governor/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@franken/core": "*",
+    "hono": "^4.7.0",
+    "ts-morph": "^27.0.2",
+    "zod": "^3.24.0"
+  }
+}

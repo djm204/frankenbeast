@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { 
   ClientSocketEventSchema, 
   ServerSocketEventSchema 
-} from '@franken/types';
+} from '@franken/core';
 
 describe('ws chat contracts', () => {
   it('accepts a valid message.send event and rejects unknown fields', () => {

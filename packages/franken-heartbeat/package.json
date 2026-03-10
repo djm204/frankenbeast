@@ -30,7 +30,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@franken/types": "*",
+    "@franken/core": "*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

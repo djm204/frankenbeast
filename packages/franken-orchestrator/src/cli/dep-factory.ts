@@ -23,9 +23,9 @@ import type { ReviewIO } from '../issues/issue-review.js';
 import { IssueRunner } from '../issues/issue-runner.js';
 import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
-import { scanForInjection, maskPii } from '@franken/firewall';
-import { MemoryOrchestrator, EpisodicMemoryStore, SemanticMemoryStore, WorkingMemoryStore } from 'franken-brain';
-import { createReviewer } from '@franken/critique';
+import { scanForInjection, maskPii } from '@franken/safety';
+import { MemoryOrchestrator, EpisodicMemoryStore, SemanticMemoryStore, WorkingMemoryStore } from '@franken/brain';
+import { createReviewer } from '@franken/safety/critique';
 import type {
   BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
   IPlannerModule, ICritiqueModule, IGovernorModule,

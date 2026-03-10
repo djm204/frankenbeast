@@ -1,4 +1,4 @@
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import { ConversationEngine } from './conversation-engine.js';
 import { ChatRuntime } from './runtime.js';
 import { ChatAgentExecutor } from './chat-agent-executor.js';

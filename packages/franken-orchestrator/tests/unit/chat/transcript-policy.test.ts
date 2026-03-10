@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TranscriptPolicy } from '../../../src/chat/transcript-policy.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient } from '@franken/core';
 import type { TranscriptMessage } from '../../../src/chat/types.js';
 
 function mockLlm(summary = 'Summary of earlier conversation.'): ILlmClient {

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { 
   ClientSocketEvent, 
   ServerSocketEvent 
-} from '@franken/types';
+} from '@franken/core';
 
 export interface ChatSocketBridgeOptions {
   url: string;

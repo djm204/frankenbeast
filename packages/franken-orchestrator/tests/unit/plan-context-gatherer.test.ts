@@ -145,7 +145,7 @@ describe('PlanContextGatherer', () => {
   });
 
   it('handles paths under packages/ directories', async () => {
-    const srcDir = join(FIXTURES_DIR, 'packages', 'franken-brain', 'src');
+    const srcDir = join(FIXTURES_DIR, 'packages', '@franken/brain', 'src');
     ensureDir(srcDir);
     writeFileSync(
       join(srcDir, 'memory.ts'),
@@ -158,13 +158,13 @@ describe('PlanContextGatherer', () => {
       ].join('\n'),
     );
 
-    const designDoc = 'We will extend packages/franken-brain/src/memory.ts with new storage.';
+    const designDoc = 'We will extend packages/@franken/brain/src/memory.ts with new storage.';
 
     const gatherer = new PlanContextGatherer(FIXTURES_DIR);
     const ctx = await gatherer.gather(designDoc);
 
     expect(ctx.relevantSignatures).toHaveLength(1);
-    expect(ctx.relevantSignatures[0]!.path).toBe('packages/franken-brain/src/memory.ts');
+    expect(ctx.relevantSignatures[0]!.path).toBe('packages/@franken/brain/src/memory.ts');
     expect(ctx.relevantSignatures[0]!.signatures).toContain('export interface IMemory');
     expect(ctx.relevantSignatures[0]!.signatures).not.toContain('internal');
   });
