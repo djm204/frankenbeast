@@ -101,6 +101,19 @@ export { ProviderRegistry, createDefaultRegistry } from './skills/providers/inde
 // Checkpoint
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
 
+// Beasts
+export type {
+  BeastDefinition,
+  BeastDispatchSource,
+  BeastExecutionMode,
+  BeastInterviewSession,
+  BeastRun,
+  BeastRunAttempt,
+  BeastRunEvent,
+  BeastRunStatus,
+} from './beasts/types.js';
+export { BEAST_SQLITE_SCHEMA_STATEMENTS } from './beasts/repository/sqlite-schema.js';
+
 // Logging
 export {
   BeastLogger,

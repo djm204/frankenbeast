@@ -37,6 +37,9 @@ describe('project-root', () => {
       expect(paths.frankenbeastDir).toBe(resolve(testDir, '.frankenbeast'));
       expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans'));
       expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
+      expect(paths.beastsDir).toBe(resolve(testDir, '.frankenbeast/.build/beasts'));
+      expect(paths.beastLogsDir).toBe(resolve(testDir, '.frankenbeast/.build/beasts/logs'));
+      expect(paths.beastsDb).toBe(resolve(testDir, '.frankenbeast/.build/beasts.db'));
       expect(paths.designDocFile).toBe(resolve(testDir, '.frankenbeast/plans/design.md'));
       expect(paths.llmResponseFile).toBe(resolve(testDir, '.frankenbeast/plans/llm-response.json'));
       expect(paths.configFile).toBe(resolve(testDir, '.frankenbeast/config.json'));
@@ -80,6 +83,8 @@ describe('project-root', () => {
       scaffoldFrankenbeast(paths);
       expect(existsSync(paths.plansDir)).toBe(true);
       expect(existsSync(paths.buildDir)).toBe(true);
+      expect(existsSync(paths.beastsDir)).toBe(true);
+      expect(existsSync(paths.beastLogsDir)).toBe(true);
     });
 
     it('is idempotent', () => {

@@ -1,0 +1,52 @@
+export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS beast_runs (
+    id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    definition_version INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    execution_mode TEXT NOT NULL,
+    config_snapshot TEXT NOT NULL,
+    dispatched_by TEXT NOT NULL,
+    dispatched_by_user TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    current_attempt_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_heartbeat_at TEXT,
+    stop_reason TEXT,
+    latest_exit_code INTEGER
+  )`,
+  `CREATE TABLE IF NOT EXISTS beast_run_attempts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    pid INTEGER,
+    started_at TEXT,
+    finished_at TEXT,
+    exit_code INTEGER,
+    stop_reason TEXT,
+    executor_metadata TEXT,
+    FOREIGN KEY (run_id) REFERENCES beast_runs(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS beast_run_events (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    attempt_id TEXT,
+    sequence INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES beast_runs(id),
+    FOREIGN KEY (attempt_id) REFERENCES beast_run_attempts(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS beast_interview_sessions (
+    id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    answers TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+] as const;

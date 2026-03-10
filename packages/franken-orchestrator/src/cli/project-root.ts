@@ -6,6 +6,9 @@ export interface ProjectPaths {
   frankenbeastDir: string;
   plansDir: string;
   buildDir: string;
+  beastsDir: string;
+  beastLogsDir: string;
+  beastsDb: string;
   chunkSessionsDir: string;
   chunkSessionSnapshotsDir: string;
   checkpointFile: string;
@@ -55,11 +58,15 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
   const plansBaseDir = resolve(frankenbeastDir, 'plans');
   const plansDir = planName ? resolve(plansBaseDir, planName) : plansBaseDir;
   const buildDir = resolve(frankenbeastDir, '.build');
+  const beastsDir = resolve(buildDir, 'beasts');
   return {
     root,
     frankenbeastDir,
     plansDir,
     buildDir,
+    beastsDir,
+    beastLogsDir: resolve(beastsDir, 'logs'),
+    beastsDb: resolve(buildDir, 'beasts.db'),
     chunkSessionsDir: resolve(buildDir, 'chunk-sessions'),
     chunkSessionSnapshotsDir: resolve(buildDir, 'chunk-session-snapshots'),
     checkpointFile: resolve(buildDir, '.checkpoint'),
@@ -77,4 +84,6 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
 export function scaffoldFrankenbeast(paths: ProjectPaths): void {
   mkdirSync(paths.plansDir, { recursive: true });
   mkdirSync(paths.buildDir, { recursive: true });
+  mkdirSync(paths.beastsDir, { recursive: true });
+  mkdirSync(paths.beastLogsDir, { recursive: true });
 }
