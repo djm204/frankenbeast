@@ -1,0 +1,144 @@
+name: Auto-merge Release Please PRs
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+
+jobs:
+  auto-merge:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release PR candidate
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const isEligibleLabel = (labels) =>
+              labels.some((label) => label.name === 'autorelease: pending');
+            const isReleaseHead = (head) =>
+              Boolean(head?.ref && head.ref.startsWith('release-please--'));
+
+            let pr = null;
+
+            if (context.eventName === 'pull_request_target') {
+              pr = context.payload.pull_request;
+            } else {
+              const { data: pulls } = await github.request(
+                'GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls',
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: context.payload.workflow_run.head_sha,
+                },
+              );
+              pr = pulls.find((candidate) => candidate.state === 'open') ?? null;
+            }
+
+            if (!pr) {
+              core.setOutput('eligible', 'false');
+              core.setOutput('reason', 'no-open-pr');
+              return;
+            }
+
+            if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'main') {
+              core.setOutput('eligible', 'false');
+              core.setOutput('reason', 'pr-not-open-main-ready');
+              return;
+            }
+
+            if (!isEligibleLabel(pr.labels) || !isReleaseHead(pr.head)) {
+              core.setOutput('eligible', 'false');
+              core.setOutput('reason', 'not-release-please');
+              return;
+            }
+
+            core.setOutput('eligible', 'true');
+            core.setOutput('pr-number', String(pr.number));
+            core.setOutput('head-sha', pr.head.sha);
+
+      - name: Verify CI and required checks are green
+        id: checks
+        if: ${{ steps.resolve.outputs.eligible == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = '${{ steps.resolve.outputs.head-sha }}';
+
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner,
+              repo,
+              ref,
+              per_page: 100,
+            });
+
+            const relevantCheckRuns = checkRuns.filter((run) => run.name !== context.workflow);
+            if (relevantCheckRuns.length === 0) {
+              core.setOutput('ready', 'false');
+              core.setOutput('reason', 'no-check-runs');
+              return;
+            }
+
+            const blockingCheckRuns = relevantCheckRuns.filter((run) =>
+              run.status !== 'completed' || !['success', 'neutral', 'skipped'].includes(run.conclusion ?? ''),
+            );
+            if (blockingCheckRuns.length > 0) {
+              core.setOutput('ready', 'false');
+              core.setOutput('reason', 'checks-not-green');
+              return;
+            }
+
+            const { data: combined } = await github.rest.repos.getCombinedStatusForRef({
+              owner,
+              repo,
+              ref,
+            });
+            const blockingStatuses = combined.statuses.filter((status) => status.state !== 'success');
+            if (blockingStatuses.length > 0) {
+              core.setOutput('ready', 'false');
+              core.setOutput('reason', 'statuses-not-green');
+              return;
+            }
+
+            core.setOutput('ready', 'true');
+
+      - name: Generate GitHub App token
+        if: ${{ steps.resolve.outputs.eligible == 'true' && steps.checks.outputs.ready == 'true' }}
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Auto-approve
+        if: ${{ steps.resolve.outputs.eligible == 'true' && steps.checks.outputs.ready == 'true' }}
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          pull-request-number: ${{ steps.resolve.outputs.pr-number }}
+
+      - name: Enable auto-merge
+        if: ${{ steps.resolve.outputs.eligible == 'true' && steps.checks.outputs.ready == 'true' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          pull-request-number: ${{ steps.resolve.outputs.pr-number }}
+          merge-method: squash

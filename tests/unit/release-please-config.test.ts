@@ -27,6 +27,7 @@ describe('release-please monorepo config', () => {
     packages: Record<string, { 'release-type'?: string; component?: string }>;
   };
   const manifest = readJson('.release-please-manifest.json') as Record<string, string>;
+  const rootPackage = readJson('package.json') as { version: string };
 
   it('config has root "." entry preserved', () => {
     expect(config.packages['.']).toBeDefined();
@@ -59,7 +60,7 @@ describe('release-please monorepo config', () => {
   });
 
   it('manifest has root "." entry preserved', () => {
-    expect(manifest['.']).toBe('0.4.1');
+    expect(manifest['.']).toBe(rootPackage.version);
   });
 
   it('manifest has entries for all 11 packages', () => {
