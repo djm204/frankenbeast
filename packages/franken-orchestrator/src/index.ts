@@ -113,6 +113,8 @@ export type {
   BeastRunStatus,
 } from './beasts/types.js';
 export { BEAST_SQLITE_SCHEMA_STATEMENTS } from './beasts/repository/sqlite-schema.js';
+export { SQLiteBeastRepository } from './beasts/repository/sqlite-beast-repository.js';
+export { BeastLogStore } from './beasts/events/beast-log-store.js';
 
 // Logging
 export {
