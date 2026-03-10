@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.14.0](https://github.com/djm204/frankenbeast/compare/v0.13.0...v0.14.0) (2026-03-10)
+
+
+### Features
+
+* **web:** refresh dashboard shell and controls ([570383f](https://github.com/djm204/frankenbeast/commit/570383f35f7c0f53fb7c8bf0eeb9b5ca73c4a7c8))
+* **web:** refresh dashboard shell UX and controls ([7d103d9](https://github.com/djm204/frankenbeast/commit/7d103d97efc3d5c76e85d952c786bf3f8c20130a))
+
+
+### Bug Fixes
+
+* **comms:** use concrete http request and response types ([7624751](https://github.com/djm204/frankenbeast/commit/762475103ac4e7135da0de7e41cb8d6fa51054d1))
+
+
+### Miscellaneous
+
+* **main:** release franken-governor 0.4.0 ([4e66333](https://github.com/djm204/frankenbeast/commit/4e663333c719fbb61541da92aa5efa142e44cec6))
+* **main:** release frankenfirewall 0.4.0 ([02e3d6a](https://github.com/djm204/frankenbeast/commit/02e3d6a9944c9e0a67cb04c5162fd0d21fbb6085))
+
+
+### Documentation
+
+* **plans:** add dashboard ux refresh design and plan ([2976f43](https://github.com/djm204/frankenbeast/commit/2976f4360cc84d35cbfdfe793fede52c8b69f39d))
+
 ## [0.13.0](https://github.com/djm204/frankenbeast/compare/v0.12.0...v0.13.0) (2026-03-10)
 
 
