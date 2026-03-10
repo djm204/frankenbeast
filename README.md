@@ -16,11 +16,9 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is organized here as 11 package directories: 8 core modules plus `franken-types`, `franken-mcp`, and `franken-orchestrator`. Most module boundaries are expressed as typed ports/adapters, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+Frankenbeast is organized as 13 packages: 8 core modules plus `franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, and `franken-web`. Most module boundaries are expressed as typed ports/adapters, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
-
-Current local CLI status: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and checkpoint handling are real. In `franken-orchestrator/src/cli/dep-factory.ts`, `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are still stubbed.
 
 ```mermaid
 flowchart TD
@@ -292,6 +290,8 @@ graph TB
 | — | [franken-types](https://github.com/djm204/franken-types) | Shared type definitions — TaskId, Severity, Result, RationaleBlock, TokenSpend. |
 | — | [franken-orchestrator](https://github.com/djm204/franken-orchestrator) | The Beast Loop — wires all modules into a 4-phase agent pipeline with circuit breakers. |
 | — | [franken-mcp](https://github.com/djm204/franken-mcp) | MCP (Model Context Protocol) server — tool discovery, constraint resolution, JSON-RPC transport. |
+| — | franken-comms | External communications gateway — Slack, Discord, Telegram, WhatsApp adapters with signature verification. |
+| — | franken-web | React web dashboard — chat UI, configuration, metrics visualization (dev tool, not published). |
 
 ### Core Principles
 
@@ -303,13 +303,14 @@ graph TB
 
 ## HTTP Services
 
-Three modules expose standalone Hono HTTP servers for use as independent microservices:
+Four modules expose standalone Hono HTTP servers for use as independent microservices:
 
 | Service | Endpoints |
 |---------|-----------|
 | Firewall | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
 | Critique | `POST /v1/review`, `GET /health` |
 | Governor | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
+| Chat Server | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
 
 ## Prerequisites
 
@@ -372,6 +373,15 @@ frankenbeast plan --design-doc design.md
 
 # Run only — executes chunks from .frankenbeast/plans/
 frankenbeast run
+
+# Interactive chat — two-tier REPL (conversational + execution)
+frankenbeast chat
+
+# Chat server — HTTP + WebSocket for franken-web dashboard
+frankenbeast chat-server --port 3000
+
+# GitHub issues — fetch, triage, and fix issues autonomously
+frankenbeast issues --label bug --repo owner/repo
 ```
 
 ### Options
@@ -380,15 +390,36 @@ frankenbeast run
 --base-dir <path>       Project root (default: cwd)
 --base-branch <name>    Git base branch (default: main)
 --budget <usd>          Budget limit in USD (default: 10)
---provider <name>       claude | codex (default: claude)
+--provider <name>       claude | codex | gemini | aider (default: claude)
+--providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
 --design-doc <path>     Path to design document
 --plan-dir <path>       Path to chunk files directory
+--config <path>         Path to config file (JSON)
 --no-pr                 Skip PR creation after execution
 --verbose               Debug logs + trace viewer on :4040
 --reset                 Clear checkpoint and traces
---resume                Parsed, but not yet wired as a distinct resume mode
---config <path>         Path to config file (JSON)
+--cleanup               Remove all build artifacts from .frankenbeast/.build/
 --help                  Show help
+```
+
+**Issues-specific flags:**
+
+```
+--label <labels>        Comma-separated labels (e.g. critical,high)
+--search <query>        GitHub search syntax
+--milestone <name>      Filter by milestone
+--assignee <user>       Filter by assignee
+--limit <n>             Max issues to fetch (default: 30)
+--repo <owner/repo>     Target repository (auto-inferred if omitted)
+--dry-run               Preview triage without executing
+```
+
+**Chat server flags:**
+
+```
+--host <addr>           Server bind address (default: localhost)
+--port <n>              Server port (default: 3000)
+--allow-origin <url>    CORS origin for dashboard
 ```
 
 ### Project Layout
@@ -411,17 +442,14 @@ your-project/
 ## Running Tests
 
 ```bash
-# Root-level integration tests
+# All tests across all packages (2,937 tests)
 npm test
 
-# All tests across the entire project (1,572 tests)
-npm run test:all
-
-# Per-module tests
-cd franken-brain && npm test
+# Per-package tests via Turborepo
+npx turbo run test --filter=franken-brain
 
 # Orchestrator E2E tests
-cd franken-orchestrator && npm run test:e2e
+cd packages/franken-orchestrator && npm run test:e2e
 ```
 
 ## Local Dev Environment
@@ -551,54 +579,83 @@ The [examples/](examples/) directory contains working integrations organized by 
 
 ## Martin Loop Build System
 
-Frankenbeast includes an observer-powered autonomous build runner based on the [Ralph Wiggum technique](https://ghuntley.com/ralph/) — iterative AI loops that process chunk files with deterministic completion detection.
-
-```bash
-# Run a plan's chunk files autonomously
-./plan-beast-runner/run-build.sh feat/my-feature --budget 10 --verbose
-```
+Frankenbeast includes an observer-powered autonomous build runner (MartinLoop) integrated into the orchestrator — iterative AI loops that process chunk files with deterministic completion detection.
 
 Features:
 - **Observer tracing** — TraceContext spans per iteration, TokenCounter + CostCalculator per chunk
 - **Budget enforcement** — CircuitBreaker stops execution when spend exceeds limit
 - **Loop detection** — LoopDetector identifies stuck sessions
-- **Checkpoint/resume** — crash recovery via checkpoint file
-- **Rate limit handling** — automatic provider fallback (Claude ↔ Codex)
-- **Git isolation** — per-chunk branches, auto-commit, merge back to base
+- **Checkpoint/resume** — crash recovery via FileCheckpointStore
+- **Chunk sessions** — canonical execution state with pre-compaction snapshots and context-window-aware compaction at >= 85% usage
+- **Rate limit handling** — automatic provider fallback chain (e.g. Claude → Gemini → Aider)
+- **Git isolation** — per-chunk branches via GitBranchIsolator, auto-commit, merge back to base
+- **4 pluggable providers** — Claude, Codex, Gemini, Aider via ProviderRegistry
 
 See [docs/beast-loop-explained.md](docs/beast-loop-explained.md) for the full iteration mechanics.
+
+## Chat System
+
+The `frankenbeast chat` REPL provides a two-tier interactive experience:
+
+- **Tier 1 (Conversational)** — cheap model with session continuation, quirky spinner, colored output (cyan prompt, green replies)
+- **Tier 2 (Execution)** — `/run <desc>` spawns a full-permissions CLI agent. `/plan <desc>` dispatches to planning. Natural language triggers execution via IntentRouter → EscalationPolicy
+- **Output sanitization** — strips raw web search JSON blobs and REMINDER instruction blocks from Claude CLI output
+- **Session persistence** — file-backed session store for conversation history across restarts
+
+The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket for the `franken-web` dashboard.
+
+## Communications Gateway (franken-comms)
+
+Multi-channel external communications with deterministic session mapping:
+
+| Channel | Transport | Security |
+|---------|-----------|----------|
+| Slack | Events API + Interactivity | HMAC-SHA256 signature verification |
+| Discord | Gateway events | ED25519 signature verification |
+| Telegram | Webhook | Token-based authentication |
+| WhatsApp | Cloud API | SHA256 signature verification |
+
+All channels route through a unified `ChatGateway` → `SocketBridge` → `SessionMapper` pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md).
 
 ## Project Status
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Individual Module Implementation | Complete (971+ tests) |
+| 1 | Individual Module Implementation | Complete |
 | 2 | LLM-Agnostic Adapter Layer | Complete (PRs 15-18) |
 | 3 | Inter-Module Contracts & Shared Types | Complete (PRs 19-24) |
 | 4 | The Orchestrator ("Beast Loop") | Complete (PRs 25-30) |
 | 5 | Guardrails as a Service (HTTP) | Complete (PRs 31-35) |
 | 6 | End-to-End Testing & Hardening | Complete (PRs 36-39) |
 | 7 | CLI & Developer Experience | Complete (PRs 40-42) |
+| 8 | CLI Skill Execution (Martin Loop) | Complete |
+| 9 | Interactive Chat & Two-Tier Dispatch | Complete |
+| 10 | Chat Server (HTTP + WebSocket) | Complete |
+| 11 | External Comms (Slack/Discord/Telegram/WhatsApp) | Complete |
+| 12 | GitHub Issues Pipeline | Complete |
 
-**1,572 tests across 177 test files, all passing.**
+**2,937 tests across 13 packages, all passing.**
 
 See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
 
 ### In Progress
 
-- **CLI skill execution** — integrating the Martin loop build runner into the Beast Loop as a first-class `executionType: 'cli'` skill. This enables BeastLoop to spawn CLI tools (Claude, Codex) with observer-powered tracing, budget enforcement, and git branch isolation. See [plan-beast-runner/](plan-beast-runner/) for the implementation chunks.
+- **Web Dashboard** — React-based UI (`franken-web`) for chat, configuration, and metrics visualization. Scaffold in place, integration ongoing.
+- **Escalation Policy Hardening** — Refining intent routing and tier escalation logic for the chat REPL.
 
 ## Development
 
-### Working on a module
+### Working on a package
 
-Each module is its own git repository:
+All packages live under `packages/` in the monorepo:
 
 ```bash
-cd franken-brain
-npm install
-npm test
-npm run build
+# Build and test a single package
+npx turbo run test --filter=franken-brain
+npx turbo run build --filter=franken-brain
+
+# Or work directly in the package
+cd packages/franken-brain && npm test
 ```
 
 ### Testing patterns
@@ -616,17 +673,19 @@ All modules follow the same patterns:
 ```
 frankenbeast/
 ├── README.md
-├── package.json                 # Root build/test scripts
+├── package.json                 # Root workspace + Turborepo scripts
+├── turbo.json                   # Build orchestration (build, test, typecheck)
 ├── docker-compose.yml           # Local dev stack (ChromaDB, Grafana, Tempo)
 ├── frankenbeast.config.example.json
 ├── assets/img/                  # Project logos
 ├── docs/
-│   ├── ARCHITECTURE.md          # Module interconnection diagram (Mermaid)
+│   ├── ARCHITECTURE.md          # System overview with Mermaid diagrams
 │   ├── PROGRESS.md              # PR-by-PR implementation tracker
+│   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # Architecture Decision Records (6)
-│   ├── guides/                  # Quickstart, add-provider, wrap-agent
+│   ├── adr/                     # 16 Architecture Decision Records
+│   ├── guides/                  # Quickstart, add-provider, wrap-agent, run-dashboard-chat
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
@@ -635,21 +694,21 @@ frankenbeast/
 │   ├── patterns/                # cost-aware-routing, tool-calling, fallback
 │   ├── scenarios/               # code-review-agent, research-agent-hitl
 │   └── openclaw-integration/    # External agent wrapping example
-├── plan-beast-runner/           # Martin loop build chunks + runner
-│   ├── build-runner.ts          # Observer-powered TypeScript build runner
-│   ├── run-build.sh             # Entry point for autonomous execution
-│   └── 01-08_*.md               # Implementation chunk files
-├── frankenfirewall/             # MOD-01: Firewall/Guardrails
-├── franken-skills/              # MOD-02: Skill Registry
-├── franken-brain/               # MOD-03: Memory Systems
-├── franken-planner/             # MOD-04: Planning & Decomposition
-├── franken-observer/            # MOD-05: Observability
-├── franken-critique/            # MOD-06: Self-Critique & Reflection
-├── franken-governor/            # MOD-07: HITL & Governance
-├── franken-heartbeat/           # MOD-08: Proactive Reflection
-├── franken-types/               # Shared type definitions
-├── franken-orchestrator/        # The Beast Loop
-└── franken-mcp/                 # MCP server (Model Context Protocol)
+├── packages/
+│   ├── frankenfirewall/         # MOD-01: Firewall/Guardrails
+│   ├── franken-skills/          # MOD-02: Skill Registry
+│   ├── franken-brain/           # MOD-03: Memory Systems
+│   ├── franken-planner/         # MOD-04: Planning & Decomposition
+│   ├── franken-observer/        # MOD-05: Observability
+│   ├── franken-critique/        # MOD-06: Self-Critique & Reflection
+│   ├── franken-governor/        # MOD-07: HITL & Governance
+│   ├── franken-heartbeat/       # MOD-08: Proactive Reflection
+│   ├── franken-types/           # Shared type definitions
+│   ├── franken-orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
+│   ├── franken-mcp/             # MCP server (Model Context Protocol)
+│   ├── franken-comms/           # External comms (Slack/Discord/Telegram/WhatsApp)
+│   └── franken-web/             # React web dashboard (dev tool)
+└── .frankenbeast/               # Project-scoped runtime state (gitignored)
 ```
 
 ## Documentation
