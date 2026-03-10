@@ -170,6 +170,16 @@ export async function main(): Promise<void> {
   const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
+  if (args.subcommand === 'network') {
+    if (args.networkAction === 'help' || args.networkAction === undefined) {
+      printUsage();
+      return;
+    }
+
+    console.log(`Network command '${args.networkAction}' is not implemented yet.`);
+    return;
+  }
+
   if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
     const { chatLlm, execLlm, finalize, projectId, sessionStoreDir } = await createChatSurfaceDeps(args, config, paths);
 

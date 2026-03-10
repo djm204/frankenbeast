@@ -53,6 +53,85 @@ describe('parseArgs', () => {
     expect(args.allowOrigin).toBe('http://localhost:5173');
   });
 
+  it('parses bare network subcommand', () => {
+    const args = parseArgs(['network']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBeUndefined();
+    expect(args.networkDetached).toBe(false);
+  });
+
+  it('parses network up', () => {
+    const args = parseArgs(['network', 'up']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('up');
+  });
+
+  it('parses network up -d', () => {
+    const args = parseArgs(['network', 'up', '-d']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('up');
+    expect(args.networkDetached).toBe(true);
+  });
+
+  it('parses network down', () => {
+    const args = parseArgs(['network', 'down']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('down');
+  });
+
+  it('parses network status', () => {
+    const args = parseArgs(['network', 'status']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('status');
+  });
+
+  it('parses network start with target service', () => {
+    const args = parseArgs(['network', 'start', 'chat-server']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('start');
+    expect(args.networkTarget).toBe('chat-server');
+  });
+
+  it('parses network stop with target service', () => {
+    const args = parseArgs(['network', 'stop', 'dashboard-web']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('stop');
+    expect(args.networkTarget).toBe('dashboard-web');
+  });
+
+  it('parses network restart with target service', () => {
+    const args = parseArgs(['network', 'restart', 'all']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('restart');
+    expect(args.networkTarget).toBe('all');
+  });
+
+  it('parses network logs with target service', () => {
+    const args = parseArgs(['network', 'logs', 'comms-gateway']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('logs');
+    expect(args.networkTarget).toBe('comms-gateway');
+  });
+
+  it('parses network config', () => {
+    const args = parseArgs(['network', 'config']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('config');
+  });
+
+  it('parses network config --set', () => {
+    const args = parseArgs(['network', 'config', '--set', 'chat.model=claude-sonnet-4-6']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('config');
+    expect(args.networkSet).toEqual(['chat.model=claude-sonnet-4-6']);
+  });
+
+  it('parses network help as an action', () => {
+    const args = parseArgs(['network', 'help']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('help');
+  });
+
   it('parses global flags without subcommand', () => {
     const args = parseArgs([
       '--base-dir', '/my/project',
@@ -95,12 +174,13 @@ describe('parseArgs', () => {
     expect(args.help).toBe(true);
   });
 
-  it('prints usage text including chat-server', () => {
+  it('prints usage text including network and chat-server', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     printUsage();
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('chat-server'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('network'));
     logSpy.mockRestore();
   });
 

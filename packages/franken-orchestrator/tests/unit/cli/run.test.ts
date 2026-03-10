@@ -24,6 +24,10 @@ const {
   }));
   const mockParseArgs = vi.fn(() => ({
     subcommand: undefined,
+    networkAction: undefined,
+    networkTarget: undefined,
+    networkDetached: false,
+    networkSet: undefined,
     baseDir: '/mock/project',
     baseBranch: undefined,
     budget: 10,
@@ -162,6 +166,7 @@ vi.mock('node:readline', () => ({
 import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { printUsage } from '../../../src/cli/args.js';
 
 // ── Tests ──
 
@@ -273,6 +278,10 @@ describe('main() execution', () => {
     vi.clearAllMocks();
     mockParseArgs.mockReturnValue({
       subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
       baseDir: '/mock/project',
       baseBranch: undefined,
       budget: 10,
@@ -310,6 +319,10 @@ describe('main() execution', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockParseArgs.mockReturnValue({
       subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
       baseDir: '/mock/project',
       baseBranch: undefined,
       budget: 10,
@@ -347,5 +360,38 @@ describe('main() execution', () => {
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3000'));
     logSpy.mockRestore();
+  });
+
+  it('dispatches network help without creating a Session', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'network',
+      networkAction: 'help',
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+    });
+
+    await main();
+
+    expect(printUsage).toHaveBeenCalled();
+    expect(MockSession).not.toHaveBeenCalled();
   });
 });
