@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
 
 /** Environment variable prefix for orchestrator config. */
@@ -36,6 +37,27 @@ async function fromFile(filePath: string): Promise<Partial<OrchestratorConfig>> 
   return JSON.parse(raw) as Partial<OrchestratorConfig>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMerge<T extends Record<string, unknown>>(...layers: Array<Partial<T>>): Partial<T> {
+  const result: Record<string, unknown> = {};
+
+  for (const layer of layers) {
+    for (const [key, value] of Object.entries(layer)) {
+      const existing = result[key];
+      if (isRecord(existing) && isRecord(value)) {
+        result[key] = deepMerge(existing, value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+
+  return result as Partial<T>;
+}
+
 /** Extract config overrides from CLI args. */
 function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
   const cli: Partial<OrchestratorConfig> = {};
@@ -60,11 +82,15 @@ export async function loadConfig(args: CliArgs): Promise<OrchestratorConfig> {
   const envConfig = fromEnv();
   const cliConfig = fromCli(args);
 
-  const merged = {
-    ...fileConfig,
-    ...envConfig,
-    ...cliConfig,
-  };
+  let merged = deepMerge<OrchestratorConfig>(
+    fileConfig as Partial<Record<string, unknown>>,
+    envConfig as Partial<Record<string, unknown>>,
+    cliConfig as Partial<Record<string, unknown>>,
+  );
+
+  if (args.networkSet && args.networkSet.length > 0) {
+    merged = applyNetworkConfigSets(merged, args.networkSet);
+  }
 
   return OrchestratorConfigSchema.parse(merged);
 }

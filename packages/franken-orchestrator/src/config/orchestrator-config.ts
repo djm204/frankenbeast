@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NetworkConfigSchema } from '../network/network-config.js';
 
 export const ProviderOverrideSchema = z.object({
   command: z.string().optional(),
@@ -15,7 +16,7 @@ export const ProvidersConfigSchema = z.object({
   overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
 });
 
-export const OrchestratorConfigSchema = z.object({
+const BaseOrchestratorConfigSchema = z.object({
   /** Maximum plan-critique iterations before escalation. */
   maxCritiqueIterations: z.number().int().min(1).max(10).default(3),
 
@@ -37,6 +38,8 @@ export const OrchestratorConfigSchema = z.object({
   /** Provider configuration. */
   providers: ProvidersConfigSchema.default({}),
 });
+
+export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(NetworkConfigSchema.shape);
 
 export type OrchestratorConfig = z.infer<typeof OrchestratorConfigSchema>;
 

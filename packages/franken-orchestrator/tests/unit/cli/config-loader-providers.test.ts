@@ -18,6 +18,10 @@ describe('Config loader providers passthrough', () => {
   function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
     return {
       subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
       baseDir: '/test',
       budget: 10,
       provider: 'claude',
