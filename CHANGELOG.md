@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/v0.11.0...v0.12.0) (2026-03-10)
+
+
+### Features
+
+* **chat:** add runnable dashboard chat server entrypoint ([d37004b](https://github.com/djm204/frankenbeast/commit/d37004b8be19257636f8e6b1f6c297f829861d33))
+* **comms:** add discord integration with secure ed25519 interactions ([670b98a](https://github.com/djm204/frankenbeast/commit/670b98af821ea2fc0562ade5169824dba1f08eb9))
+* **comms:** add franken-comms package with core abstractions and slack adapter ([e1a9078](https://github.com/djm204/frankenbeast/commit/e1a9078162e51a482d38741799a4fb8a04267813))
+* **comms:** add slack signature verification and events/interactivity routing ([8ff7133](https://github.com/djm204/frankenbeast/commit/8ff7133afb920d283e39f6c014f25f517f01773f))
+* **comms:** complete multi-channel integration (Slack, Discord, Telegram, WhatsApp) ([8c421a3](https://github.com/djm204/frankenbeast/commit/8c421a35eb48bf6a5f19ea95d455aad3385b7051))
+* **comms:** implement franken-comms core and slack adapter ([b4164ba](https://github.com/djm204/frankenbeast/commit/b4164ba7198abc6f5961f91aeb6e6c543c7ea04b))
+
+
+### Bug Fixes
+
+* **comms:** resolve linting issues and modernize eslint config ([5e361e9](https://github.com/djm204/frankenbeast/commit/5e361e9b561e16701d3c340e46273ca5d496aeee))
+* **comms:** synchronize package-lock.json with new franken-comms package ([bd3be73](https://github.com/djm204/frankenbeast/commit/bd3be73ef8219afcf595c05688865aae7deacacf))
+
+
+### Miscellaneous
+
+* **dev:** add runnable local flow for dashboard chat ([08962f3](https://github.com/djm204/frankenbeast/commit/08962f3f180c9f5f40939a19529e8a1639e124ed))
+* **main:** release franken-orchestrator 0.10.0 ([7d57b9b](https://github.com/djm204/frankenbeast/commit/7d57b9b921c14d0f683398cbe004b0b6b1184b0d))
+* **main:** release franken-orchestrator 0.10.0 ([c860347](https://github.com/djm204/frankenbeast/commit/c860347ba56772e925c4dc4d551094eeb7fcd02d))
+
+
+### Documentation
+
+* **adr:** add ADR-016 for external comms gateway architecture ([cfbdef3](https://github.com/djm204/frankenbeast/commit/cfbdef3e17120825a96e1959ec4036b197605588))
+* **adr:** record dashboard chat server entrypoint ([6108351](https://github.com/djm204/frankenbeast/commit/61083513e2e8940dee468b2c6e6cdf620b733715))
+* **chat:** add dashboard chat run guide ([dde4c18](https://github.com/djm204/frankenbeast/commit/dde4c1845c04ed19872f46253d21e90cbeb45c5d))
+* **plans:** move channel-integrations implementation plan to complete ([84962f0](https://github.com/djm204/frankenbeast/commit/84962f0296e6ba5aa4a603dbf2d3b86d1e38f32d))
+* **plans:** update init workflow and add new design documents ([a26402b](https://github.com/djm204/frankenbeast/commit/a26402b65f609b6825fef14807609f02f067cd7b))
+* **plan:** update init workflow for current project state ([48434a2](https://github.com/djm204/frankenbeast/commit/48434a2dc9c30b0861af45821422be4f4be1704e))
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/v0.10.0...v0.11.0) (2026-03-09)
 
 
