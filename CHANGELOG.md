@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.14.1](https://github.com/djm204/frankenbeast/compare/v0.14.0...v0.14.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* **network:** harden startup flow and dashboard connectivity ([b881f2b](https://github.com/djm204/frankenbeast/commit/b881f2bd2d7bf5aa68e9e1f76986d18204811021))
+* **network:** harden startup flow and dashboard connectivity ([c312e9f](https://github.com/djm204/frankenbeast/commit/c312e9fd4dd6e2db0f3388da765a3bcb6d7e1b92))
+
+
+### Miscellaneous
+
+* **main:** release franken-critique 0.4.0 ([8c506d9](https://github.com/djm204/frankenbeast/commit/8c506d90279c82e9c38ea6ca65d4fb11b0b7ee11))
+* **main:** release franken-governor 0.4.0 ([da52fa4](https://github.com/djm204/frankenbeast/commit/da52fa41013e85635eb6a59f5001ac32f60b2365))
+* **main:** release franken-governor 0.4.0 ([0430d42](https://github.com/djm204/frankenbeast/commit/0430d42062f4e658de609ffeb8862407dc28a008))
+* **main:** release franken-governor 0.4.0 ([6faab25](https://github.com/djm204/frankenbeast/commit/6faab25d6676329e5d7fbc4f84d304a30c90817f))
+* **main:** release franken-orchestrator 0.11.1 ([77db6f6](https://github.com/djm204/frankenbeast/commit/77db6f61228a1678c2d2f237cb421c395c1eff25))
+* **main:** release franken-orchestrator 0.11.1 ([949bd84](https://github.com/djm204/frankenbeast/commit/949bd84557d7428d374b4447e1d8356e7df26af2))
+* **main:** release franken-types 0.3.2 ([5d88dcb](https://github.com/djm204/frankenbeast/commit/5d88dcb63d5c43f7a66e79b4fd5c976c795df164))
+* **main:** release franken-types 0.3.2 ([64381db](https://github.com/djm204/frankenbeast/commit/64381db3ca76cd36107dfb5a44e6b8c3a278561f))
+
 ## [0.14.0](https://github.com/djm204/frankenbeast/compare/v0.13.0...v0.14.0) (2026-03-10)
 
 
