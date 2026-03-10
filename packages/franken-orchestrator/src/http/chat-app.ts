@@ -6,11 +6,13 @@ import type { ConversationEngine } from '../chat/conversation-engine.js';
 import type { TurnRunner } from '../chat/turn-runner.js';
 import type { ChatRuntime } from '../chat/runtime.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
+import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import { TransportSecurityService } from './security/transport-security.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -23,6 +25,7 @@ export interface ChatAppOptions {
   engine?: ConversationEngine;
   runtime?: ChatRuntime;
   turnRunner?: TurnRunner;
+  transportSecurity?: TransportSecurityService;
   networkControl?: {
     root: string;
     frankenbeastDir: string;
@@ -30,6 +33,7 @@ export interface ChatAppOptions {
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
+  beastControl?: BeastRoutesDeps;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -53,6 +57,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         ...(opts.turnRunner ? { turnRunner: opts.turnRunner } : {}),
       });
   const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
+  const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
 
   const app = new Hono();
   app.use('*', requestId);
@@ -69,6 +74,12 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     }),
   });
   app.route('/', routes);
+  if (opts.beastControl) {
+    app.route('/', beastRoutes({
+      ...opts.beastControl,
+      security: opts.beastControl.security ?? transportSecurity,
+    }));
+  }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
   }

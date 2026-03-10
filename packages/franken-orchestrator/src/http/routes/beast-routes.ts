@@ -1,0 +1,140 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
+import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
+import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
+import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
+import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
+import { BeastRunService } from '../../beasts/services/beast-run-service.js';
+import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
+import { parseJsonBody, validateBody } from '../middleware.js';
+import { TransportSecurityService } from '../security/transport-security.js';
+
+const CreateRunBody = z.object({
+  definitionId: z.string().min(1),
+  config: z.record(z.string(), z.unknown()),
+  executionMode: z.enum(['process', 'container']).optional(),
+  startNow: z.boolean().optional(),
+}).strict();
+
+const InterviewAnswerBody = z.object({
+  answer: z.string().min(1),
+}).strict();
+
+export interface BeastRoutesDeps {
+  catalog: BeastCatalogService;
+  dispatch: BeastDispatchService;
+  runs: BeastRunService;
+  interviews: BeastInterviewService;
+  metrics: BeastMetrics;
+  operatorToken: string;
+  security: TransportSecurityService;
+  rateLimit: BeastRateLimitOptions;
+}
+
+export function beastRoutes(deps: BeastRoutesDeps): Hono {
+  const app = new Hono();
+  const limiter = new InMemoryRateLimiter(deps.rateLimit);
+  const auth = requireBeastOperatorAuth({
+    operatorToken: deps.operatorToken,
+    security: deps.security,
+  });
+  const rateLimit = requireBeastRateLimit(
+    limiter,
+    (authHeader, path) => `${authHeader ?? 'anonymous'}:${path}`,
+  );
+
+  app.use('/v1/beasts/*', auth);
+  app.use('/v1/beasts/runs', rateLimit);
+  app.use('/v1/beasts/interviews/*', rateLimit);
+
+  app.get('/v1/beasts/catalog', (c) => {
+    return c.json({
+      data: deps.catalog.listDefinitions().map((definition) => ({
+        id: definition.id,
+        version: definition.version,
+        label: definition.label,
+        description: definition.description,
+        executionModeDefault: definition.executionModeDefault,
+        interviewPrompts: definition.interviewPrompts,
+      })),
+    });
+  });
+
+  app.post('/v1/beasts/runs', async (c) => {
+    const body = validateBody(CreateRunBody, await parseJsonBody(c));
+    const run = await deps.dispatch.createRun({
+      definitionId: body.definitionId,
+      config: body.config,
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
+      ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),
+    });
+    return c.json({ data: run }, 201);
+  });
+
+  app.get('/v1/beasts/runs', (c) => {
+    return c.json({ data: { runs: deps.runs.listRuns() } });
+  });
+
+  app.get('/v1/beasts/runs/:runId', (c) => {
+    const runId = c.req.param('runId');
+    return c.json({
+      data: {
+        run: deps.runs.getRun(runId),
+        attempts: deps.runs.listAttempts(runId),
+        events: deps.runs.listEvents(runId),
+      },
+    });
+  });
+
+  app.get('/v1/beasts/runs/:runId/events', (c) => {
+    return c.json({
+      data: {
+        events: deps.runs.listEvents(c.req.param('runId')),
+      },
+    });
+  });
+
+  app.get('/v1/beasts/runs/:runId/logs', async (c) => {
+    return c.json({
+      data: {
+        logs: await deps.runs.readLogs(c.req.param('runId')),
+      },
+    });
+  });
+
+  app.post('/v1/beasts/runs/:runId/start', async (c) => {
+    const run = await deps.runs.start(c.req.param('runId'), 'operator');
+    return c.json({ data: run });
+  });
+
+  app.post('/v1/beasts/runs/:runId/stop', async (c) => {
+    const run = await deps.runs.stop(c.req.param('runId'), 'operator');
+    return c.json({ data: run });
+  });
+
+  app.post('/v1/beasts/runs/:runId/kill', async (c) => {
+    const run = await deps.runs.kill(c.req.param('runId'), 'operator');
+    return c.json({ data: run });
+  });
+
+  app.post('/v1/beasts/runs/:runId/restart', async (c) => {
+    const run = await deps.runs.restart(c.req.param('runId'), 'operator');
+    return c.json({ data: run });
+  });
+
+  app.post('/v1/beasts/interviews/:definitionId/start', (c) => {
+    const session = deps.interviews.start(c.req.param('definitionId'));
+    return c.json({ data: session }, 201);
+  });
+
+  app.post('/v1/beasts/interviews/:sessionId/answer', async (c) => {
+    const body = validateBody(InterviewAnswerBody, await parseJsonBody(c));
+    const progress = deps.interviews.answer(c.req.param('sessionId'), body.answer);
+    return c.json({ data: progress });
+  });
+
+  return app;
+}

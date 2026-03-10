@@ -22,6 +22,32 @@ export class BeastRunService {
     return this.repository.getRun(runId);
   }
 
+  listAttempts(runId: string) {
+    this.requireRun(runId);
+    return this.repository.listAttempts(runId);
+  }
+
+  listEvents(runId: string) {
+    this.requireRun(runId);
+    return this.repository.listEvents(runId);
+  }
+
+  async readLogs(runId: string): Promise<string[]> {
+    const run = this.requireRun(runId);
+    const attemptId = run.currentAttemptId;
+    if (!attemptId) {
+      return [];
+    }
+    return this.logs.read(run.id, attemptId);
+  }
+
+  async start(runId: string, _actor: string): Promise<BeastRun> {
+    const run = this.requireRun(runId);
+    const definition = this.getDefinitionOrThrow(run.definitionId);
+    await this.executorFor(run).start(run, definition);
+    return this.requireRun(runId);
+  }
+
   async stop(runId: string, _actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
@@ -32,6 +58,25 @@ export class BeastRunService {
     this.metrics.recordRunStopped(run.definitionId);
     await this.logs.append(run.id, attemptId, 'stderr', 'operator_stop');
     return this.requireRun(runId);
+  }
+
+  async kill(runId: string, _actor: string): Promise<BeastRun> {
+    const run = this.requireRun(runId);
+    const attemptId = run.currentAttemptId;
+    if (!attemptId) {
+      throw new Error(`Beast run has no active attempt: ${runId}`);
+    }
+    await this.executorFor(run).kill(run.id, attemptId);
+    await this.logs.append(run.id, attemptId, 'stderr', 'operator_kill');
+    return this.requireRun(runId);
+  }
+
+  async restart(runId: string, actor: string): Promise<BeastRun> {
+    const run = this.requireRun(runId);
+    if (run.status === 'running') {
+      await this.stop(runId, actor);
+    }
+    return this.start(runId, actor);
   }
 
   private executorFor(run: BeastRun) {
