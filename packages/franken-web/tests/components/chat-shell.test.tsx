@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ChatShell } from '../../src/components/chat-shell.js';
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
@@ -40,12 +40,16 @@ vi.mock('../../src/hooks/use-chat-session.js', () => ({
 afterEach(cleanup);
 
 describe('ChatShell', () => {
-  it('renders Frankenbeast dashboard branding and version', () => {
+  it('renders Frankenbeast branding and keeps the version in the sidebar footer', () => {
     const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
     const nav = container.querySelector('[aria-label="Dashboard navigation"]');
+    const brand = container.querySelector('.sidebar__brand');
+    const footer = container.querySelector('.sidebar__footer');
 
-    expect(screen.getByText('v0.9.0')).toBeDefined();
+    expect(footer?.textContent).toContain('v0.9.0');
+    expect(brand?.textContent).not.toContain('v0.9.0');
     expect(nav?.textContent).toContain('Chat');
+    expect(nav?.textContent).toContain('Beasts');
     expect(nav?.textContent).toContain('Sessions');
     expect(nav?.textContent).toContain('Analytics');
   });
@@ -66,5 +70,22 @@ describe('ChatShell', () => {
     expect(topbar?.textContent).toContain('connected');
     expect(topbar?.textContent).toContain('sess-1');
     expect(topbar?.textContent).toContain('test-project');
+  });
+
+  it('exposes an accessible mobile navigation drawer toggle', () => {
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    const toggle = screen.getByRole('button', { name: 'Open navigation menu' });
+
+    expect(toggle.getAttribute('aria-controls')).toBe('dashboard-sidebar');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('class')).toContain('button');
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Close navigation menu' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Dispatch' }).getAttribute('class')).toContain('button--primary');
+    expect(screen.getByRole('button', { name: 'Reject' }).getAttribute('class')).toContain('button--secondary');
   });
 });

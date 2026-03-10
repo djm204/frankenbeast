@@ -34,7 +34,7 @@ export function NetworkPage({
           <p className="eyebrow">Operator Control</p>
           <h2>Network</h2>
         </div>
-        <button type="button" onClick={onRefresh}>Refresh</button>
+        <button className="button button--secondary" type="button" onClick={onRefresh}>Refresh</button>
       </section>
 
       <div className="network-page__grid">

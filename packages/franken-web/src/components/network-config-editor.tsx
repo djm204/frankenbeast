@@ -18,12 +18,13 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
         <span>Chat model</span>
         <input
           aria-label="Chat model"
+          className="field-control"
           type="text"
           value={chatModel}
           onChange={(event) => setChatModel(event.target.value)}
         />
       </label>
-      <button type="button" onClick={() => onSave([`chat.model=${chatModel}`])}>
+      <button className="button button--primary" type="button" onClick={() => onSave([`chat.model=${chatModel}`])}>
         Save config
       </button>
     </section>
