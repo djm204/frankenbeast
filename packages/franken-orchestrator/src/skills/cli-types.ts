@@ -10,6 +10,7 @@ import type { ChunkSessionCompactor } from '../session/chunk-session-compactor.j
 
 export interface IterationResult {
   readonly iteration: number;
+  readonly provider: string;
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
