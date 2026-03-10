@@ -1,4 +1,4 @@
-import { createServer, type Server as HttpServer } from 'node:http';
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 import type { CommsConfig } from '../config/comms-config.js';
@@ -86,8 +86,8 @@ export async function startCommsServer(options: StartCommsServerOptions): Promis
 
 async function handleHttpRequest(
   app: ReturnType<typeof createCommsApp>,
-  request: Parameters<HttpServer['emit']>[1],
-  response: Parameters<HttpServer['emit']>[2],
+  request: IncomingMessage,
+  response: ServerResponse<IncomingMessage>,
   host: string,
   port: number,
 ): Promise<void> {
@@ -109,7 +109,7 @@ async function handleHttpRequest(
   }
 }
 
-function toRequest(request: Parameters<HttpServer['emit']>[1], host: string, port: number): Request {
+function toRequest(request: IncomingMessage, host: string, port: number): Request {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? `${host}:${port}`}`);
   const headers = new Headers();
 
