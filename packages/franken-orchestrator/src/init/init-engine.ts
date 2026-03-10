@@ -18,7 +18,7 @@ interface RunInteractiveInitOptions {
   io: InterviewIO;
 }
 
-interface RunRepairInitOptions extends RunInteractiveInitOptions {}
+type RunRepairInitOptions = RunInteractiveInitOptions;
 
 async function loadExistingConfig(configFile: string): Promise<OrchestratorConfig> {
   try {
