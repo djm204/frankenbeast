@@ -11,6 +11,12 @@ import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
 import { NetworkSupervisor } from '../../network/network-supervisor.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
+import {
+  healthcheckNetworkService,
+  preflightNetworkService,
+  startNetworkService,
+  stopNetworkService,
+} from '../../network/network-supervisor-runtime.js';
 
 const TargetBody = z.object({
   target: z.string().min(1),
@@ -33,61 +39,15 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
     stateStore: new NetworkStateStore(join(frankenbeastDir, 'network', 'state.json')),
     logStore: new NetworkLogStore(join(frankenbeastDir, 'network', 'logs')),
     startService: async (service, options) => {
-      const processSpec = service.runtimeConfig.process;
-      if (!processSpec) {
-        throw new HttpError(400, 'NOT_RUNNABLE', `Service '${service.id}' does not have a runnable entrypoint yet`);
-      }
-
-      if (options.detached) {
-        const handle = await open(options.logFile ?? '/dev/null', 'a');
-        const child = spawn(processSpec.command, processSpec.args, {
-          cwd: processSpec.cwd,
-          env: {
-            ...process.env,
-            ...processSpec.env,
-          },
-          detached: true,
-          stdio: ['ignore', handle.fd, handle.fd],
-        });
-        child.unref();
-        await handle.close();
-        if (!child.pid) {
-          throw new HttpError(500, 'START_FAILED', `Failed to start '${service.id}'`);
-        }
-        return { pid: child.pid };
-      }
-
-      const child = spawn(processSpec.command, processSpec.args, {
-        cwd: processSpec.cwd,
-        env: {
-          ...process.env,
-          ...processSpec.env,
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      if (!child.pid) {
-        throw new HttpError(500, 'START_FAILED', `Failed to start '${service.id}'`);
-      }
-      return { pid: child.pid };
-    },
-    stopService: async (serviceState) => {
       try {
-        process.kill(serviceState.pid, 'SIGTERM');
+        return await startNetworkService(service, options);
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ESRCH') {
-          throw error;
-        }
+        throw new HttpError(500, 'START_FAILED', error instanceof Error ? error.message : `Failed to start '${service.id}'`);
       }
     },
-    healthcheck: async (serviceState) => {
-      try {
-        process.kill(serviceState.pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    stopService: stopNetworkService,
+    healthcheck: healthcheckNetworkService,
+    preflightService: preflightNetworkService,
   });
 }
 

@@ -25,6 +25,7 @@ describe('NetworkStateStore', () => {
         {
           id: 'chat-server',
           pid: 101,
+          detached: true,
           dependsOn: [],
           startedAt: '2026-03-09T00:00:00.000Z',
           logFile: '/tmp/chat.log',

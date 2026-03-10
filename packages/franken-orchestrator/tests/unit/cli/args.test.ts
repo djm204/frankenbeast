@@ -35,7 +35,7 @@ describe('parseArgs', () => {
     const args = parseArgs(['chat-server']);
     expect(args.subcommand).toBe('chat-server');
     expect(args.host).toBe('127.0.0.1');
-    expect(args.port).toBe(3000);
+    expect(args.port).toBe(3737);
     expect(args.allowOrigin).toBeUndefined();
   });
 

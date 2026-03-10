@@ -378,7 +378,7 @@ frankenbeast run
 frankenbeast chat
 
 # Chat server — HTTP + WebSocket for franken-web dashboard
-frankenbeast chat-server --port 3000
+frankenbeast chat-server --port 3737
 
 # GitHub issues — fetch, triage, and fix issues autonomously
 frankenbeast issues --label bug --repo owner/repo
@@ -418,7 +418,7 @@ frankenbeast issues --label bug --repo owner/repo
 
 ```
 --host <addr>           Server bind address (default: localhost)
---port <n>              Server port (default: 3000)
+--port <n>              Server port (default: 3737)
 --allow-origin <url>    CORS origin for dashboard
 ```
 

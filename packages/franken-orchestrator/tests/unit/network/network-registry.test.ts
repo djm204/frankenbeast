@@ -55,6 +55,12 @@ describe('network-registry', () => {
       port: 5173,
       apiUrl: 'http://127.0.0.1:4242',
       url: 'http://127.0.0.1:5173',
+      process: {
+        env: {
+          VITE_API_URL: '',
+          VITE_API_PROXY_TARGET: 'http://127.0.0.1:4242',
+        },
+      },
     });
   });
 

@@ -17,12 +17,14 @@ export interface NetworkServiceRuntimeConfig {
   url?: string;
   wsUrl?: string;
   healthUrl?: string;
+  serviceIdentity?: string;
   apiUrl?: string;
   model?: string;
   orchestratorWsUrl?: string;
   channels?: Record<string, boolean>;
   composeFile?: string;
   services?: string[];
+  suppressManagedBanner?: boolean;
   process?: {
     command: string;
     args: string[];

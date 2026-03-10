@@ -27,12 +27,12 @@ npm --workspace franken-orchestrator run chat-server
 Default bind:
 
 - host: `127.0.0.1`
-- port: `3000`
+- port: `3737`
 
 When the server is ready, it prints:
 
 ```text
-Chat server listening on http://127.0.0.1:3000
+Chat server listening on http://127.0.0.1:3737
 ```
 
 Useful overrides:
@@ -52,7 +52,7 @@ In a second terminal:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-That points the frontend at `http://127.0.0.1:3000`.
+That points the frontend at `http://127.0.0.1:3737`.
 
 If your backend is on a different port, set `VITE_API_URL` explicitly:
 

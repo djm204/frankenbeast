@@ -81,7 +81,7 @@ Options:
   --plan-name <name>      Plan name (default: auto-generated from date)
   --config <path>         Path to config file (JSON)
   --host <host>           Chat server bind host (default: 127.0.0.1)
-  --port <port>           Chat server bind port (default: 3000)
+  --port <port>           Chat server bind port (default: 3737)
   --allow-origin <url>    Allow one additional websocket Origin
   --no-pr                 Skip PR creation
   --verbose               Debug logs + trace viewer
@@ -231,7 +231,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     planName: values['plan-name'],
     config: values.config,
     host: values.host ?? (subcommand === 'chat-server' ? '127.0.0.1' : undefined),
-    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3000 : undefined),
+    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : undefined),
     allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,

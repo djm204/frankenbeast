@@ -4,10 +4,14 @@ import { dirname } from 'node:path';
 export interface ManagedNetworkServiceState {
   id: string;
   pid: number;
+  detached?: boolean | undefined;
   dependsOn: string[];
   startedAt: string;
+  status?: 'started' | 'already-running';
   logFile?: string | undefined;
   url?: string | undefined;
+  healthUrl?: string | undefined;
+  serviceIdentity?: string | undefined;
 }
 
 export interface NetworkOperatorState {
