@@ -101,6 +101,33 @@ export { ProviderRegistry, createDefaultRegistry } from './skills/providers/inde
 // Checkpoint
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
 
+// Beasts
+export type {
+  BeastDefinition,
+  BeastDispatchSource,
+  BeastExecutionMode,
+  BeastInterviewPrompt,
+  BeastInterviewSession,
+  BeastRun,
+  BeastRunAttempt,
+  BeastRunEvent,
+  BeastRunStatus,
+} from './beasts/types.js';
+export { BEAST_SQLITE_SCHEMA_STATEMENTS } from './beasts/repository/sqlite-schema.js';
+export { SQLiteBeastRepository } from './beasts/repository/sqlite-beast-repository.js';
+export { BeastLogStore } from './beasts/events/beast-log-store.js';
+export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
+export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
+export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
+export { BeastDispatchService } from './beasts/services/beast-dispatch-service.js';
+export { BeastRunService } from './beasts/services/beast-run-service.js';
+export type { BeastExecutor } from './beasts/execution/beast-executor.js';
+export { ProcessSupervisor } from './beasts/execution/process-supervisor.js';
+export { ProcessBeastExecutor } from './beasts/execution/process-beast-executor.js';
+export { ContainerBeastExecutor } from './beasts/execution/container-beast-executor.js';
+export type { BeastMetrics } from './beasts/telemetry/beast-metrics.js';
+export { PrometheusBeastMetrics } from './beasts/telemetry/prometheus-beast-metrics.js';
+
 // Logging
 export {
   BeastLogger,

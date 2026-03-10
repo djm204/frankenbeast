@@ -12,6 +12,7 @@ const {
   MockAdapterLlmClient,
   MockCliLlmAdapter,
   MockSession,
+  mockHandleBeastCommand,
 } = vi.hoisted(() => {
   const mockAdapterComplete = vi.fn(async () => 'mock-complete');
   const mockFinalize = vi.fn(async () => undefined);
@@ -61,6 +62,7 @@ const {
     this.complete = mockAdapterComplete;
   });
   const MockCliLlmAdapter = vi.fn(function (this: Record<string, unknown>) {});
+  const mockHandleBeastCommand = vi.fn(async () => undefined);
   return {
     mockAdapterComplete,
     mockCreateCliDeps,
@@ -71,6 +73,7 @@ const {
     MockAdapterLlmClient,
     MockCliLlmAdapter,
     MockSession,
+    mockHandleBeastCommand,
   };
 });
 
@@ -110,6 +113,10 @@ vi.mock('../../../src/cli/session.js', () => ({
 
 vi.mock('../../../src/cli/dep-factory.js', () => ({
   createCliDeps: mockCreateCliDeps,
+}));
+
+vi.mock('../../../src/cli/beast-cli.js', () => ({
+  handleBeastCommand: mockHandleBeastCommand,
 }));
 
 vi.mock('../../../src/http/chat-server.js', () => ({
@@ -299,6 +306,8 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      beastAction: undefined,
+      beastTarget: undefined,
     });
   });
 
@@ -340,6 +349,8 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      beastAction: undefined,
+      beastTarget: undefined,
     });
 
     await main();
@@ -359,6 +370,41 @@ describe('main() execution', () => {
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
     logSpy.mockRestore();
+  });
+
+  it('dispatches beasts commands without creating a Session', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'beasts',
+      beastAction: 'catalog',
+      beastTarget: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+    });
+
+    await main();
+
+    expect(mockHandleBeastCommand).toHaveBeenCalled();
+    expect(MockSession).not.toHaveBeenCalled();
   });
 
   it('dispatches network help without creating a Session', async () => {

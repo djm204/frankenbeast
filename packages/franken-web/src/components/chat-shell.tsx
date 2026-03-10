@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import brandMark from '../../../../assets/img/frankenbeast-github-logo-478x72.png';
 import { useChatSession } from '../hooks/use-chat-session';
 import { TranscriptPane } from './transcript-pane';
@@ -7,10 +7,14 @@ import { ActivityPane } from './activity-pane';
 import { ApprovalCard } from './approval-card';
 import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
+import { BeastApiClient, type BeastCatalogEntry, type BeastRunDetail, type BeastRunSummary } from '../lib/beast-api';
+import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
+import { BeastDispatchPage } from '../pages/beast-dispatch-page';
 
 export interface ChatShellProps {
   baseUrl: string;
+  beastOperatorToken?: string;
   projectId: string;
   sessionId?: string;
   version: string;
@@ -18,15 +22,15 @@ export interface ChatShellProps {
 
 type RouteId = 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
 
-const ROUTES: Array<{ id: RouteId; label: string; summary: string }> = [
-  { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console' },
-  { id: 'beasts', label: 'Beasts', summary: 'Coming soon: active runs first, then finished runs by start date' },
-  { id: 'network', label: 'Network', summary: 'Service controls and operator config' },
-  { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands' },
-  { id: 'analytics', label: 'Analytics', summary: 'Usage and routing breakdowns are staged next' },
-  { id: 'costs', label: 'Costs', summary: 'Token and provider reporting will live here' },
-  { id: 'safety', label: 'Safety', summary: 'Approvals, policy, and injection telemetry' },
-  { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles' },
+const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean }> = [
+  { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console', live: true },
+  { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
+  { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
+  { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands', live: false },
+  { id: 'analytics', label: 'Analytics', summary: 'Usage and routing breakdowns are staged next', live: false },
+  { id: 'costs', label: 'Costs', summary: 'Token and provider reporting will live here', live: false },
+  { id: 'safety', label: 'Safety', summary: 'Approvals, policy, and injection telemetry', live: false },
+  { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
 ];
 
 function routeFromHash(hash: string): RouteId {
@@ -47,9 +51,18 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
   );
 }
 
-export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
+export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
+  const [sessionSeed, setSessionSeed] = useState(0);
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
+  const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
+  const [selectedBeastRunId, setSelectedBeastRunId] = useState<string | null>(null);
+  const [beastRunDetail, setBeastRunDetail] = useState<BeastRunDetail | null>(null);
+  const [beastError, setBeastError] = useState<string | null>(null);
+  const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
     mode: 'secure',
     secureBackend: 'local-encrypted',
@@ -77,8 +90,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   } = useChatSession({
     baseUrl,
     projectId,
-    sessionId,
+    sessionId: selectedSessionId,
+    sessionSeed,
   });
+
+  const chatClient = useMemo(() => new ChatApiClient(baseUrl), [baseUrl]);
+  const beastClient = useMemo(
+    () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),
+    [baseUrl, beastOperatorToken],
+  );
 
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
@@ -91,6 +111,91 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       }
     });
   }, [baseUrl]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSelectedSessionId(activeSessionId);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void chatClient.listSessions(projectId)
+      .then((sessions) => {
+        if (!cancelled) {
+          setChatSessions(sessions);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChatSessions([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chatClient, projectId, activeSessionId, sessionSeed]);
+
+  useEffect(() => {
+    if (route !== 'beasts') {
+      return;
+    }
+    if (!beastClient) {
+      setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
+      setBeastCatalog([]);
+      setBeastRuns([]);
+      setBeastRunDetail(null);
+      return;
+    }
+    const client = beastClient;
+
+    let cancelled = false;
+
+    async function refreshBeasts() {
+      try {
+        const [catalog, runs] = await Promise.all([
+          client.getCatalog(),
+          client.listRuns(),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setBeastError(null);
+        setBeastCatalog(catalog);
+        setBeastRuns(runs);
+        const currentRunId = selectedBeastRunId ?? runs[0]?.id ?? null;
+        setSelectedBeastRunId(currentRunId);
+
+        if (currentRunId) {
+          const [detail, logs] = await Promise.all([
+            client.getRun(currentRunId),
+            client.getLogs(currentRunId),
+          ]);
+          if (!cancelled) {
+            setBeastRunDetail({ ...detail, logs });
+          }
+        } else {
+          setBeastRunDetail(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBeastError(error instanceof Error ? error.message : 'Unable to load Beast dispatch state.');
+        }
+      }
+    }
+
+    void refreshBeasts();
+    const interval = window.setInterval(() => {
+      void refreshBeasts();
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [route, beastClient, selectedBeastRunId, beastRefreshNonce]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -166,7 +271,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 <strong>{item.label}</strong>
                 <small>{item.summary}</small>
               </span>
-              {item.id !== 'chat' && <span className="sidebar__status">Soon</span>}
+              {!item.live && <span className="sidebar__status">Soon</span>}
             </a>
           ))}
         </nav>
@@ -227,6 +332,44 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         {route === 'chat' ? (
           <main className="chat-page">
             <section className="chat-page__main">
+              <section className="session-switcher rail-card">
+                <div className="session-switcher__copy">
+                  <p className="eyebrow">Conversations</p>
+                  <h2>Resume a chat or start fresh</h2>
+                </div>
+                <div className="session-switcher__controls">
+                  <label className="field-stack">
+                    <span>Conversation</span>
+                    <select
+                      aria-label="Conversation"
+                      className="field-control"
+                      onChange={(event) => {
+                        const nextId = event.target.value.trim();
+                        setSelectedSessionId(nextId || undefined);
+                      }}
+                      value={selectedSessionId ?? ''}
+                    >
+                      <option value="">Current conversation</option>
+                      {chatSessions.map((session) => (
+                        <option key={session.id} value={session.id}>
+                          {session.preview ? `${session.id} · ${session.preview}` : session.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="button button--secondary"
+                    onClick={() => {
+                      setSelectedSessionId(undefined);
+                      setSessionSeed((current) => current + 1);
+                    }}
+                    type="button"
+                  >
+                    New conversation
+                  </button>
+                </div>
+              </section>
+
               <TranscriptPane messages={messages} showTypingIndicator={showTypingIndicator} />
               <Composer
                 connectionStatus={connectionStatus}
@@ -253,6 +396,80 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               />
             </aside>
           </main>
+        ) : route === 'beasts' ? (
+          <BeastDispatchPage
+            catalog={beastCatalog}
+            disabled={!beastClient}
+            error={beastError}
+            onDispatch={(definitionId, config) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.createRun({
+                definitionId,
+                config,
+                startNow: true,
+              }).then((run) => {
+                setSelectedBeastRunId(run.id);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to dispatch Beast run.');
+              });
+            }}
+            onKill={(runId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.killRun(runId).then(() => {
+                setSelectedBeastRunId(runId);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to kill Beast run.');
+              });
+            }}
+            onRefresh={() => {
+              setBeastRefreshNonce((current) => current + 1);
+            }}
+            onRestart={(runId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.restartRun(runId).then(() => {
+                setSelectedBeastRunId(runId);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to restart Beast run.');
+              });
+            }}
+            onSelectRun={(runId) => {
+              setSelectedBeastRunId(runId);
+            }}
+            onStart={(runId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.startRun(runId).then(() => {
+                setSelectedBeastRunId(runId);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to start Beast run.');
+              });
+            }}
+            onStop={(runId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.stopRun(runId).then(() => {
+                setSelectedBeastRunId(runId);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to stop Beast run.');
+              });
+            }}
+            runDetail={beastRunDetail}
+            runs={beastRuns}
+            selectedRunId={selectedBeastRunId}
+          />
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}

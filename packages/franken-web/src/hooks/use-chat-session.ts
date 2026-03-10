@@ -31,6 +31,7 @@ export interface UseChatSessionOptions {
   baseUrl: string;
   projectId: string;
   sessionId?: string;
+  sessionSeed?: number;
 }
 
 export interface UseChatSessionResult {
@@ -193,6 +194,16 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     let cancelled = false;
     const client = clientRef.current;
 
+    setActivity([]);
+    setMessages([]);
+    setPendingApproval(null);
+    setShowTypingIndicator(false);
+    setTier(null);
+    setTokenTotals(EMPTY_TOKEN_TOTALS);
+    setCostUsd(0);
+    setStatus('connecting');
+    setConnectionStatus('connecting');
+
     async function init() {
       try {
         const session = opts.sessionId
@@ -224,7 +235,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     return () => {
       cancelled = true;
     };
-  }, [opts.projectId, opts.sessionId]);
+  }, [opts.projectId, opts.sessionId, opts.sessionSeed]);
 
   useEffect(() => {
     if (!sessionId || !socketToken) {

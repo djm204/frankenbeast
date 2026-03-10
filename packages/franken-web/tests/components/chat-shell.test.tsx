@@ -2,6 +2,18 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ChatShell } from '../../src/components/chat-shell.js';
 
+const mockListSessions = vi.fn().mockResolvedValue([
+  {
+    id: 'sess-1',
+    projectId: 'test-project',
+    state: 'active',
+    messageCount: 2,
+    preview: 'Dispatch accepted.',
+    createdAt: '2026-03-09T00:00:00Z',
+    updatedAt: '2026-03-09T00:00:01Z',
+  },
+]);
+
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
     messages: [
@@ -37,6 +49,12 @@ vi.mock('../../src/hooks/use-chat-session.js', () => ({
   }),
 }));
 
+vi.mock('../../src/lib/api.js', () => ({
+  ChatApiClient: vi.fn(function (this: { listSessions: typeof mockListSessions }) {
+    this.listSessions = mockListSessions;
+  }),
+}));
+
 afterEach(cleanup);
 
 describe('ChatShell', () => {
@@ -58,6 +76,7 @@ describe('ChatShell', () => {
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     expect(screen.getByText('Dispatch accepted.')).toBeDefined();
+    expect(screen.getByLabelText('Conversation')).toBeDefined();
     expect(screen.getByRole('textbox')).toBeDefined();
     expect(screen.getByText('Approve deploy')).toBeDefined();
     expect(screen.getByText('turn.execution.start')).toBeDefined();

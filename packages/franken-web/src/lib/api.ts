@@ -32,6 +32,16 @@ export interface ChatSession {
   updatedAt: string;
 }
 
+export interface ChatSessionSummary {
+  id: string;
+  projectId: string;
+  state: string;
+  messageCount: number;
+  preview: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type TurnOutcome =
   | { kind: 'reply'; content: string; modelTier: string }
   | { kind: 'clarify'; question: string; options: string[] }
@@ -79,6 +89,18 @@ export class ChatApiClient {
     return this.request<ChatSession>(`/v1/chat/sessions/${encodeURIComponent(id)}`, {
       method: 'GET',
     });
+  }
+
+  async listSessions(projectId?: string): Promise<ChatSessionSummary[]> {
+    const url = new URL('/v1/chat/sessions', this.baseUrl);
+    if (projectId) {
+      url.searchParams.set('projectId', projectId);
+    }
+    const body = await this.request<{ sessions: ChatSessionSummary[] }>(
+      `${url.pathname}${url.search}`,
+      { method: 'GET' },
+    );
+    return body.sessions;
   }
 
   async sendMessage(sessionId: string, content: string): Promise<MessageResult> {

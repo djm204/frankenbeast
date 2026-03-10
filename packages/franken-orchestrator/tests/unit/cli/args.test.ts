@@ -39,6 +39,26 @@ describe('parseArgs', () => {
     expect(args.allowOrigin).toBeUndefined();
   });
 
+  it('parses beasts catalog command', () => {
+    const args = parseArgs(['beasts', 'catalog']);
+    expect(args.subcommand).toBe('beasts');
+    expect(args.beastAction).toBe('catalog');
+  });
+
+  it('parses beasts spawn target', () => {
+    const args = parseArgs(['beasts', 'spawn', 'martin-loop']);
+    expect(args.subcommand).toBe('beasts');
+    expect(args.beastAction).toBe('spawn');
+    expect(args.beastTarget).toBe('martin-loop');
+  });
+
+  it('parses beasts restart target', () => {
+    const args = parseArgs(['beasts', 'restart', 'run-1']);
+    expect(args.subcommand).toBe('beasts');
+    expect(args.beastAction).toBe('restart');
+    expect(args.beastTarget).toBe('run-1');
+  });
+
   it('parses chat-server host, port, and origin overrides', () => {
     const args = parseArgs([
       'chat-server',
@@ -181,6 +201,7 @@ describe('parseArgs', () => {
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('chat-server'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('network'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('beasts'));
     logSpy.mockRestore();
   });
 

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { TransportSecurityService } from './security/transport-security.js';
 
 export interface IssueSessionTokenOptions {
   expiresInMs?: number;
@@ -20,66 +20,38 @@ export interface VerifyChatSocketRequestOptions {
   secret: string;
 }
 
-function encode(input: string): string {
-  return Buffer.from(input, 'utf8').toString('base64url');
-}
-
-function decode(input: string): string {
-  return Buffer.from(input, 'base64url').toString('utf8');
-}
-
-function signatureFor(payload: string, secret: string): Buffer {
-  return createHmac('sha256', secret).update(payload).digest();
-}
+const SESSION_SCOPE = 'chat-session';
+const transportSecurity = new TransportSecurityService();
 
 export function createSessionTokenSecret(): string {
-  return randomBytes(32).toString('hex');
+  return transportSecurity.createSecret();
 }
 
 export function issueSessionToken(options: IssueSessionTokenOptions): string {
-  const expiresAt = Date.now() + (options.expiresInMs ?? 5 * 60 * 1000);
-  const payload = `${options.sessionId}.${expiresAt}`;
-  const signature = signatureFor(payload, options.secret).toString('base64url');
-  return `${encode(payload)}.${signature}`;
+  return transportSecurity.issueSignedToken({
+    secret: options.secret,
+    subject: options.sessionId,
+    scope: SESSION_SCOPE,
+    ...(options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
+  });
 }
 
 export function verifySessionToken(options: VerifySessionTokenOptions): boolean {
-  const [encodedPayload, encodedSignature] = options.token.split('.');
-  if (!encodedPayload || !encodedSignature) {
-    return false;
-  }
-
-  const payload = decode(encodedPayload);
-  const [sessionId, expiresAtRaw] = payload.split('.');
-  if (sessionId !== options.sessionId) {
-    return false;
-  }
-
-  const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
-    return false;
-  }
-
-  const expected = signatureFor(payload, options.secret);
-  const received = Buffer.from(encodedSignature, 'base64url');
-  return received.length === expected.length && timingSafeEqual(received, expected);
+  return transportSecurity.verifySignedToken({
+    secret: options.secret,
+    subject: options.sessionId,
+    scope: SESSION_SCOPE,
+    token: options.token,
+  });
 }
 
 export function verifyChatSocketRequest(options: VerifyChatSocketRequestOptions) {
-  const allowedOrigins = options.allowedOrigins ?? [];
-  if (allowedOrigins.length > 0) {
-    if (!options.origin || !allowedOrigins.includes(options.origin)) {
-      return { ok: false as const, status: 403 as const };
-    }
-  }
-
-  if (!options.token || !verifySessionToken({
+  return transportSecurity.verifySocketRequest({
+    origin: options.origin,
+    subject: options.sessionId,
+    scope: SESSION_SCOPE,
     secret: options.secret,
-    sessionId: options.sessionId,
     token: options.token,
-  })) {
-    return { ok: false as const, status: 401 as const };
-  }
-
-  return { ok: true as const };
+    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+  });
 }

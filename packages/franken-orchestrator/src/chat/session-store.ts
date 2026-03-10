@@ -8,6 +8,7 @@ export interface ISessionStore {
   get(id: string): ChatSession | undefined;
   save(session: ChatSession): void;
   list(): string[];
+  listSessions(projectId?: string): ChatSession[];
   delete(id: string): void;
 }
 
@@ -56,6 +57,14 @@ export class FileSessionStore implements ISessionStore {
     } catch {
       return [];
     }
+  }
+
+  listSessions(projectId?: string): ChatSession[] {
+    return this.list()
+      .map((id) => this.get(id))
+      .filter((session): session is ChatSession => session !== undefined)
+      .filter((session) => projectId === undefined || session.projectId === projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   delete(id: string): void {

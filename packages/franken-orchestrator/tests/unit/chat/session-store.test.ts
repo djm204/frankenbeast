@@ -42,6 +42,24 @@ describe('FileSessionStore', () => {
     expect(store.list()).toHaveLength(2);
   });
 
+  it('lists stored sessions sorted by most recent update', async () => {
+    const first = store.create('proj');
+    const second = store.create('proj');
+
+    store.save({
+      ...first,
+      updatedAt: '2026-03-10T00:00:01.000Z',
+    });
+    store.save({
+      ...second,
+      updatedAt: '2026-03-10T00:00:02.000Z',
+    });
+
+    const sessions = store.listSessions('proj');
+
+    expect(sessions.map((session) => session.id)).toEqual([second.id, first.id]);
+  });
+
   it('deletes a session', () => {
     const session = store.create('proj');
     store.delete(session.id);

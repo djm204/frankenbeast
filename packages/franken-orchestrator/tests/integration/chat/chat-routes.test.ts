@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { verifySessionToken } from '../../../src/http/ws-chat-auth.js';
+import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
+import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
+import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-service.js';
+import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
+import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
+import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
+import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/http-chat');
@@ -49,6 +57,31 @@ describe('Chat HTTP Routes', () => {
     expect(body.data.id).toBeDefined();
     expect(body.data.projectId).toBe('my-project');
     expect(body.data.socketToken).toEqual(expect.any(String));
+  });
+
+  it('GET /v1/chat/sessions lists session summaries and filters by project', async () => {
+    await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'alpha' }),
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'beta' }),
+    });
+    const { data: latest } = await createRes.json();
+
+    const response = await app.request('/v1/chat/sessions?projectId=beta');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.sessions).toEqual([
+      expect.objectContaining({
+        id: latest.id,
+        projectId: 'beta',
+        messageCount: 0,
+      }),
+    ]);
   });
 
   // --- Get session ---
@@ -129,6 +162,112 @@ describe('Chat HTTP Routes', () => {
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript).toHaveLength(2);
     expect(sessionBody.data.state).toBe('active');
+  });
+
+  it('runs a Beast interview in chat and dispatches a persisted Beast run', async () => {
+    const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
+    const logStore = new BeastLogStore(join(TMP, 'beast-logs'));
+    const catalog = new BeastCatalogService();
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run, _definition) => {
+          const attempt = repository.createAttempt(run.id, {
+            status: 'running',
+            pid: 4321,
+            startedAt: '2026-03-10T00:01:00.000Z',
+            executorMetadata: { backend: 'process' },
+          });
+          repository.appendEvent(run.id, {
+            attemptId: attempt.id,
+            type: 'attempt.started',
+            payload: { pid: 4321 },
+            createdAt: '2026-03-10T00:01:00.000Z',
+          });
+          await logStore.append(run.id, attempt.id, 'stdout', 'started from chat');
+          return attempt;
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    app = createChatApp({
+      sessionStoreDir: join(TMP, 'chat-with-beasts'),
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      beastControl: {
+        catalog,
+        dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
+        runs: new BeastRunService(repository, catalog, executors, metrics, logStore),
+        interviews: new BeastInterviewService(repository, catalog),
+        metrics,
+        security: new TransportSecurityService(),
+        operatorToken: 'operator-token',
+        rateLimit: {
+          windowMs: 60_000,
+          max: 50,
+        },
+      },
+    });
+
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const promptOneRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'spawn a martin beast' }),
+    });
+    expect(promptOneRes.status).toBe(200);
+    const promptOne = await promptOneRes.json();
+    expect(promptOne.data.outcome.kind).toBe('reply');
+    expect(promptOne.data.outcome.content).toContain('Which provider should run the martin loop?');
+
+    const promptTwoRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'claude' }),
+    });
+    const promptTwo = await promptTwoRes.json();
+    expect(promptTwo.data.outcome.content).toContain('What should the martin loop accomplish?');
+
+    const dispatchRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'Ship Beast monitoring' }),
+    });
+    const dispatchBody = await dispatchRes.json();
+    expect(dispatchBody.data.outcome.kind).toBe('reply');
+    expect(dispatchBody.data.outcome.content).toContain('Martin Loop');
+    expect(dispatchBody.data.outcome.content).toContain('running');
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.transcript.some((message: { content: string }) => message.content.includes('Ship Beast monitoring'))).toBe(true);
+    expect(sessionBody.data.beastContext).toBeNull();
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: 'Bearer operator-token',
+      },
+    });
+    const runsBody = await runsResponse.json();
+    expect(runsBody.data.runs).toHaveLength(1);
+    expect(runsBody.data.runs[0]).toMatchObject({
+      definitionId: 'martin-loop',
+      dispatchedBy: 'chat',
+      dispatchedByUser: `chat-session:${created.id}`,
+      status: 'running',
+    });
   });
 
   it('uses the default LLM-backed executor for code-request turns', async () => {

@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
-import type { TurnRunner, TurnRunResult } from '../../chat/turn-runner.js';
+import type { ChatRuntime } from '../../chat/runtime.js';
+import type { TurnRunner } from '../../chat/turn-runner.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 
@@ -21,6 +22,7 @@ const ApproveBody = z.object({
 export interface ChatRoutesDeps {
   sessionStore: ISessionStore;
   engine: ConversationEngine;
+  runtime: ChatRuntime;
   turnRunner: TurnRunner;
   issueSocketToken: (sessionId: string) => string;
 }
@@ -33,19 +35,8 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
   return session;
 }
 
-function sessionStateFromRunStatus(status: TurnRunResult['status']): string {
-  switch (status) {
-    case 'pending_approval':
-      return 'pending_approval';
-    case 'failed':
-      return 'failed';
-    case 'completed':
-      return 'active';
-  }
-}
-
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, engine, turnRunner, issueSocketToken } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketToken } = deps;
   const app = new Hono();
 
   // Health check
@@ -62,6 +53,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } }, 201);
   });
 
+  app.get('/v1/chat/sessions', (c) => {
+    const projectId = c.req.query('projectId');
+    const sessions = sessionStore.listSessions(projectId).map((session) => ({
+      id: session.id,
+      projectId: session.projectId,
+      state: session.state,
+      messageCount: session.transcript.length,
+      preview: [...session.transcript].reverse().find((message) => message.role !== 'system')?.content ?? '',
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    }));
+    return c.json({ data: { sessions } });
+  });
+
   // Get session
   app.get('/v1/chat/sessions/:id', (c) => {
     const id = c.req.param('id');
@@ -76,16 +81,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { content } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    const result = await engine.processTurn(content, session.transcript);
-    let state = session.state;
+    const result = await runtime.run(content, {
+      sessionId: session.id,
+      pendingApproval: Boolean(session.pendingApproval),
+      projectId: session.projectId,
+      transcript: session.transcript,
+      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+    });
 
-    if (result.outcome.kind === 'execute') {
-      const runResult = await turnRunner.run(result.outcome);
-      state = sessionStateFromRunStatus(runResult.status);
-    }
-
-    session.transcript.push(...result.newMessages);
-    session.state = state;
+    session.transcript = result.transcript;
+    session.state = result.state;
+    session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
+      ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+      : null;
+    session.beastContext = result.beastContext ?? null;
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 

@@ -10,8 +10,16 @@ export function resolveBaseUrl(
 
 const BASE_URL = resolveBaseUrl(import.meta.env.VITE_API_URL as string | undefined);
 const PROJECT_ID = import.meta.env.VITE_PROJECT_ID as string | undefined ?? 'default';
+const BEAST_OPERATOR_TOKEN = import.meta.env.VITE_BEAST_OPERATOR_TOKEN as string | undefined;
 const VERSION = __FRANKENBEAST_VERSION__;
 
 export function App() {
-  return <ChatShell baseUrl={BASE_URL} projectId={PROJECT_ID} version={VERSION} />;
+  return (
+    <ChatShell
+      baseUrl={BASE_URL}
+      beastOperatorToken={BEAST_OPERATOR_TOKEN}
+      projectId={PROJECT_ID}
+      version={VERSION}
+    />
+  );
 }

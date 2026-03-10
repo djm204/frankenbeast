@@ -91,6 +91,25 @@ describe('ChatSessionSchema', () => {
     expect(() => ChatSessionSchema.parse(session)).not.toThrow();
   });
 
+  it('accepts persisted Beast interview context for resumable dispatches', () => {
+    const session = {
+      id: 'sess-1',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'active',
+      beastContext: {
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    expect(() => ChatSessionSchema.parse(session)).not.toThrow();
+  });
+
   it('rejects negative cost', () => {
     const session = {
       id: 'sess-1', projectId: 'proj-1', transcript: [], state: 'active',
