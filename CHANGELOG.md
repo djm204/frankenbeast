@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.16.0](https://github.com/djm204/frankenbeast/compare/v0.15.0...v0.16.0) (2026-03-11)
+
+
+### Features
+
+* add init config wizard ([9129b73](https://github.com/djm204/frankenbeast/commit/9129b736bf0d0fd79a9089dab9eebe6178b1ff4d))
+* **orchestrator:** support upstream repo targeting for issues ([414b7e1](https://github.com/djm204/frankenbeast/commit/414b7e1c33e5762c5966b55d05932ef02ba2fe3a))
+* **orchestrator:** support upstream repo targeting for issues ([20d0585](https://github.com/djm204/frankenbeast/commit/20d058503589bdf940b4cbc497b5e22ec3310fe8))
+
+
+### Bug Fixes
+
+* **observer:** fix cost tracking and document implementation gaps ([7054989](https://github.com/djm204/frankenbeast/commit/7054989522894d5bd2429d71ef73d041e9599725))
+* **observer:** fix zero-cost tracking and document implementation gaps ([c75c322](https://github.com/djm204/frankenbeast/commit/c75c322b46dc804873cff78c1ae8756104092cb7))
+
+
+### Miscellaneous
+
+* **main:** release franken-observer 0.3.2 ([c61c47d](https://github.com/djm204/frankenbeast/commit/c61c47d0b73275e1ee7514fa37f3b7ef733e1e7d))
+* **main:** release franken-observer 0.3.2 ([84cc110](https://github.com/djm204/frankenbeast/commit/84cc110c0e2f161f797151f0e92326433a43ddd9))
+* **main:** release franken-orchestrator 0.13.0 ([7bfef3d](https://github.com/djm204/frankenbeast/commit/7bfef3dc1dc8610bf7b05d621f5da28c91bfbef0))
+* **main:** release franken-orchestrator 0.13.0 ([3608647](https://github.com/djm204/frankenbeast/commit/36086470d523deb50d7e78542c1f2338980cc674))
+
+
+### Documentation
+
+* **issues:** document upstream repo targeting ([e8632ad](https://github.com/djm204/frankenbeast/commit/e8632ad9ada8689b0f6d3f48a48555ba68ab5c97))
+* refresh init workflow design and plan ([d590651](https://github.com/djm204/frankenbeast/commit/d5906511dba6a7ee07d809987a4bef63e6329c07))
+
+
+### CI/CD
+
+* auto-merge release please prs after ci ([5c9afbe](https://github.com/djm204/frankenbeast/commit/5c9afbe2c561cb9fae87b7fc00361e6c35aeaa4a))
+* auto-merge release please prs after ci ([6e1557a](https://github.com/djm204/frankenbeast/commit/6e1557a7ed4cedf3f731b717c62451d5129d05c7))
+
 ## [0.15.0](https://github.com/djm204/frankenbeast/compare/v0.14.1...v0.15.0) (2026-03-10)
 
 
