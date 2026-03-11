@@ -5,6 +5,7 @@ describe('SecretStoreFactory', () => {
   it('creates a local-encrypted store', () => {
     const store = createSecretStore('local-encrypted', {
       projectRoot: '/tmp/test-project',
+      passphrase: 'test-passphrase',
     });
     expect(store.id).toBe('local-encrypted');
   });

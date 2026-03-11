@@ -1,4 +1,5 @@
 import type { InterviewIO } from '../planning/interview-loop.js';
+import { LocalEncryptedStore } from './secret-backends/local-encrypted-store.js';
 
 export interface SecretStoreDetection {
   available: boolean;
@@ -28,7 +29,7 @@ export function createSecretStore(
 ): ISecretStore {
   switch (backendId) {
     case 'local-encrypted':
-      return createStubStore('local-encrypted');
+      return createLocalEncryptedStore(options);
     case '1password':
       return createStubStore('1password');
     case 'bitwarden':
@@ -38,6 +39,16 @@ export function createSecretStore(
     default:
       throw new Error(`Unknown secret backend: ${backendId}`);
   }
+}
+
+function createLocalEncryptedStore(options: SecretStoreOptions): ISecretStore {
+  const passphrase = options.passphrase ?? process.env.FRANKENBEAST_PASSPHRASE;
+  if (!passphrase) {
+    throw new Error(
+      'Local encrypted store requires a passphrase. Set FRANKENBEAST_PASSPHRASE env var or pass via options.',
+    );
+  }
+  return new LocalEncryptedStore({ ...options, passphrase });
 }
 
 function createStubStore(id: string): ISecretStore {
