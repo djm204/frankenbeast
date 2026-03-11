@@ -4,7 +4,7 @@ import { LocalEncryptedStore } from './secret-backends/local-encrypted-store.js'
 import { OnePasswordStore } from './secret-backends/one-password-store.js';
 import { BitwardenStore } from './secret-backends/bitwarden-store.js';
 import { OsKeychainStore } from './secret-backends/os-keychain-store.js';
-import { runCli } from './secret-backends/cli-runner.js';
+import { runCli, runCliWithStdin } from './secret-backends/cli-runner.js';
 
 export interface SecretStoreDetection {
   available: boolean;
@@ -65,7 +65,7 @@ function createBitwardenStore(): ISecretStore {
 }
 
 function createOsKeychainStore(): ISecretStore {
-  return new OsKeychainStore({ runner: runCli });
+  return new OsKeychainStore({ runner: runCli, stdinRunner: runCliWithStdin });
 }
 
 export interface ResolvedSecrets {
@@ -113,15 +113,4 @@ export class SecretResolver {
       discordBotToken,
     };
   }
-}
-
-function createStubStore(id: string): ISecretStore {
-  return {
-    id,
-    detect: async () => ({ available: false, reason: 'Not yet implemented' }),
-    store: async () => { throw new Error(`${id} store not yet implemented`); },
-    resolve: async () => { throw new Error(`${id} resolve not yet implemented`); },
-    delete: async () => { throw new Error(`${id} delete not yet implemented`); },
-    keys: async () => { throw new Error(`${id} keys not yet implemented`); },
-  };
 }

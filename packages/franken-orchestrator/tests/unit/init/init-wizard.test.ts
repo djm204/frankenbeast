@@ -175,9 +175,10 @@ describe('runInitWizard – with secretStore and Discord enabled', () => {
     const state = createEmptyInitState('/tmp/test-config.json');
     const result = await runInitWizard({ io, initialState: state, secretStore });
     expect(secretStore.stored.get('comms.discord.botTokenRef')).toBe('discord-bot-tok');
-    expect(secretStore.stored.get('comms.discord.publicKeyRef')).toBe('pubkey-abc');
+    // publicKeyRef is NOT sensitive — stored directly in config, not in secret store
+    expect(secretStore.stored.has('comms.discord.publicKeyRef')).toBe(false);
     expect(result.config.comms.discord.botTokenRef).toBe('comms.discord.botTokenRef');
-    expect(result.config.comms.discord.publicKeyRef).toBe('comms.discord.publicKeyRef');
+    expect(result.config.comms.discord.publicKeyRef).toBe('pubkey-abc');
   });
 });
 

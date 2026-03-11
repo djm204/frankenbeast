@@ -2,12 +2,14 @@ import type { CliResult } from './cli-runner.js';
 import type { ISecretStore, SecretStoreDetection } from '../secret-store.js';
 
 type CliRunner = (command: string, args: string[]) => Promise<CliResult>;
+type StdinRunner = (command: string, args: string[], stdin: string) => Promise<CliResult>;
 
 const SERVICE = 'frankenbeast';
 const KEYS_META_KEY = '__frankenbeast_keys__';
 
 export interface OsKeychainStoreOptions {
   runner: CliRunner;
+  stdinRunner?: StdinRunner;
   platform?: NodeJS.Platform | string;
 }
 
@@ -15,10 +17,12 @@ export class OsKeychainStore implements ISecretStore {
   readonly id = 'os-keychain';
 
   private readonly runner: CliRunner;
+  private readonly stdinRunner?: StdinRunner;
   private readonly platform: string;
 
   constructor(options: OsKeychainStoreOptions) {
     this.runner = options.runner;
+    this.stdinRunner = options.stdinRunner;
     this.platform = options.platform ?? process.platform;
   }
 
@@ -108,19 +112,20 @@ export class OsKeychainStore implements ISecretStore {
 
   private async storeLinux(key: string, value: string): Promise<void> {
     // secret-tool store reads the secret from stdin
-    // We call runner with 'store' in args; the actual stdin piping is handled
-    // by runCliWithStdin in production, but the runner interface here just takes
-    // command + args. We encode the value as a trailing arg for the mock-compatible
-    // interface, and in production the factory passes runCliWithStdin as the runner.
-    await this.runner('secret-tool', [
+    const args = [
       'store',
       '--label=frankenbeast',
       'application',
       SERVICE,
       'key',
       key,
-      value,
-    ]);
+    ];
+    if (this.stdinRunner) {
+      await this.stdinRunner('secret-tool', args, value);
+    } else {
+      // Fallback: pass value as trailing arg (for mock runner compatibility in tests)
+      await this.runner('secret-tool', [...args, value]);
+    }
   }
 
   private async resolveLinux(key: string): Promise<string | undefined> {

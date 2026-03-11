@@ -152,8 +152,6 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   } catch {
     return undefined;
   }
-
-  return undefined;
 }
 
 async function createChatSurfaceDeps(

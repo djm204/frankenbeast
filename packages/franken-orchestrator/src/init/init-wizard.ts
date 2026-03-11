@@ -238,10 +238,10 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
             await options.secretStore.store('comms.discord.botTokenRef', rawBotToken);
             answers['comms.discord.botTokenRef'] = 'comms.discord.botTokenRef';
           }
+          // publicKeyRef is NOT sensitive (it's a public key) — prompt but don't store in secret backend
           const rawPublicKey = await askText(options.io, 'Enter your Discord public key:', '');
           if (rawPublicKey.length > 0) {
-            await options.secretStore.store('comms.discord.publicKeyRef', rawPublicKey);
-            answers['comms.discord.publicKeyRef'] = 'comms.discord.publicKeyRef';
+            answers['comms.discord.publicKeyRef'] = rawPublicKey;
           }
         } else {
           const currentBotTokenRef = String(stateValue(options.initialState, 'comms.discord.botTokenRef') ?? '');
