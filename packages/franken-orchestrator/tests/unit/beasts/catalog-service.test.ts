@@ -22,11 +22,35 @@ describe('BeastCatalogService', () => {
     expect(definition?.configSchema.safeParse({
       provider: 'claude',
       objective: 'Implement the run detail page',
+      chunkDirectory: 'docs/chunks',
     }).success).toBe(true);
     expect(definition?.interviewPrompts.map((prompt) => prompt.key)).toEqual([
       'provider',
       'objective',
+      'chunkDirectory',
     ]);
+  });
+
+  it('exposes the updated init workflow catalog metadata', () => {
+    const service = new BeastCatalogService();
+    const chunkPlan = service.getDefinition('chunk-plan');
+    const martinLoop = service.getDefinition('martin-loop');
+
+    expect(chunkPlan?.label).toBe('Design Doc -> Chunk Creation');
+    expect(chunkPlan?.interviewPrompts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'designDocPath',
+        kind: 'file',
+      }),
+    ]));
+
+    expect(martinLoop?.interviewPrompts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'chunkDirectory',
+        kind: 'directory',
+        required: true,
+      }),
+    ]));
   });
 
   it('returns undefined for an unknown definition id', () => {

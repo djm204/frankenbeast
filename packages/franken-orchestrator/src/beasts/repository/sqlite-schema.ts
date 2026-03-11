@@ -49,4 +49,29 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS tracked_agents (
+    id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_by_user TEXT NOT NULL,
+    init_action TEXT NOT NULL,
+    init_config TEXT NOT NULL,
+    chat_session_id TEXT,
+    dispatch_run_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (dispatch_run_id) REFERENCES beast_runs(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tracked_agent_events (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    level TEXT NOT NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES tracked_agents(id)
+  )`,
 ] as const;

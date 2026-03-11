@@ -1,5 +1,13 @@
 import type { ZodType } from 'zod';
 
+export type {
+  TrackedAgent,
+  TrackedAgentEvent,
+  TrackedAgentInitAction,
+  TrackedAgentInitActionKind,
+  TrackedAgentStatus,
+} from './agent-types.js';
+
 export type BeastDispatchSource = 'cli' | 'dashboard' | 'chat' | 'api';
 
 export type BeastExecutionMode = 'process' | 'container';
@@ -16,7 +24,7 @@ export type BeastRunStatus =
 export interface BeastInterviewPrompt {
   readonly key: string;
   readonly prompt: string;
-  readonly kind: 'string' | 'boolean';
+  readonly kind: 'string' | 'boolean' | 'file' | 'directory';
   readonly required?: boolean | undefined;
   readonly options?: readonly string[] | undefined;
 }

@@ -120,4 +120,92 @@ describe('SQLiteBeastRepository', () => {
       stopReason: 'operator_kill',
     });
   });
+
+  it('creates, lists, and loads tracked agents', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+
+    const agent = repo.createTrackedAgent({
+      definitionId: 'design-interview',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'design-interview',
+        command: '/interview',
+        config: { goal: 'Map the lifecycle' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { goal: 'Map the lifecycle' },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    expect(agent.id).toMatch(/^agent_/);
+    expect(repo.getTrackedAgent(agent.id)).toEqual(agent);
+    expect(repo.listTrackedAgents()).toEqual([agent]);
+  });
+
+  it('appends tracked agent events and links tracked agents to beast runs', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agent = repo.createTrackedAgent({
+      definitionId: 'chunk-plan',
+      source: 'chat',
+      status: 'initializing',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: {
+          designDocPath: 'docs/plans/design.md',
+        },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: {
+        designDocPath: 'docs/plans/design.md',
+      },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    const event = repo.appendTrackedAgentEvent(agent.id, {
+      level: 'info',
+      type: 'agent.command.sent',
+      message: 'Sent /plan --design-doc docs/plans/design.md',
+      payload: {
+        sessionId: 'sess-1',
+      },
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+
+    const run = repo.createRun({
+      definitionId: 'chunk-plan',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        designDocPath: 'docs/plans/design.md',
+        outputDir: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:sess-1',
+      createdAt: '2026-03-11T00:00:02.000Z',
+    });
+
+    const linked = repo.updateTrackedAgent(agent.id, {
+      status: 'dispatching',
+      dispatchRunId: run.id,
+      updatedAt: '2026-03-11T00:00:02.000Z',
+    });
+
+    expect(event.sequence).toBe(1);
+    expect(repo.listTrackedAgentEvents(agent.id)).toEqual([event]);
+    expect(linked.dispatchRunId).toBe(run.id);
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
+      status: 'dispatching',
+      dispatchRunId: run.id,
+    });
+  });
 });

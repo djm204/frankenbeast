@@ -4,8 +4,8 @@ import type { BeastDefinition } from '../types.js';
 export const chunkPlanDefinition: BeastDefinition = {
   id: 'chunk-plan',
   version: 1,
-  label: 'Chunk Plan',
-  description: 'Decompose a design document into chunked implementation plan artifacts.',
+  label: 'Design Doc -> Chunk Creation',
+  description: 'Turn a design document into chunked implementation artifacts through the tracked init workflow.',
   executionModeDefault: 'process',
   configSchema: z.object({
     designDocPath: z.string().min(1),
@@ -15,7 +15,7 @@ export const chunkPlanDefinition: BeastDefinition = {
     {
       key: 'designDocPath',
       prompt: 'Which design document should be chunked?',
-      kind: 'string',
+      kind: 'file',
       required: true,
     },
     {
