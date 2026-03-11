@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
+import {
+  SQLiteBeastRepository,
+  UnknownTrackedAgentError,
+} from '../../../src/beasts/repository/sqlite-beast-repository.js';
 
 describe('SQLiteBeastRepository', () => {
   let workDir: string | undefined;
@@ -207,5 +210,42 @@ describe('SQLiteBeastRepository', () => {
       status: 'dispatching',
       dispatchRunId: run.id,
     });
+  });
+
+  it('rolls back linked run creation when the tracked agent is unknown', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+
+    expect(() => repo.transaction(() => {
+      const missingAgentId = 'agent-missing';
+      if (!repo.getTrackedAgent(missingAgentId)) {
+        throw new UnknownTrackedAgentError(missingAgentId);
+      }
+
+      const run = repo.createRun({
+        trackedAgentId: missingAgentId,
+        definitionId: 'martin-loop',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'Reject invalid tracked agent ids',
+          chunkDirectory: 'docs/chunks',
+        },
+        dispatchedBy: 'api',
+        dispatchedByUser: 'operator',
+        createdAt: '2026-03-11T00:00:02.000Z',
+      });
+
+      repo.appendEvent(run.id, {
+        type: 'run.created',
+        payload: {
+          definitionId: run.definitionId,
+        },
+        createdAt: run.createdAt,
+      });
+    })).toThrow('Unknown tracked agent: agent-missing');
+
+    expect(repo.listRuns()).toEqual([]);
   });
 });

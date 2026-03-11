@@ -171,6 +171,12 @@ function prefixedId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
 
+export class UnknownTrackedAgentError extends Error {
+  constructor(agentId: string) {
+    super(`Unknown tracked agent: ${agentId}`);
+  }
+}
+
 export class SQLiteBeastRepository {
   private readonly db: Database.Database;
 
@@ -227,6 +233,10 @@ export class SQLiteBeastRepository {
     );
 
     return run;
+  }
+
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   getRun(runId: string): BeastRun | undefined {
@@ -424,6 +434,10 @@ export class SQLiteBeastRepository {
   getTrackedAgent(agentId: string): TrackedAgent | undefined {
     const row = this.db.prepare('SELECT * FROM tracked_agents WHERE id = ?').get(agentId) as TrackedAgentRow | undefined;
     return row ? mapTrackedAgent(row) : undefined;
+  }
+
+  requireTrackedAgent(agentId: string): TrackedAgent {
+    return this.getTrackedAgentOrThrow(agentId);
   }
 
   listTrackedAgents(): TrackedAgent[] {
@@ -638,7 +652,7 @@ export class SQLiteBeastRepository {
   private getTrackedAgentOrThrow(agentId: string): TrackedAgent {
     const agent = this.getTrackedAgent(agentId);
     if (!agent) {
-      throw new Error(`Unknown tracked agent: ${agentId}`);
+      throw new UnknownTrackedAgentError(agentId);
     }
     return agent;
   }

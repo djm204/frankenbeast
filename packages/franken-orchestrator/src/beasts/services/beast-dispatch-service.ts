@@ -33,50 +33,56 @@ export class BeastDispatchService {
     const definition = this.getDefinitionOrThrow(request.definitionId);
     const config = definition.configSchema.parse(request.config);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
+    const createdAt = new Date().toISOString();
+    const linkedAt = new Date().toISOString();
+    const run = this.repository.transaction(() => {
+      if (request.trackedAgentId) {
+        this.repository.requireTrackedAgent(request.trackedAgentId);
+      }
 
-    if (request.trackedAgentId && !this.repository.getTrackedAgent(request.trackedAgentId)) {
-      throw new Error(`Unknown tracked agent: ${request.trackedAgentId}`);
-    }
-
-    const run = this.repository.createRun({
-      ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
-      definitionId: definition.id,
-      definitionVersion: definition.version,
-      executionMode,
-      configSnapshot: config,
-      dispatchedBy: request.dispatchedBy,
-      dispatchedByUser: request.dispatchedByUser,
-      createdAt: new Date().toISOString(),
-    });
-
-    this.repository.appendEvent(run.id, {
-      type: 'run.created',
-      payload: {
-        definitionId: run.definitionId,
+      const createdRun = this.repository.createRun({
+        ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
+        definitionId: definition.id,
+        definitionVersion: definition.version,
         executionMode,
-        dispatchedBy: run.dispatchedBy,
-      },
-      createdAt: run.createdAt,
+        configSnapshot: config,
+        dispatchedBy: request.dispatchedBy,
+        dispatchedByUser: request.dispatchedByUser,
+        createdAt,
+      });
+
+      this.repository.appendEvent(createdRun.id, {
+        type: 'run.created',
+        payload: {
+          definitionId: createdRun.definitionId,
+          executionMode,
+          dispatchedBy: createdRun.dispatchedBy,
+        },
+        createdAt: createdRun.createdAt,
+      });
+
+      if (request.trackedAgentId) {
+        this.repository.updateTrackedAgent(request.trackedAgentId, {
+          status: 'dispatching',
+          dispatchRunId: createdRun.id,
+          updatedAt: linkedAt,
+        });
+        this.repository.appendTrackedAgentEvent(request.trackedAgentId, {
+          level: 'info',
+          type: 'agent.dispatch.linked',
+          message: `Linked Beast run ${createdRun.id}`,
+          payload: {
+            runId: createdRun.id,
+          },
+          createdAt: linkedAt,
+        });
+      }
+
+      return createdRun;
     });
+
     await this.logs.append(run.id, 'system', 'stdout', 'run created');
     this.metrics.recordRunCreated(run.definitionId, run.dispatchedBy);
-
-    if (request.trackedAgentId) {
-      this.repository.updateTrackedAgent(request.trackedAgentId, {
-        status: 'dispatching',
-        dispatchRunId: run.id,
-        updatedAt: new Date().toISOString(),
-      });
-      this.repository.appendTrackedAgentEvent(request.trackedAgentId, {
-        level: 'info',
-        type: 'agent.dispatch.linked',
-        message: `Linked Beast run ${run.id}`,
-        payload: {
-          runId: run.id,
-        },
-        createdAt: new Date().toISOString(),
-      });
-    }
 
     if (request.startNow) {
       await this.executorFor(executionMode).start(run, definition);

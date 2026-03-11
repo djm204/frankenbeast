@@ -2,13 +2,14 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
+import { UnknownTrackedAgentError } from '../../beasts/repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
-import { parseJsonBody, validateBody } from '../middleware.js';
+import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
 const CreateRunBody = z.object({
@@ -66,15 +67,27 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.post('/v1/beasts/runs', async (c) => {
     const body = validateBody(CreateRunBody, await parseJsonBody(c));
-    const run = await deps.dispatch.createRun({
-      definitionId: body.definitionId,
-      config: body.config,
-      dispatchedBy: 'api',
-      dispatchedByUser: 'operator',
-      ...(body.trackedAgentId ? { trackedAgentId: body.trackedAgentId } : {}),
-      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
-      ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),
-    });
+    let run;
+    try {
+      run = await deps.dispatch.createRun({
+        definitionId: body.definitionId,
+        config: body.config,
+        dispatchedBy: 'api',
+        dispatchedByUser: 'operator',
+        ...(body.trackedAgentId ? { trackedAgentId: body.trackedAgentId } : {}),
+        ...(body.executionMode ? { executionMode: body.executionMode } : {}),
+        ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),
+      });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError && body.trackedAgentId) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${body.trackedAgentId}' was not found`,
+        );
+      }
+      throw error;
+    }
     return c.json({ data: run }, 201);
   });
 
