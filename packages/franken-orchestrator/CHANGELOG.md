@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.0...franken-orchestrator-v0.14.1) (2026-03-11)
+
+
+### Bug Fixes
+
+* **beasts:** wire dashboard control routes into chat server ([578f5cc](https://github.com/djm204/frankenbeast/commit/578f5cc4d5b93b0c3ecabec12f8dc222af9ccd16))
+* wire beast control into chat server ([aa7d26e](https://github.com/djm204/frankenbeast/commit/aa7d26ed240621af2273d554ef8268c4d5ecbdb8))
+
 ## [0.14.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.13.0...franken-orchestrator-v0.14.0) (2026-03-11)
 
 
