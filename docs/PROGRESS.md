@@ -161,6 +161,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 | PR-34 | Critique gets Hono server | Yes |
 | PR-35 | Governor gets Hono server | Yes |
 | PR-42 | Full architecture update — Beast Loop, HTTP services, shared types | Yes |
+| PR-183 | Tracked-agent init workflow above Beast runs | Yes |
 
 ---
 

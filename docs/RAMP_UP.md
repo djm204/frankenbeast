@@ -162,7 +162,7 @@ All modules use `tsc` for builds.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 16 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway) |
+| `docs/adr/` | 18 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway, network operator control plane, tracked-agent init workflow) |
 | `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 

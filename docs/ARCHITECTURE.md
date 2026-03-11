@@ -913,7 +913,7 @@ The `frankenbeast chat-server` subcommand exposes the ChatRuntime over HTTP and 
 | `ChatSocketController` | `src/http/ws-chat-server.ts` | WebSocket connection management, chunk-based content delivery, turn event streaming |
 | `chat-app.ts` | `src/http/chat-app.ts` | Hono HTTP routes for REST-based chat interactions |
 
-**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md) and [ADR-016](adr/016-chat-server-entrypoint.md).
+**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md), [ADR-016](adr/016-chat-server-entrypoint.md), and [ADR-018](adr/018-tracked-agent-init-workflow.md).
 
 ### Beast Control and Tracked Agents
 
