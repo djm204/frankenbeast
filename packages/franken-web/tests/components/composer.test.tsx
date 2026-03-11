@@ -41,6 +41,17 @@ describe('Composer', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('clicking Dispatch sends the message', () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'click test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dispatch' }));
+
+    expect(onSend).toHaveBeenCalledWith('click test');
+  });
+
   it('handles Enter key submission via form', () => {
     const onSend = vi.fn();
     render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
@@ -50,6 +61,17 @@ describe('Composer', () => {
     fireEvent.submit(input.closest('form')!);
 
     expect(onSend).toHaveBeenCalledWith('enter test');
+  });
+
+  it('sends on Ctrl+Enter from the textarea', () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'keyboard send' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    expect(onSend).toHaveBeenCalledWith('keyboard send');
   });
 
   it('submit button has a label', () => {

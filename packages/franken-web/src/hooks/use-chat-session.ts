@@ -182,6 +182,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [sessionId, setSessionId] = useState<string | null>(opts.sessionId ?? null);
   const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [socketToken, setSocketToken] = useState<string | null>(null);
+  const [socketGeneration, setSocketGeneration] = useState(0);
   const [status, setStatus] = useState<SessionStatus>('connecting');
   const [tier, setTier] = useState<string | null>(null);
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
@@ -242,6 +243,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
+    let shouldReconnect = true;
     setConnectionStatus('connecting');
     readyRef.current = false;
 
@@ -357,17 +359,21 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     socket.onclose = () => {
       socketRef.current = null;
       setConnectionStatus('disconnected');
+      if (shouldReconnect) {
+        setSocketGeneration((current) => current + 1);
+      }
     };
 
     return () => {
+      shouldReconnect = false;
       socket.close();
       socketRef.current = null;
     };
-  }, [sessionId, socketToken]);
+  }, [sessionId, socketToken, socketGeneration]);
 
   async function send(content: string): Promise<void> {
     const socket = socketRef.current;
-    if (!sessionId || !socket || socket.readyState !== 1) {
+    if (!sessionId) {
       return;
     }
 
@@ -383,6 +389,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       },
     ]);
     setStatus('sending');
+
+    if (!socket || socket.readyState !== 1) {
+      try {
+        const result = await clientRef.current.sendMessage(sessionId, content);
+        const refreshed = await clientRef.current.getSession(sessionId);
+        setMessages(applySessionSnapshot(refreshed));
+        setPendingApproval(refreshed.pendingApproval ?? null);
+        setTokenTotals(refreshed.tokenTotals);
+        setCostUsd(refreshed.costUsd);
+        setTier(result.tier);
+        setStatus('idle');
+      } catch {
+        setStatus('error');
+      }
+      return;
+    }
+
     socket.send(JSON.stringify({
       type: 'message.send',
       clientMessageId,

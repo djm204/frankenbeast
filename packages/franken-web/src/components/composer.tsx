@@ -11,8 +11,7 @@ export interface ComposerProps {
 export function Composer({ connectionStatus, disabled, onSend, status }: ComposerProps) {
   const [value, setValue] = useState('');
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submitCurrentValue() {
     const trimmed = value.trim();
     if (!trimmed) {
       return;
@@ -20,6 +19,11 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
 
     onSend(trimmed);
     setValue('');
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    submitCurrentValue();
   }
 
   return (
@@ -30,6 +34,12 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
           className="field-control composer__textarea"
           value={value}
           onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && event.ctrlKey) {
+              event.preventDefault();
+              submitCurrentValue();
+            }
+          }}
           placeholder="Ask Frankenbeast to plan, explain, execute, or use slash commands like /run or /plan."
           aria-label="Message input"
           rows={3}

@@ -4,16 +4,19 @@ import { useChatSession } from '../../src/hooks/use-chat-session';
 
 const mockCreateSession = vi.fn();
 const mockGetSession = vi.fn();
+const mockSendMessage = vi.fn();
 const mockSocketUrl = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
   ChatApiClient: vi.fn(function (this: {
     createSession: typeof mockCreateSession;
     getSession: typeof mockGetSession;
+    sendMessage: typeof mockSendMessage;
     socketUrl: typeof mockSocketUrl;
   }) {
     this.createSession = mockCreateSession;
     this.getSession = mockGetSession;
+    this.sendMessage = mockSendMessage;
     this.socketUrl = mockSocketUrl;
   }),
 }));
@@ -81,6 +84,23 @@ describe('useChatSession', () => {
       costUsd: 0,
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:00Z',
+    });
+    mockGetSession.mockResolvedValue({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:00Z',
+    });
+    mockSendMessage.mockResolvedValue({
+      outcome: { kind: 'reply', content: 'Fallback reply', modelTier: 'cheap' },
+      tier: 'cheap',
+      state: 'active',
     });
     mockSocketUrl.mockReturnValue('ws://localhost:3000/v1/chat/ws?sessionId=chat-1&token=signed-token');
   });
@@ -190,6 +210,25 @@ describe('useChatSession', () => {
     expect(result.current.connectionStatus).toBe('connected');
   });
 
+  it('falls back to HTTP send when the websocket is not ready', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+
+    await act(async () => {
+      await result.current.send('Queue this until connected');
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledWith('chat-1', 'Queue this until connected');
+    expect(mockGetSession).toHaveBeenCalledWith('chat-1');
+    expect(socket.sent).toHaveLength(0);
+    expect(result.current.status).toBe('idle');
+  });
+
   it('surfaces pending approvals and sends approval responses over the socket', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -220,7 +259,7 @@ describe('useChatSession', () => {
     });
   });
 
-  it('resumes an existing session and marks the socket disconnected when it closes', async () => {
+  it('resumes an existing session and reconnects when the socket closes', async () => {
     mockGetSession.mockResolvedValue({
       id: 'existing-sess',
       projectId: 'test-proj',
@@ -255,6 +294,38 @@ describe('useChatSession', () => {
 
     expect(mockGetSession).toHaveBeenCalledWith('existing-sess');
     expect(result.current.messages[0]?.content).toBe('old message');
-    expect(result.current.connectionStatus).toBe('disconnected');
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+    expect(result.current.connectionStatus).toBe('connecting');
+  });
+
+  it('reconnects after the socket closes and falls back to HTTP send while reconnecting', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const firstSocket = MockWebSocket.instances[0]!;
+    act(() => {
+      firstSocket.open();
+      firstSocket.shutdown();
+    });
+
+    expect(result.current.connectionStatus).toBe('connecting');
+
+    await act(async () => {
+      await result.current.send('retry after reconnect');
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledWith('chat-1', 'retry after reconnect');
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+
+    const secondSocket = MockWebSocket.instances[1]!;
+    expect(secondSocket.sent).toHaveLength(0);
   });
 });

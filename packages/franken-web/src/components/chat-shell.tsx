@@ -244,8 +244,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
           <div className="sidebar__brand">
             <img src={brandMark} alt="Frankenbeast" />
             <div>
-              <p className="eyebrow">Operator Dashboard</p>
-              <p className="sidebar__tagline">Dispatch, inspect, and govern active Frankenbeast runs.</p>
+              <span className="eyebrow">Frankenbeast</span> - <span className="sidebar__tagline">Release the Beast.</span>
             </div>
           </div>
 
@@ -277,10 +276,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
         </nav>
 
         <div className="sidebar__footer">
-          <p>Frankenbeast dashboard chrome with the chat surface as the first live module.</p>
           <div className="sidebar__meta">
             <span className="version-chip">v{version}</span>
-            <span>Accessibility-tuned operator shell</span>
           </div>
         </div>
       </aside>

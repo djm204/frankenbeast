@@ -130,13 +130,14 @@ button {
 
 .sidebar__brand {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 1rem;
 }
 
 .sidebar__brand img {
-  width: 10.5rem;
+  width: 7.5rem;
   max-width: 100%;
+  margin: 0px auto;
   filter: drop-shadow(0 10px 18px rgba(126, 255, 78, 0.15));
 }
 
@@ -144,6 +145,7 @@ button {
   margin-top: 0.45rem;
   color: var(--text-muted);
   max-width: 20rem;
+  font-size: .75em;
 }
 
 .sidebar__toggle,

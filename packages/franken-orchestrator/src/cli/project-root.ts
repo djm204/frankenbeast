@@ -1,5 +1,5 @@
-import { resolve, basename } from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { resolve, basename, dirname, relative } from 'node:path';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 
 export interface ProjectPaths {
   root: string;
@@ -25,11 +25,43 @@ export interface ProjectPaths {
  * Validates the directory exists.
  */
 export function resolveProjectRoot(baseDir: string): string {
-  const root = resolve(baseDir);
-  if (!existsSync(root)) {
-    throw new Error(`Project root does not exist: ${root}`);
+  const start = resolve(baseDir);
+  if (!existsSync(start)) {
+    throw new Error(`Project root does not exist: ${start}`);
   }
-  return root;
+
+  return findWorkspaceRoot(start) ?? start;
+}
+
+function findWorkspaceRoot(start: string): string | undefined {
+  let current = start;
+
+  while (true) {
+    const packageJsonPath = resolve(current, 'package.json');
+    if (existsSync(packageJsonPath)) {
+      try {
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+          workspaces?: string[] | { packages?: string[] };
+        };
+        const workspaces = Array.isArray(packageJson.workspaces)
+          ? packageJson.workspaces
+          : packageJson.workspaces?.packages;
+        const rel = relative(current, start);
+        const isInsidePackagesDir = rel === 'packages' || rel.startsWith(`packages/`);
+        if (workspaces?.includes('packages/*') && (start === current || isInsidePackagesDir)) {
+          return current;
+        }
+      } catch {
+        // Ignore malformed package.json and continue walking upward.
+      }
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
 }
 
 /**

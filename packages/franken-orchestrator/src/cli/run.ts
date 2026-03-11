@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { open } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import { parse as parseDotenv } from 'dotenv';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
 import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
@@ -107,10 +108,32 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
 }
 
-function resolveBeastOperatorToken(): string | undefined {
+async function resolveBeastOperatorToken(root: string): Promise<string | undefined> {
   const token = process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? process.env.VITE_BEAST_OPERATOR_TOKEN;
   const trimmed = token?.trim();
-  return trimmed ? trimmed : undefined;
+  if (trimmed) {
+    return trimmed;
+  }
+
+  const rootEnvToken = await readOperatorTokenFromEnvFile(join(root, '.env'));
+  if (rootEnvToken?.trim()) {
+    return rootEnvToken.trim();
+  }
+
+  const fileToken = await readOperatorTokenFromEnvFile(join(root, 'packages', 'franken-web', '.env.local'));
+  return fileToken?.trim() ? fileToken.trim() : undefined;
+}
+
+async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | undefined> {
+  try {
+    const contents = await readFile(filePath, 'utf8');
+    const parsed = parseDotenv(contents);
+    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? parsed.VITE_BEAST_OPERATOR_TOKEN;
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 async function createChatSurfaceDeps(
@@ -242,7 +265,7 @@ export async function main(): Promise<void> {
 
     if (args.subcommand === 'chat-server') {
       let mutableConfig = config;
-      const beastOperatorToken = resolveBeastOperatorToken();
+      const beastOperatorToken = await resolveBeastOperatorToken(root);
       const beastServices = beastOperatorToken ? createBeastServices(paths) : undefined;
       const server = await startChatServer({
         sessionStoreDir,

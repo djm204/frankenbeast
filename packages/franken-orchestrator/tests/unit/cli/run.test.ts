@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
@@ -305,6 +308,8 @@ describe('main wiring', () => {
 });
 
 describe('main() execution', () => {
+  const tempDirs: string[] = [];
+
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.VITE_BEAST_OPERATOR_TOKEN = 'dashboard-operator-token';
@@ -338,6 +343,14 @@ describe('main() execution', () => {
       beastAction: undefined,
       beastTarget: undefined,
     });
+  });
+
+  afterEach(() => {
+    delete process.env.VITE_BEAST_OPERATOR_TOKEN;
+    delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('scaffolds project and resolves base branch during startup', async () => {
@@ -405,6 +418,118 @@ describe('main() execution', () => {
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
     logSpy.mockRestore();
+  });
+
+  it('prefers the root .env beast operator token for chat-server', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}`);
+    tempDirs.push(root);
+    mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
+    writeFileSync(
+      join(root, '.env'),
+      'FRANKENBEAST_BEAST_OPERATOR_TOKEN=root-env-token\n',
+    );
+    writeFileSync(
+      join(root, 'packages', 'franken-web', '.env.local'),
+      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+    );
+
+    delete process.env.VITE_BEAST_OPERATOR_TOKEN;
+    delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastControl: expect.objectContaining({
+        operatorToken: 'root-env-token',
+      }),
+    }));
+  });
+
+  it('falls back to the web env file when root .env has no beast operator token', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-fallback`);
+    tempDirs.push(root);
+    mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
+    writeFileSync(
+      join(root, '.env'),
+      'CHROMA_URL=http://localhost:8000\n',
+    );
+    writeFileSync(
+      join(root, 'packages', 'franken-web', '.env.local'),
+      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+    );
+
+    delete process.env.VITE_BEAST_OPERATOR_TOKEN;
+    delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastControl: expect.objectContaining({
+        operatorToken: 'dashboard-file-token',
+      }),
+    }));
   });
 
   it('dispatches beasts commands without creating a Session', async () => {

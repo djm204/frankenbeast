@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
@@ -24,9 +24,21 @@ describe('project-root', () => {
       expect(() => resolveProjectRoot('/nonexistent/path')).toThrow('Project root does not exist');
     });
 
-    it('resolves relative paths to absolute', () => {
+    it('resolves relative paths to the workspace root when called from a package cwd', () => {
       const result = resolveProjectRoot('.');
-      expect(result).toBe(resolve('.'));
+      expect(result).toBe(resolve('../../'));
+    });
+
+    it('walks up from a workspace package directory to the repo root', () => {
+      const repoRoot = resolve(testDir, 'repo');
+      const packageDir = resolve(repoRoot, 'packages/franken-orchestrator');
+      mkdirSync(packageDir, { recursive: true });
+      writeFileSync(
+        resolve(repoRoot, 'package.json'),
+        JSON.stringify({ private: true, workspaces: ['packages/*'] }),
+      );
+
+      expect(resolveProjectRoot(packageDir)).toBe(repoRoot);
     });
   });
 
