@@ -26,6 +26,8 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
+import { createBeastServices } from '../beasts/create-beast-services.js';
+import { TransportSecurityService } from '../http/security/transport-security.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
 import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
@@ -102,6 +104,12 @@ interface ChatSurfaceDeps {
   finalize: () => Promise<void>;
   projectId: string;
   sessionStoreDir: string;
+}
+
+function resolveBeastOperatorToken(): string | undefined {
+  const token = process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? process.env.VITE_BEAST_OPERATOR_TOKEN;
+  const trimmed = token?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 async function createChatSurfaceDeps(
@@ -222,11 +230,26 @@ export async function main(): Promise<void> {
 
     if (args.subcommand === 'chat-server') {
       let mutableConfig = config;
+      const beastOperatorToken = resolveBeastOperatorToken();
+      const beastServices = beastOperatorToken ? createBeastServices(paths) : undefined;
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
         executionLlm: execLlm,
         projectName: projectId,
+        ...(beastServices && beastOperatorToken
+          ? {
+              beastControl: {
+                ...beastServices,
+                security: new TransportSecurityService(),
+                operatorToken: beastOperatorToken,
+                rateLimit: {
+                  windowMs: 60_000,
+                  max: 20,
+                },
+              },
+            }
+          : {}),
         networkControl: {
           root,
           frankenbeastDir: paths.frankenbeastDir,

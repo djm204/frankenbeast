@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   mockAdapterComplete,
   mockCreateCliDeps,
+  mockCreateBeastServices,
   mockFinalize,
   mockParseArgs,
   mockSessionStart,
@@ -22,6 +23,13 @@ const {
     observerBridge: {},
     logger: {},
     finalize: mockFinalize,
+  }));
+  const mockCreateBeastServices = vi.fn(() => ({
+    catalog: {},
+    dispatch: {},
+    runs: {},
+    interviews: {},
+    metrics: {},
   }));
   const mockParseArgs = vi.fn(() => ({
     subcommand: undefined,
@@ -66,6 +74,7 @@ const {
   return {
     mockAdapterComplete,
     mockCreateCliDeps,
+    mockCreateBeastServices,
     mockFinalize,
     mockParseArgs,
     mockSessionStart,
@@ -93,6 +102,9 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     frankenbeastDir: `${root}/.frankenbeast`,
     plansDir: `${root}/.frankenbeast/plans`,
     buildDir: `${root}/.frankenbeast/.build`,
+    beastsDir: `${root}/.frankenbeast/.build/beasts`,
+    beastLogsDir: `${root}/.frankenbeast/.build/beasts/logs`,
+    beastsDb: `${root}/.frankenbeast/.build/beasts.db`,
     checkpointFile: `${root}/.frankenbeast/.build/.checkpoint`,
     tracesDb: `${root}/.frankenbeast/.build/build-traces.db`,
     logFile: `${root}/.frankenbeast/.build/build.log`,
@@ -117,6 +129,10 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
 
 vi.mock('../../../src/cli/beast-cli.js', () => ({
   handleBeastCommand: mockHandleBeastCommand,
+}));
+
+vi.mock('../../../src/beasts/create-beast-services.js', () => ({
+  createBeastServices: mockCreateBeastServices,
 }));
 
 vi.mock('../../../src/http/chat-server.js', () => ({
@@ -282,6 +298,7 @@ describe('main wiring', () => {
 describe('main() execution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.VITE_BEAST_OPERATOR_TOKEN = 'dashboard-operator-token';
     mockParseArgs.mockReturnValue({
       subcommand: undefined,
       networkAction: undefined,
@@ -366,6 +383,9 @@ describe('main() execution', () => {
       allowedOrigins: ['http://localhost:5173'],
       sessionStoreDir: '/mock/project/.frankenbeast/chat',
       projectName: 'project',
+      beastControl: expect.objectContaining({
+        operatorToken: 'dashboard-operator-token',
+      }),
     }));
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
