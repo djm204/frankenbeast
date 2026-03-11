@@ -1,6 +1,7 @@
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { LocalEncryptedStore } from './secret-backends/local-encrypted-store.js';
 import { OnePasswordStore } from './secret-backends/one-password-store.js';
+import { BitwardenStore } from './secret-backends/bitwarden-store.js';
 import { runCli } from './secret-backends/cli-runner.js';
 
 export interface SecretStoreDetection {
@@ -35,7 +36,7 @@ export function createSecretStore(
     case '1password':
       return createOnePasswordStore();
     case 'bitwarden':
-      return createStubStore('bitwarden');
+      return createBitwardenStore();
     case 'os-keychain':
       return createStubStore('os-keychain');
     default:
@@ -55,6 +56,10 @@ function createLocalEncryptedStore(options: SecretStoreOptions): ISecretStore {
 
 function createOnePasswordStore(): ISecretStore {
   return new OnePasswordStore(runCli);
+}
+
+function createBitwardenStore(): ISecretStore {
+  return new BitwardenStore(runCli);
 }
 
 function createStubStore(id: string): ISecretStore {
