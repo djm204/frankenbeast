@@ -6,6 +6,7 @@ import type { InterviewIO } from '../planning/interview-loop.js';
 import { FileInitStateStore } from '../init/init-state-store.js';
 import { runInteractiveInit, runRepairInit } from '../init/init-engine.js';
 import { verifyInit } from '../init/init-verify.js';
+import { createSecretStore } from '../network/secret-store.js';
 
 export interface InitCommandOptions {
   args: CliArgs;
@@ -18,10 +19,22 @@ export interface InitCommandOptions {
 export async function handleInitCommand(options: InitCommandOptions): Promise<void> {
   const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
 
+  const secureBackend = options.config.network.secureBackend ?? 'local-encrypted';
+  let passphrase: string | undefined = process.env.FRANKENBEAST_PASSPHRASE;
+  if (secureBackend === 'local-encrypted' && !passphrase) {
+    passphrase = (await options.io.ask('Enter passphrase for local encrypted store:')).trim() || undefined;
+  }
+  const secretStore = createSecretStore(secureBackend, {
+    projectRoot: options.paths.root,
+    io: options.io,
+    passphrase,
+  });
+
   if (options.args.initVerify) {
     const verification = await verifyInit({
       configFile: options.paths.configFile,
       stateStore,
+      secretStore,
     });
     options.print(
       verification.ok
@@ -36,6 +49,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       configFile: options.paths.configFile,
       stateStore,
       io: options.io,
+      secretStore,
     });
     options.print(
       `Repaired init config at ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
@@ -46,6 +60,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     configFile: options.paths.configFile,
     stateStore,
     io: options.io,
+    secretStore,
   });
 
   options.print(

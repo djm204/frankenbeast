@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { FileInitStateStore } from './init-state-store.js';
+import type { ISecretStore } from '../network/secret-store.js';
 
 export type InitIssueCode =
   | 'missing-config'
   | 'missing-init-state'
   | 'slack-incomplete'
-  | 'discord-incomplete';
+  | 'discord-incomplete'
+  | 'secret-backend-unavailable';
 
 export interface InitVerificationIssue {
   code: InitIssueCode;
@@ -35,6 +37,7 @@ async function tryReadJson<T>(filePath: string): Promise<T | undefined> {
 export async function verifyInit(options: {
   configFile: string;
   stateStore: FileInitStateStore;
+  secretStore?: ISecretStore;
 }): Promise<InitVerificationResult> {
   const issues: InitVerificationIssue[] = [];
   const rawConfig = await tryReadJson<unknown>(options.configFile);
@@ -86,6 +89,16 @@ export async function verifyInit(options: {
       issues.push({
         code: 'discord-incomplete',
         message: `Discord config is incomplete: missing ${missing.join(', ')}.`,
+      });
+    }
+  }
+
+  if (options.secretStore) {
+    const detection = await options.secretStore.detect();
+    if (!detection.available) {
+      issues.push({
+        code: 'secret-backend-unavailable',
+        message: `Secret backend '${options.secretStore.id}' is not available: ${detection.reason ?? 'unknown reason'}`,
       });
     }
   }
