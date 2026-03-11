@@ -1,3 +1,4 @@
+import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +12,8 @@ import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatc
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
+import { errorHandler } from '../../../src/http/middleware.js';
+import { agentRoutes } from '../../../src/http/routes/agent-routes.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -79,9 +82,40 @@ function createBeastApp() {
   return { app, operatorToken };
 }
 
+function createStandaloneAgentApp() {
+  mkdirSync(TMP, { recursive: true });
+  const repository = new SQLiteBeastRepository(join(TMP, 'standalone-beasts.db'));
+  const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+  const app = new Hono();
+  app.onError(errorHandler);
+  app.route('/', agentRoutes({
+    agents,
+    operatorToken: 'super-secret-operator-token',
+    security: new TransportSecurityService(),
+  }));
+
+  return { app };
+}
+
 describe('agent routes', () => {
   afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rejects unauthenticated access to tracked agent endpoints', async () => {
+    const { app } = createBeastApp();
+
+    const listResponse = await app.request('/v1/beasts/agents');
+
+    expect(listResponse.status).toBe(401);
+  });
+
+  it('enforces operator auth when agent routes are mounted standalone', async () => {
+    const { app } = createStandaloneAgentApp();
+
+    const listResponse = await app.request('/v1/beasts/agents');
+
+    expect(listResponse.status).toBe(401);
   });
 
   it('creates and lists tracked agents for authorized operators', async () => {

@@ -95,6 +95,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     }));
     app.route('/', agentRoutes({
       agents: opts.beastControl.agents,
+      operatorToken: opts.beastControl.operatorToken,
+      security: opts.beastControl.security ?? transportSecurity,
     }));
   }
   if (opts.networkControl) {

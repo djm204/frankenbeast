@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import { TransportSecurityService } from '../security/transport-security.js';
 
 const CreateAgentBody = z.object({
   definitionId: z.string().min(1),
@@ -16,10 +18,19 @@ const CreateAgentBody = z.object({
 
 export interface AgentRoutesDeps {
   agents: AgentService;
+  operatorToken: string;
+  security: TransportSecurityService;
 }
 
 export function agentRoutes(deps: AgentRoutesDeps): Hono {
   const app = new Hono();
+  const auth = requireBeastOperatorAuth({
+    operatorToken: deps.operatorToken,
+    security: deps.security,
+  });
+
+  app.use('/v1/beasts/agents', auth);
+  app.use('/v1/beasts/agents/*', auth);
 
   app.post('/v1/beasts/agents', async (c) => {
     const raw = await c.req.json();

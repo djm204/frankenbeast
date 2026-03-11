@@ -33,6 +33,11 @@ export class BeastDispatchService {
     const definition = this.getDefinitionOrThrow(request.definitionId);
     const config = definition.configSchema.parse(request.config);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
+
+    if (request.trackedAgentId && !this.repository.getTrackedAgent(request.trackedAgentId)) {
+      throw new Error(`Unknown tracked agent: ${request.trackedAgentId}`);
+    }
+
     const run = this.repository.createRun({
       ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
       definitionId: definition.id,

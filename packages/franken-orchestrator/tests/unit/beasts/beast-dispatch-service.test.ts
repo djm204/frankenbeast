@@ -116,4 +116,40 @@ describe('BeastDispatchService', () => {
       dispatchRunId: run.id,
     });
   });
+
+  it('rejects unknown tracked agents before persisting a run', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: 'agent-missing',
+      config: {
+        provider: 'claude',
+        objective: 'Reject invalid tracked agent ids',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+    })).rejects.toThrow('Unknown tracked agent: agent-missing');
+
+    expect(repo.listRuns()).toEqual([]);
+    expect(metrics.render()).not.toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
+  });
 });
