@@ -182,6 +182,8 @@ export class SQLiteBeastRepository {
     for (const statement of BEAST_SQLITE_SCHEMA_STATEMENTS) {
       this.db.prepare(statement).run();
     }
+
+    this.migrateLegacySchema();
   }
 
   createRun(input: CreateRunInput): BeastRun {
@@ -584,6 +586,17 @@ export class SQLiteBeastRepository {
 
   close(): void {
     this.db.close();
+  }
+
+  private migrateLegacySchema(): void {
+    this.ensureColumnExists('beast_runs', 'tracked_agent_id', 'ALTER TABLE beast_runs ADD COLUMN tracked_agent_id TEXT');
+  }
+
+  private ensureColumnExists(table: string, column: string, alterStatement: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((entry) => entry.name === column)) {
+      this.db.prepare(alterStatement).run();
+    }
   }
 
   private insertAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {

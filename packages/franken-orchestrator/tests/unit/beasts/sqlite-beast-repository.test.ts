@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { UnknownTrackedAgentError } from '../../../src/beasts/errors.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 
@@ -245,5 +246,50 @@ describe('SQLiteBeastRepository', () => {
     })).toThrow('Unknown tracked agent: agent-missing');
 
     expect(repo.listRuns()).toEqual([]);
+  });
+
+  it('migrates legacy beast_runs tables that predate tracked_agent_id', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const legacyDb = new Database(dbPath);
+
+    legacyDb.exec(`
+      CREATE TABLE beast_runs (
+        id TEXT PRIMARY KEY,
+        definition_id TEXT NOT NULL,
+        definition_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        execution_mode TEXT NOT NULL,
+        config_snapshot TEXT NOT NULL,
+        dispatched_by TEXT NOT NULL,
+        dispatched_by_user TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        current_attempt_id TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_heartbeat_at TEXT,
+        stop_reason TEXT,
+        latest_exit_code INTEGER
+      );
+    `);
+    legacyDb.close();
+
+    const repo = new SQLiteBeastRepository(dbPath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Migrate legacy schema',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    });
+
+    expect(repo.getRun(run.id)).toEqual(run);
   });
 });
