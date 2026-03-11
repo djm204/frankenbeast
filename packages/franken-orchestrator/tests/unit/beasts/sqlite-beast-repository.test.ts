@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
+import { UnknownTrackedAgentError } from '../../../src/beasts/errors.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 
 describe('SQLiteBeastRepository', () => {
@@ -119,5 +121,175 @@ describe('SQLiteBeastRepository', () => {
       latestExitCode: 137,
       stopReason: 'operator_kill',
     });
+  });
+
+  it('creates, lists, and loads tracked agents', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+
+    const agent = repo.createTrackedAgent({
+      definitionId: 'design-interview',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'design-interview',
+        command: '/interview',
+        config: { goal: 'Map the lifecycle' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { goal: 'Map the lifecycle' },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    expect(agent.id).toMatch(/^agent_/);
+    expect(repo.getTrackedAgent(agent.id)).toEqual(agent);
+    expect(repo.listTrackedAgents()).toEqual([agent]);
+  });
+
+  it('appends tracked agent events and links tracked agents to beast runs', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agent = repo.createTrackedAgent({
+      definitionId: 'chunk-plan',
+      source: 'chat',
+      status: 'initializing',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: {
+          designDocPath: 'docs/plans/design.md',
+        },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: {
+        designDocPath: 'docs/plans/design.md',
+      },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    const event = repo.appendTrackedAgentEvent(agent.id, {
+      level: 'info',
+      type: 'agent.command.sent',
+      message: 'Sent /plan --design-doc docs/plans/design.md',
+      payload: {
+        sessionId: 'sess-1',
+      },
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+
+    const run = repo.createRun({
+      definitionId: 'chunk-plan',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        designDocPath: 'docs/plans/design.md',
+        outputDir: 'docs/chunks',
+      },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:sess-1',
+      createdAt: '2026-03-11T00:00:02.000Z',
+    });
+
+    const linked = repo.updateTrackedAgent(agent.id, {
+      status: 'dispatching',
+      dispatchRunId: run.id,
+      updatedAt: '2026-03-11T00:00:02.000Z',
+    });
+
+    expect(event.sequence).toBe(1);
+    expect(repo.listTrackedAgentEvents(agent.id)).toEqual([event]);
+    expect(linked.dispatchRunId).toBe(run.id);
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({
+      status: 'dispatching',
+      dispatchRunId: run.id,
+    });
+  });
+
+  it('rolls back linked run creation when the tracked agent is unknown', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+
+    expect(() => repo.transaction(() => {
+      const missingAgentId = 'agent-missing';
+      if (!repo.getTrackedAgent(missingAgentId)) {
+        throw new UnknownTrackedAgentError(missingAgentId);
+      }
+
+      const run = repo.createRun({
+        trackedAgentId: missingAgentId,
+        definitionId: 'martin-loop',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'Reject invalid tracked agent ids',
+          chunkDirectory: 'docs/chunks',
+        },
+        dispatchedBy: 'api',
+        dispatchedByUser: 'operator',
+        createdAt: '2026-03-11T00:00:02.000Z',
+      });
+
+      repo.appendEvent(run.id, {
+        type: 'run.created',
+        payload: {
+          definitionId: run.definitionId,
+        },
+        createdAt: run.createdAt,
+      });
+    })).toThrow('Unknown tracked agent: agent-missing');
+
+    expect(repo.listRuns()).toEqual([]);
+  });
+
+  it('migrates legacy beast_runs tables that predate tracked_agent_id', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const legacyDb = new Database(dbPath);
+
+    legacyDb.exec(`
+      CREATE TABLE beast_runs (
+        id TEXT PRIMARY KEY,
+        definition_id TEXT NOT NULL,
+        definition_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        execution_mode TEXT NOT NULL,
+        config_snapshot TEXT NOT NULL,
+        dispatched_by TEXT NOT NULL,
+        dispatched_by_user TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        current_attempt_id TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_heartbeat_at TEXT,
+        stop_reason TEXT,
+        latest_exit_code INTEGER
+      );
+    `);
+    legacyDb.close();
+
+    const repo = new SQLiteBeastRepository(dbPath);
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Migrate legacy schema',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-12T00:00:00.000Z',
+    });
+
+    expect(repo.getRun(run.id)).toEqual(run);
   });
 });

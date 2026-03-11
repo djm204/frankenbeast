@@ -1,6 +1,7 @@
 import type { BeastCatalogService } from '../beasts/services/beast-catalog-service.js';
 import type { BeastDispatchService } from '../beasts/services/beast-dispatch-service.js';
 import type { BeastInterviewService, BeastInterviewProgress } from '../beasts/services/beast-interview-service.js';
+import type { AgentInitService } from '../beasts/services/agent-init-service.js';
 import type { ChatBeastContext, TranscriptMessage } from './types.js';
 
 export interface ChatBeastDispatchState {
@@ -22,6 +23,7 @@ export interface ChatBeastDispatchAdapterOptions {
   readonly catalog: BeastCatalogService;
   readonly interviews: BeastInterviewService;
   readonly dispatch: BeastDispatchService;
+  readonly agentInit: AgentInitService;
 }
 
 interface BeastDefinitionSummary {
@@ -39,7 +41,7 @@ export class ChatBeastDispatchAdapter {
     const activeContext = state.beastContext;
     if (activeContext?.status === 'interviewing' && activeContext.interviewSessionId) {
       const progress = this.options.interviews.answer(activeContext.interviewSessionId, input);
-      return this.resultFromProgress(progress, activeContext.definitionId, state.sessionId);
+      return this.resultFromProgress(progress, activeContext, state.sessionId);
     }
 
     const definition = this.matchDefinition(input);
@@ -53,11 +55,20 @@ export class ChatBeastDispatchAdapter {
       throw new Error(`Beast interview started without a prompt: ${definition.id}`);
     }
 
+    const agent = this.options.agentInit.createChatInitAgent({
+      definitionId: definition.id,
+      chatSessionId: state.sessionId,
+      command: commandFor(definition.id),
+      initActionKind: definition.id as 'design-interview' | 'chunk-plan' | 'martin-loop',
+      config: {},
+    });
+
     return {
       kind: 'interview',
       definitionId: definition.id,
       assistantMessage: this.formatPrompt(definition.label, prompt.prompt, prompt.options),
       beastContext: {
+        agentId: agent.id,
         definitionId: definition.id,
         interviewSessionId: interview.id,
         status: 'interviewing',
@@ -67,9 +78,10 @@ export class ChatBeastDispatchAdapter {
 
   private async resultFromProgress(
     progress: BeastInterviewProgress,
-    definitionId: string,
+    context: ChatBeastContext,
     sessionId: string,
   ): Promise<ChatBeastDispatchResult> {
+    const definitionId = context.definitionId;
     const definition = this.getDefinitionOrThrow(definitionId);
     if (!progress.complete || !progress.config) {
       if (!progress.currentPrompt) {
@@ -80,6 +92,7 @@ export class ChatBeastDispatchAdapter {
         definitionId,
         assistantMessage: this.formatPrompt(definition.label, progress.currentPrompt.prompt, progress.currentPrompt.options),
         beastContext: {
+          ...(context.agentId ? { agentId: context.agentId } : {}),
           definitionId,
           interviewSessionId: progress.session.id,
           status: 'interviewing',
@@ -87,13 +100,19 @@ export class ChatBeastDispatchAdapter {
       };
     }
 
-    const run = await this.options.dispatch.createRun({
-      definitionId,
-      config: progress.config,
-      dispatchedBy: 'chat',
-      dispatchedByUser: `chat-session:${sessionId}`,
-      startNow: true,
-    });
+    const run = context.agentId
+      ? await this.options.agentInit.dispatchAgent(context.agentId, {
+          definitionId,
+          chatSessionId: sessionId,
+          config: progress.config,
+        })
+      : await this.options.dispatch.createRun({
+          definitionId,
+          config: progress.config,
+          dispatchedBy: 'chat',
+          dispatchedByUser: `chat-session:${sessionId}`,
+          startNow: true,
+        });
 
     return {
       kind: 'dispatch',
@@ -154,5 +173,17 @@ export class ChatBeastDispatchAdapter {
       return `${label} interview: ${prompt}`;
     }
     return `${label} interview: ${prompt} Options: ${options.join(', ')}`;
+  }
+}
+
+function commandFor(definitionId: string): string {
+  switch (definitionId) {
+    case 'design-interview':
+      return '/interview';
+    case 'chunk-plan':
+      return '/plan';
+    case 'martin-loop':
+    default:
+      return definitionId;
   }
 }

@@ -1,6 +1,6 @@
 # @frankenbeast/web
 
-Web dashboard for Frankenbeast — provides a browser-based operator console with chat, beast dispatch, and network management.
+Web dashboard for Frankenbeast — provides a browser-based operator console with chat, tracked-agent launch/detail flows, and network management.
 
 ## Quick Start
 
@@ -11,6 +11,17 @@ npm run build        # Production build (tsc + vite build)
 npm run preview      # Preview production build locally
 npm test             # Run tests
 ```
+
+## Beast Control Surface
+
+The `Beasts` tab is now tracked-agent based:
+
+- launches create tracked agents via `POST /v1/beasts/agents`
+- `design-doc -> chunk creation` uses a file-style path field
+- `martin-loop` uses a directory-style path field
+- agent detail shows init lifecycle status, startup events, linked run id, and linked run logs once dispatch occurs
+
+Execution controls (`start`, `stop`, `restart`, `kill`) still target Beast runs after a tracked agent has dispatched.
 
 ## Environment Variables
 

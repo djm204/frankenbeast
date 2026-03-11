@@ -723,6 +723,20 @@ button {
   gap: 0.8rem;
 }
 
+.beast-path-picker {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.beast-path-picker__native {
+  display: none;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
 .beast-run-list {
   display: grid;
   gap: 0.8rem;

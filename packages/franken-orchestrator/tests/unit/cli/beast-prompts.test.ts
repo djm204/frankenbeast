@@ -7,16 +7,18 @@ describe('collectBeastConfig', () => {
     const io = {
       ask: vi.fn()
         .mockResolvedValueOnce('claude')
-        .mockResolvedValueOnce('Implement the dispatch panel'),
+        .mockResolvedValueOnce('Implement the dispatch panel')
+        .mockResolvedValueOnce('docs/chunks'),
       display: vi.fn(),
     };
 
     const config = await collectBeastConfig(io, martinLoopDefinition);
 
-    expect(io.ask).toHaveBeenCalledTimes(2);
+    expect(io.ask).toHaveBeenCalledTimes(3);
     expect(config).toEqual({
       provider: 'claude',
       objective: 'Implement the dispatch panel',
+      chunkDirectory: 'docs/chunks',
     });
   });
 });

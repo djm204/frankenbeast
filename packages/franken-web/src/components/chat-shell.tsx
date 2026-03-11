@@ -7,7 +7,14 @@ import { ActivityPane } from './activity-pane';
 import { ApprovalCard } from './approval-card';
 import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
-import { BeastApiClient, type BeastCatalogEntry, type BeastRunDetail, type BeastRunSummary } from '../lib/beast-api';
+import {
+  BeastApiClient,
+  type BeastCatalogEntry,
+  type BeastRunDetail,
+  type TrackedAgentDetail,
+  type TrackedAgentInitAction,
+  type TrackedAgentSummary,
+} from '../lib/beast-api';
 import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import { BeastDispatchPage } from '../pages/beast-dispatch-page';
@@ -51,6 +58,36 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
   );
 }
 
+function buildInitAction(
+  definitionId: string,
+  config: Record<string, unknown>,
+  chatSessionId: string | undefined,
+): TrackedAgentInitAction {
+  if (definitionId === 'design-interview') {
+    return {
+      kind: 'design-interview',
+      command: '/interview',
+      config,
+      ...(chatSessionId ? { chatSessionId } : {}),
+    };
+  }
+
+  if (definitionId === 'chunk-plan') {
+    return {
+      kind: 'chunk-plan',
+      command: `/plan --design-doc ${String(config.designDocPath ?? '')}`,
+      config,
+      ...(chatSessionId ? { chatSessionId } : {}),
+    };
+  }
+
+  return {
+    kind: 'martin-loop',
+    command: 'martin-loop',
+    config,
+  };
+}
+
 export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -58,9 +95,9 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   const [sessionSeed, setSessionSeed] = useState(0);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
-  const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
-  const [selectedBeastRunId, setSelectedBeastRunId] = useState<string | null>(null);
-  const [beastRunDetail, setBeastRunDetail] = useState<BeastRunDetail | null>(null);
+  const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
+  const [selectedBeastAgentId, setSelectedBeastAgentId] = useState<string | null>(null);
+  const [beastAgentDetail, setBeastAgentDetail] = useState<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
@@ -145,8 +182,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     if (!beastClient) {
       setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
       setBeastCatalog([]);
-      setBeastRuns([]);
-      setBeastRunDetail(null);
+      setBeastAgents([]);
+      setBeastAgentDetail(null);
       return;
     }
     const client = beastClient;
@@ -157,27 +194,34 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
       try {
         const [catalog, runs] = await Promise.all([
           client.getCatalog(),
-          client.listRuns(),
+          client.listAgents(),
         ]);
         if (cancelled) {
           return;
         }
         setBeastError(null);
         setBeastCatalog(catalog);
-        setBeastRuns(runs);
-        const currentRunId = selectedBeastRunId ?? runs[0]?.id ?? null;
-        setSelectedBeastRunId(currentRunId);
+        setBeastAgents(runs);
+        const currentAgentId = selectedBeastAgentId ?? runs[0]?.id ?? null;
+        setSelectedBeastAgentId(currentAgentId);
 
-        if (currentRunId) {
-          const [detail, logs] = await Promise.all([
-            client.getRun(currentRunId),
-            client.getLogs(currentRunId),
-          ]);
+        if (currentAgentId) {
+          const detail = await client.getAgent(currentAgentId);
           if (!cancelled) {
-            setBeastRunDetail({ ...detail, logs });
+            if (detail.agent.dispatchRunId) {
+              const [run, logs] = await Promise.all([
+                client.getRun(detail.agent.dispatchRunId),
+                client.getLogs(detail.agent.dispatchRunId),
+              ]);
+              if (!cancelled) {
+                setBeastAgentDetail({ ...detail, run: { ...run, logs } });
+              }
+            } else {
+              setBeastAgentDetail({ ...detail, run: null });
+            }
           }
         } else {
-          setBeastRunDetail(null);
+          setBeastAgentDetail(null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -195,7 +239,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [route, beastClient, selectedBeastRunId, beastRefreshNonce]);
+  }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -402,15 +446,26 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               if (!beastClient) {
                 return;
               }
-              void beastClient.createRun({
+              const activeDefinition = beastCatalog.find((entry) => entry.id === definitionId);
+              if (!activeDefinition) {
+                setBeastError(`Unknown Beast definition: ${definitionId}`);
+                return;
+              }
+              const initAction = buildInitAction(
                 definitionId,
                 config,
-                startNow: true,
-              }).then((run) => {
-                setSelectedBeastRunId(run.id);
+                selectedSessionId ?? activeSessionId ?? undefined,
+              );
+              void beastClient.createAgent({
+                definitionId,
+                initAction,
+                initConfig: config,
+                ...(initAction.chatSessionId ? { chatSessionId: initAction.chatSessionId } : {}),
+              }).then((agent) => {
+                setSelectedBeastAgentId(agent.id);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to dispatch Beast run.');
+                setBeastError(error instanceof Error ? error.message : 'Unable to create tracked agent.');
               });
             }}
             onKill={(runId) => {
@@ -418,7 +473,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 return;
               }
               void beastClient.killRun(runId).then(() => {
-                setSelectedBeastRunId(runId);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
                 setBeastError(error instanceof Error ? error.message : 'Unable to kill Beast run.');
@@ -432,21 +486,19 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 return;
               }
               void beastClient.restartRun(runId).then(() => {
-                setSelectedBeastRunId(runId);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
                 setBeastError(error instanceof Error ? error.message : 'Unable to restart Beast run.');
               });
             }}
-            onSelectRun={(runId) => {
-              setSelectedBeastRunId(runId);
+            onSelectAgent={(agentId) => {
+              setSelectedBeastAgentId(agentId);
             }}
             onStart={(runId) => {
               if (!beastClient) {
                 return;
               }
               void beastClient.startRun(runId).then(() => {
-                setSelectedBeastRunId(runId);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
                 setBeastError(error instanceof Error ? error.message : 'Unable to start Beast run.');
@@ -457,15 +509,14 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 return;
               }
               void beastClient.stopRun(runId).then(() => {
-                setSelectedBeastRunId(runId);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
                 setBeastError(error instanceof Error ? error.message : 'Unable to stop Beast run.');
               });
             }}
-            runDetail={beastRunDetail}
-            runs={beastRuns}
-            selectedRunId={selectedBeastRunId}
+            agentDetail={beastAgentDetail}
+            agents={beastAgents}
+            selectedAgentId={selectedBeastAgentId}
           />
         ) : route === 'network' ? (
           <NetworkPage

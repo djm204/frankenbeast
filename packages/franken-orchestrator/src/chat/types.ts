@@ -47,6 +47,7 @@ export interface ExecuteOutcome {
 export type TurnOutcome = ReplyOutcome | ClarifyOutcome | PlanOutcome | ExecuteOutcome;
 
 export const ChatBeastContextSchema = z.object({
+  agentId: z.string().min(1).optional(),
   definitionId: z.string().min(1),
   interviewSessionId: z.string().min(1),
   status: z.enum(['interviewing']),

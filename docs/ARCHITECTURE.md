@@ -25,7 +25,7 @@ Unless a section explicitly says otherwise, diagrams should be read as target ar
 | `franken-types` | Shared type definitions (TaskId, Severity, Result, TokenSpend, etc.) |
 | `franken-orchestrator` | The Beast Loop — wires all modules into a 4-phase agent pipeline |
 | `franken-comms` | External communications gateway — Slack, Discord, Telegram, WhatsApp with signature verification |
-| `franken-web` | React web dashboard — chat UI, configuration, metrics visualization (dev tool) |
+| `franken-web` | React web dashboard — chat UI, tracked-agent launch/detail flow, configuration, metrics visualization (dev tool) |
 
 ## The Beast Loop (franken-orchestrator)
 
@@ -913,7 +913,27 @@ The `frankenbeast chat-server` subcommand exposes the ChatRuntime over HTTP and 
 | `ChatSocketController` | `src/http/ws-chat-server.ts` | WebSocket connection management, chunk-based content delivery, turn event streaming |
 | `chat-app.ts` | `src/http/chat-app.ts` | Hono HTTP routes for REST-based chat interactions |
 
-**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md) and [ADR-016](adr/016-chat-server-entrypoint.md).
+**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md), [ADR-016](adr/016-chat-server-entrypoint.md), and [ADR-018](adr/018-tracked-agent-init-workflow.md).
+
+### Beast Control and Tracked Agents
+
+The beast control surface is now agent-centric rather than run-centric.
+
+- `tracked_agents` exist before a Beast run is dispatched and carry init metadata such as `initAction`, `chatSessionId`, lifecycle status, and `dispatchRunId`
+- Beast runs remain the execution record, linked back to the tracked agent through `trackedAgentId`
+- chat-backed init flows (`design-interview`, `chunk-plan`) create tracked agents first, bind them to the active chat session, emit init events, then dispatch runs after init completes
+- the dashboard Beasts tab now launches tracked agents, renders typed file/directory controls, and shows tracked-agent detail with startup events plus linked run logs
+
+Current beast-control routes:
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/beasts/catalog` | Operator-facing catalog definitions with typed prompt metadata |
+| `POST /v1/beasts/agents` | Create a tracked agent in `initializing` |
+| `GET /v1/beasts/agents` | List tracked agents |
+| `GET /v1/beasts/agents/:id` | Hydrate tracked-agent detail and init events |
+| `POST /v1/beasts/runs` | Create or dispatch a Beast run, optionally linked to a tracked agent |
+| `GET /v1/beasts/runs/:id` + `/logs` | Read linked run detail and execution logs |
 
 ## Communications Gateway (franken-comms)
 
@@ -965,4 +985,4 @@ flowchart TD
 
 ## Web Dashboard (franken-web)
 
-React-based development tool for chat, configuration, and metrics visualization. Scaffold in place (`packages/franken-web/`), connects to `frankenbeast chat-server` via WebSocket. Not published to npm; private monorepo package for local development.
+React-based development tool for chat, tracked-agent launch/detail flows, configuration, and metrics visualization. Lives in `packages/franken-web/`, connects to `frankenbeast chat-server` via WebSocket, and uses authenticated Beast control HTTP routes for operator actions. Not published to npm; private monorepo package for local development.

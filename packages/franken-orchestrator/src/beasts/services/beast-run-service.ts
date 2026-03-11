@@ -45,7 +45,9 @@ export class BeastRunService {
     const run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     await this.executorFor(run).start(run, definition);
-    return this.requireRun(runId);
+    const updated = this.requireRun(runId);
+    this.syncTrackedAgent(updated);
+    return updated;
   }
 
   async stop(runId: string, _actor: string): Promise<BeastRun> {
@@ -57,7 +59,9 @@ export class BeastRunService {
     await this.executorFor(run).stop(run.id, attemptId);
     this.metrics.recordRunStopped(run.definitionId);
     await this.logs.append(run.id, attemptId, 'stderr', 'operator_stop');
-    return this.requireRun(runId);
+    const updated = this.requireRun(runId);
+    this.syncTrackedAgent(updated);
+    return updated;
   }
 
   async kill(runId: string, _actor: string): Promise<BeastRun> {
@@ -68,7 +72,9 @@ export class BeastRunService {
     }
     await this.executorFor(run).kill(run.id, attemptId);
     await this.logs.append(run.id, attemptId, 'stderr', 'operator_kill');
-    return this.requireRun(runId);
+    const updated = this.requireRun(runId);
+    this.syncTrackedAgent(updated);
+    return updated;
   }
 
   async restart(runId: string, actor: string): Promise<BeastRun> {
@@ -100,5 +106,25 @@ export class BeastRunService {
       throw new Error(`Unknown Beast definition: ${definitionId}`);
     }
     return definition;
+  }
+
+  private syncTrackedAgent(run: BeastRun): void {
+    if (!run.trackedAgentId) {
+      return;
+    }
+
+    const status = run.status === 'running'
+      ? 'running'
+      : run.status === 'completed'
+        ? 'completed'
+        : run.status === 'failed'
+          ? 'failed'
+          : 'stopped';
+
+    this.repository.updateTrackedAgent(run.trackedAgentId, {
+      status,
+      ...(run.id ? { dispatchRunId: run.id } : {}),
+      updatedAt: new Date().toISOString(),
+    });
   }
 }
