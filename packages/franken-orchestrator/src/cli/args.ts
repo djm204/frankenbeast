@@ -52,6 +52,7 @@ export interface CliArgs {
   issueAssignee?: string | undefined;
   issueLimit?: number | undefined;
   issueRepo?: string | undefined;
+  targetUpstream?: boolean | undefined;
   dryRun?: boolean | undefined;
 }
 
@@ -97,6 +98,7 @@ Issue Flags (for 'issues' subcommand):
   --assignee <user>       Filter by assignee
   --limit <n>             Max issues to fetch (default: 30)
   --repo <owner/repo>     Target repository
+  --target-upstream       Use the fork upstream as the canonical repo for issues and PRs
   --dry-run               Preview without executing
 
 Network Commands:
@@ -168,6 +170,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       assignee: { type: 'string' },
       limit: { type: 'string' },
       repo: { type: 'string' },
+      'target-upstream': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       set: { type: 'string', multiple: true },
     },
@@ -200,6 +203,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Warn on conflicting flags
   if (subcommand === 'issues' && values['design-doc']) {
     console.warn('Warning: --design-doc is not relevant for the issues subcommand');
+  }
+
+  if (subcommand === 'issues' && values.repo && values['target-upstream']) {
+    throw new TypeError(
+      'Cannot use --repo with --target-upstream: --repo explicitly selects the canonical repository, while --target-upstream derives it from the fork upstream remote.',
+    );
   }
 
   const labelRaw = values.label;
@@ -245,6 +254,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueAssignee: values.assignee,
     issueLimit,
     issueRepo: values.repo,
+    targetUpstream: values['target-upstream'] ?? undefined,
     dryRun: values['dry-run'] ?? undefined,
   };
 }

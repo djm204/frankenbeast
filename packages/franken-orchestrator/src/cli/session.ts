@@ -20,6 +20,7 @@ import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
 import { writeDesignDoc, readDesignDoc } from './file-writer.js';
+import { resolveUpstreamRepo } from './upstream-repo.js';
 import type { ChunkDefinition } from './file-writer.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
@@ -62,6 +63,7 @@ export interface SessionConfig {
   issueAssignee?: string | undefined;
   issueLimit?: number | undefined;
   issueRepo?: string | undefined;
+  targetUpstream?: boolean | undefined;
   dryRun?: boolean | undefined;
 }
 
@@ -116,14 +118,16 @@ export class Session {
 
     const { fetcher, triage, review, graphBuilder, runner, executor, git, prCreator, checkpoint } = issueDeps;
 
-    // Infer repo — fall back to --repo flag
+    // Resolve canonical repo for the entire issues pipeline.
     let repo: string;
-    try {
-      repo = await fetcher.inferRepo();
-    } catch {
-      if (this.config.issueRepo) {
-        repo = this.config.issueRepo;
-      } else {
+    if (this.config.targetUpstream) {
+      repo = await resolveUpstreamRepo();
+    } else if (this.config.issueRepo) {
+      repo = this.config.issueRepo;
+    } else {
+      try {
+        repo = await fetcher.inferRepo();
+      } catch {
         throw new Error('Could not infer repository. Use --repo <owner/repo> to specify.');
       }
     }
