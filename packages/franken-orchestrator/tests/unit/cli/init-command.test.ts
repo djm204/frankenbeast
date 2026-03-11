@@ -61,6 +61,8 @@ describe('handleInitCommand', () => {
       io: {
         ask: async (prompt: string) => {
           switch (prompt) {
+            case 'Enter passphrase for local encrypted store:':
+              return 'test-passphrase';
             case 'Enable Chat? [Y/n]':
               return 'y';
             case 'Enable Dashboard? [Y/n]':
@@ -70,6 +72,8 @@ describe('handleInitCommand', () => {
             case 'Default provider [claude]':
               return '';
             case 'Security mode [secure/insecure] (default: secure)':
+              return '';
+            case 'Enter operator token (leave blank to auto-generate):':
               return '';
             default:
               return '';
