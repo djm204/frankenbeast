@@ -1,20 +1,23 @@
+import { randomBytes } from 'node:crypto';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { OrchestratorConfigSchema, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { listSupportedCommsTransports } from './comms-transport-registry.js';
 import type { InitState, SupportedCommsTransportId } from './init-types.js';
+import type { ISecretStore } from '../network/secret-store.js';
 
 export interface InitWizardResult {
   config: OrchestratorConfig;
   state: InitState;
 }
 
-export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'discord';
+export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'discord' | 'secret-backend';
 
 interface RunInitWizardOptions {
   io: InterviewIO;
   initialState: InitState;
   baseConfig?: OrchestratorConfig;
   scope?: readonly InitWizardScope[];
+  secretStore?: ISecretStore;
 }
 
 function stateValue<T>(state: InitState, key: string): T | undefined {
@@ -59,6 +62,7 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
     network: {
       ...baseConfig.network,
       mode: state.securityMode,
+      operatorTokenRef: stateValue<string>(state, 'network.operatorTokenRef') ?? baseConfig.network.operatorTokenRef,
     },
     chat: {
       ...baseConfig.chat,
@@ -89,14 +93,23 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
   });
 }
 
+/**
+ * Whether the wizard is running in "secret-backend only" scope — no interactive module/provider/security prompts.
+ */
+function isSecretBackendOnlyScope(scope: readonly InitWizardScope[] | undefined): boolean {
+  if (!scope) return false;
+  return scope.length === 1 && scope[0] === 'secret-backend';
+}
+
 export async function runInitWizard(options: RunInitWizardOptions): Promise<InitWizardResult> {
   const config = options.baseConfig ?? defaultConfig();
   const scope = new Set<InitWizardScope>(options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord']);
+  const secretBackendOnly = isSecretBackendOnlyScope(options.scope);
 
   let enableChat = moduleDefault(options.initialState, config, 'chat');
   let enableDashboard = moduleDefault(options.initialState, config, 'dashboard');
   let enableComms = moduleDefault(options.initialState, config, 'comms');
-  if (scope.has('modules')) {
+  if (!secretBackendOnly && scope.has('modules')) {
     enableChat = await askBoolean(options.io, 'Enable Chat? [Y/n]', enableChat);
     enableDashboard = await askBoolean(options.io, 'Enable Dashboard? [Y/n]', enableDashboard);
     enableComms = await askBoolean(options.io, 'Enable Comms? [y/N]', enableComms);
@@ -107,13 +120,41 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
   if (enableComms) selectedModules.push('comms');
 
   const currentProviderDefault = String(stateValue(options.initialState, 'providers.default') ?? config.providers.default);
-  const providerDefault = scope.has('provider')
+  const providerDefault = (!secretBackendOnly && scope.has('provider'))
     ? await askText(options.io, `Default provider [${currentProviderDefault}]`, currentProviderDefault)
     : currentProviderDefault;
 
-  const securityMode = scope.has('security')
+  const securityMode = (!secretBackendOnly && scope.has('security'))
     ? await askText(options.io, 'Security mode [secure/insecure] (default: secure)', options.initialState.securityMode) as 'secure' | 'insecure'
     : options.initialState.securityMode;
+
+  // Secret backend detection
+  const completedSteps = new Set(options.initialState.completedSteps);
+  if (options.secretStore) {
+    const detection = await options.secretStore.detect();
+    if (detection.available) {
+      options.io.display(`Secret backend '${options.secretStore.id}' is available.`);
+    } else {
+      options.io.display(`Secret backend '${options.secretStore.id}' is not available: ${detection.reason ?? 'unknown reason'}`);
+      if (detection.setupInstructions) {
+        options.io.display(detection.setupInstructions);
+      }
+    }
+    completedSteps.add('secret-backend-selection');
+  }
+
+  // If running in secret-backend-only mode, skip all comms and operator token prompts
+  if (secretBackendOnly) {
+    const nextState: InitState = {
+      ...options.initialState,
+      selectedModules: options.initialState.selectedModules,
+      selectedCommsTransports: options.initialState.selectedCommsTransports,
+      completedSteps: Array.from(completedSteps),
+      securityMode,
+      answers: { ...options.initialState.answers },
+    };
+    return { config: buildConfig(config, nextState), state: nextState };
+  }
 
   const selectedCommsTransports: SupportedCommsTransportId[] = enableComms
     ? listSupportedCommsTransports()
@@ -159,13 +200,28 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
         if (!scope.has('slack') || currentAppId.length === 0) {
           answers['comms.slack.appId'] = await askText(options.io, 'Slack app ID', currentAppId);
         }
-        const currentBotTokenRef = String(stateValue(options.initialState, 'comms.slack.botTokenRef') ?? '');
-        if (!scope.has('slack') || currentBotTokenRef.length === 0) {
-          answers['comms.slack.botTokenRef'] = await askText(options.io, 'Slack bot token ref', currentBotTokenRef);
-        }
-        const currentSigningSecretRef = String(stateValue(options.initialState, 'comms.slack.signingSecretRef') ?? '');
-        if (!scope.has('slack') || currentSigningSecretRef.length === 0) {
-          answers['comms.slack.signingSecretRef'] = await askText(options.io, 'Slack signing secret ref', currentSigningSecretRef);
+
+        if (options.secretStore) {
+          // Prompt for raw value and store it
+          const rawBotToken = await askText(options.io, 'Enter your Slack bot token:', '');
+          if (rawBotToken.length > 0) {
+            await options.secretStore.store('comms.slack.botTokenRef', rawBotToken);
+            answers['comms.slack.botTokenRef'] = 'comms.slack.botTokenRef';
+          }
+          const rawSigningSecret = await askText(options.io, 'Enter your Slack signing secret:', '');
+          if (rawSigningSecret.length > 0) {
+            await options.secretStore.store('comms.slack.signingSecretRef', rawSigningSecret);
+            answers['comms.slack.signingSecretRef'] = 'comms.slack.signingSecretRef';
+          }
+        } else {
+          const currentBotTokenRef = String(stateValue(options.initialState, 'comms.slack.botTokenRef') ?? '');
+          if (!scope.has('slack') || currentBotTokenRef.length === 0) {
+            answers['comms.slack.botTokenRef'] = await askText(options.io, 'Slack bot token ref', currentBotTokenRef);
+          }
+          const currentSigningSecretRef = String(stateValue(options.initialState, 'comms.slack.signingSecretRef') ?? '');
+          if (!scope.has('slack') || currentSigningSecretRef.length === 0) {
+            answers['comms.slack.signingSecretRef'] = await askText(options.io, 'Slack signing secret ref', currentSigningSecretRef);
+          }
         }
       }
 
@@ -174,25 +230,58 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
         if (!scope.has('discord') || currentApplicationId.length === 0) {
           answers['comms.discord.applicationId'] = await askText(options.io, 'Discord application ID', currentApplicationId);
         }
-        const currentBotTokenRef = String(stateValue(options.initialState, 'comms.discord.botTokenRef') ?? '');
-        if (!scope.has('discord') || currentBotTokenRef.length === 0) {
-          answers['comms.discord.botTokenRef'] = await askText(options.io, 'Discord bot token ref', currentBotTokenRef);
-        }
-        const currentPublicKeyRef = String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? '');
-        if (!scope.has('discord') || currentPublicKeyRef.length === 0) {
-          answers['comms.discord.publicKeyRef'] = await askText(options.io, 'Discord public key ref', currentPublicKeyRef);
+
+        if (options.secretStore) {
+          // Prompt for raw value and store it
+          const rawBotToken = await askText(options.io, 'Enter your Discord bot token:', '');
+          if (rawBotToken.length > 0) {
+            await options.secretStore.store('comms.discord.botTokenRef', rawBotToken);
+            answers['comms.discord.botTokenRef'] = 'comms.discord.botTokenRef';
+          }
+          const rawPublicKey = await askText(options.io, 'Enter your Discord public key:', '');
+          if (rawPublicKey.length > 0) {
+            await options.secretStore.store('comms.discord.publicKeyRef', rawPublicKey);
+            answers['comms.discord.publicKeyRef'] = 'comms.discord.publicKeyRef';
+          }
+        } else {
+          const currentBotTokenRef = String(stateValue(options.initialState, 'comms.discord.botTokenRef') ?? '');
+          if (!scope.has('discord') || currentBotTokenRef.length === 0) {
+            answers['comms.discord.botTokenRef'] = await askText(options.io, 'Discord bot token ref', currentBotTokenRef);
+          }
+          const currentPublicKeyRef = String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? '');
+          if (!scope.has('discord') || currentPublicKeyRef.length === 0) {
+            answers['comms.discord.publicKeyRef'] = await askText(options.io, 'Discord public key ref', currentPublicKeyRef);
+          }
         }
       }
     }
+  }
+
+  // Operator token handling (only when secretStore is provided)
+  if (options.secretStore) {
+    const rawToken = await askText(options.io, 'Enter operator token (leave blank to auto-generate):', '');
+    const operatorToken = rawToken.length > 0
+      ? rawToken
+      : randomBytes(32).toString('hex');
+    if (rawToken.length === 0) {
+      options.io.display(`Auto-generated operator token: ${operatorToken}`);
+    }
+    await options.secretStore.store('network.operatorTokenRef', operatorToken);
+    answers['network.operatorTokenRef'] = 'network.operatorTokenRef';
+  }
+
+  completedSteps.add('module-selection');
+  completedSteps.add('provider-config');
+  completedSteps.add('security-selection');
+  if (enableComms) {
+    completedSteps.add('comms-transport-selection');
   }
 
   const nextState: InitState = {
     ...options.initialState,
     selectedModules,
     selectedCommsTransports,
-    completedSteps: enableComms
-      ? ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection']
-      : ['module-selection', 'provider-config', 'security-selection'],
+    completedSteps: Array.from(completedSteps),
     securityMode,
     answers,
   };
