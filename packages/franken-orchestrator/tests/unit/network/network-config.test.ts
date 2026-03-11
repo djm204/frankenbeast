@@ -55,4 +55,35 @@ describe('OrchestratorConfigSchema network integration', () => {
     expect(config.dashboard.enabled).toBe(true);
     expect(config.network.mode).toBe('secure');
   });
+
+  it('migrates legacy OS backend names to os-keychain', () => {
+    const config1 = OrchestratorConfigSchema.parse({
+      network: { secureBackend: 'macos-keychain' },
+    });
+    expect(config1.network.secureBackend).toBe('os-keychain');
+
+    const config2 = OrchestratorConfigSchema.parse({
+      network: { secureBackend: 'windows-credential-manager' },
+    });
+    expect(config2.network.secureBackend).toBe('os-keychain');
+
+    const config3 = OrchestratorConfigSchema.parse({
+      network: { secureBackend: 'linux-secret-service' },
+    });
+    expect(config3.network.secureBackend).toBe('os-keychain');
+  });
+
+  it('accepts the new os-keychain value directly', () => {
+    const config = OrchestratorConfigSchema.parse({
+      network: { secureBackend: 'os-keychain' },
+    });
+    expect(config.network.secureBackend).toBe('os-keychain');
+  });
+
+  it('includes operatorTokenRef in config', () => {
+    const config = OrchestratorConfigSchema.parse({
+      network: { operatorTokenRef: 'network.operatorTokenRef' },
+    });
+    expect(config.network.operatorTokenRef).toBe('network.operatorTokenRef');
+  });
 });

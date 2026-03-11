@@ -2,15 +2,9 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'network.mode': { type: 'enum', values: ['secure', 'insecure'] },
   'network.secureBackend': {
     type: 'enum',
-    values: [
-      '1password',
-      'bitwarden',
-      'macos-keychain',
-      'windows-credential-manager',
-      'linux-secret-service',
-      'local-encrypted',
-    ],
+    values: ['1password', 'bitwarden', 'os-keychain', 'local-encrypted'],
   },
+  'network.operatorTokenRef': { type: 'string', sensitive: true },
   'chat.enabled': { type: 'boolean' },
   'chat.host': { type: 'string' },
   'chat.port': { type: 'number' },

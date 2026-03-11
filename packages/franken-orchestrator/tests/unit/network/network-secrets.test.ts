@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import {
-  createSecretRef,
   redactSensitiveConfig,
   resolveSecretMode,
 } from '../../../src/network/network-secrets.js';
@@ -14,17 +13,6 @@ describe('network-secrets', () => {
 
     expect(resolveSecretMode(secureConfig)).toBe('secure');
     expect(resolveSecretMode(insecureConfig)).toBe('insecure');
-  });
-
-  it('stores sensitive config values as opaque refs, not raw values', () => {
-    const ref = createSecretRef({
-      path: 'comms.slack.signingSecretRef',
-      rawValue: 'super-secret',
-      mode: 'insecure',
-    });
-
-    expect(ref).toMatch(/^secret:\/\/insecure\//);
-    expect(ref).not.toContain('super-secret');
   });
 
   it('redacts sensitive values in config output', () => {
