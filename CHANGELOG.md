@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/djm204/frankenbeast/compare/v0.16.2...v0.16.3) (2026-03-11)
+
+
+### Miscellaneous
+
+* **main:** release franken-orchestrator 0.14.2 ([8a41a9f](https://github.com/djm204/frankenbeast/commit/8a41a9f7665826b8994967e3972369e4bf845b8c))
+
 ## [0.16.2](https://github.com/djm204/frankenbeast/compare/v0.16.1...v0.16.2) (2026-03-11)
 
 
