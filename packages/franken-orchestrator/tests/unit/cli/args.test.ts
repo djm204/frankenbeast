@@ -289,6 +289,20 @@ describe('parseArgs', () => {
       expect(args.issueRepo).toBe('djm204/frankenbeast');
     });
 
+    it('parses --target-upstream', () => {
+      const args = parseArgs(['issues', '--target-upstream']);
+      expect(args.subcommand).toBe('issues');
+      expect(args.targetUpstream).toBe(true);
+    });
+
+    it('rejects --repo with --target-upstream', () => {
+      expect(() => parseArgs([
+        'issues',
+        '--repo', 'djm204/frankenbeast',
+        '--target-upstream',
+      ])).toThrow(/--repo.*--target-upstream|--target-upstream.*--repo/i);
+    });
+
     it('parses --dry-run', () => {
       const args = parseArgs(['issues', '--dry-run']);
       expect(args.subcommand).toBe('issues');

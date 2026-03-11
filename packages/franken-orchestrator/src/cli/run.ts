@@ -308,6 +308,7 @@ export async function main(): Promise<void> {
     issueAssignee: args.issueAssignee,
     issueLimit: args.issueLimit,
     issueRepo: args.issueRepo,
+    targetUpstream: args.targetUpstream,
     dryRun: args.dryRun,
     maxCritiqueIterations: config.maxCritiqueIterations,
     maxDurationMs: config.maxDurationMs,
