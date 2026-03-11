@@ -2,6 +2,7 @@ import type { InterviewIO } from '../planning/interview-loop.js';
 import { LocalEncryptedStore } from './secret-backends/local-encrypted-store.js';
 import { OnePasswordStore } from './secret-backends/one-password-store.js';
 import { BitwardenStore } from './secret-backends/bitwarden-store.js';
+import { OsKeychainStore } from './secret-backends/os-keychain-store.js';
 import { runCli } from './secret-backends/cli-runner.js';
 
 export interface SecretStoreDetection {
@@ -38,7 +39,7 @@ export function createSecretStore(
     case 'bitwarden':
       return createBitwardenStore();
     case 'os-keychain':
-      return createStubStore('os-keychain');
+      return createOsKeychainStore();
     default:
       throw new Error(`Unknown secret backend: ${backendId}`);
   }
@@ -60,6 +61,10 @@ function createOnePasswordStore(): ISecretStore {
 
 function createBitwardenStore(): ISecretStore {
   return new BitwardenStore(runCli);
+}
+
+function createOsKeychainStore(): ISecretStore {
+  return new OsKeychainStore({ runner: runCli });
 }
 
 function createStubStore(id: string): ISecretStore {
