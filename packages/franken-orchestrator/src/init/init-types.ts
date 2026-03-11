@@ -7,7 +7,8 @@ export type InitStepId =
   | 'module-selection'
   | 'provider-config'
   | 'security-selection'
-  | 'comms-transport-selection';
+  | 'comms-transport-selection'
+  | 'secret-backend-selection';
 
 export interface InitVerificationState {
   status: 'unknown' | 'passed' | 'failed';
