@@ -15,6 +15,7 @@ import type {
   TrackedAgentInitAction,
   TrackedAgentStatus,
 } from '../types.js';
+import { UnknownTrackedAgentError } from '../errors.js';
 import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
 
 interface CreateRunInput {
@@ -169,12 +170,6 @@ type TrackedAgentEventRow = {
 
 function prefixedId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
-}
-
-export class UnknownTrackedAgentError extends Error {
-  constructor(agentId: string) {
-    super(`Unknown tracked agent: ${agentId}`);
-  }
 }
 
 export class SQLiteBeastRepository {

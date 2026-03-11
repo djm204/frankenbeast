@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { UnknownTrackedAgentError } from '../../beasts/repository/sqlite-beast-repository.js';
+import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';

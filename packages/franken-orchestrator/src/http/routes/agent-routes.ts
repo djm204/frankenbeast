@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
+import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
 const CreateAgentBody = z.object({
@@ -33,8 +35,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.use('/v1/beasts/agents/*', auth);
 
   app.post('/v1/beasts/agents', async (c) => {
-    const raw = await c.req.json();
-    const body = CreateAgentBody.parse(raw);
+    const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const agent = deps.agents.createAgent({
       definitionId: body.definitionId,
       source: 'dashboard',
@@ -63,9 +64,21 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   });
 
   app.get('/v1/beasts/agents/:agentId', (c) => {
-    return c.json({
-      data: deps.agents.getAgentDetail(c.req.param('agentId')),
-    });
+    const agentId = c.req.param('agentId');
+    try {
+      return c.json({
+        data: deps.agents.getAgentDetail(agentId),
+      });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
   });
 
   return app;

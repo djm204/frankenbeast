@@ -3,6 +3,7 @@ import type {
   TrackedAgentEvent,
   TrackedAgentInitAction,
 } from '../types.js';
+import { UnknownTrackedAgentError } from '../errors.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 
 export interface CreateTrackedAgentRequest {
@@ -60,7 +61,7 @@ export class AgentService {
   getAgent(agentId: string): TrackedAgent {
     const agent = this.repository.getTrackedAgent(agentId);
     if (!agent) {
-      throw new Error(`Unknown tracked agent: ${agentId}`);
+      throw new UnknownTrackedAgentError(agentId);
     }
     return agent;
   }

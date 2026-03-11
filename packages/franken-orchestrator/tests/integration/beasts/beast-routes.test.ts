@@ -16,7 +16,7 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
-function createBeastApp(options?: { rateLimitMax?: number }) {
+function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -25,6 +25,9 @@ function createBeastApp(options?: { rateLimitMax?: number }) {
   const executors = {
     process: {
       start: vi.fn(async (run, _definition) => {
+        if (options?.failStart) {
+          throw new Error('spawn failed');
+        }
         const attempt = repository.createAttempt(run.id, {
           status: 'running',
           pid: 1234,
@@ -232,5 +235,41 @@ describe('beast routes', () => {
     });
     const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
     expect(runsBody.data.runs).toEqual([]);
+  });
+
+  it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
+    const { app, operatorToken } = createBeastApp({ failStart: true });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Handle startup failure coherently',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; stopReason?: string } };
+    expect(created.data.status).toBe('failed');
+    expect(created.data.stopReason).toBe('start_failed');
+
+    const detailResponse = await app.request(`/v1/beasts/runs/${created.data.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(detailResponse.status).toBe(200);
+    const detailBody = await detailResponse.json() as { data: { run: { status: string; stopReason?: string } } };
+    expect(detailBody.data.run.status).toBe('failed');
+    expect(detailBody.data.run.stopReason).toBe('start_failed');
   });
 });

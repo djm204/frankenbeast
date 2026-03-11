@@ -118,6 +118,49 @@ describe('agent routes', () => {
     expect(listResponse.status).toBe(401);
   });
 
+  it('returns validation errors for invalid tracked agent payloads', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+  });
+
+  it('returns malformed json errors for invalid tracked agent request bodies', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: '{"definitionId"',
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'MALFORMED_JSON',
+        message: 'Malformed JSON body',
+      },
+    });
+  });
+
   it('creates and lists tracked agents for authorized operators', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
@@ -226,5 +269,23 @@ describe('agent routes', () => {
     expect(detailBody.data.agent.initAction.kind).toBe('martin-loop');
     expect(detailBody.data.agent.dispatchRunId).toBe(createdRun.data.id);
     expect(detailBody.data.events.map((event) => event.type)).toContain('agent.created');
+  });
+
+  it('returns 404 for unknown tracked agents', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/agents/agent-missing', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_FOUND',
+        message: "Tracked agent 'agent-missing' was not found",
+      },
+    });
   });
 });
