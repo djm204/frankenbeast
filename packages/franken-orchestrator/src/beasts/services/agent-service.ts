@@ -21,6 +21,12 @@ export interface AppendTrackedAgentEventRequest {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
+export interface UpdateTrackedAgentRequest {
+  readonly status?: TrackedAgent['status'] | undefined;
+  readonly chatSessionId?: string | undefined;
+  readonly dispatchRunId?: string | undefined;
+}
+
 export interface TrackedAgentDetail {
   readonly agent: TrackedAgent;
   readonly events: TrackedAgentEvent[];
@@ -74,9 +80,17 @@ export class AgentService {
   }
 
   linkRun(agentId: string, runId: string): TrackedAgent {
-    return this.repository.updateTrackedAgent(agentId, {
+    return this.updateAgent(agentId, {
       status: 'dispatching',
       dispatchRunId: runId,
+    });
+  }
+
+  updateAgent(agentId: string, request: UpdateTrackedAgentRequest): TrackedAgent {
+    return this.repository.updateTrackedAgent(agentId, {
+      ...(request.status !== undefined ? { status: request.status } : {}),
+      ...(request.chatSessionId !== undefined ? { chatSessionId: request.chatSessionId } : {}),
+      ...(request.dispatchRunId !== undefined ? { dispatchRunId: request.dispatchRunId } : {}),
       updatedAt: this.now(),
     });
   }

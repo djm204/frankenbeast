@@ -18,6 +18,7 @@ import type {
 import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
 
 interface CreateRunInput {
+  trackedAgentId?: string | undefined;
   definitionId: string;
   definitionVersion: number;
   executionMode: BeastExecutionMode;
@@ -91,6 +92,7 @@ interface AppendTrackedAgentEventInput {
 
 type BeastRunRow = {
   id: string;
+  tracked_agent_id: string | null;
   definition_id: string;
   definition_version: number;
   status: BeastRunStatus;
@@ -184,6 +186,7 @@ export class SQLiteBeastRepository {
   createRun(input: CreateRunInput): BeastRun {
     const run: BeastRun = {
       id: prefixedId('run'),
+      ...(input.trackedAgentId ? { trackedAgentId: input.trackedAgentId } : {}),
       definitionId: input.definitionId,
       definitionVersion: input.definitionVersion,
       status: 'queued',
@@ -198,6 +201,7 @@ export class SQLiteBeastRepository {
     this.db.prepare(
       `INSERT INTO beast_runs (
         id,
+        tracked_agent_id,
         definition_id,
         definition_version,
         status,
@@ -207,9 +211,10 @@ export class SQLiteBeastRepository {
         dispatched_by_user,
         created_at,
         attempt_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.id,
+      run.trackedAgentId ?? null,
       run.definitionId,
       run.definitionVersion,
       run.status,
@@ -656,6 +661,7 @@ function nextTrackedAgentEventSequence(db: Database.Database, agentId: string): 
 function mapRun(row: BeastRunRow): BeastRun {
   return {
     id: row.id,
+    ...(row.tracked_agent_id ? { trackedAgentId: row.tracked_agent_id } : {}),
     definitionId: row.definition_id,
     definitionVersion: row.definition_version,
     status: row.status,

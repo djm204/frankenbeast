@@ -50,6 +50,7 @@ export interface BeastDefinition {
 
 export interface BeastRun {
   readonly id: string;
+  readonly trackedAgentId?: string | undefined;
   readonly definitionId: string;
   readonly definitionVersion: number;
   readonly status: BeastRunStatus;

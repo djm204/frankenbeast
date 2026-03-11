@@ -138,6 +138,7 @@ describe('beast routes', () => {
         config: {
           provider: 'claude',
           objective: 'Implement beast routes',
+          chunkDirectory: 'docs/chunks',
         },
         executionMode: 'process',
         startNow: true,

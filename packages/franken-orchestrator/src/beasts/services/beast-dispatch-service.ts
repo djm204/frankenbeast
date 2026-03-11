@@ -15,6 +15,7 @@ export interface CreateBeastRunRequest {
   readonly config: Readonly<Record<string, unknown>>;
   readonly dispatchedBy: BeastDispatchSource;
   readonly dispatchedByUser: string;
+  readonly trackedAgentId?: string | undefined;
   readonly executionMode?: BeastExecutionMode | undefined;
   readonly startNow?: boolean | undefined;
 }
@@ -33,6 +34,7 @@ export class BeastDispatchService {
     const config = definition.configSchema.parse(request.config);
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const run = this.repository.createRun({
+      ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
       definitionId: definition.id,
       definitionVersion: definition.version,
       executionMode,
@@ -54,11 +56,34 @@ export class BeastDispatchService {
     await this.logs.append(run.id, 'system', 'stdout', 'run created');
     this.metrics.recordRunCreated(run.definitionId, run.dispatchedBy);
 
+    if (request.trackedAgentId) {
+      this.repository.updateTrackedAgent(request.trackedAgentId, {
+        status: 'dispatching',
+        dispatchRunId: run.id,
+        updatedAt: new Date().toISOString(),
+      });
+      this.repository.appendTrackedAgentEvent(request.trackedAgentId, {
+        level: 'info',
+        type: 'agent.dispatch.linked',
+        message: `Linked Beast run ${run.id}`,
+        payload: {
+          runId: run.id,
+        },
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     if (request.startNow) {
       await this.executorFor(executionMode).start(run, definition);
       const updated = this.repository.getRun(run.id);
       if (!updated) {
         throw new Error(`Beast run disappeared after start: ${run.id}`);
+      }
+      if (updated.trackedAgentId) {
+        this.repository.updateTrackedAgent(updated.trackedAgentId, {
+          status: updated.status === 'running' ? 'running' : 'dispatching',
+          updatedAt: new Date().toISOString(),
+        });
       }
       return updated;
     }

@@ -6,6 +6,7 @@ import { BeastCatalogService } from '../../beasts/services/beast-catalog-service
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService } from '../../beasts/services/beast-run-service.js';
+import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
 import { parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
@@ -13,6 +14,7 @@ import { TransportSecurityService } from '../security/transport-security.js';
 const CreateRunBody = z.object({
   definitionId: z.string().min(1),
   config: z.record(z.string(), z.unknown()),
+  trackedAgentId: z.string().min(1).optional(),
   executionMode: z.enum(['process', 'container']).optional(),
   startNow: z.boolean().optional(),
 }).strict();
@@ -22,6 +24,7 @@ const InterviewAnswerBody = z.object({
 }).strict();
 
 export interface BeastRoutesDeps {
+  agents: AgentService;
   catalog: BeastCatalogService;
   dispatch: BeastDispatchService;
   runs: BeastRunService;
@@ -68,6 +71,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       config: body.config,
       dispatchedBy: 'api',
       dispatchedByUser: 'operator',
+      ...(body.trackedAgentId ? { trackedAgentId: body.trackedAgentId } : {}),
       ...(body.executionMode ? { executionMode: body.executionMode } : {}),
       ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),
     });
