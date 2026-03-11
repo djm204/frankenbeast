@@ -37,7 +37,7 @@ async function tryReadJson<T>(filePath: string): Promise<T | undefined> {
 export async function verifyInit(options: {
   configFile: string;
   stateStore: FileInitStateStore;
-  secretStore?: ISecretStore;
+  secretStore?: ISecretStore | undefined;
 }): Promise<InitVerificationResult> {
   const issues: InitVerificationIssue[] = [];
   const rawConfig = await tryReadJson<unknown>(options.configFile);

@@ -15,9 +15,9 @@ export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'd
 interface RunInitWizardOptions {
   io: InterviewIO;
   initialState: InitState;
-  baseConfig?: OrchestratorConfig;
-  scope?: readonly InitWizardScope[];
-  secretStore?: ISecretStore;
+  baseConfig?: OrchestratorConfig | undefined;
+  scope?: readonly InitWizardScope[] | undefined;
+  secretStore?: ISecretStore | undefined;
 }
 
 function stateValue<T>(state: InitState, key: string): T | undefined {

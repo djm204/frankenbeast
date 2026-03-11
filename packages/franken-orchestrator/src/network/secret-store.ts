@@ -8,8 +8,8 @@ import { runCli, runCliWithStdin } from './secret-backends/cli-runner.js';
 
 export interface SecretStoreDetection {
   available: boolean;
-  reason?: string;
-  setupInstructions?: string;
+  reason?: string | undefined;
+  setupInstructions?: string | undefined;
 }
 
 export interface ISecretStore {
@@ -24,8 +24,8 @@ export interface ISecretStore {
 
 export interface SecretStoreOptions {
   projectRoot: string;
-  io?: InterviewIO;
-  passphrase?: string;
+  io?: InterviewIO | undefined;
+  passphrase?: string | undefined;
 }
 
 export function createSecretStore(
@@ -69,11 +69,11 @@ function createOsKeychainStore(): ISecretStore {
 }
 
 export interface ResolvedSecrets {
-  operatorToken?: string;
-  orchestratorToken?: string;
-  slackBotToken?: string;
-  slackSigningSecret?: string;
-  discordBotToken?: string;
+  operatorToken?: string | undefined;
+  orchestratorToken?: string | undefined;
+  slackBotToken?: string | undefined;
+  slackSigningSecret?: string | undefined;
+  discordBotToken?: string | undefined;
 }
 
 export class SecretResolver {

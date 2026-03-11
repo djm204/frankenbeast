@@ -17,7 +17,7 @@ interface RunInteractiveInitOptions {
   configFile: string;
   stateStore: FileInitStateStore;
   io: InterviewIO;
-  secretStore?: ISecretStore;
+  secretStore?: ISecretStore | undefined;
 }
 
 type RunRepairInitOptions = RunInteractiveInitOptions;

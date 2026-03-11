@@ -112,7 +112,7 @@ interface ChatSurfaceDeps {
 
 export async function resolveBeastOperatorToken(
   root: string,
-  options?: { secretStore?: ISecretStore; config?: OrchestratorConfig },
+  options?: { secretStore?: ISecretStore | undefined; config?: OrchestratorConfig | undefined } | undefined,
 ): Promise<string | undefined> {
   // 1. Secret store: highest priority when a store and operatorTokenRef are configured
   const { secretStore, config } = options ?? {};

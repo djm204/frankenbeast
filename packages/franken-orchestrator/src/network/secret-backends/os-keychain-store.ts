@@ -9,15 +9,15 @@ const KEYS_META_KEY = '__frankenbeast_keys__';
 
 export interface OsKeychainStoreOptions {
   runner: CliRunner;
-  stdinRunner?: StdinRunner;
-  platform?: NodeJS.Platform | string;
+  stdinRunner?: StdinRunner | undefined;
+  platform?: NodeJS.Platform | string | undefined;
 }
 
 export class OsKeychainStore implements ISecretStore {
   readonly id = 'os-keychain';
 
   private readonly runner: CliRunner;
-  private readonly stdinRunner?: StdinRunner;
+  private readonly stdinRunner: StdinRunner | undefined;
   private readonly platform: string;
 
   constructor(options: OsKeychainStoreOptions) {
