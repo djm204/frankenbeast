@@ -1,14 +1,6 @@
 import type { CliArgs } from './args.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { BeastCatalogService } from '../beasts/services/beast-catalog-service.js';
-import { SQLiteBeastRepository } from '../beasts/repository/sqlite-beast-repository.js';
-import { BeastLogStore } from '../beasts/events/beast-log-store.js';
-import { PrometheusBeastMetrics } from '../beasts/telemetry/prometheus-beast-metrics.js';
-import { ProcessSupervisor } from '../beasts/execution/process-supervisor.js';
-import { ProcessBeastExecutor } from '../beasts/execution/process-beast-executor.js';
-import { ContainerBeastExecutor } from '../beasts/execution/container-beast-executor.js';
-import { BeastDispatchService } from '../beasts/services/beast-dispatch-service.js';
-import { BeastRunService } from '../beasts/services/beast-run-service.js';
+import { createBeastServices } from '../beasts/create-beast-services.js';
 import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 
@@ -19,25 +11,9 @@ interface BeastCommandDeps {
   print(message: string): void;
 }
 
-function buildServices(paths: ProjectPaths) {
-  const repository = new SQLiteBeastRepository(paths.beastsDb);
-  const logStore = new BeastLogStore(paths.beastLogsDir);
-  const catalog = new BeastCatalogService();
-  const metrics = new PrometheusBeastMetrics();
-  const executors = {
-    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor()),
-    container: new ContainerBeastExecutor(),
-  };
-  return {
-    catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
-    runs: new BeastRunService(repository, catalog, executors, metrics, logStore),
-  };
-}
-
 export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> {
   const { args, io, paths, print } = deps;
-  const services = buildServices(paths);
+  const services = createBeastServices(paths);
   const actor = process.env.USER ?? 'operator';
 
   switch (args.beastAction) {

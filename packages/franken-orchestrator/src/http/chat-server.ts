@@ -5,10 +5,12 @@ import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
+import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { createChatApp } from './chat-app.js';
 import { attachChatWebSocketServer } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import type { BeastRoutesDeps } from './routes/beast-routes.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -28,6 +30,7 @@ export interface StartChatServerOptions {
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
+  beastControl?: BeastRoutesDeps;
 }
 
 export interface ChatServerHandle {
@@ -58,6 +61,15 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     chatLlm: options.llm,
     projectName: options.projectName,
     sessionContinuation: options.sessionContinuation ?? true,
+    ...(options.beastControl
+      ? {
+          beastDispatchAdapter: new ChatBeastDispatchAdapter({
+            catalog: options.beastControl.catalog,
+            interviews: options.beastControl.interviews,
+            dispatch: options.beastControl.dispatch,
+          }),
+        }
+      : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
   const app = createChatApp({
@@ -66,6 +78,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     runtime: runtime.runtime,
     turnRunner: runtime.turnRunner,
     sessionTokenSecret: tokenSecret,
+    ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
   });
   const server = createServer((request, response) => {
