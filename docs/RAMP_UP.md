@@ -105,7 +105,7 @@ packages/franken-orchestrator/src/
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
-- Tracked-agent domain types and SQLite persistence now exist below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
+- Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
 - `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
@@ -154,7 +154,7 @@ All modules use `tsc` for builds.
 2. The current CLI path is not purely ports-only: `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`
 3. There is no dedicated `--non-interactive` flag; headless usage currently relies on starting at `plan` or `run` with existing inputs
 4. `--resume` is parsed, but it is not wired as a distinct resume control path; checkpoint-based task skipping still works from existing checkpoint files
-5. Tracked-agent persistence exists in the backend, but dedicated tracked-agent HTTP routes and dashboard wiring are still being implemented; the current UI remains primarily run-centric
+5. CLI-created agents do not yet enter the tracked-agent model through a dedicated CLI init flow; the dashboard and chat-backed init paths are wired, but CLI parity is still a follow-up
 
 ## Key Documentation
 

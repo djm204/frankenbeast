@@ -257,6 +257,19 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ---
 
+## Phase 11: Agent Init Workflow
+
+> Branch: `feature/agent-init-workflow`. Draft PR: `#183`.
+
+- Added tracked-agent domain types, SQLite persistence, query APIs, and authenticated HTTP routes in `franken-orchestrator`
+- Rewired chat-backed init so `design-interview` and `chunk-plan` create tracked agents first, bind `chatSessionId`, emit init events, and then dispatch linked Beast runs
+- Added `trackedAgentId` linkage from Beast runs back to tracked agents and kept tracked-agent lifecycle in sync through dispatch/start/stop flows
+- Updated the beast catalog contract for typed prompt kinds: `file` for design-doc input and `directory` for MartinLoop chunk directories
+- Reworked the dashboard Beasts tab to create tracked agents instead of direct runs, validate typed path inputs, and render tracked-agent detail with startup logs and linked run logs
+- Synced `ARCHITECTURE.md`, `RAMP_UP.md`, and `packages/franken-web/README.md` with the tracked-agent lifecycle
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.
