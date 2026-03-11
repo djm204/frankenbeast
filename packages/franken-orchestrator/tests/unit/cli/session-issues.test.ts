@@ -107,6 +107,8 @@ const mockCliLlmAdapter = {
   validateCapabilities: vi.fn(() => true),
 };
 
+const mockResolveUpstreamRepo = vi.fn(async () => 'upstream/repo');
+
 // ── Module mocks ──
 
 vi.mock('../../../src/cli/dep-factory.js', () => ({
@@ -128,6 +130,10 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
       checkpoint: mockCheckpoint,
     },
   })),
+}));
+
+vi.mock('../../../src/cli/upstream-repo.js', () => ({
+  resolveUpstreamRepo: mockResolveUpstreamRepo,
 }));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
@@ -263,6 +269,21 @@ describe('Session.runIssues()', () => {
   const origLog = console.log;
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetcher.fetch.mockReset();
+    mockFetcher.inferRepo.mockReset();
+    mockTriageInstance.triage.mockReset();
+    mockReviewInstance.review.mockReset();
+    mockRunnerInstance.run.mockReset();
+    mockResolveUpstreamRepo.mockReset();
+    mockFetcher.fetch.mockResolvedValue([makeIssue()]);
+    mockFetcher.inferRepo.mockResolvedValue('org/repo');
+    mockTriageInstance.triage.mockResolvedValue([makeTriage()]);
+    mockReviewInstance.review.mockResolvedValue({
+      approved: [makeTriage()],
+      action: 'execute',
+    });
+    mockRunnerInstance.run.mockResolvedValue([makeOutcome()]);
+    mockResolveUpstreamRepo.mockResolvedValue('upstream/repo');
     console.log = vi.fn();
   });
   afterEach(() => {
@@ -356,6 +377,31 @@ describe('Session.runIssues()', () => {
     const session = new Session(config);
 
     await expect(session.runIssues()).rejects.toThrow(/--repo/);
+  });
+
+  it('uses the upstream repo when targetUpstream is enabled', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig({ targetUpstream: true });
+    const session = new Session(config);
+
+    await session.runIssues();
+
+    expect(mockResolveUpstreamRepo).toHaveBeenCalledTimes(1);
+    expect(mockFetcher.fetch).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'upstream/repo' }),
+    );
+    expect(mockRunnerInstance.run).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'upstream/repo' }),
+    );
+  });
+
+  it('throws a targeted error when upstream resolution fails', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    mockResolveUpstreamRepo.mockRejectedValueOnce(new Error('missing upstream'));
+    const config = makeConfig({ targetUpstream: true });
+    const session = new Session(config);
+
+    await expect(session.runIssues()).rejects.toThrow(/upstream/i);
   });
 
   it('flows budget through to IssueRunner', async () => {

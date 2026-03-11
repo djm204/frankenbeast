@@ -14,6 +14,7 @@ const {
   MockCliLlmAdapter,
   MockSession,
   mockHandleBeastCommand,
+  mockHandleInitCommand,
 } = vi.hoisted(() => {
   const mockAdapterComplete = vi.fn(async () => 'mock-complete');
   const mockFinalize = vi.fn(async () => undefined);
@@ -55,6 +56,9 @@ const {
     resume: false,
     cleanup: false,
     help: false,
+    initVerify: false,
+    initRepair: false,
+    initNonInteractive: false,
   }));
   const mockSessionStart = vi.fn(async () => ({ status: 'completed' as const }));
   const MockSession = vi.fn(function (this: { start: typeof mockSessionStart }) {
@@ -71,6 +75,7 @@ const {
   });
   const MockCliLlmAdapter = vi.fn(function (this: Record<string, unknown>) {});
   const mockHandleBeastCommand = vi.fn(async () => undefined);
+  const mockHandleInitCommand = vi.fn(async () => undefined);
   return {
     mockAdapterComplete,
     mockCreateCliDeps,
@@ -83,6 +88,7 @@ const {
     MockCliLlmAdapter,
     MockSession,
     mockHandleBeastCommand,
+    mockHandleInitCommand,
   };
 });
 
@@ -133,6 +139,9 @@ vi.mock('../../../src/cli/beast-cli.js', () => ({
 
 vi.mock('../../../src/beasts/create-beast-services.js', () => ({
   createBeastServices: mockCreateBeastServices,
+}));
+vi.mock('../../../src/cli/init-command.js', () => ({
+  handleInitCommand: mockHandleInitCommand,
 }));
 
 vi.mock('../../../src/http/chat-server.js', () => ({
@@ -323,6 +332,9 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
       beastAction: undefined,
       beastTarget: undefined,
     });
@@ -366,6 +378,9 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
       beastAction: undefined,
       beastTarget: undefined,
     });
@@ -419,11 +434,56 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
     });
 
     await main();
 
     expect(mockHandleBeastCommand).toHaveBeenCalled();
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('dispatches init without creating a Session', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: true,
+      initRepair: false,
+      initNonInteractive: true,
+    });
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.objectContaining({
+        subcommand: 'init',
+        initVerify: true,
+        initNonInteractive: true,
+      }),
+    }));
     expect(MockSession).not.toHaveBeenCalled();
   });
 
@@ -452,6 +512,9 @@ describe('main() execution', () => {
       resume: false,
       cleanup: false,
       help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
     });
 
     await main();

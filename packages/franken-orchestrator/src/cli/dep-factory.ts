@@ -188,7 +188,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
   });
 
-  const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
+  const adapterLlm = new AdapterLlmClient(
+    cliLlmAdapter,
+    observerBridge.observerDeps as never,
+    options.provider,
+  );
 
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(

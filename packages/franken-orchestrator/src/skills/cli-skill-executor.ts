@@ -346,6 +346,7 @@ export class CliSkillExecutor {
         this.observer.recordTokenUsage(
           iterSpan,
           {
+            model: result.provider,
             promptTokens: Math.ceil((config.martin?.prompt?.length ?? 0) / 4),
             completionTokens: result.tokensEstimated,
           },

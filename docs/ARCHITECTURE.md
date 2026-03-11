@@ -427,7 +427,7 @@ flowchart TD
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| `IssueFetcher` | `packages/franken-orchestrator/src/issues/issue-fetcher.ts` | Wraps `gh issue list` with filters (label, milestone, search, assignee, repo, limit). Infers repo from `gh repo view` when `--repo` is omitted. |
+| `IssueFetcher` | `packages/franken-orchestrator/src/issues/issue-fetcher.ts` | Wraps `gh issue list` with filters (label, milestone, search, assignee, repo, limit). The canonical repo is resolved in the CLI/session layer from `--repo`, `--target-upstream`, or `gh repo view`. |
 | `IssueTriage` | `packages/franken-orchestrator/src/issues/issue-triage.ts` | LLM-powered classification of issues as `one-shot` (single file, simple fix) or `chunked` (multi-file, architectural). Retries on parse failure. |
 | `IssueGraphBuilder` | `packages/franken-orchestrator/src/issues/issue-graph-builder.ts` | Converts a triaged issue into a `PlanGraph`. One-shot issues get 2 tasks (impl + harden). Chunked issues are LLM-decomposed into N chunk pairs with linear dependencies. |
 | `IssueReview` | `packages/franken-orchestrator/src/issues/issue-review.ts` | HITL triage review. Displays severity-sorted table, prompts for approval. Supports edit loop to remove specific issues. `--dry-run` previews without executing. |

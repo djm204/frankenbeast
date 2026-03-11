@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
+import { handleInitCommand } from './init-command.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -210,6 +211,17 @@ export async function main(): Promise<void> {
     return;
   }
 
+  if (args.subcommand === 'init') {
+    await handleInitCommand({
+      args,
+      config,
+      io: createStdinIO(),
+      paths,
+      print: console.log,
+    });
+    return;
+  }
+
   if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
     if (args.subcommand === 'chat') {
       const managedAttachment = await resolveManagedChatAttachment({
@@ -319,6 +331,7 @@ export async function main(): Promise<void> {
     issueAssignee: args.issueAssignee,
     issueLimit: args.issueLimit,
     issueRepo: args.issueRepo,
+    targetUpstream: args.targetUpstream,
     dryRun: args.dryRun,
     maxCritiqueIterations: config.maxCritiqueIterations,
     maxDurationMs: config.maxDurationMs,
