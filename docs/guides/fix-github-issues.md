@@ -43,6 +43,14 @@ frankenbeast issues --label build --dry-run
 
 Fetches and triages issues, displays the severity/complexity table, then exits without executing. Use this to verify the triage output before committing to a run.
 
+### Target the upstream repo from a fork
+
+```bash
+frankenbeast issues --target-upstream
+```
+
+Resolves the GitHub `upstream` remote from the current fork checkout and uses that repository as the canonical target for issue fetch, branch context, and PR creation. This cannot be combined with `--repo`.
+
 ## All Flags
 
 | Flag | Description | Default |
@@ -53,6 +61,7 @@ Fetches and triages issues, displays the severity/complexity table, then exits w
 | `--assignee <user>` | Filter by assignee | — |
 | `--limit <n>` | Max issues to fetch | 30 |
 | `--repo <owner/repo>` | Target repository | auto-inferred |
+| `--target-upstream` | Use the fork upstream as the canonical target repo | false |
 | `--dry-run` | Preview triage, skip execution | false |
 | `--budget <n>` | Max spend in USD | 10 |
 | `--no-pr` | Skip PR creation | false |
