@@ -1,8 +1,10 @@
 # Frankenbeast
 
 <p align="center">
-  <img src="/assets/assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
+  <img src="/assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
 </p>
+
+![Prototype](https://img.shields.io/badge/status-prototype-orange)
 
 **Deterministic guardrails for AI agents.**
 
