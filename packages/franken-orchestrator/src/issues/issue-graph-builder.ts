@@ -19,7 +19,7 @@ export class IssueGraphBuilder {
     if (triage.complexity === 'one-shot') {
       return this.buildOneShotGraph(issue);
     }
-    return this.buildChunkedGraph(issue);
+    return this.buildGraph(issue.number, await this.buildChunkDefinitionsForIssue(issue, triage));
   }
 
   private buildOneShotGraph(issue: GithubIssue): PlanGraph {
@@ -30,7 +30,7 @@ export class IssueGraphBuilder {
       {
         id: implId,
         objective: `Fix issue #${issue.number}: ${issue.title}\n\n${issue.body}`,
-        requiredSkills: [],
+        requiredSkills: [`cli:issue-${issue.number}`],
         dependsOn: [],
       },
       {
@@ -38,7 +38,7 @@ export class IssueGraphBuilder {
         objective:
           `Review and verify the fix for issue #${issue.number}. ` +
           `Run tests. Check acceptance criteria.`,
-        requiredSkills: [],
+        requiredSkills: [`cli:issue-${issue.number}/harden`],
         dependsOn: [implId],
       },
     ];
@@ -46,11 +46,27 @@ export class IssueGraphBuilder {
     return { tasks };
   }
 
-  private async buildChunkedGraph(issue: GithubIssue): Promise<PlanGraph> {
+  async buildChunkDefinitionsForIssue(issue: GithubIssue, triage: TriageResult): Promise<ChunkDefinition[]> {
+    if (triage.complexity === 'one-shot') {
+      return [this.buildOneShotChunk(issue)];
+    }
+
     const prompt = this.buildDecompositionPrompt(issue);
     const raw = await this.complete(prompt);
-    const chunks = this.parseResponse(raw);
-    return this.buildGraph(issue.number, chunks);
+    return this.parseResponse(raw);
+  }
+
+  private buildOneShotChunk(issue: GithubIssue): ChunkDefinition {
+    return {
+      id: `issue-${issue.number}`,
+      objective: `Fix issue #${issue.number}: ${issue.title}\n\n${issue.body}`,
+      files: [],
+      successCriteria:
+        `The fix for issue #${issue.number} is implemented, relevant tests pass, ` +
+        `and acceptance criteria in the issue body are satisfied.`,
+      verificationCommand: 'npm test',
+      dependencies: [],
+    };
   }
 
   private buildDecompositionPrompt(issue: GithubIssue): string {

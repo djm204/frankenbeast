@@ -222,6 +222,7 @@ describe('dep-factory provider wiring', () => {
 
     expect(artifacts).toEqual(expect.objectContaining({
       planName: 'issue-89',
+      planDir: expect.stringContaining('issue-89'),
       checkpointFile: expect.stringContaining('issue-89'),
       logFile: expect.stringContaining('issue-89'),
     }));

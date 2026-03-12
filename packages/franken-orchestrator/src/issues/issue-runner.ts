@@ -1,16 +1,28 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import type { PlanGraph, ICheckpointStore, ILogger, SkillInput } from '../deps.js';
+import { basename, dirname, resolve } from 'node:path';
+import { BeastLoop } from '../beast-loop.js';
+import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
+import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
+import { getProjectPaths } from '../cli/project-root.js';
+import type {
+  PlanGraph,
+  ICheckpointStore,
+  ILogger,
+  BeastLoopDeps,
+  ISkillsModule,
+  SkillDescriptor,
+} from '../deps.js';
 import type { GithubIssue, TriageResult, IssueOutcome } from './types.js';
 import type { IssueGraphBuilder } from './issue-graph-builder.js';
-import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { GitBranchIsolator } from '../skills/git-branch-isolator.js';
+import type { BeastResult } from '../types.js';
+import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
+import type { CliSkillConfig } from '../skills/cli-types.js';
 import type { PrCreator } from '../closure/pr-creator.js';
-import type { CliSkillConfig, IterationResult } from '../skills/cli-types.js';
-import type { BeastResult, TaskOutcome } from '../types.js';
 
 export interface IssueRuntimeArtifacts {
   readonly planName: string;
+  readonly planDir: string;
   readonly checkpointFile: string;
   readonly logFile: string;
 }
@@ -25,18 +37,14 @@ export interface IssueRunnerConfig {
   readonly issues: readonly GithubIssue[];
   readonly triageResults: readonly TriageResult[];
   readonly graphBuilder: IssueGraphBuilder;
-  readonly executor: CliSkillExecutor;
+  readonly fullDeps: BeastLoopDeps;
   readonly git: GitBranchIsolator;
-  readonly prCreator?: PrCreator | undefined;
-  readonly checkpoint?: ICheckpointStore | undefined;
   readonly logger?: ILogger | undefined;
   readonly budget: number;
-  readonly baseBranch: string;
-  readonly noPr: boolean;
   readonly repo: string;
-  readonly provider: string;
-  readonly providers?: readonly string[] | undefined;
   readonly issueRuntime?: IssueRuntimeSupport | undefined;
+  readonly checkpoint?: ICheckpointStore | undefined;
+  readonly timeoutMs?: number | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -48,7 +56,7 @@ const SEVERITY_ORDER: Record<string, number> = {
 
 const NO_SEVERITY = 4;
 const TOKENS_PER_DOLLAR = 1_000_000;
-const ONE_SHOT_MAX_ITERATIONS = 1_000;
+const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
 
 function extractSeverity(labels: readonly string[]): number {
@@ -67,20 +75,98 @@ function findTriage(triages: readonly TriageResult[], issueNumber: number): Tria
   return triages.find(t => t.issueNumber === issueNumber);
 }
 
-function taskStage(taskId: string): 'impl' | 'harden' {
-  return taskId.startsWith('harden:') ? 'harden' : 'impl';
-}
-
-function taskChunkId(taskId: string): string {
-  const [, ...rest] = taskId.split(':');
-  const base = rest.join(':');
-  return taskStage(taskId) === 'harden' ? `${base}/harden` : base;
-}
-
 function appendIssueLog(logFile: string | undefined, message: string): void {
   if (!logFile) return;
   mkdirSync(dirname(logFile), { recursive: true });
   appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+}
+
+function issueCompletionKey(taskId: string): string {
+  return `${taskId}:done`;
+}
+
+function issueSkillDescriptor(id: string): SkillDescriptor {
+  return {
+    id,
+    name: id.replace(/^cli:/, ''),
+    executionType: 'cli',
+    requiresHitl: false,
+  };
+}
+
+function createIssueSkills(baseSkills: ISkillsModule | undefined, skillIds: readonly string[]): ISkillsModule {
+  const fallbackSkills: ISkillsModule = baseSkills ?? {
+    hasSkill: () => false,
+    getAvailableSkills: () => [],
+    execute: async () => {
+      throw new Error('No skills available for issue execution');
+    },
+  };
+  const extraIds = new Set(skillIds);
+  const merged = new Map<string, SkillDescriptor>();
+
+  for (const descriptor of fallbackSkills.getAvailableSkills()) {
+    merged.set(descriptor.id, descriptor);
+  }
+  for (const skillId of skillIds) {
+    merged.set(skillId, issueSkillDescriptor(skillId));
+  }
+
+  return {
+    hasSkill: (id: string) => extraIds.has(id) || fallbackSkills.hasSkill(id),
+    getAvailableSkills: () => [...merged.values()],
+    execute: (skillId, input) => fallbackSkills.execute(skillId, input),
+  };
+}
+
+function extractIssueChunkId(skillId: string): string {
+  return skillId.startsWith('cli:') ? skillId.slice(4) : skillId;
+}
+
+function createIssueCliExecutor(
+  baseCliExecutor: CliSkillExecutor,
+  planName: string,
+  options?: {
+    maxIterations?: number;
+    staleMateLimit?: number;
+  },
+): CliSkillExecutor {
+  return {
+    recoverDirtyFiles: (...args) => baseCliExecutor.recoverDirtyFiles(...args),
+    execute: (skillId, input, _config, checkpoint, taskId) => {
+      const martinConfig: CliSkillConfig = {
+        martin: {
+          planName,
+          chunkId: extractIssueChunkId(skillId),
+          taskId,
+          ...(options?.maxIterations !== undefined ? { maxIterations: options.maxIterations } : {}),
+          ...(options?.staleMateLimit !== undefined ? { staleMateLimit: options.staleMateLimit } : {}),
+        } as CliSkillConfig['martin'],
+        git: {
+          baseBranch: 'main',
+          branchPrefix: 'fix/',
+          autoCommit: true,
+          workingDir: '.',
+        },
+      };
+
+      return baseCliExecutor.execute(skillId, input, martinConfig, checkpoint, taskId);
+    },
+  } as CliSkillExecutor;
+}
+
+function createIssuePrCreator(
+  basePrCreator: PrCreator,
+  issueNumber: number,
+  prRef: { current?: string | undefined },
+): PrCreator {
+  return {
+    create: async (result: BeastResult, logger?: ILogger) => {
+      const created = await basePrCreator.create(result, logger, { issueNumber });
+      prRef.current = created?.url;
+      return created;
+    },
+  } as PrCreator;
 }
 
 export class IssueRunner {
@@ -159,27 +245,31 @@ export class IssueRunner {
   ): Promise<IssueOutcome> {
     const {
       graphBuilder,
-      executor,
+      fullDeps,
       git,
-      prCreator,
-      checkpoint,
       logger,
-      noPr,
-      baseBranch,
       repo,
-      provider,
-      providers,
       issueRuntime,
     } = config;
 
     const runtimeArtifacts = issueRuntime?.artifactsForIssue(issue.number);
-    const issueCheckpoint = issueRuntime?.checkpointForIssue(issue.number) ?? checkpoint;
-    const planName = issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
+    const issueCheckpoint = issueRuntime?.checkpointForIssue(issue.number) ?? config.checkpoint;
+    const planName = runtimeArtifacts?.planName ?? issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
     const logFile = runtimeArtifacts?.logFile;
+    const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
 
     let graph: PlanGraph;
+    let executionGraphBuilder: BeastLoopDeps['graphBuilder'];
+    let refreshPlanTasks: BeastLoopDeps['refreshPlanTasks'];
+    let skillIds: readonly string[];
     try {
-      graph = await graphBuilder.buildForIssue(issue, triage);
+      const chunks = await graphBuilder.buildChunkDefinitionsForIssue(issue, triage);
+      const chunkPaths = new ChunkFileWriter(planDir).write(chunks);
+      const realGraphBuilder = new ChunkFileGraphBuilder(planDir);
+      graph = await realGraphBuilder.build({ goal: `Process issue #${issue.number}` });
+      executionGraphBuilder = realGraphBuilder;
+      skillIds = chunkPaths.map((chunkPath) => `cli:${basename(chunkPath, '.md')}`);
+      refreshPlanTasks = async () => (await realGraphBuilder.build({ goal: 'refresh issue tasks' })).tasks;
     } catch (err) {
       return {
         issueNumber: issue.number,
@@ -190,7 +280,7 @@ export class IssueRunner {
       };
     }
 
-    if (issueCheckpoint && graph.tasks.every(t => issueCheckpoint.has(t.id))) {
+    if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
       logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
       appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
       return {
@@ -203,144 +293,76 @@ export class IssueRunner {
 
     git.isolate(`issue-${issue.number}`);
 
-    let issueTokens = 0;
-    const taskOutcomes: TaskOutcome[] = [];
-
-    for (const task of graph.tasks) {
-      if (cumulativeTokens + issueTokens >= budgetTokens) {
-        return {
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          status: 'failed',
-          tokensUsed: issueTokens,
-          error: 'Budget exceeded',
-        };
-      }
-
-      if (issueCheckpoint?.has(task.id)) {
-        appendIssueLog(logFile, `Skipping checkpointed task ${task.id}`);
-        taskOutcomes.push({ taskId: task.id, status: 'success' });
-        continue;
-      }
-
-      try {
-        const stage = taskStage(task.id);
-        if (issueCheckpoint?.lastCommit(task.id, stage)) {
-          appendIssueLog(logFile, `Recovering ${task.id} from checkpointed commit`);
-          await executor.recoverDirtyFiles(task.id, stage, issueCheckpoint, logger);
-        }
-
-        const input: SkillInput = {
-          objective: task.objective,
-          context: { adrs: [], knownErrors: [], rules: [] },
-          dependencyOutputs: new Map(),
-          sessionId: `issue-${issue.number}`,
-          projectId: repo,
-        };
-
-        const skillConfig: CliSkillConfig = {
-          martin: {
-            prompt: task.objective,
-            promiseTag: stage === 'harden'
-              ? `HARDEN_issue-${issue.number}_DONE`
-              : `IMPL_issue-${issue.number}_DONE`,
-            maxIterations: triage.complexity === 'chunked' ? 10 : ONE_SHOT_MAX_ITERATIONS,
-            maxTurns: 25,
-            provider,
-            providers,
-            planName,
-            chunkId: taskChunkId(task.id),
-            taskId: task.id,
-            ...(triage.complexity === 'one-shot' ? { staleMateLimit: ONE_SHOT_STALE_MATE_LIMIT } : {}),
-            onProviderAttempt: (activeProvider: string, iteration: number) => {
-              appendIssueLog(logFile, `Task ${task.id} iteration ${iteration} provider ${activeProvider}`);
-            },
-            onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
-              appendIssueLog(logFile, `Task ${task.id} provider switch ${fromProvider} -> ${toProvider} (${reason})`);
-            },
-            onSleep: (durationMs: number, source: string) => {
-              appendIssueLog(logFile, `Task ${task.id} sleeping ${durationMs}ms (${source})`);
-            },
-            onIteration: (iteration: number, result: IterationResult) => {
-              appendIssueLog(
-                logFile,
-                `Task ${task.id} iteration ${iteration} exit=${result.exitCode} rateLimited=${result.rateLimited} promise=${result.promiseDetected}`,
-              );
-            },
-            timeoutMs: 600_000,
-          },
-          git: {
-            baseBranch,
-            branchPrefix: 'fix/',
-            autoCommit: true,
-            workingDir: '.',
-          },
-        };
-
-        const result = await executor.execute(task.id, input, skillConfig, issueCheckpoint, task.id);
-        issueTokens += result.tokensUsed ?? 0;
-        taskOutcomes.push({ taskId: task.id, status: 'success', output: result.output });
-        appendIssueLog(logFile, `Task ${task.id} completed`);
-        issueCheckpoint?.write(task.id);
-      } catch (err) {
-        appendIssueLog(logFile, `Task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
-        taskOutcomes.push({
-          taskId: task.id,
-          status: 'failure',
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return {
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          status: 'failed',
-          tokensUsed: issueTokens,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    }
-
-    let prUrl: string | undefined;
-    if (!noPr && prCreator) {
-      try {
-        const beastResult: BeastResult = {
-          sessionId: `issue-${issue.number}`,
-          projectId: repo,
-          phase: 'execution',
-          status: 'completed',
-          tokenSpend: {
-            inputTokens: 0,
-            outputTokens: 0,
-            totalTokens: issueTokens,
-            estimatedCostUsd: issueTokens / TOKENS_PER_DOLLAR,
-          },
-          taskResults: taskOutcomes,
-          durationMs: 0,
-          planSummary: `Fixes #${issue.number}: ${issue.title}`,
-        };
-
-        const prResult = await prCreator.create(beastResult, logger, { issueNumber: issue.number });
-        if (prResult) {
-          prUrl = prResult.url;
-          logger?.info(`[issues] Issue #${issue.number} fixed, PR: ${prUrl}`, undefined, 'issues');
-          appendIssueLog(logFile, `Issue #${issue.number} fixed with PR ${prUrl}`);
-        }
-      } catch (err) {
-        logger?.warn(
-          `[issues] PR creation failed for issue #${issue.number}: ${err instanceof Error ? err.message : String(err)}`,
-          undefined,
-          'issues',
-        );
-      }
-    }
-
-    appendIssueLog(logFile, `Issue #${issue.number} completed`);
-
-    return {
-      issueNumber: issue.number,
-      issueTitle: issue.title,
-      status: 'fixed',
-      tokensUsed: issueTokens,
-      prUrl,
+    const prRef: { current?: string | undefined } = {};
+    const issueDeps: BeastLoopDeps = {
+      firewall: fullDeps.firewall,
+      skills: createIssueSkills(fullDeps.skills, skillIds),
+      memory: fullDeps.memory,
+      planner: fullDeps.planner,
+      observer: fullDeps.observer,
+      critique: fullDeps.critique,
+      governor: fullDeps.governor,
+      heartbeat: fullDeps.heartbeat,
+      logger: logger ?? fullDeps.logger,
+      clock: fullDeps.clock,
+      graphBuilder: executionGraphBuilder,
+      refreshPlanTasks,
+      ...(fullDeps.mcp ? { mcp: fullDeps.mcp } : {}),
+      ...(fullDeps.cliExecutor
+        ? {
+            cliExecutor: createIssueCliExecutor(
+              fullDeps.cliExecutor,
+              planName,
+              triage.complexity === 'one-shot'
+                ? {
+                    maxIterations: ONE_SHOT_MAX_ITERATIONS,
+                    staleMateLimit: ONE_SHOT_STALE_MATE_LIMIT,
+                  }
+                : undefined,
+            ),
+          }
+        : {}),
+      ...(fullDeps.prCreator
+        ? { prCreator: createIssuePrCreator(fullDeps.prCreator, issue.number, prRef) }
+        : {}),
+      ...(issueCheckpoint ? { checkpoint: issueCheckpoint } : {}),
     };
+
+    const loop = new BeastLoop(issueDeps, {
+      maxDurationMs: config.timeoutMs ?? 3_600_000,
+    });
+
+    try {
+      appendIssueLog(logFile, `Issue #${issue.number} execution started via BeastLoop`);
+      
+      const result = await loop.run({
+        sessionId: `issue-${issue.number}`,
+        projectId: repo,
+        userInput: `Fix issue #${issue.number}: ${issue.title}\n\n${issue.body}`,
+      });
+
+      const tokensUsed = result.tokenSpend.totalTokens;
+      const status = result.status === 'completed' ? 'fixed' : 'failed';
+      const prUrl = prRef.current;
+
+      appendIssueLog(logFile, `Issue #${issue.number} execution finished with status ${status}`);
+
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status,
+        tokensUsed,
+        prUrl,
+      };
+    } catch (err) {
+      appendIssueLog(logFile, `Issue #${issue.number} failed: ${err instanceof Error ? err.message : String(err)}`);
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'failed',
+        tokensUsed: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 }

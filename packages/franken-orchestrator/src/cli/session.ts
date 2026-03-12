@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
@@ -106,7 +107,7 @@ export class Session {
       write: (text: string) => io.display(text),
     };
 
-    const { logger, issueDeps, finalize } = await createCliDeps({
+    const { deps, logger, issueDeps, finalize } = await createCliDeps({
       ...this.buildDepOptions(),
       issueIO: reviewIO,
       dryRun,
@@ -170,18 +171,13 @@ export class Session {
       issues: approvedIssues,
       triageResults: decision.approved,
       graphBuilder,
-      executor,
+      fullDeps: deps,
       git,
-      prCreator,
-      checkpoint,
       logger,
       budget,
-      baseBranch,
-      noPr,
       repo,
-      provider: this.config.provider,
-      providers: this.config.providers,
       issueRuntime,
+      checkpoint,
     });
 
     this.displayIssueSummary(outcomes);

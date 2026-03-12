@@ -130,6 +130,21 @@ describe('IssueGraphBuilder', () => {
       const impl = taskById(graph.tasks, 'impl:issue-5')!;
       expect(impl.dependsOn).toEqual([]);
     });
+
+    it('creates executable cli skills for one-shot impl and harden tasks', async () => {
+      const completeFn = vi.fn<CompleteFn>();
+      const builder = new IssueGraphBuilder(completeFn);
+      const issue = makeIssue({ number: 21 });
+      const triage = makeTriageResult(21, 'one-shot');
+
+      const graph = await builder.buildForIssue(issue, triage);
+
+      const impl = taskById(graph.tasks, 'impl:issue-21')!;
+      const harden = taskById(graph.tasks, 'harden:issue-21')!;
+
+      expect(impl.requiredSkills).toEqual(['cli:issue-21']);
+      expect(harden.requiredSkills).toEqual(['cli:issue-21/harden']);
+    });
   });
 
   describe('chunked path', () => {

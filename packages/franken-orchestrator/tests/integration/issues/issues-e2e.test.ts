@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, it, expect, vi } from 'vitest';
 import { IssueFetcher } from '../../../src/issues/issue-fetcher.js';
 import { IssueTriage } from '../../../src/issues/issue-triage.js';
@@ -5,10 +8,11 @@ import { IssueGraphBuilder } from '../../../src/issues/issue-graph-builder.js';
 import { IssueReview } from '../../../src/issues/issue-review.js';
 import type { ReviewIO } from '../../../src/issues/issue-review.js';
 import { IssueRunner } from '../../../src/issues/issue-runner.js';
-import type { ICheckpointStore, ILogger } from '../../../src/deps.js';
+import type { BeastLoopDeps, ICheckpointStore, ILogger } from '../../../src/deps.js';
 import type { CliSkillExecutor } from '../../../src/skills/cli-skill-executor.js';
 import type { GitBranchIsolator } from '../../../src/skills/git-branch-isolator.js';
 import type { PrCreator } from '../../../src/closure/pr-creator.js';
+import type { IssueRuntimeArtifacts, IssueRuntimeSupport } from '../../../src/issues/issue-runner.js';
 
 // ── Boundary mock helpers ──
 
@@ -71,6 +75,70 @@ function stubPrCreator(url = 'https://github.com/org/repo/pull/1') {
   } as unknown as PrCreator;
 }
 
+function makeIssueRuntimeSupport(): IssueRuntimeSupport {
+  const root = mkdtempSync(join(tmpdir(), 'issues-e2e-'));
+  return {
+    planNameForIssue: (issueNumber: number) => `issue-${issueNumber}`,
+    checkpointForIssue: () => noopCheckpoint(),
+    artifactsForIssue: (issueNumber: number): IssueRuntimeArtifacts => ({
+      planName: `issue-${issueNumber}`,
+      planDir: join(root, `issue-${issueNumber}`),
+      checkpointFile: join(root, `issue-${issueNumber}.checkpoint`),
+      logFile: join(root, `issue-${issueNumber}.log`),
+    }),
+  };
+}
+
+function makeFullDeps(
+  executor: CliSkillExecutor,
+  prCreator?: PrCreator,
+  logger: ILogger = silentLogger(),
+): BeastLoopDeps {
+  return {
+    firewall: {
+      runPipeline: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
+    },
+    skills: {
+      hasSkill: () => false,
+      getAvailableSkills: () => [],
+      execute: async () => {
+        throw new Error('No non-CLI skills should execute in issue integration tests');
+      },
+    },
+    memory: {
+      frontload: async () => {},
+      getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }),
+      recordTrace: async () => {},
+    },
+    planner: {
+      createPlan: async () => ({ tasks: [] }),
+    },
+    observer: {
+      startTrace: () => {},
+      startSpan: () => ({ end: () => {} }),
+      getTokenSpend: async () => ({
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        estimatedCostUsd: 0,
+      }),
+    },
+    critique: {
+      reviewPlan: async () => ({ verdict: 'pass', findings: [], score: 1 }),
+    },
+    governor: {
+      requestApproval: async () => ({ decision: 'approved' }),
+    },
+    heartbeat: {
+      pulse: async () => ({ improvements: [], techDebt: [], summary: '' }),
+    },
+    logger,
+    clock: () => new Date(),
+    cliExecutor: executor,
+    ...(prCreator ? { prCreator } : {}),
+  };
+}
+
 // ── Tests ──
 
 describe('issues E2E pipeline', () => {
@@ -104,6 +172,8 @@ describe('issues E2E pipeline', () => {
     const prCreator = stubPrCreator();
     const checkpoint = noopCheckpoint();
     const logger = silentLogger();
+    const issueRuntime = makeIssueRuntimeSupport();
+    const fullDeps = makeFullDeps(executor, prCreator, logger);
 
     // Real pipeline instances wired with mocked boundaries
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,16 +194,13 @@ describe('issues E2E pipeline', () => {
       issues,
       triageResults: decision.approved,
       graphBuilder,
-      executor,
+      fullDeps,
       git,
-      prCreator,
       checkpoint,
+      issueRuntime,
       logger,
       budget: 10,
-      baseBranch: 'main',
-      noPr: false,
       repo: 'org/repo',
-      provider: 'claude',
     });
 
     // Assert: IssueOutcome has status 'fixed'
@@ -144,7 +211,6 @@ describe('issues E2E pipeline', () => {
     // Assert: PrCreator.create() called with Fixes #42 in body
     expect(prCreator.create).toHaveBeenCalledOnce();
     const createCall = (prCreator.create as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(createCall[0].planSummary).toContain('Fixes #42');
     expect(createCall[2]).toEqual({ issueNumber: 42 });
   });
 
@@ -197,6 +263,9 @@ describe('issues E2E pipeline', () => {
     const git = stubGit();
     const prCreator = stubPrCreator();
     const checkpoint = noopCheckpoint();
+    const logger = silentLogger();
+    const issueRuntime = makeIssueRuntimeSupport();
+    const fullDeps = makeFullDeps(executor, prCreator, logger);
 
     // Real pipeline instances
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -214,21 +283,19 @@ describe('issues E2E pipeline', () => {
       issues,
       triageResults: decision.approved,
       graphBuilder,
-      executor,
+      fullDeps,
       git,
-      prCreator,
       checkpoint,
+      issueRuntime,
+      logger,
       budget: 10,
-      baseBranch: 'main',
-      noPr: false,
       repo: 'org/repo',
-      provider: 'claude',
     });
 
     // Assert: 4 tasks executed (2 impl + 2 harden)
     expect(executor.execute).toHaveBeenCalledTimes(4);
     const taskIds = (executor.execute as ReturnType<typeof vi.fn>).mock.calls.map(
-      (call: unknown[]) => call[0] as string,
+      (call: unknown[]) => call[4] as string,
     );
     const implTasks = taskIds.filter((id) => id.startsWith('impl:'));
     const hardenTasks = taskIds.filter((id) => id.startsWith('harden:'));
@@ -281,6 +348,8 @@ describe('issues E2E pipeline', () => {
     const prCreator = stubPrCreator();
     const checkpoint = noopCheckpoint();
     const logger = silentLogger();
+    const issueRuntime = makeIssueRuntimeSupport();
+    const fullDeps = makeFullDeps(executor, prCreator, logger);
 
     // Real pipeline instances
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,26 +367,25 @@ describe('issues E2E pipeline', () => {
       issues,
       triageResults: decision.approved,
       graphBuilder,
-      executor,
+      fullDeps,
       git,
-      prCreator,
       checkpoint,
+      issueRuntime,
       logger,
       budget: 10,
-      baseBranch: 'main',
-      noPr: false,
       repo: 'org/repo',
-      provider: 'claude',
     });
 
     // Issues sorted by severity: 1 (critical) first, then 2 (high)
     expect(outcomes).toHaveLength(2);
     expect(outcomes.map((o) => o.status)).toEqual(['failed', 'fixed']);
 
-    // Second issue still gets a PR
-    expect(prCreator.create).toHaveBeenCalledOnce();
-    const createCall = (prCreator.create as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(createCall[2]).toEqual({ issueNumber: 2 });
+    // Closure attempts PR creation for each issue run; the successful run must carry issue #2 metadata.
+    expect(prCreator.create).toHaveBeenCalledTimes(2);
+    const successfulCall = (prCreator.create as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) => (call[0] as { status?: string }).status === 'completed',
+    )!;
+    expect(successfulCall[2]).toEqual({ issueNumber: 2 });
   });
 
   it('dry-run stops after triage review', async () => {

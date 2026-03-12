@@ -130,6 +130,7 @@ function issueArtifactsFor(paths: ProjectPaths, issueNumber: number): IssueRunti
   const issueDir = resolve(paths.buildDir, 'issues', planName);
   return {
     planName,
+    planDir: resolve(paths.plansDir, planName),
     checkpointFile: resolve(issueDir, `${planName}.checkpoint`),
     logFile: resolve(issueDir, `${planName}-build.log`),
   };
