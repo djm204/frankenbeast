@@ -711,4 +711,76 @@ describe('agent routes', () => {
     expect(detail.data.agent.status).toBe('failed');
     expect(detail.data.events.map((e) => e.type)).toContain('agent.dispatch.failed');
   });
+
+  it('allows starting failed tracked agents via the start endpoint', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    // Create a chunk-plan agent with valid config — dispatch will succeed and start
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+        },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(created.data.status).toBe('running');
+    expect(created.data.dispatchRunId).toBeTruthy();
+
+    // Stop the run to get to 'stopped' state, then kill the run to get agent to 'failed'
+    await app.request(`/v1/beasts/runs/${created.data.dispatchRunId}/stop`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    // Verify the agent is stopped, then use the restart endpoint which already works for stopped
+    // The real test: use the start endpoint with a failed agent (via dispatch failure test above)
+    // Instead, create a new agent with invalid config so it becomes 'failed' with no dispatchRunId
+    const failedResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan',
+          config: {},
+        },
+        initConfig: {
+          invalidField: 'will-fail',
+        },
+      }),
+    });
+    expect(failedResponse.status).toBe(201);
+    const failedAgent = await failedResponse.json() as { data: { id: string; status: string } };
+    expect(failedAgent.data.status).toBe('failed');
+
+    // Starting a failed agent without a dispatchRunId will try dispatchDetachedAgent
+    // which will also fail (same bad config), but the status guard should NOT be the blocker
+    const startResponse = await app.request(`/v1/beasts/agents/${failedAgent.data.id}/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    // The start attempt goes through the status guard (no 409) but dispatch may fail (500)
+    // At minimum it should NOT be 409 TRACKED_AGENT_NOT_STARTABLE
+    expect(startResponse.status).not.toBe(409);
+  });
 });

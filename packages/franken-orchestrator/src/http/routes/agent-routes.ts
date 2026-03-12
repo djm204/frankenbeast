@@ -144,11 +144,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     try {
       const agent = deps.agents.getAgent(agentId);
-      if (agent.status !== 'stopped') {
+      if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
         throw new HttpError(
           409,
           'TRACKED_AGENT_NOT_STARTABLE',
-          `Tracked agent '${agentId}' is not stopped`,
+          `Tracked agent '${agentId}' is not in a startable state`,
         );
       }
 

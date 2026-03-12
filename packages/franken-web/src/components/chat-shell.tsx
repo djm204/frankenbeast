@@ -447,6 +447,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 return;
               }
               void beastClient.deleteAgent(agentId).then(() => {
+                setSelectedBeastAgentId((current) => current === agentId ? null : current);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
                 setBeastError(error instanceof Error ? error.message : 'Unable to delete tracked agent.');
