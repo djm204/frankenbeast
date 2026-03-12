@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
+import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
@@ -26,6 +27,7 @@ export interface AgentRoutesDeps {
   runs: BeastRunService;
   operatorToken: string;
   security: TransportSecurityService;
+  rateLimit?: BeastRateLimitOptions;
 }
 
 export function agentRoutes(deps: AgentRoutesDeps): Hono {
@@ -37,6 +39,14 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.use('/v1/beasts/agents', auth);
   app.use('/v1/beasts/agents/*', auth);
+  if (deps.rateLimit) {
+    const limiter = new InMemoryRateLimiter(deps.rateLimit);
+    const rateLimit = requireBeastRateLimit(
+      limiter,
+      (authHeader, path) => `${authHeader ?? 'anonymous'}:${path}`,
+    );
+    app.use('/v1/beasts/agents', rateLimit);
+  }
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
@@ -80,14 +90,26 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       return c.json({ data: agent }, 201);
     }
 
-    await deps.dispatch.createRun({
-      definitionId: body.definitionId,
-      config: body.initConfig,
-      dispatchedBy: body.chatSessionId ? 'chat' : 'api',
-      dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
-      trackedAgentId: agent.id,
-      startNow: true,
-    });
+    try {
+      await deps.dispatch.createRun({
+        definitionId: body.definitionId,
+        config: body.initConfig,
+        dispatchedBy: body.chatSessionId ? 'chat' : 'api',
+        dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
+        trackedAgentId: agent.id,
+        startNow: true,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      deps.agents.updateAgent(agent.id, { status: 'failed' });
+      deps.agents.appendEvent(agent.id, {
+        level: 'error',
+        type: 'agent.dispatch.failed',
+        message: `Dispatch failed: ${errorMessage}`,
+        payload: { error: errorMessage },
+      });
+      return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
+    }
 
     return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
   });

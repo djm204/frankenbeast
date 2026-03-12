@@ -19,7 +19,7 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
-function createBeastApp() {
+function createBeastApp(opts?: { rateLimitMax?: number }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -86,7 +86,7 @@ function createBeastApp() {
       operatorToken,
       rateLimit: {
         windowMs: 60_000,
-        max: 20,
+        max: opts?.rateLimitMax ?? 20,
       },
     },
   });
@@ -450,5 +450,74 @@ describe('agent routes', () => {
         message: "Tracked agent 'agent-missing' was not found",
       },
     });
+  });
+
+  it('rate-limits agent creation requests', async () => {
+    const { app, operatorToken } = createBeastApp({ rateLimitMax: 2 });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const body = JSON.stringify({
+      definitionId: 'design-interview',
+      initAction: {
+        kind: 'design-interview',
+        command: '/interview',
+        config: {},
+      },
+      initConfig: {},
+    });
+
+    const r1 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+    const r2 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+    const r3 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    expect(r3.status).toBe(429);
+  });
+
+  it('marks agent as failed when dispatch throws instead of leaving orphaned initializing agents', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+            invalidField: 'this-will-fail-schema',
+          },
+        },
+        initConfig: {
+          invalidField: 'this-will-fail-schema',
+        },
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string } };
+    expect(created.data.status).toBe('failed');
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    const detail = await detailResponse.json() as {
+      data: {
+        agent: { status: string };
+        events: Array<{ type: string }>;
+      };
+    };
+    expect(detail.data.agent.status).toBe('failed');
+    expect(detail.data.events.map((e) => e.type)).toContain('agent.dispatch.failed');
   });
 });
