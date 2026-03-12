@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { CostCalculator } from './CostCalculator.js'
 import { DEFAULT_PRICING } from './defaultPricing.js'
 
@@ -36,6 +36,45 @@ describe('CostCalculator', () => {
         completionTokens: 500,
       })
       expect(cost).toBe(0)
+    })
+
+    it('emits a warning when encountering an unknown model', () => {
+      const warnings: string[] = []
+      const warnCalc = new CostCalculator(DEFAULT_PRICING, {
+        onUnknownModel: (model) => warnings.push(model),
+      })
+      warnCalc.calculate({ model: 'unknown-model-xyz', promptTokens: 1000, completionTokens: 500 })
+      expect(warnings).toEqual(['unknown-model-xyz'])
+    })
+
+    it('warns only once per unknown model', () => {
+      const warnings: string[] = []
+      const warnCalc = new CostCalculator(DEFAULT_PRICING, {
+        onUnknownModel: (model) => warnings.push(model),
+      })
+      warnCalc.calculate({ model: 'unknown-model-xyz', promptTokens: 1000, completionTokens: 500 })
+      warnCalc.calculate({ model: 'unknown-model-xyz', promptTokens: 2000, completionTokens: 1000 })
+      expect(warnings).toEqual(['unknown-model-xyz'])
+    })
+
+    it('warns for each distinct unknown model', () => {
+      const warnings: string[] = []
+      const warnCalc = new CostCalculator(DEFAULT_PRICING, {
+        onUnknownModel: (model) => warnings.push(model),
+      })
+      warnCalc.calculate({ model: 'unknown-a', promptTokens: 1, completionTokens: 0 })
+      warnCalc.calculate({ model: 'unknown-b', promptTokens: 1, completionTokens: 0 })
+      expect(warnings).toEqual(['unknown-a', 'unknown-b'])
+    })
+
+    it('uses console.warn by default for unknown models', () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const defaultCalc = new CostCalculator(DEFAULT_PRICING)
+      defaultCalc.calculate({ model: 'some-new-model', promptTokens: 1, completionTokens: 0 })
+      expect(spy).toHaveBeenCalledWith(
+        expect.stringContaining('some-new-model'),
+      )
+      spy.mockRestore()
     })
   })
 
