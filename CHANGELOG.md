@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.17.0](https://github.com/djm204/frankenbeast/compare/v0.16.3...v0.17.0) (2026-03-12)
+
+
+### Features
+
+* add beast dashboard resume and path controls ([500999f](https://github.com/djm204/frankenbeast/commit/500999f8404ef680616341136cbe5c4eeef4fe10))
+* add beast dashboard resume controls and path validation ([195bc31](https://github.com/djm204/frankenbeast/commit/195bc310cdbf9754e0af1c84ffd80febf4dba227))
+* secret store with 4 pluggable backends ([f05846f](https://github.com/djm204/frankenbeast/commit/f05846f70dbc6b6815ae4568c829d9eedc0a1670))
+
+
+### Miscellaneous
+
+* **main:** release franken-observer 0.4.0 ([8a6c421](https://github.com/djm204/frankenbeast/commit/8a6c4214ddb33af629897ea01caf03a97cae9af3))
+* **main:** release franken-observer 0.4.0 ([92febeb](https://github.com/djm204/frankenbeast/commit/92febeb6b856f9c0af790beee2e54be80159624b))
+* **main:** release franken-orchestrator 0.16.0 ([bc5f0b6](https://github.com/djm204/frankenbeast/commit/bc5f0b693b741a7b5901fe4564e3ec4e5d2452e0))
+* **main:** release franken-orchestrator 0.16.0 ([1510dc9](https://github.com/djm204/frankenbeast/commit/1510dc94837ea66c15756f3869dc145ee9cc6ed2))
+* **main:** release franken-planner 0.4.0 ([4ad33cf](https://github.com/djm204/frankenbeast/commit/4ad33cf35c2c22efe34359191e510a6c671d5b1f))
+* **main:** release franken-skills 0.4.0 ([4de5013](https://github.com/djm204/frankenbeast/commit/4de50135f88e9f565d06abb50c188640a9ba3fdd))
+* **main:** release franken-skills 0.4.0 ([bc03094](https://github.com/djm204/frankenbeast/commit/bc030943491c239ce9ced84e77b3f3e275a99afb))
+
+
+### Documentation
+
+* sync ramp-up guides with workspace ([d989aa5](https://github.com/djm204/frankenbeast/commit/d989aa52b9c9378c45cf28c470e267f0e46caeed))
+
 ## [0.16.3](https://github.com/djm204/frankenbeast/compare/v0.16.2...v0.16.3) (2026-03-11)
 
 
