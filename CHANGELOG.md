@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/djm204/frankenbeast/compare/v0.17.0...v0.17.1) (2026-03-12)
+
+
+### Miscellaneous
+
+* **main:** release franken-planner 0.4.0 ([7f17b8e](https://github.com/djm204/frankenbeast/commit/7f17b8e22a28a96c642c0239461d08a06e9da2a1))
+
 ## [0.17.0](https://github.com/djm204/frankenbeast/compare/v0.16.3...v0.17.0) (2026-03-12)
 
 
