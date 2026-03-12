@@ -131,7 +131,15 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
   // Secret backend detection
   const completedSteps = new Set(options.initialState.completedSteps);
   if (options.secretStore) {
-    const detection = await options.secretStore.detect();
+    let detection: { available: boolean; reason?: string | undefined; setupInstructions?: string | undefined };
+    try {
+      detection = await options.secretStore.detect();
+    } catch (err) {
+      detection = {
+        available: false,
+        reason: err instanceof Error ? err.message : 'detection failed',
+      };
+    }
     if (detection.available) {
       options.io.display(`Secret backend '${options.secretStore.id}' is available.`);
     } else {
@@ -143,12 +151,20 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
     completedSteps.add('secret-backend-selection');
   }
 
-  // If running in secret-backend-only mode, skip all comms and operator token prompts
+  // If running in secret-backend-only mode, skip all comms and operator token prompts.
+  // Preserve existing module/transport state from initialState if present, otherwise
+  // derive from baseConfig so we don't accidentally disable modules that config has enabled.
   if (secretBackendOnly) {
+    const preservedModules = options.initialState.selectedModules.length > 0
+      ? options.initialState.selectedModules
+      : selectedModules;
+    const preservedTransports = options.initialState.selectedCommsTransports.length > 0
+      ? options.initialState.selectedCommsTransports
+      : options.initialState.selectedCommsTransports;
     const nextState: InitState = {
       ...options.initialState,
-      selectedModules: options.initialState.selectedModules,
-      selectedCommsTransports: options.initialState.selectedCommsTransports,
+      selectedModules: preservedModules,
+      selectedCommsTransports: preservedTransports,
       completedSteps: Array.from(completedSteps),
       securityMode,
       answers: { ...options.initialState.answers },

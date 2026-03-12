@@ -19,6 +19,21 @@ export interface InitCommandOptions {
 export async function handleInitCommand(options: InitCommandOptions): Promise<void> {
   const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
 
+  // Verify path: no secret store needed — pure file validation
+  if (options.args.initVerify) {
+    const verification = await verifyInit({
+      configFile: options.paths.configFile,
+      stateStore,
+    });
+    options.print(
+      verification.ok
+        ? `Init verify passed for ${options.paths.configFile}.`
+        : verification.messages.join('\n'),
+    );
+    return;
+  }
+
+  // Interactive and repair paths need the secret store
   const secureBackend = options.config.network.secureBackend ?? 'local-encrypted';
   let passphrase: string | undefined = process.env.FRANKENBEAST_PASSPHRASE;
   if (secureBackend === 'local-encrypted' && !passphrase) {
@@ -29,20 +44,6 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     io: options.io,
     passphrase,
   });
-
-  if (options.args.initVerify) {
-    const verification = await verifyInit({
-      configFile: options.paths.configFile,
-      stateStore,
-      secretStore,
-    });
-    options.print(
-      verification.ok
-        ? `Init verify passed for ${options.paths.configFile}.`
-        : verification.messages.join('\n'),
-    );
-    return;
-  }
 
   if (options.args.initRepair) {
     const result = await runRepairInit({

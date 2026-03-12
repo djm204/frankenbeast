@@ -119,9 +119,13 @@ export async function resolveBeastOperatorToken(
   if (secretStore && config) {
     const lookupKey = config.network.operatorTokenRef;
     if (lookupKey) {
-      const storeToken = await secretStore.resolve(lookupKey);
-      if (storeToken?.trim()) {
-        return storeToken.trim();
+      try {
+        const storeToken = await secretStore.resolve(lookupKey);
+        if (storeToken?.trim()) {
+          return storeToken.trim();
+        }
+      } catch {
+        // Secret store unavailable (e.g. missing CLI binary) — fall through to env vars
       }
     }
   }

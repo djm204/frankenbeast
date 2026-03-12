@@ -95,6 +95,38 @@ export class OsKeychainStore implements ISecretStore {
     }
   }
 
+  // ── Manifest helpers (Linux + macOS lack native key listing) ────────────────
+
+  private async addKeyToManifest(key: string): Promise<void> {
+    if (key === KEYS_META_KEY) return;
+    const existing = await this.keys();
+    if (!existing.includes(key)) {
+      existing.push(key);
+      await this.writeManifest(existing);
+    }
+  }
+
+  private async removeKeyFromManifest(key: string): Promise<void> {
+    if (key === KEYS_META_KEY) return;
+    const existing = await this.keys();
+    const updated = existing.filter(k => k !== key);
+    if (updated.length !== existing.length) {
+      await this.writeManifest(updated);
+    }
+  }
+
+  private async writeManifest(keys: string[]): Promise<void> {
+    const value = JSON.stringify(keys);
+    switch (this.platform) {
+      case 'linux':
+        return this.storeLinuxRaw(KEYS_META_KEY, value);
+      case 'darwin':
+        return this.storeDarwinRaw(KEYS_META_KEY, value);
+      default:
+        break;
+    }
+  }
+
   // ── Linux (secret-tool / GNOME Keyring) ─────────────────────────────────────
 
   private async detectLinux(): Promise<SecretStoreDetection> {
@@ -111,6 +143,11 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeLinux(key: string, value: string): Promise<void> {
+    await this.storeLinuxRaw(key, value);
+    await this.addKeyToManifest(key);
+  }
+
+  private async storeLinuxRaw(key: string, value: string): Promise<void> {
     // secret-tool store reads the secret from stdin
     const args = [
       'store',
@@ -150,6 +187,7 @@ export class OsKeychainStore implements ISecretStore {
       'key',
       key,
     ]);
+    await this.removeKeyFromManifest(key);
   }
 
   private async keysLinux(): Promise<string[]> {
@@ -179,6 +217,11 @@ export class OsKeychainStore implements ISecretStore {
   }
 
   private async storeDarwin(key: string, value: string): Promise<void> {
+    await this.storeDarwinRaw(key, value);
+    await this.addKeyToManifest(key);
+  }
+
+  private async storeDarwinRaw(key: string, value: string): Promise<void> {
     await this.runner('security', [
       'add-generic-password',
       '-U',
@@ -207,6 +250,7 @@ export class OsKeychainStore implements ISecretStore {
       '-s', SERVICE,
       '-a', key,
     ]);
+    await this.removeKeyFromManifest(key);
   }
 
   private async keysDarwin(): Promise<string[]> {

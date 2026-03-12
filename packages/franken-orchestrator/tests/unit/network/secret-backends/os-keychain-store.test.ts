@@ -61,6 +61,41 @@ describe('OsKeychainStore', () => {
       mock.responses.set('clear', { stdout: '', stderr: '', exitCode: 0 });
       await expect(store.delete('comms.slack.botTokenRef')).resolves.not.toThrow();
     });
+
+    it('updates key manifest on store and delete', async () => {
+      // Track what gets written to the manifest
+      const manifestWrites: string[] = [];
+      mock.responses.set('store', { stdout: '', stderr: '', exitCode: 0 });
+      mock.responses.set('clear', { stdout: '', stderr: '', exitCode: 0 });
+
+      // Store a key — manifest lookup returns empty (first time)
+      await store.store('my-key', 'my-value');
+      // The store call writes the key, then writes the manifest
+      const manifestStoreCall = mock.calls.find(
+        c => c.args.includes('store') && c.args.includes('__frankenbeast_keys__'),
+      );
+      expect(manifestStoreCall).toBeDefined();
+      // The manifest value should contain 'my-key'
+      const manifestValue = manifestStoreCall!.args[manifestStoreCall!.args.length - 1];
+      manifestWrites.push(manifestValue);
+      expect(JSON.parse(manifestValue)).toEqual(['my-key']);
+
+      // Now simulate the manifest existing for delete
+      mock.responses.set('lookup', {
+        stdout: JSON.stringify(['my-key']) + '\n',
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.calls.length = 0;
+      await store.delete('my-key');
+      // Should write an empty manifest
+      const deleteManifestCall = mock.calls.find(
+        c => c.args.includes('store') && c.args.includes('__frankenbeast_keys__'),
+      );
+      expect(deleteManifestCall).toBeDefined();
+      const deleteManifestValue = deleteManifestCall!.args[deleteManifestCall!.args.length - 1];
+      expect(JSON.parse(deleteManifestValue)).toEqual([]);
+    });
   });
 
   describe('darwin platform', () => {
