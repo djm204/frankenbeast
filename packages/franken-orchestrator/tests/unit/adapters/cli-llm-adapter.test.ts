@@ -14,6 +14,14 @@ interface MockSpawnCall {
   options: SpawnOptions;
 }
 
+interface MockSpawnResult {
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  delayMs?: number;
+  neverExit?: boolean;
+}
+
 function createMockSpawn(opts: {
   stdout?: string;
   stderr?: string;
@@ -52,6 +60,51 @@ function createMockSpawn(opts: {
         stderrStream.end();
         proc.emit('close', opts.exitCode ?? 0);
       }, opts.delayMs ?? 5);
+    }
+
+    return proc;
+  };
+
+  return { spawnFn, calls };
+}
+
+function createQueuedSpawn(results: MockSpawnResult[]): {
+  spawnFn: (cmd: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+  calls: MockSpawnCall[];
+} {
+  const calls: MockSpawnCall[] = [];
+  let index = 0;
+
+  const spawnFn = (cmd: string, args: readonly string[], options: SpawnOptions): ChildProcess => {
+    calls.push({ cmd, args: [...args], options });
+    const current = results[index++] ?? { stdout: '', stderr: 'unexpected spawn', exitCode: 1 };
+
+    const proc = new EventEmitter() as ChildProcess;
+    const stdinStream = new PassThrough();
+    const stdoutStream = new PassThrough();
+    const stderrStream = new PassThrough();
+
+    Object.defineProperty(proc, 'stdin', { value: stdinStream, writable: false });
+    Object.defineProperty(proc, 'stdout', { value: stdoutStream, writable: false });
+    Object.defineProperty(proc, 'stderr', { value: stderrStream, writable: false });
+    Object.defineProperty(proc, 'pid', { value: 12345 + index, writable: false });
+
+    const killFn = vi.fn(() => {
+      if (!current.neverExit) {
+        setTimeout(() => proc.emit('close', null), 2);
+      }
+      return true;
+    });
+    Object.defineProperty(proc, 'kill', { value: killFn, writable: false });
+
+    if (!current.neverExit) {
+      setTimeout(() => {
+        if (current.stdout) stdoutStream.write(current.stdout);
+        stdoutStream.end();
+        if (current.stderr) stderrStream.write(current.stderr);
+        stderrStream.end();
+        proc.emit('close', current.exitCode ?? 0);
+      }, current.delayMs ?? 5);
     }
 
     return proc;
@@ -321,6 +374,55 @@ describe('CliLlmAdapter', () => {
         );
         const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
         expect(result).toBe('full output');
+      });
+
+      it('switches to the next provider when the selected provider is rate limited', async () => {
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'codex success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('codex success');
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+      });
+
+      it('sleeps after all configured providers are exhausted, then retries from the selected provider', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { stderr: 'resets in 3s', exitCode: 1 },
+          { stdout: 'claude recovered', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('claude recovered');
+        expect(sleepFn).toHaveBeenCalledWith(3_000);
+        expect(calls).toHaveLength(3);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+        expect(calls[2]!.cmd).toBe('claude');
       });
     });
   });
