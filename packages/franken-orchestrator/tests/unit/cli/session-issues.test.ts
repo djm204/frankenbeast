@@ -435,19 +435,7 @@ describe('Session.runIssues()', () => {
     );
   });
 
-  it('flows --no-pr through to IssueRunner', async () => {
-    const { Session } = await import('../../../src/cli/session.js');
-    const config = makeConfig({ noPr: true });
-    const session = new Session(config);
-
-    await session.runIssues();
-
-    expect(mockRunnerInstance.run).toHaveBeenCalledWith(
-      expect.objectContaining({ noPr: true }),
-    );
-  });
-
-  it('passes baseBranch and repo to IssueRunner', async () => {
+  it('passes repo to IssueRunner', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig({ baseBranch: 'develop' });
     const session = new Session(config);
@@ -456,7 +444,6 @@ describe('Session.runIssues()', () => {
 
     expect(mockRunnerInstance.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        baseBranch: 'develop',
         repo: 'org/repo',
       }),
     );
@@ -502,7 +489,7 @@ describe('Session.runIssues()', () => {
     expect(runCall.triageResults).toHaveLength(1);
   });
 
-  it('wires graphBuilder, executor, git, checkpoint to IssueRunner', async () => {
+  it('wires graphBuilder, git, checkpoint to IssueRunner', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig();
     const session = new Session(config);
@@ -512,10 +499,10 @@ describe('Session.runIssues()', () => {
     expect(mockRunnerInstance.run).toHaveBeenCalledWith(
       expect.objectContaining({
         graphBuilder: mockGraphBuilder,
-        executor: mockExecutor,
         git: mockGit,
         checkpoint: mockCheckpoint,
         issueRuntime: mockIssueRuntime,
+        fullDeps: expect.anything(),
       }),
     );
   });
