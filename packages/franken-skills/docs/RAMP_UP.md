@@ -98,4 +98,4 @@ Test runner: **Vitest**. Tests are colocated (e.g., `skill-registry.test.ts` nex
 
 - **Upstream**: `@djm204/agent-skills` npm package (external CLI), local `/skills/*.json` files
 - **Downstream consumers**: franken-planner (MOD-04) queries available skills; frankenfirewall (MOD-01) validates that invoked skills satisfy their declared constraints (`is_destructive`, `requires_hitl`, `sandbox_type`)
-- **Package**: `@franken/skills` v0.1.0 -- ESM, Node >=18, no production dependencies
+- **Package**: `@franken/skills` v0.3.1 -- ESM, Node >=18, no production dependencies

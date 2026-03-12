@@ -136,14 +136,14 @@ Flow: sanitize input (MOD-01) -> build graph (GraphBuilder) -> HITL approval gat
 ## Build and Test
 
 ```bash
-pnpm build          # uses tsup (NOT tsc) -- tsup src/index.ts --format esm --dts
-pnpm test           # vitest (watch mode)
-pnpm test:ci        # vitest run --coverage
-pnpm typecheck      # tsc --noEmit
-pnpm lint           # eslint
+npm run build       # tsc
+npm run test        # vitest run
+npm run test:ci     # vitest run --coverage
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint
 ```
 
 ## Dependencies
 
 - **Runtime**: `@franken/types` (file:../franken-types) -- TaskId, RationaleBlock, VerificationResult
-- **Dev**: vitest, tsup, typescript 5.x, eslint, prettier
+- **Dev**: vitest, typescript 5.x, eslint, prettier
