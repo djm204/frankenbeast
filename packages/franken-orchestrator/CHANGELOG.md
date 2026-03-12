@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.17.0...franken-orchestrator-v0.18.0) (2026-03-12)
+
+
+### Features
+
+* add tracked agent dashboard controls ([0f9b4db](https://github.com/djm204/frankenbeast/commit/0f9b4db305950ccdd1580fee28d8ba1ee751d9ee))
+* add tracked agent dashboard controls ([fb13aa7](https://github.com/djm204/frankenbeast/commit/fb13aa740788a9ec7b81066d732318ce5314efb7))
+
+
+### Bug Fixes
+
+* broaden start endpoint status guard and clear selection on agent delete ([45026bf](https://github.com/djm204/frankenbeast/commit/45026bf0f7b7fc5edede087e00176f6ed09d3493))
+
 ## [0.17.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.16.0...franken-orchestrator-v0.17.0) (2026-03-12)
 
 
