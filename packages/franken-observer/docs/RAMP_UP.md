@@ -133,9 +133,9 @@ All implement `ExportAdapter`. Write-only adapters return `null`/`[]` for querie
 ## Build and Test
 
 ```bash
-npm run build          # tsup -> dist/ (dual CJS + ESM)
+npm run build          # tsc
 npm run typecheck      # tsc --noEmit
-npm run test           # vitest run (~389 tests)
+npm run test           # vitest run
 npm run test:watch     # vitest (watch mode)
 npm run test:integration  # INTEGRATION=true vitest run (requires SQLite)
 npm run test:eval         # EVAL=true vitest run (LLM-judge evals, costs money)
@@ -146,5 +146,5 @@ Tests are co-located (`*.test.ts` next to source). Integration tests use `*.inte
 ## Dependencies
 
 - **Runtime:** `better-sqlite3` (SQLite adapter)
-- **Dev:** `vitest`, `tsup`, `typescript`, `@types/better-sqlite3`, `@types/node`
+- **Dev:** `vitest`, `typescript`, `@types/better-sqlite3`, `@types/node`
 - **No OTEL SDK dependency** -- the module serializes to OTEL format via its own `OTELSerializer`

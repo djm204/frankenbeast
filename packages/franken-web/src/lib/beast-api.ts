@@ -146,6 +146,12 @@ export class BeastApiClient {
     return this.postAction(runId, 'restart');
   }
 
+  async resumeAgent(agentId: string): Promise<BeastRunSummary> {
+    return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}/resume`, {
+      method: 'POST',
+    });
+  }
+
   private async postAction(runId: string, action: 'start' | 'stop' | 'kill' | 'restart'): Promise<BeastRunSummary> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/${action}`, {
       method: 'POST',

@@ -43,7 +43,19 @@ function createBeastApp() {
         await logStore.append(run.id, attempt.id, 'stdout', 'started');
         return attempt;
       }),
-      stop: vi.fn(),
+      stop: vi.fn(async (runId: string, attemptId: string) => {
+        const attempt = repository.updateAttempt(attemptId, {
+          status: 'stopped',
+          finishedAt: '2026-03-11T00:02:00.000Z',
+          stopReason: 'operator_stop',
+        });
+        repository.updateRun(runId, {
+          status: 'stopped',
+          finishedAt: '2026-03-11T00:02:00.000Z',
+          stopReason: 'operator_stop',
+        });
+        return attempt;
+      }),
       kill: vi.fn(),
     },
     container: {
@@ -90,6 +102,12 @@ function createStandaloneAgentApp() {
   app.onError(errorHandler);
   app.route('/', agentRoutes({
     agents,
+    runs: {
+      start: vi.fn(),
+      stop: vi.fn(),
+      kill: vi.fn(),
+      restart: vi.fn(),
+    } as never,
     operatorToken: 'super-secret-operator-token',
     security: new TransportSecurityService(),
   }));
@@ -269,6 +287,75 @@ describe('agent routes', () => {
     expect(detailBody.data.agent.initAction.kind).toBe('martin-loop');
     expect(detailBody.data.agent.dispatchRunId).toBe(createdRun.data.id);
     expect(detailBody.data.events.map((event) => event.type)).toContain('agent.created');
+  });
+
+  it('resumes a stopped tracked agent by creating a new run attempt on the linked run', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createAgentResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Resume from dashboard',
+            chunkDirectory: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Resume from dashboard',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+    const createdAgent = await createAgentResponse.json() as { data: { id: string } };
+
+    const createRunResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: createdAgent.data.id,
+        config: {
+          provider: 'claude',
+          objective: 'Resume from dashboard',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+    const createdRun = await createRunResponse.json() as { data: { id: string } };
+
+    const stopResponse = await app.request(`/v1/beasts/runs/${createdRun.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(stopResponse.status).toBe(200);
+
+    const resumeResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/resume`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(resumeResponse.status).toBe(200);
+    const resumed = await resumeResponse.json() as { data: { id: string; attemptCount: number; status: string } };
+    expect(resumed.data.id).toBe(createdRun.data.id);
+    expect(resumed.data.attemptCount).toBe(2);
+    expect(resumed.data.status).toBe('running');
   });
 
   it('returns 404 for unknown tracked agents', async () => {

@@ -140,4 +140,4 @@ Only runtime dependency: `hono`. Dev: vitest, typescript, eslint, prettier.
 
 ## System Context
 
-MOD-01 in the 10-module frankenbeast framework. Sits between `franken-orchestrator` (caller) and LLM providers. Depends on `SkillRegistryClient` interface (MOD-02 boundary) for tool grounding -- injected, never imported concretely. Config is `guardrails.config.json` per project.
+MOD-01 in the Frankenbeast monorepo. Sits between `franken-orchestrator` (caller) and LLM providers. Depends on `SkillRegistryClient` interface (MOD-02 boundary) for tool grounding -- injected, never imported concretely. Config is `guardrails.config.json` per project.

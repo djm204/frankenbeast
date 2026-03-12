@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **13 packages** live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **5 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, `franken-web`). Cross-package dependencies use workspace references (e.g., `@frankenbeast/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **13 packages** live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **5 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, `franken-web`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 ## Modules
 
@@ -131,7 +131,7 @@ npm run typecheck    # turbo run typecheck
 
 Per-package: `npx turbo run test --filter=franken-brain`
 
-All modules use `tsc` for builds.
+Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 
 ## Project Config
 
@@ -162,7 +162,7 @@ All modules use `tsc` for builds.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 18 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway, network operator control plane, tracked-agent init workflow) |
+| `docs/adr/` | ADRs covering monorepo structure, hex architecture, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, pluggable CLI providers, multi-pass planning, chat dispatch, external comms, network operator control plane, and tracked-agent init workflow |
 | `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 

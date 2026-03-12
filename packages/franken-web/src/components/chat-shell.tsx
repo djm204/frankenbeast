@@ -478,31 +478,21 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setBeastError(error instanceof Error ? error.message : 'Unable to kill Beast run.');
               });
             }}
+            onResume={(agentId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.resumeAgent(agentId).then(() => {
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to resume tracked agent.');
+              });
+            }}
             onRefresh={() => {
               setBeastRefreshNonce((current) => current + 1);
             }}
-            onRestart={(runId) => {
-              if (!beastClient) {
-                return;
-              }
-              void beastClient.restartRun(runId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to restart Beast run.');
-              });
-            }}
             onSelectAgent={(agentId) => {
               setSelectedBeastAgentId(agentId);
-            }}
-            onStart={(runId) => {
-              if (!beastClient) {
-                return;
-              }
-              void beastClient.startRun(runId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to start Beast run.');
-              });
             }}
             onStop={(runId) => {
               if (!beastClient) {

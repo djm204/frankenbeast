@@ -124,6 +124,7 @@ const mockCreateAgent = vi.fn().mockResolvedValue({
   createdAt: '2026-03-11T00:00:02.000Z',
   updatedAt: '2026-03-11T00:00:02.000Z',
 });
+const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -174,6 +175,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getRun: typeof mockGetRun;
     getLogs: typeof mockGetLogs;
     createAgent: typeof mockCreateAgent;
+    resumeAgent: typeof mockResumeAgent;
     startRun: ReturnType<typeof vi.fn>;
     stopRun: ReturnType<typeof vi.fn>;
     killRun: ReturnType<typeof vi.fn>;
@@ -185,6 +187,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getRun = mockGetRun;
     this.getLogs = mockGetLogs;
     this.createAgent = mockCreateAgent;
+    this.resumeAgent = mockResumeAgent;
     this.startRun = vi.fn().mockResolvedValue(undefined);
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
@@ -221,6 +224,60 @@ afterEach(() => {
       updatedAt: '2026-03-09T00:00:01Z',
     },
   ]);
+  mockListAgents.mockResolvedValue([
+    {
+      id: 'agent-1',
+      definitionId: 'chunk-plan',
+      status: 'dispatching',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { designDocPath: 'docs/plans/design.md' },
+      chatSessionId: 'sess-1',
+      dispatchRunId: 'run-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:01.000Z',
+    },
+  ]);
+  mockGetAgent.mockResolvedValue({
+    agent: {
+      id: 'agent-1',
+      definitionId: 'chunk-plan',
+      status: 'dispatching',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { designDocPath: 'docs/plans/design.md' },
+      chatSessionId: 'sess-1',
+      dispatchRunId: 'run-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:01.000Z',
+    },
+    events: [
+      {
+        id: 'event-1',
+        agentId: 'agent-1',
+        sequence: 1,
+        level: 'info',
+        type: 'agent.command.sent',
+        message: 'sent planning command',
+        payload: {},
+        createdAt: '2026-03-11T00:00:01.000Z',
+      },
+    ],
+  });
+  mockResumeAgent.mockReset();
+  mockResumeAgent.mockResolvedValue(undefined);
 });
 
 describe('ChatShell', () => {
@@ -332,5 +389,69 @@ describe('ChatShell', () => {
     expect(screen.getByText('started from chat')).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
     expect(mockGetAgent).toHaveBeenCalledWith('agent-1');
+  });
+
+  it('resumes stopped tracked agents from the beasts page', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'stopped',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: { designDocPath: 'docs/plans/design.md' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { designDocPath: 'docs/plans/design.md' },
+        chatSessionId: 'sess-1',
+        dispatchRunId: 'run-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+    ]);
+    mockGetAgent.mockResolvedValue({
+      agent: {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'stopped',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: { designDocPath: 'docs/plans/design.md' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { designDocPath: 'docs/plans/design.md' },
+        chatSessionId: 'sess-1',
+        dispatchRunId: 'run-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+      events: [],
+    });
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Resume agent-1' })).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume agent-1' }));
+
+    await waitFor(() => {
+      expect(mockResumeAgent).toHaveBeenCalledWith('agent-1');
+    });
   });
 });

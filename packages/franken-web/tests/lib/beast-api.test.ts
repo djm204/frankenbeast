@@ -120,4 +120,24 @@ describe('BeastApiClient', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('resumes a tracked agent through the agent-specific endpoint', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          id: 'run-1',
+          status: 'running',
+          attemptCount: 2,
+        },
+      }),
+    });
+
+    await client.resumeAgent('agent-1');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents/agent-1/resume',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });
