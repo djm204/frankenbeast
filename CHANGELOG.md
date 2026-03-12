@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.2](https://github.com/djm204/frankenbeast/compare/v0.18.1...v0.18.2) (2026-03-12)
+
+
+### Bug Fixes
+
+* **orchestrator:** make one-shot issues issue-aware and resumable ([09488cb](https://github.com/djm204/frankenbeast/commit/09488cb6f49ee2179ce9d2d0cfaff2f19cd1ef4f))
+
+
+### Documentation
+
+* add issue-aware issues resume design and plan ([a87a74b](https://github.com/djm204/frankenbeast/commit/a87a74bdfe91c153ad0f40bd788ae29c958bdc84))
+
 ## [0.18.1](https://github.com/djm204/frankenbeast/compare/v0.18.0...v0.18.1) (2026-03-12)
 
 
