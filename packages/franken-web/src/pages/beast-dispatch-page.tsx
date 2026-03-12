@@ -266,7 +266,10 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
             </div>
           </div>
           <div className="beast-run-list">
-            {props.agents.map((agent) => (
+            {props.agents.map((agent) => {
+              const linkedRunId = agent.dispatchRunId;
+
+              return (
               <article className={`beast-run-row ${props.selectedAgentId === agent.id ? 'beast-run-row--selected' : ''}`} key={agent.id}>
                 <button
                   className="button button--secondary button--compact"
@@ -279,7 +282,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                   <strong>{agent.definitionId}</strong>
                   <span>{agent.status}</span>
                   <small>{agent.source} · {agent.createdByUser}</small>
-                  {agent.dispatchRunId && <small>linked run {agent.dispatchRunId}</small>}
+                  {linkedRunId && <small>linked run {linkedRunId}</small>}
                 </div>
                 <div className="beast-run-row__actions">
                   {canStopAgent(agent) && (
@@ -291,18 +294,19 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                   {canRestartAgent(agent) && (
                     <button className="button button--secondary button--compact" onClick={() => props.onRestart(agent.id)} type="button">Restart {agent.id}</button>
                   )}
-                  {agent.status === 'stopped' && agent.dispatchRunId && (
+                  {agent.status === 'stopped' && linkedRunId && (
                     <button className="button button--secondary button--compact" onClick={() => props.onResume(agent.id)} type="button">Resume {agent.id}</button>
                   )}
                   {agent.status === 'stopped' && (
                     <button className="button button--secondary button--compact" onClick={() => props.onDelete(agent.id)} type="button">Delete {agent.id}</button>
                   )}
-                  {agent.status === 'running' && agent.dispatchRunId && (
-                    <button className="button button--secondary button--compact" onClick={() => props.onKill(agent.dispatchRunId)} type="button">Kill {agent.dispatchRunId}</button>
+                  {agent.status === 'running' && linkedRunId && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onKill(linkedRunId)} type="button">Kill {linkedRunId}</button>
                   )}
                 </div>
               </article>
-            ))}
+            );
+            })}
           </div>
         </section>
 
