@@ -25,6 +25,13 @@ describe('GeminiProvider', () => {
     expect(args).toContain('-p');
   });
 
+  it('buildArgs supplies an empty prompt argument after -p for stdin-driven headless mode', () => {
+    const args = provider.buildArgs({});
+    const promptIndex = args.indexOf('-p');
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(args[promptIndex + 1]).toBe('');
+  });
+
   it('buildArgs includes --yolo flag', () => {
     const args = provider.buildArgs({});
     expect(args).toContain('--yolo');
