@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.18.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.0...franken-orchestrator-v0.18.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* add provider fallback to cli llm adapter ([643ed9f](https://github.com/djm204/frankenbeast/commit/643ed9f3876d760f9621d648dbf6cd2e5fb021ca))
+* correct gemini headless prompt args ([a076b7c](https://github.com/djm204/frankenbeast/commit/a076b7cab410b84a6ee141dbb40704b54d27d45b))
+* honor provider selection in issues execution ([23073a3](https://github.com/djm204/frankenbeast/commit/23073a31bf0f922913f81006e2dbdf65c3117f41))
+* **orchestrator:** honor provider selection and fallback semantics ([abf1b77](https://github.com/djm204/frankenbeast/commit/abf1b776226e67257ec39e2d34cd359bc3e7eb95))
+* preserve provider semantics during cli fallback ([5f34635](https://github.com/djm204/frankenbeast/commit/5f34635505c4dcc4f449e4f33b64c2d171189d5a))
+
 ## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.17.0...franken-orchestrator-v0.18.0) (2026-03-12)
 
 
