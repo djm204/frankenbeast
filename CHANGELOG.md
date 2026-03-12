@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.18.1](https://github.com/djm204/frankenbeast/compare/v0.18.0...v0.18.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **orchestrator:** honor provider selection and fallback semantics ([abf1b77](https://github.com/djm204/frankenbeast/commit/abf1b776226e67257ec39e2d34cd359bc3e7eb95))
+
+
+### Miscellaneous
+
+* **franken-observer:** implement fix-issue-89-costcalculator-silently-returns-0-f ([ca26308](https://github.com/djm204/frankenbeast/commit/ca2630882bf79032e66da42fce92f410c35afe7c))
+
+
+### Documentation
+
+* add issues provider fallback design and plan ([8623a74](https://github.com/djm204/frankenbeast/commit/8623a74ada6b8aeb6bb86be82dfbbbb675b46dfb))
+
 ## [0.18.0](https://github.com/djm204/frankenbeast/compare/v0.17.1...v0.18.0) (2026-03-12)
 
 

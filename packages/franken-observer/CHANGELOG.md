@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.0...franken-observer-v0.4.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **orchestrator:** honor provider selection and fallback semantics ([abf1b77](https://github.com/djm204/frankenbeast/commit/abf1b776226e67257ec39e2d34cd359bc3e7eb95))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.3.2...franken-observer-v0.4.0) (2026-03-12)
 
 
