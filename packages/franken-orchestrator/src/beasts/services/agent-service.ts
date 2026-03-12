@@ -55,12 +55,12 @@ export class AgentService {
   }
 
   listAgents(): TrackedAgent[] {
-    return this.repository.listTrackedAgents();
+    return this.repository.listTrackedAgents().filter((agent) => isVisibleAgent(agent));
   }
 
   getAgent(agentId: string): TrackedAgent {
     const agent = this.repository.getTrackedAgent(agentId);
-    if (!agent) {
+    if (!agent || !isVisibleAgent(agent)) {
       throw new UnknownTrackedAgentError(agentId);
     }
     return agent;
@@ -87,6 +87,17 @@ export class AgentService {
     });
   }
 
+  softDeleteAgent(agentId: string): TrackedAgent {
+    const agent = this.getAgent(agentId);
+    if (agent.status !== 'stopped') {
+      throw new Error(`Tracked agent '${agentId}' is not stopped`);
+    }
+    return this.repository.updateTrackedAgent(agentId, {
+      status: 'deleted',
+      updatedAt: this.now(),
+    });
+  }
+
   updateAgent(agentId: string, request: UpdateTrackedAgentRequest): TrackedAgent {
     return this.repository.updateTrackedAgent(agentId, {
       ...(request.status !== undefined ? { status: request.status } : {}),
@@ -95,4 +106,8 @@ export class AgentService {
       updatedAt: this.now(),
     });
   }
+}
+
+function isVisibleAgent(agent: TrackedAgent): boolean {
+  return agent.status !== 'deleted';
 }

@@ -19,7 +19,7 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
-function createBeastApp() {
+function createBeastApp(opts?: { rateLimitMax?: number }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -86,7 +86,7 @@ function createBeastApp() {
       operatorToken,
       rateLimit: {
         windowMs: 60_000,
-        max: 20,
+        max: opts?.rateLimitMax ?? 20,
       },
     },
   });
@@ -434,6 +434,197 @@ describe('agent routes', () => {
     expect(resumed.data.status).toBe('running');
   });
 
+  it('stops initializing tracked agents without a linked run', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Stop from dashboard' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { goal: 'Stop from dashboard' },
+        chatSessionId: 'sess-1',
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string } };
+    expect(created.data.status).toBe('initializing');
+
+    const stopResponse = await app.request(`/v1/beasts/agents/${created.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(stopResponse.status).toBe(200);
+    const stopped = await stopResponse.json() as { data: { id: string; status: string } };
+    expect(stopped.data.id).toBe(created.data.id);
+    expect(stopped.data.status).toBe('stopped');
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const detail = await detailResponse.json() as {
+      data: {
+        agent: { status: string };
+        events: Array<{ type: string }>;
+      };
+    };
+    expect(detail.data.agent.status).toBe('stopped');
+    expect(detail.data.events.map((event) => event.type)).toContain('agent.stop.requested');
+  });
+
+  it('starts and restarts stopped tracked agents through agent-specific endpoints', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createAgentResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Restart from dashboard',
+            chunkDirectory: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Restart from dashboard',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+    const createdAgent = await createAgentResponse.json() as { data: { id: string } };
+
+    const createRunResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: createdAgent.data.id,
+        config: {
+          provider: 'claude',
+          objective: 'Restart from dashboard',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+    expect(createRunResponse.status).toBe(201);
+    const createdRun = await createRunResponse.json() as { data: { id: string } };
+
+    const stopResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(stopResponse.status).toBe(200);
+
+    const startResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/start`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(startResponse.status).toBe(200);
+    const started = await startResponse.json() as { data: { id: string; attemptCount: number; status: string } };
+    expect(started.data.id).toBe(createdRun.data.id);
+    expect(started.data.attemptCount).toBe(2);
+    expect(started.data.status).toBe('running');
+
+    const restartResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/restart`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(restartResponse.status).toBe(200);
+    const restarted = await restartResponse.json() as { data: { id: string; attemptCount: number; status: string } };
+    expect(restarted.data.id).toBe(createdRun.data.id);
+    expect(restarted.data.attemptCount).toBe(3);
+    expect(restarted.data.status).toBe('running');
+  });
+
+  it('soft-deletes stopped tracked agents so they disappear from the dashboard list', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Delete from dashboard' },
+        },
+        initConfig: { goal: 'Delete from dashboard' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const stopResponse = await app.request(`/v1/beasts/agents/${created.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(stopResponse.status).toBe(200);
+
+    const deleteResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(deleteResponse.status).toBe(204);
+
+    const listResponse = await app.request('/v1/beasts/agents', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const list = await listResponse.json() as { data: { agents: Array<{ id: string }> } };
+    expect(list.data.agents).toEqual([]);
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(detailResponse.status).toBe(404);
+  });
+
   it('returns 404 for unknown tracked agents', async () => {
     const { app, operatorToken } = createBeastApp();
 
@@ -450,5 +641,146 @@ describe('agent routes', () => {
         message: "Tracked agent 'agent-missing' was not found",
       },
     });
+  });
+
+  it('rate-limits agent creation requests', async () => {
+    const { app, operatorToken } = createBeastApp({ rateLimitMax: 2 });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const body = JSON.stringify({
+      definitionId: 'design-interview',
+      initAction: {
+        kind: 'design-interview',
+        command: '/interview',
+        config: {},
+      },
+      initConfig: {},
+    });
+
+    const r1 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+    const r2 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+    const r3 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
+
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    expect(r3.status).toBe(429);
+  });
+
+  it('marks agent as failed when dispatch throws instead of leaving orphaned initializing agents', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+            invalidField: 'this-will-fail-schema',
+          },
+        },
+        initConfig: {
+          invalidField: 'this-will-fail-schema',
+        },
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string } };
+    expect(created.data.status).toBe('failed');
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    const detail = await detailResponse.json() as {
+      data: {
+        agent: { status: string };
+        events: Array<{ type: string }>;
+      };
+    };
+    expect(detail.data.agent.status).toBe('failed');
+    expect(detail.data.events.map((e) => e.type)).toContain('agent.dispatch.failed');
+  });
+
+  it('allows starting failed tracked agents via the start endpoint', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    // Create a chunk-plan agent with valid config — dispatch will succeed and start
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+        },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(created.data.status).toBe('running');
+    expect(created.data.dispatchRunId).toBeTruthy();
+
+    // Stop the run to get to 'stopped' state, then kill the run to get agent to 'failed'
+    await app.request(`/v1/beasts/runs/${created.data.dispatchRunId}/stop`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    // Verify the agent is stopped, then use the restart endpoint which already works for stopped
+    // The real test: use the start endpoint with a failed agent (via dispatch failure test above)
+    // Instead, create a new agent with invalid config so it becomes 'failed' with no dispatchRunId
+    const failedResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan',
+          config: {},
+        },
+        initConfig: {
+          invalidField: 'will-fail',
+        },
+      }),
+    });
+    expect(failedResponse.status).toBe(201);
+    const failedAgent = await failedResponse.json() as { data: { id: string; status: string } };
+    expect(failedAgent.data.status).toBe('failed');
+
+    // Starting a failed agent without a dispatchRunId will try dispatchDetachedAgent
+    // which will also fail (same bad config), but the status guard should NOT be the blocker
+    const startResponse = await app.request(`/v1/beasts/agents/${failedAgent.data.id}/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    // The start attempt goes through the status guard (no 409) but dispatch may fail (500)
+    // At minimum it should NOT be 409 TRACKED_AGENT_NOT_STARTABLE
+    expect(startResponse.status).not.toBe(409);
   });
 });

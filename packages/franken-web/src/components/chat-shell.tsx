@@ -442,6 +442,17 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             catalog={beastCatalog}
             disabled={!beastClient}
             error={beastError}
+            onDelete={(agentId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.deleteAgent(agentId).then(() => {
+                setSelectedBeastAgentId((current) => current === agentId ? null : current);
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to delete tracked agent.');
+              });
+            }}
             onDispatch={(definitionId, config) => {
               if (!beastClient) {
                 return;
@@ -478,6 +489,16 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setBeastError(error instanceof Error ? error.message : 'Unable to kill Beast run.');
               });
             }}
+            onRestart={(agentId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.restartAgent(agentId).then(() => {
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to restart tracked agent.');
+              });
+            }}
             onResume={(agentId) => {
               if (!beastClient) {
                 return;
@@ -494,14 +515,24 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             onSelectAgent={(agentId) => {
               setSelectedBeastAgentId(agentId);
             }}
-            onStop={(runId) => {
+            onStart={(agentId) => {
               if (!beastClient) {
                 return;
               }
-              void beastClient.stopRun(runId).then(() => {
+              void beastClient.startAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to stop Beast run.');
+                setBeastError(error instanceof Error ? error.message : 'Unable to start tracked agent.');
+              });
+            }}
+            onStop={(agentId) => {
+              if (!beastClient) {
+                return;
+              }
+              void beastClient.stopAgent(agentId).then(() => {
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((error) => {
+                setBeastError(error instanceof Error ? error.message : 'Unable to stop tracked agent.');
               });
             }}
             agentDetail={beastAgentDetail}

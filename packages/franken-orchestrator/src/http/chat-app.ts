@@ -99,6 +99,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       runs: opts.beastControl.runs,
       operatorToken: opts.beastControl.operatorToken,
       security: opts.beastControl.security ?? transportSecurity,
+      rateLimit: opts.beastControl.rateLimit,
     }));
   }
   if (opts.networkControl) {

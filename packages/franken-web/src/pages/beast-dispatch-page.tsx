@@ -11,12 +11,15 @@ interface BeastDispatchPageProps {
   catalog: BeastCatalogEntry[];
   disabled: boolean;
   error: string | null;
+  onDelete(agentId: string): void;
   onDispatch(definitionId: string, config: Record<string, unknown>): void;
   onKill(runId: string): void;
+  onRestart(agentId: string): void;
   onResume(agentId: string): void;
   onRefresh(): void;
   onSelectAgent(agentId: string): void;
-  onStop(runId: string): void;
+  onStart(agentId: string): void;
+  onStop(agentId: string): void;
   agentDetail: (TrackedAgentDetail & { run?: BeastRunDetail | null }) | null;
   agents: TrackedAgentSummary[];
   selectedAgentId: string | null;
@@ -74,6 +77,18 @@ function validateDefinition(definition: BeastCatalogEntry, values: Record<string
     const error = validatePrompt(prompt, values[prompt.key] ?? '');
     return error ? [[prompt.key, error]] : [];
   }));
+}
+
+function canStopAgent(agent: TrackedAgentSummary): boolean {
+  return agent.status === 'initializing' || agent.status === 'dispatching' || agent.status === 'running';
+}
+
+function canStartAgent(agent: TrackedAgentSummary): boolean {
+  return agent.status === 'stopped' || agent.status === 'failed' || agent.status === 'completed';
+}
+
+function canRestartAgent(agent: TrackedAgentSummary): boolean {
+  return agent.status === 'running' || canStartAgent(agent);
 }
 
 export function BeastDispatchPage(props: BeastDispatchPageProps) {
@@ -251,7 +266,10 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
             </div>
           </div>
           <div className="beast-run-list">
-            {props.agents.map((agent) => (
+            {props.agents.map((agent) => {
+              const linkedRunId = agent.dispatchRunId;
+
+              return (
               <article className={`beast-run-row ${props.selectedAgentId === agent.id ? 'beast-run-row--selected' : ''}`} key={agent.id}>
                 <button
                   className="button button--secondary button--compact"
@@ -264,23 +282,31 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                   <strong>{agent.definitionId}</strong>
                   <span>{agent.status}</span>
                   <small>{agent.source} · {agent.createdByUser}</small>
-                  {agent.dispatchRunId && <small>linked run {agent.dispatchRunId}</small>}
+                  {linkedRunId && <small>linked run {linkedRunId}</small>}
                 </div>
-                {agent.dispatchRunId && (
-                  <div className="beast-run-row__actions">
-                    {agent.status === 'running' && (
-                      <>
-                        <button className="button button--secondary button--compact" onClick={() => props.onStop(agent.dispatchRunId!)} type="button">Pause {agent.dispatchRunId}</button>
-                        <button className="button button--secondary button--compact" onClick={() => props.onKill(agent.dispatchRunId!)} type="button">Kill {agent.dispatchRunId}</button>
-                      </>
-                    )}
-                    {agent.status === 'stopped' && (
-                      <button className="button button--secondary button--compact" onClick={() => props.onResume(agent.id)} type="button">Resume {agent.id}</button>
-                    )}
-                  </div>
-                )}
+                <div className="beast-run-row__actions">
+                  {canStopAgent(agent) && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onStop(agent.id)} type="button">Stop {agent.id}</button>
+                  )}
+                  {canStartAgent(agent) && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onStart(agent.id)} type="button">Start {agent.id}</button>
+                  )}
+                  {canRestartAgent(agent) && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onRestart(agent.id)} type="button">Restart {agent.id}</button>
+                  )}
+                  {agent.status === 'stopped' && linkedRunId && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onResume(agent.id)} type="button">Resume {agent.id}</button>
+                  )}
+                  {agent.status === 'stopped' && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onDelete(agent.id)} type="button">Delete {agent.id}</button>
+                  )}
+                  {agent.status === 'running' && linkedRunId && (
+                    <button className="button button--secondary button--compact" onClick={() => props.onKill(linkedRunId)} type="button">Kill {linkedRunId}</button>
+                  )}
+                </div>
               </article>
-            ))}
+            );
+            })}
           </div>
         </section>
 

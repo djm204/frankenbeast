@@ -434,7 +434,11 @@ export class SQLiteBeastRepository {
   }
 
   requireTrackedAgent(agentId: string): TrackedAgent {
-    return this.getTrackedAgentOrThrow(agentId);
+    const agent = this.getTrackedAgentOrThrow(agentId);
+    if (agent.status === 'deleted') {
+      throw new UnknownTrackedAgentError(agentId);
+    }
+    return agent;
   }
 
   listTrackedAgents(): TrackedAgent[] {

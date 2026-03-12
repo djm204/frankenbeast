@@ -23,6 +23,9 @@ describe('BeastDispatchPage', () => {
         disabled={false}
         error={null}
         onDispatch={vi.fn()}
+        onDelete={vi.fn()}
+        onRestart={vi.fn()}
+        onStart={vi.fn()}
         onKill={vi.fn()}
         onResume={vi.fn()}
         onRefresh={vi.fn()}
@@ -92,14 +95,18 @@ describe('BeastDispatchPage', () => {
     expect(screen.getByLabelText('Design Doc -> Chunk Creation designDocPath')).toBeDefined();
     expect(screen.queryByRole('button', { name: 'Choose file for Design Doc -> Chunk Creation designDocPath' })).toBeNull();
     expect(screen.getByText('started from chat')).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Pause run-1' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Stop agent-1' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Restart agent-1' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Kill run-1' })).toBeDefined();
     expect(screen.getByText('sent planning command')).toBeDefined();
   });
 
   it('validates file and directory path fields before launch and submits tracked-agent config', () => {
     const onDispatch = vi.fn();
+    const onDelete = vi.fn();
     const onSelectAgent = vi.fn();
+    const onRestart = vi.fn();
+    const onStart = vi.fn();
     const onStop = vi.fn();
     const onKill = vi.fn();
     const onResume = vi.fn();
@@ -132,6 +139,9 @@ describe('BeastDispatchPage', () => {
         disabled={false}
         error={null}
         onDispatch={onDispatch}
+        onDelete={onDelete}
+        onRestart={onRestart}
+        onStart={onStart}
         onKill={onKill}
         onResume={onResume}
         onRefresh={vi.fn()}
@@ -174,7 +184,8 @@ describe('BeastDispatchPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose directory for Martin Loop chunkDirectory' }));
     fireEvent.click(screen.getByRole('button', { name: 'Launch Martin Loop' }));
     fireEvent.click(screen.getByRole('button', { name: 'Inspect agent-1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pause run-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop agent-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart agent-1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Kill run-1' }));
 
     expect(onDispatch).toHaveBeenCalledWith('martin-loop', {
@@ -184,8 +195,10 @@ describe('BeastDispatchPage', () => {
     });
     expect((screen.getByLabelText('Design Doc -> Chunk Creation designDocPath') as HTMLInputElement).value).toBe('docs/plans/design.md');
     expect(onSelectAgent).toHaveBeenCalledWith('agent-1');
-    expect(onStop).toHaveBeenCalledWith('run-1');
+    expect(onStop).toHaveBeenCalledWith('agent-1');
+    expect(onRestart).toHaveBeenCalledWith('agent-1');
     expect(onKill).toHaveBeenCalledWith('run-1');
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it('rejects browser fake file paths for design-doc dispatch', () => {
@@ -208,6 +221,9 @@ describe('BeastDispatchPage', () => {
         disabled={false}
         error={null}
         onDispatch={onDispatch}
+        onDelete={vi.fn()}
+        onRestart={vi.fn()}
+        onStart={vi.fn()}
         onKill={vi.fn()}
         onResume={vi.fn()}
         onRefresh={vi.fn()}
@@ -232,7 +248,10 @@ describe('BeastDispatchPage', () => {
   });
 
   it('shows resume for stopped tracked agents', () => {
+    const onDelete = vi.fn();
+    const onRestart = vi.fn();
     const onResume = vi.fn();
+    const onStart = vi.fn();
 
     render(
       <BeastDispatchPage
@@ -240,6 +259,9 @@ describe('BeastDispatchPage', () => {
         disabled={false}
         error={null}
         onDispatch={vi.fn()}
+        onDelete={onDelete}
+        onRestart={onRestart}
+        onStart={onStart}
         onKill={vi.fn()}
         onResume={onResume}
         onRefresh={vi.fn()}
@@ -277,8 +299,14 @@ describe('BeastDispatchPage', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Resume agent-stopped' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start agent-stopped' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart agent-stopped' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete agent-stopped' }));
 
     expect(onResume).toHaveBeenCalledWith('agent-stopped');
-    expect(screen.queryByRole('button', { name: 'Pause run-stopped' })).toBeNull();
+    expect(onStart).toHaveBeenCalledWith('agent-stopped');
+    expect(onRestart).toHaveBeenCalledWith('agent-stopped');
+    expect(onDelete).toHaveBeenCalledWith('agent-stopped');
+    expect(screen.queryByRole('button', { name: 'Stop agent-stopped' })).toBeNull();
   });
 });

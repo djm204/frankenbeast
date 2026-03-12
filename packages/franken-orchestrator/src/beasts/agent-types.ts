@@ -8,6 +8,7 @@ export const TRACKED_AGENT_STATUSES = [
   'completed',
   'failed',
   'stopped',
+  'deleted',
 ] as const;
 
 export type TrackedAgentStatus = (typeof TRACKED_AGENT_STATUSES)[number];
