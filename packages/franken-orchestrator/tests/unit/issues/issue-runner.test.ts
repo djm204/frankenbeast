@@ -7,23 +7,37 @@ import type { IssueGraphBuilder } from '../../../src/issues/issue-graph-builder.
 import type { GitBranchIsolator } from '../../../src/skills/git-branch-isolator.js';
 import type { BeastResult } from '../../../src/types.js';
 import type { IssueRuntimeArtifacts, IssueRuntimeSupport } from '../../../src/issues/issue-runner.js';
+import type { ChunkDefinition } from '../../../src/cli/file-writer.js';
 
 // ── Mocks ──
 
-const mockRun = vi.fn(async () => {
+const mockLoopConstructions: Array<{ deps: BeastLoopDeps; config: unknown }> = [];
+
+const mockRun = vi.fn(async (deps?: BeastLoopDeps) => {
   // Default mock behavior: success with some tokens used
-  return {
+  const result = {
     status: 'completed',
     tokenSpend: { totalTokens: 200 },
-    taskResults: [],
-    prUrl: 'https://github.com/org/repo/pull/42',
+    taskResults: [
+      { taskId: 'impl:dummy', status: 'success' },
+      { taskId: 'harden:dummy', status: 'success' },
+    ],
   } as unknown as BeastResult;
+
+  await deps?.prCreator?.create?.(result, undefined);
+  return result;
 });
 
 vi.mock('../../../src/beast-loop.js', () => {
   return {
     BeastLoop: class {
-      run = mockRun;
+      private readonly deps: BeastLoopDeps;
+
+      constructor(deps: BeastLoopDeps, config: unknown) {
+        this.deps = deps;
+        mockLoopConstructions.push({ deps, config });
+      }
+      run = async () => mockRun(this.deps);
     },
   };
 });
@@ -52,22 +66,57 @@ function makeTriage(issueNumber: number, complexity: 'one-shot' | 'chunked' = 'o
   };
 }
 
-function makeGraph(issueNumber: number): PlanGraph {
-  const implId = `impl:issue-${issueNumber}`;
-  const hardenId = `harden:issue-${issueNumber}`;
-  return {
-    tasks: [
-      { id: implId, objective: `Fix #${issueNumber}`, requiredSkills: [], dependsOn: [] },
-      { id: hardenId, objective: `Verify #${issueNumber}`, requiredSkills: [], dependsOn: [implId] },
-    ],
-  };
+function makeChunks(issueNumber: number, complexity: 'one-shot' | 'chunked' = 'one-shot'): ChunkDefinition[] {
+  if (complexity === 'one-shot') {
+    return [
+      {
+        id: `issue-${issueNumber}`,
+        objective: `Fix #${issueNumber}`,
+        files: [],
+        successCriteria: `Verify #${issueNumber}`,
+        verificationCommand: 'npm test',
+        dependencies: [],
+      },
+    ];
+  }
+
+  return [
+    {
+      id: `issue-${issueNumber}-part-1`,
+      objective: `Fix #${issueNumber} part 1`,
+      files: [],
+      successCriteria: `Verify #${issueNumber} part 1`,
+      verificationCommand: 'npm test',
+      dependencies: [],
+    },
+    {
+      id: `issue-${issueNumber}-part-2`,
+      objective: `Fix #${issueNumber} part 2`,
+      files: [],
+      successCriteria: `Verify #${issueNumber} part 2`,
+      verificationCommand: 'npm test',
+      dependencies: [`issue-${issueNumber}-part-1`],
+    },
+  ];
 }
 
 // ── Mock builders ──
 
 function mockGraphBuilder(): IssueGraphBuilder {
   return {
-    buildForIssue: vi.fn(async (issue: GithubIssue) => makeGraph(issue.number)),
+    buildForIssue: vi.fn(async (issue: GithubIssue) => {
+      const implId = `impl:issue-${issue.number}`;
+      const hardenId = `harden:issue-${issue.number}`;
+      return {
+        tasks: [
+          { id: implId, objective: `Fix #${issue.number}`, requiredSkills: [`cli:issue-${issue.number}`], dependsOn: [] },
+          { id: hardenId, objective: `Verify #${issue.number}`, requiredSkills: [`cli:issue-${issue.number}/harden`], dependsOn: [implId] },
+        ],
+      } as PlanGraph;
+    }),
+    buildChunkDefinitionsForIssue: vi.fn(async (issue: GithubIssue, triage: TriageResult) =>
+      makeChunks(issue.number, triage.complexity),
+    ),
   } as unknown as IssueGraphBuilder;
 }
 
@@ -116,6 +165,7 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
     checkpointForIssue: vi.fn((_issueNumber: number) => mockCheckpoint()),
     artifactsForIssue: vi.fn((issueNumber: number): IssueRuntimeArtifacts => ({
       planName: `issue-${issueNumber}`,
+      planDir: `/tmp/plans/issue-${issueNumber}`,
       checkpointFile: `/tmp/issue-${issueNumber}.checkpoint`,
       logFile: `/tmp/issue-${issueNumber}-build.log`,
     })),
@@ -127,15 +177,20 @@ describe('IssueRunner', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLoopConstructions.length = 0;
     mockRun.mockReset();
-    mockRun.mockImplementation(async () => {
+    mockRun.mockImplementation(async (deps?: BeastLoopDeps) => {
       // Default mock behavior: success with some tokens used
-      return {
+      const result = {
         status: 'completed',
         tokenSpend: { totalTokens: 200 },
-        taskResults: [],
-        prUrl: 'https://github.com/org/repo/pull/42',
+        taskResults: [
+          { taskId: 'impl:dummy', status: 'success' },
+          { taskId: 'harden:dummy', status: 'success' },
+        ],
       } as unknown as BeastResult;
+      await deps?.prCreator?.create?.(result, undefined);
+      return result;
     });
     runner = new IssueRunner();
   });
@@ -176,7 +231,7 @@ describe('IssueRunner', () => {
   });
 
   describe('per-issue execution', () => {
-    it('calls graphBuilder.buildForIssue() for each issue', async () => {
+    it('calls graphBuilder.buildChunkDefinitionsForIssue() for each issue', async () => {
       const graphBuilder = mockGraphBuilder();
       const issues = [makeIssue({ number: 42 })];
       const triages = [makeTriage(42)];
@@ -184,8 +239,8 @@ describe('IssueRunner', () => {
 
       await runner.run(config);
 
-      expect(graphBuilder.buildForIssue).toHaveBeenCalledOnce();
-      expect(graphBuilder.buildForIssue).toHaveBeenCalledWith(issues[0], triages[0]);
+      expect(graphBuilder.buildChunkDefinitionsForIssue).toHaveBeenCalledOnce();
+      expect(graphBuilder.buildChunkDefinitionsForIssue).toHaveBeenCalledWith(issues[0], triages[0]);
     });
 
     it('instantiates BeastLoop with issue-specific deps and runs it', async () => {
@@ -196,6 +251,32 @@ describe('IssueRunner', () => {
       await runner.run(config);
 
       expect(mockRun).toHaveBeenCalled();
+    });
+
+    it('registers executable one-shot cli skills in BeastLoop deps', async () => {
+      const issues = [makeIssue({ number: 7 })];
+      const triages = [makeTriage(7)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        fullDeps: {
+          skills: {
+            hasSkill: vi.fn(() => false),
+            getAvailableSkills: vi.fn(() => []),
+            execute: vi.fn(),
+          },
+        } as unknown as BeastLoopDeps,
+      });
+
+      await runner.run(config);
+
+      const issueDeps = mockLoopConstructions[0]!.deps;
+      expect(issueDeps.skills.hasSkill('cli:01_issue-7')).toBe(true);
+      expect(issueDeps.skills.getAvailableSkills()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'cli:01_issue-7', executionType: 'cli' }),
+        ]),
+      );
     });
 
     it('creates branch fix/issue-<N> via git.isolate()', async () => {
@@ -227,7 +308,7 @@ describe('IssueRunner', () => {
 
     it('records failed outcome when graphBuilder throws', async () => {
       const graphBuilder = {
-        buildForIssue: vi.fn().mockRejectedValueOnce(new Error('LLM down')),
+        buildChunkDefinitionsForIssue: vi.fn().mockRejectedValueOnce(new Error('LLM down')),
       } as unknown as IssueGraphBuilder;
       const issues = [makeIssue({ number: 10 })];
       const triages = [makeTriage(10)];
@@ -245,6 +326,10 @@ describe('IssueRunner', () => {
       mockRun.mockImplementation(async () => ({
         status: 'completed',
         tokenSpend: { totalTokens: 1_200_000 },
+        taskResults: [
+          { taskId: 'impl:dummy', status: 'success' },
+          { taskId: 'harden:dummy', status: 'success' },
+        ],
       }) as any);
       const issues = [
         makeIssue({ number: 1, labels: ['critical'] }),
@@ -269,7 +354,7 @@ describe('IssueRunner', () => {
   describe('checkpoint integration', () => {
     it('skips issues where all tasks already checkpointed', async () => {
       const checkpoint = mockCheckpoint(
-        new Set(['impl:issue-1', 'harden:issue-1']),
+        new Set(['impl:01_issue-1:done', 'harden:01_issue-1:done']),
       );
       const issues = [makeIssue({ number: 1 }), makeIssue({ number: 2 })];
       const triages = [makeTriage(1), makeTriage(2)];
@@ -294,7 +379,15 @@ describe('IssueRunner', () => {
     it('returns IssueOutcome with correct fields on success', async () => {
       const issues = [makeIssue({ number: 42, title: 'Fix the thing' })];
       const triages = [makeTriage(42)];
-      const config = makeConfig({ issues, triageResults: triages });
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        fullDeps: {
+          prCreator: {
+            create: vi.fn(async () => ({ url: 'https://github.com/org/repo/pull/42' })),
+          },
+        } as unknown as BeastLoopDeps,
+      });
 
       const outcomes = await runner.run(config);
 

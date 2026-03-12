@@ -108,6 +108,7 @@ const mockIssueRuntime = {
   })),
   artifactsForIssue: vi.fn((issueNumber: number) => ({
     planName: `issue-${issueNumber}`,
+    planDir: `/tmp/plans/issue-${issueNumber}`,
     checkpointFile: `/tmp/issue-${issueNumber}.checkpoint`,
     logFile: `/tmp/issue-${issueNumber}-build.log`,
   })),

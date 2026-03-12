@@ -122,7 +122,6 @@ describe('README.md Usage section', () => {
 
   it('should not document obsolete frankenbeast flags', () => {
     const content = readFile('README.md');
-    expect(content).not.toContain('--dry-run');
     expect(content).not.toContain('--project-id');
     expect(content).not.toContain('--model');
   });

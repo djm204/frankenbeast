@@ -1,17 +1,28 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
-import { writeChunkFiles, type ChunkDefinition } from '../cli/file-writer.js';
+import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { getProjectPaths } from '../cli/project-root.js';
-import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../deps.js';
+import type {
+  PlanGraph,
+  ICheckpointStore,
+  ILogger,
+  BeastLoopDeps,
+  ISkillsModule,
+  SkillDescriptor,
+} from '../deps.js';
 import type { GithubIssue, TriageResult, IssueOutcome } from './types.js';
 import type { IssueGraphBuilder } from './issue-graph-builder.js';
 import type { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import type { BeastResult } from '../types.js';
+import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
+import type { CliSkillConfig } from '../skills/cli-types.js';
+import type { PrCreator } from '../closure/pr-creator.js';
 
 export interface IssueRuntimeArtifacts {
   readonly planName: string;
+  readonly planDir: string;
   readonly checkpointFile: string;
   readonly logFile: string;
 }
@@ -68,6 +79,94 @@ function appendIssueLog(logFile: string | undefined, message: string): void {
   if (!logFile) return;
   mkdirSync(dirname(logFile), { recursive: true });
   appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+}
+
+function issueCompletionKey(taskId: string): string {
+  return `${taskId}:done`;
+}
+
+function issueSkillDescriptor(id: string): SkillDescriptor {
+  return {
+    id,
+    name: id.replace(/^cli:/, ''),
+    executionType: 'cli',
+    requiresHitl: false,
+  };
+}
+
+function createIssueSkills(baseSkills: ISkillsModule | undefined, skillIds: readonly string[]): ISkillsModule {
+  const fallbackSkills: ISkillsModule = baseSkills ?? {
+    hasSkill: () => false,
+    getAvailableSkills: () => [],
+    execute: async () => {
+      throw new Error('No skills available for issue execution');
+    },
+  };
+  const extraIds = new Set(skillIds);
+  const merged = new Map<string, SkillDescriptor>();
+
+  for (const descriptor of fallbackSkills.getAvailableSkills()) {
+    merged.set(descriptor.id, descriptor);
+  }
+  for (const skillId of skillIds) {
+    merged.set(skillId, issueSkillDescriptor(skillId));
+  }
+
+  return {
+    hasSkill: (id: string) => extraIds.has(id) || fallbackSkills.hasSkill(id),
+    getAvailableSkills: () => [...merged.values()],
+    execute: (skillId, input) => fallbackSkills.execute(skillId, input),
+  };
+}
+
+function extractIssueChunkId(skillId: string): string {
+  return skillId.startsWith('cli:') ? skillId.slice(4) : skillId;
+}
+
+function createIssueCliExecutor(
+  baseCliExecutor: CliSkillExecutor,
+  planName: string,
+  options?: {
+    maxIterations?: number;
+    staleMateLimit?: number;
+  },
+): CliSkillExecutor {
+  return {
+    recoverDirtyFiles: (...args) => baseCliExecutor.recoverDirtyFiles(...args),
+    execute: (skillId, input, _config, checkpoint, taskId) => {
+      const martinConfig: CliSkillConfig = {
+        martin: {
+          planName,
+          chunkId: extractIssueChunkId(skillId),
+          taskId,
+          ...(options?.maxIterations !== undefined ? { maxIterations: options.maxIterations } : {}),
+          ...(options?.staleMateLimit !== undefined ? { staleMateLimit: options.staleMateLimit } : {}),
+        } as CliSkillConfig['martin'],
+        git: {
+          baseBranch: 'main',
+          branchPrefix: 'fix/',
+          autoCommit: true,
+          workingDir: '.',
+        },
+      };
+
+      return baseCliExecutor.execute(skillId, input, martinConfig, checkpoint, taskId);
+    },
+  } as CliSkillExecutor;
+}
+
+function createIssuePrCreator(
+  basePrCreator: PrCreator,
+  issueNumber: number,
+  prRef: { current?: string | undefined },
+): PrCreator {
+  return {
+    create: async (result: BeastResult, logger?: ILogger) => {
+      const created = await basePrCreator.create(result, logger, { issueNumber });
+      prRef.current = created?.url;
+      return created;
+    },
+  } as PrCreator;
 }
 
 export class IssueRunner {
@@ -155,11 +254,22 @@ export class IssueRunner {
 
     const runtimeArtifacts = issueRuntime?.artifactsForIssue(issue.number);
     const issueCheckpoint = issueRuntime?.checkpointForIssue(issue.number) ?? config.checkpoint;
+    const planName = runtimeArtifacts?.planName ?? issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
     const logFile = runtimeArtifacts?.logFile;
+    const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
 
     let graph: PlanGraph;
+    let executionGraphBuilder: BeastLoopDeps['graphBuilder'];
+    let refreshPlanTasks: BeastLoopDeps['refreshPlanTasks'];
+    let skillIds: readonly string[];
     try {
-      graph = await graphBuilder.buildForIssue(issue, triage);
+      const chunks = await graphBuilder.buildChunkDefinitionsForIssue(issue, triage);
+      const chunkPaths = new ChunkFileWriter(planDir).write(chunks);
+      const realGraphBuilder = new ChunkFileGraphBuilder(planDir);
+      graph = await realGraphBuilder.build({ goal: `Process issue #${issue.number}` });
+      executionGraphBuilder = realGraphBuilder;
+      skillIds = chunkPaths.map((chunkPath) => `cli:${basename(chunkPath, '.md')}`);
+      refreshPlanTasks = async () => (await realGraphBuilder.build({ goal: 'refresh issue tasks' })).tasks;
     } catch (err) {
       return {
         issueNumber: issue.number,
@@ -170,7 +280,7 @@ export class IssueRunner {
       };
     }
 
-    if (issueCheckpoint && graph.tasks.every(t => issueCheckpoint.has(t.id))) {
+    if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
       logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
       appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
       return {
@@ -183,38 +293,40 @@ export class IssueRunner {
 
     git.isolate(`issue-${issue.number}`);
 
-    const planDir = resolve(`.frankenbeast/plans/issue-${issue.number}`);
-    mkdirSync(planDir, { recursive: true });
-
-    // Convert PlanGraph to ChunkDefinitions for the file writer
-    const chunkDefs: ChunkDefinition[] = graph.tasks.map(task => ({
-      id: task.id,
-      objective: task.objective,
-      dependsOn: task.dependsOn,
-      verificationCommand: 'npm test', // Default for issues
-      successCriteria: 'Issue fix is verified by tests',
-      files: [],
-      dependencies: [],
-    }));
-
-    const paths = getProjectPaths('.');
-    const issuePaths = { ...paths, plansDir: planDir };
-    writeChunkFiles(issuePaths, chunkDefs);
-
-    const realGraphBuilder = new ChunkFileGraphBuilder(planDir);
-
-    // Create issue-specific deps for BeastLoop
+    const prRef: { current?: string | undefined } = {};
     const issueDeps: BeastLoopDeps = {
-      ...fullDeps,
+      firewall: fullDeps.firewall,
+      skills: createIssueSkills(fullDeps.skills, skillIds),
+      memory: fullDeps.memory,
+      planner: fullDeps.planner,
+      observer: fullDeps.observer,
+      critique: fullDeps.critique,
+      governor: fullDeps.governor,
+      heartbeat: fullDeps.heartbeat,
       logger: logger ?? fullDeps.logger,
-      graphBuilder: realGraphBuilder,
-      refreshPlanTasks: async () => (await realGraphBuilder.build({ goal: 'refresh' })).tasks,
+      clock: fullDeps.clock,
+      graphBuilder: executionGraphBuilder,
+      refreshPlanTasks,
+      ...(fullDeps.mcp ? { mcp: fullDeps.mcp } : {}),
+      ...(fullDeps.cliExecutor
+        ? {
+            cliExecutor: createIssueCliExecutor(
+              fullDeps.cliExecutor,
+              planName,
+              triage.complexity === 'one-shot'
+                ? {
+                    maxIterations: ONE_SHOT_MAX_ITERATIONS,
+                    staleMateLimit: ONE_SHOT_STALE_MATE_LIMIT,
+                  }
+                : undefined,
+            ),
+          }
+        : {}),
+      ...(fullDeps.prCreator
+        ? { prCreator: createIssuePrCreator(fullDeps.prCreator, issue.number, prRef) }
+        : {}),
+      ...(issueCheckpoint ? { checkpoint: issueCheckpoint } : {}),
     };
-
-    const finalCheckpoint = issueCheckpoint ?? fullDeps.checkpoint;
-    if (finalCheckpoint) {
-      Object.assign(issueDeps, { checkpoint: finalCheckpoint });
-    }
 
     const loop = new BeastLoop(issueDeps, {
       maxDurationMs: config.timeoutMs ?? 3_600_000,
@@ -231,7 +343,7 @@ export class IssueRunner {
 
       const tokensUsed = result.tokenSpend.totalTokens;
       const status = result.status === 'completed' ? 'fixed' : 'failed';
-      const prUrl = result.prUrl;
+      const prUrl = prRef.current;
 
       appendIssueLog(logFile, `Issue #${issue.number} execution finished with status ${status}`);
 
