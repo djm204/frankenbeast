@@ -21,8 +21,8 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 | shared | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
 | MCP | `packages/franken-mcp/` | MCP server client & registry |
 | comms | `packages/franken-comms/` | External comms gateway — Slack, Discord, Telegram, WhatsApp adapters with signature verification |
-| web | `packages/franken-web/` | React web dashboard — chat UI, config, metrics (dev tool, not published) |
-| orch | `packages/franken-orchestrator/` | Beast Loop, CLI, phases, circuit breakers, skill execution, crash recovery |
+| web | `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics (dev tool, not published) |
+| orch | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, beast control APIs, phases, circuit breakers, skill execution, crash recovery |
 
 ## The Beast Loop (4 Phases)
 
@@ -104,6 +104,8 @@ packages/franken-orchestrator/src/
   - `startChatServer()` binds TCP, wires auth (session tokens), session persistence, and WebSocket attachment
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
+- Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
+- Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
 - `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
@@ -152,6 +154,7 @@ All modules use `tsc` for builds.
 2. The current CLI path is not purely ports-only: `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`
 3. There is no dedicated `--non-interactive` flag; headless usage currently relies on starting at `plan` or `run` with existing inputs
 4. `--resume` is parsed, but it is not wired as a distinct resume control path; checkpoint-based task skipping still works from existing checkpoint files
+5. CLI-created agents do not yet enter the tracked-agent model through a dedicated CLI init flow; the dashboard and chat-backed init paths are wired, but CLI parity is still a follow-up
 
 ## Key Documentation
 
@@ -159,7 +162,7 @@ All modules use `tsc` for builds.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | 16 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway) |
+| `docs/adr/` | 18 ADRs (monorepo, hex arch, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, global CLI design, pluggable CLI providers, real monorepo migration, multi-pass planner, expanded chunk schema, chat two-tier dispatch, shared spinner, chat server entrypoint, external comms gateway, network operator control plane, tracked-agent init workflow) |
 | `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 

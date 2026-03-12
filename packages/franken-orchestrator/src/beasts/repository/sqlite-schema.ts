@@ -1,6 +1,7 @@
 export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS beast_runs (
     id TEXT PRIMARY KEY,
+    tracked_agent_id TEXT,
     definition_id TEXT NOT NULL,
     definition_version INTEGER NOT NULL,
     status TEXT NOT NULL,
@@ -15,7 +16,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_heartbeat_at TEXT,
     stop_reason TEXT,
-    latest_exit_code INTEGER
+    latest_exit_code INTEGER,
+    FOREIGN KEY (tracked_agent_id) REFERENCES tracked_agents(id)
   )`,
   `CREATE TABLE IF NOT EXISTS beast_run_attempts (
     id TEXT PRIMARY KEY,
@@ -48,5 +50,30 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     answers TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tracked_agents (
+    id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_by_user TEXT NOT NULL,
+    init_action TEXT NOT NULL,
+    init_config TEXT NOT NULL,
+    chat_session_id TEXT,
+    dispatch_run_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (dispatch_run_id) REFERENCES beast_runs(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tracked_agent_events (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    level TEXT NOT NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES tracked_agents(id)
   )`,
 ] as const;

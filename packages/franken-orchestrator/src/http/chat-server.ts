@@ -6,6 +6,7 @@ import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
+import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
 import { attachChatWebSocketServer } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
@@ -67,6 +68,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
             catalog: options.beastControl.catalog,
             interviews: options.beastControl.interviews,
             dispatch: options.beastControl.dispatch,
+            agentInit: new AgentInitService(options.beastControl.agents, options.beastControl.dispatch),
           }),
         }
       : {}),

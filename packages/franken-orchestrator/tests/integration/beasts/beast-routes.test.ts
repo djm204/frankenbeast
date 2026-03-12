@@ -9,13 +9,14 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
-function createBeastApp(options?: { rateLimitMax?: number }) {
+function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -24,6 +25,9 @@ function createBeastApp(options?: { rateLimitMax?: number }) {
   const executors = {
     process: {
       start: vi.fn(async (run, _definition) => {
+        if (options?.failStart) {
+          throw new Error('spawn failed');
+        }
         const attempt = repository.createAttempt(run.id, {
           status: 'running',
           pid: 1234,
@@ -75,6 +79,7 @@ function createBeastApp(options?: { rateLimitMax?: number }) {
   const dispatch = new BeastDispatchService(repository, catalog, executors, metrics, logStore);
   const runs = new BeastRunService(repository, catalog, executors, metrics, logStore);
   const interviews = new BeastInterviewService(repository, catalog);
+  const agents = new AgentService(repository, () => '2026-03-10T00:00:00.000Z');
   const security = new TransportSecurityService();
   const operatorToken = 'super-secret-operator-token';
 
@@ -83,6 +88,7 @@ function createBeastApp(options?: { rateLimitMax?: number }) {
     llm: { complete: vi.fn().mockResolvedValue('hello') },
     projectName: 'beast-routes',
     beastControl: {
+      agents,
       catalog,
       dispatch,
       runs,
@@ -138,6 +144,7 @@ describe('beast routes', () => {
         config: {
           provider: 'claude',
           objective: 'Implement beast routes',
+          chunkDirectory: 'docs/chunks',
         },
         executionMode: 'process',
         startNow: true,
@@ -190,5 +197,79 @@ describe('beast routes', () => {
     const answered = await answerResponse.json() as { data: { complete: boolean; session: { currentPrompt: { key: string } } } };
     expect(answered.data.complete).toBe(false);
     expect(answered.data.session.currentPrompt.key).toBe('objective');
+  });
+
+  it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: 'agent-missing',
+        config: {
+          provider: 'claude',
+          objective: 'Reject invalid tracked agent ids',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(createResponse.status).toBe(404);
+    expect(await createResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_FOUND',
+        message: "Tracked agent 'agent-missing' was not found",
+      },
+    });
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
+    expect(runsBody.data.runs).toEqual([]);
+  });
+
+  it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
+    const { app, operatorToken } = createBeastApp({ failStart: true });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Handle startup failure coherently',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; stopReason?: string } };
+    expect(created.data.status).toBe('failed');
+    expect(created.data.stopReason).toBe('start_failed');
+
+    const detailResponse = await app.request(`/v1/beasts/runs/${created.data.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(detailResponse.status).toBe(200);
+    const detailBody = await detailResponse.json() as { data: { run: { status: string; stopReason?: string } } };
+    expect(detailBody.data.run.status).toBe('failed');
+    expect(detailBody.data.run.stopReason).toBe('start_failed');
   });
 });

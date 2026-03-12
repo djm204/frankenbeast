@@ -34,7 +34,62 @@ describe('BeastApiClient', () => {
     );
   });
 
-  it('creates Beast runs and controls existing runs', async () => {
+  it('creates tracked agents and loads tracked agent detail', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          id: 'agent-1',
+          status: 'initializing',
+        },
+      }),
+    });
+
+    await client.createAgent({
+      definitionId: 'chunk-plan',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { designDocPath: 'docs/plans/design.md' },
+      chatSessionId: 'sess-1',
+    });
+    await client.listAgents();
+    await client.getAgent('agent-1');
+
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3000/v1/beasts/agents',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          definitionId: 'chunk-plan',
+          initAction: {
+            kind: 'chunk-plan',
+            command: '/plan --design-doc docs/plans/design.md',
+            config: { designDocPath: 'docs/plans/design.md' },
+            chatSessionId: 'sess-1',
+          },
+          initConfig: { designDocPath: 'docs/plans/design.md' },
+          chatSessionId: 'sess-1',
+        }),
+      }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:3000/v1/beasts/agents',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:3000/v1/beasts/agents/agent-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('controls existing beast runs once dispatch has happened', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -45,39 +100,22 @@ describe('BeastApiClient', () => {
       }),
     });
 
-    await client.createRun({
-      definitionId: 'martin-loop',
-      config: { provider: 'claude', objective: 'Ship it' },
-      startNow: true,
-    });
     await client.stopRun('run-1');
     await client.killRun('run-1');
     await client.restartRun('run-1');
 
     expect(mockFetch).toHaveBeenNthCalledWith(
       1,
-      'http://localhost:3000/v1/beasts/runs',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          definitionId: 'martin-loop',
-          config: { provider: 'claude', objective: 'Ship it' },
-          startNow: true,
-        }),
-      }),
-    );
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      2,
       'http://localhost:3000/v1/beasts/runs/run-1/stop',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(mockFetch).toHaveBeenNthCalledWith(
-      3,
+      2,
       'http://localhost:3000/v1/beasts/runs/run-1/kill',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(mockFetch).toHaveBeenNthCalledWith(
-      4,
+      3,
       'http://localhost:3000/v1/beasts/runs/run-1/restart',
       expect.objectContaining({ method: 'POST' }),
     );

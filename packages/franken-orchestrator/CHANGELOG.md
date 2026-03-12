@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.15.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.1...franken-orchestrator-v0.15.0) (2026-03-11)
+
+
+### Features
+
+* add tracked agent foundations ([4073878](https://github.com/djm204/frankenbeast/commit/407387806cb8972b2115e6aef489df02bf3c07fe))
+* implement tracked agent init workflow ([366cc75](https://github.com/djm204/frankenbeast/commit/366cc756338774124ee5a4928a9ff451efec3bbd))
+* wire tracked agents through dispatch and chat ([7179567](https://github.com/djm204/frankenbeast/commit/71795676226f9675c74902b83edd9c15b1d4a966))
+
+
+### Bug Fixes
+
+* fix the connection between dashboard and backend, and make some UI changes ([d137437](https://github.com/djm204/frankenbeast/commit/d1374374b3e0e6195b58a7fd8f19a74dc7f6a40f))
+* harden beast route failure handling ([ac53201](https://github.com/djm204/frankenbeast/commit/ac53201a045e777faa6de9f6daa2455349d1050e))
+* harden tracked agent beast routes and dispatch validation ([39b6850](https://github.com/djm204/frankenbeast/commit/39b685052c810d09b7b7af237ed15a1d3d7805c8))
+* make tracked agent dispatch transactional ([4f622d2](https://github.com/djm204/frankenbeast/commit/4f622d2ac72f665267d7a7a2280baa51b970ac55))
+* migrate legacy beast run schema ([f97d7f5](https://github.com/djm204/frankenbeast/commit/f97d7f548551afa95246563c7fc914e306f74247))
+
 ## [0.14.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.0...franken-orchestrator-v0.14.1) (2026-03-11)
 
 

@@ -9,6 +9,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
@@ -21,6 +22,7 @@ function createSecuredApp(rateLimitMax = 1) {
   const logStore = new BeastLogStore(join(TMP, 'logs'));
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
+  const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
   const executors = {
     process: {
       start: vi.fn(async () => { throw new Error('not needed'); }),
@@ -39,6 +41,7 @@ function createSecuredApp(rateLimitMax = 1) {
     llm: { complete: vi.fn().mockResolvedValue('hello') },
     projectName: 'beast-security',
     beastControl: {
+      agents,
       catalog,
       dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
       runs: new BeastRunService(repository, catalog, executors, metrics, logStore),
@@ -82,6 +85,7 @@ describe('beast route security', () => {
         config: {
           provider: 'claude',
           objective: 'first',
+          chunkDirectory: 'docs/chunks',
         },
       }),
     });
@@ -93,6 +97,7 @@ describe('beast route security', () => {
         config: {
           provider: 'claude',
           objective: 'second',
+          chunkDirectory: 'docs/chunks',
         },
       }),
     });

@@ -5,7 +5,7 @@ export const designInterviewDefinition: BeastDefinition = {
   id: 'design-interview',
   version: 1,
   label: 'Design Interview',
-  description: 'Interview for a design goal and produce a design document artifact.',
+  description: 'Create a tracked agent that drives an interactive design interview and writes a design document artifact.',
   executionModeDefault: 'process',
   configSchema: z.object({
     goal: z.string().min(1),

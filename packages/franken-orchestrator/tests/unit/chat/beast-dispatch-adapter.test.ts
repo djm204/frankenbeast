@@ -3,6 +3,7 @@ import { ChatBeastDispatchAdapter } from '../../../src/chat/beast-dispatch-adapt
 import type { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-service.js';
 import type { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import type { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
+import type { AgentInitService } from '../../../src/beasts/services/agent-init-service.js';
 import type { BeastInterviewPrompt } from '../../../src/beasts/types.js';
 
 const providerPrompt: BeastInterviewPrompt = {
@@ -22,6 +23,10 @@ const objectivePrompt: BeastInterviewPrompt = {
 
 describe('ChatBeastDispatchAdapter', () => {
   it('starts a persisted interview when chat asks to spawn a beast', async () => {
+    const createChatInitAgent = vi.fn(() => ({
+      id: 'agent-1',
+      definitionId: 'martin-loop',
+    }));
     const adapter = new ChatBeastDispatchAdapter({
       catalog: {
         listDefinitions: () => [
@@ -40,6 +45,9 @@ describe('ChatBeastDispatchAdapter', () => {
         })),
       } as unknown as BeastInterviewService,
       dispatch: {} as BeastDispatchService,
+      agentInit: {
+        createChatInitAgent,
+      } as unknown as AgentInitService,
     });
 
     const result = await adapter.handle('spawn a martin beast', {
@@ -52,10 +60,18 @@ describe('ChatBeastDispatchAdapter', () => {
       definitionId: 'martin-loop',
       kind: 'interview',
       beastContext: {
+        agentId: 'agent-1',
         definitionId: 'martin-loop',
         interviewSessionId: 'interview-1',
         status: 'interviewing',
       },
+    });
+    expect(createChatInitAgent).toHaveBeenCalledWith({
+      definitionId: 'martin-loop',
+      chatSessionId: 'chat-1',
+      command: 'martin-loop',
+      initActionKind: 'martin-loop',
+      config: {},
     });
     expect(result?.assistantMessage).toContain('Which provider should run the martin loop?');
   });
@@ -88,7 +104,7 @@ describe('ChatBeastDispatchAdapter', () => {
         complete: true,
         config: { provider: 'claude', objective: 'Ship Beast monitoring' },
       });
-    const createRun = vi.fn().mockResolvedValue({
+    const dispatchAgent = vi.fn().mockResolvedValue({
       id: 'run-1',
       definitionId: 'martin-loop',
       status: 'running',
@@ -104,8 +120,10 @@ describe('ChatBeastDispatchAdapter', () => {
         answer,
       } as unknown as BeastInterviewService,
       dispatch: {
-        createRun,
       } as unknown as BeastDispatchService,
+      agentInit: {
+        dispatchAgent,
+      } as unknown as AgentInitService,
     });
 
     const nextPrompt = await adapter.handle('claude', {
@@ -113,6 +131,7 @@ describe('ChatBeastDispatchAdapter', () => {
       sessionId: 'chat-1',
       transcript: [],
       beastContext: {
+        agentId: 'agent-1',
         definitionId: 'martin-loop',
         interviewSessionId: 'interview-1',
         status: 'interviewing',
@@ -134,18 +153,17 @@ describe('ChatBeastDispatchAdapter', () => {
       sessionId: 'chat-1',
       transcript: [],
       beastContext: {
+        agentId: 'agent-1',
         definitionId: 'martin-loop',
         interviewSessionId: 'interview-1',
         status: 'interviewing',
       },
     });
 
-    expect(createRun).toHaveBeenCalledWith({
+    expect(dispatchAgent).toHaveBeenCalledWith('agent-1', {
       definitionId: 'martin-loop',
+      chatSessionId: 'chat-1',
       config: { provider: 'claude', objective: 'Ship Beast monitoring' },
-      dispatchedBy: 'chat',
-      dispatchedByUser: 'chat-session:chat-1',
-      startNow: true,
     });
     expect(dispatched).toMatchObject({
       kind: 'dispatch',

@@ -1,7 +1,7 @@
 export interface BeastInterviewPrompt {
   key: string;
   prompt: string;
-  kind: 'string' | 'boolean';
+  kind: 'string' | 'boolean' | 'file' | 'directory';
   required?: boolean;
   options?: readonly string[];
 }
@@ -17,6 +17,7 @@ export interface BeastCatalogEntry {
 
 export interface BeastRunSummary {
   id: string;
+  trackedAgentId?: string;
   definitionId: string;
   status: string;
   dispatchedBy: string;
@@ -30,6 +31,43 @@ export interface BeastRunDetail {
   attempts: Array<Record<string, unknown>>;
   events: Array<{ id: string; runId: string; sequence: number; type: string; payload: Record<string, unknown>; createdAt: string }>;
   logs: string[];
+}
+
+export interface TrackedAgentInitAction {
+  kind: 'design-interview' | 'chunk-plan' | 'martin-loop';
+  command: string;
+  config: Record<string, unknown>;
+  chatSessionId?: string;
+}
+
+export interface TrackedAgentSummary {
+  id: string;
+  definitionId: string;
+  status: string;
+  source: string;
+  createdByUser: string;
+  initAction: TrackedAgentInitAction;
+  initConfig: Record<string, unknown>;
+  chatSessionId?: string;
+  dispatchRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrackedAgentEvent {
+  id: string;
+  agentId: string;
+  sequence: number;
+  level: 'info' | 'warning' | 'error';
+  type: string;
+  message: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface TrackedAgentDetail {
+  agent: TrackedAgentSummary;
+  events: TrackedAgentEvent[];
 }
 
 export class BeastApiClient {
@@ -47,8 +85,17 @@ export class BeastApiClient {
     return body.runs;
   }
 
+  async listAgents(): Promise<TrackedAgentSummary[]> {
+    const body = await this.request<{ agents: TrackedAgentSummary[] }>('/v1/beasts/agents', { method: 'GET' });
+    return body.agents;
+  }
+
   async getRun(runId: string): Promise<Omit<BeastRunDetail, 'logs'> & { run: BeastRunSummary }> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}`, { method: 'GET' });
+  }
+
+  async getAgent(agentId: string): Promise<TrackedAgentDetail> {
+    return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}`, { method: 'GET' });
   }
 
   async getLogs(runId: string): Promise<string[]> {
@@ -59,10 +106,24 @@ export class BeastApiClient {
   async createRun(input: {
     definitionId: string;
     config: Record<string, unknown>;
+    trackedAgentId?: string;
     executionMode?: 'process' | 'container';
     startNow?: boolean;
   }): Promise<BeastRunSummary> {
     return this.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  async createAgent(input: {
+    definitionId: string;
+    initAction: TrackedAgentInitAction;
+    initConfig: Record<string, unknown>;
+    chatSessionId?: string;
+  }): Promise<TrackedAgentSummary> {
+    return this.request('/v1/beasts/agents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),

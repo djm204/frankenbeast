@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatShell } from '../../src/components/chat-shell.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
@@ -13,6 +13,117 @@ const mockListSessions = vi.fn().mockResolvedValue([
     updatedAt: '2026-03-09T00:00:01Z',
   },
 ]);
+
+const mockGetCatalog = vi.fn().mockResolvedValue([
+  {
+    id: 'chunk-plan',
+    label: 'Design Doc -> Chunk Creation',
+    description: 'Build chunks from a design doc',
+    executionModeDefault: 'process',
+    interviewPrompts: [
+      { key: 'designDocPath', prompt: 'Design doc', kind: 'file', required: true },
+      { key: 'outputDir', prompt: 'Output directory', kind: 'string', required: true },
+    ],
+  },
+  {
+    id: 'martin-loop',
+    label: 'Martin Loop',
+    description: 'Run Martin loop',
+    executionModeDefault: 'process',
+    interviewPrompts: [
+      { key: 'provider', prompt: 'Provider', kind: 'string', options: ['claude', 'codex'] },
+      { key: 'objective', prompt: 'Objective', kind: 'string' },
+      { key: 'chunkDirectory', prompt: 'Chunk directory', kind: 'directory', required: true },
+    ],
+  },
+]);
+
+const mockListAgents = vi.fn().mockResolvedValue([
+  {
+    id: 'agent-1',
+    definitionId: 'chunk-plan',
+    status: 'dispatching',
+    source: 'chat',
+    createdByUser: 'chat-session:sess-1',
+    initAction: {
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/plans/design.md',
+      config: { designDocPath: 'docs/plans/design.md' },
+      chatSessionId: 'sess-1',
+    },
+    initConfig: { designDocPath: 'docs/plans/design.md' },
+    chatSessionId: 'sess-1',
+    dispatchRunId: 'run-1',
+    createdAt: '2026-03-11T00:00:00.000Z',
+    updatedAt: '2026-03-11T00:00:01.000Z',
+  },
+]);
+
+const mockGetAgent = vi.fn().mockResolvedValue({
+  agent: {
+    id: 'agent-1',
+    definitionId: 'chunk-plan',
+    status: 'dispatching',
+    source: 'chat',
+    createdByUser: 'chat-session:sess-1',
+    initAction: {
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/plans/design.md',
+      config: { designDocPath: 'docs/plans/design.md' },
+      chatSessionId: 'sess-1',
+    },
+    initConfig: { designDocPath: 'docs/plans/design.md' },
+    chatSessionId: 'sess-1',
+    dispatchRunId: 'run-1',
+    createdAt: '2026-03-11T00:00:00.000Z',
+    updatedAt: '2026-03-11T00:00:01.000Z',
+  },
+  events: [
+    {
+      id: 'event-1',
+      agentId: 'agent-1',
+      sequence: 1,
+      level: 'info',
+      type: 'agent.command.sent',
+      message: 'sent planning command',
+      payload: {},
+      createdAt: '2026-03-11T00:00:01.000Z',
+    },
+  ],
+});
+
+const mockGetRun = vi.fn().mockResolvedValue({
+  run: {
+    id: 'run-1',
+    definitionId: 'chunk-plan',
+    status: 'running',
+    dispatchedBy: 'chat',
+    dispatchedByUser: 'chat-session:sess-1',
+    attemptCount: 1,
+    createdAt: '2026-03-11T00:00:02.000Z',
+  },
+  attempts: [],
+  events: [],
+});
+
+const mockGetLogs = vi.fn().mockResolvedValue(['started from chat']);
+const mockCreateAgent = vi.fn().mockResolvedValue({
+  id: 'agent-2',
+  definitionId: 'chunk-plan',
+  status: 'initializing',
+  source: 'dashboard',
+  createdByUser: 'operator',
+  initAction: {
+    kind: 'chunk-plan',
+    command: '/plan --design-doc docs/plans/design.md',
+    config: { designDocPath: 'docs/plans/design.md' },
+    chatSessionId: 'sess-1',
+  },
+  initConfig: { designDocPath: 'docs/plans/design.md' },
+  chatSessionId: 'sess-1',
+  createdAt: '2026-03-11T00:00:02.000Z',
+  updatedAt: '2026-03-11T00:00:02.000Z',
+});
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -55,7 +166,62 @@ vi.mock('../../src/lib/api.js', () => ({
   }),
 }));
 
-afterEach(cleanup);
+vi.mock('../../src/lib/beast-api.js', () => ({
+  BeastApiClient: vi.fn(function (this: {
+    getCatalog: typeof mockGetCatalog;
+    listAgents: typeof mockListAgents;
+    getAgent: typeof mockGetAgent;
+    getRun: typeof mockGetRun;
+    getLogs: typeof mockGetLogs;
+    createAgent: typeof mockCreateAgent;
+    startRun: ReturnType<typeof vi.fn>;
+    stopRun: ReturnType<typeof vi.fn>;
+    killRun: ReturnType<typeof vi.fn>;
+    restartRun: ReturnType<typeof vi.fn>;
+  }) {
+    this.getCatalog = mockGetCatalog;
+    this.listAgents = mockListAgents;
+    this.getAgent = mockGetAgent;
+    this.getRun = mockGetRun;
+    this.getLogs = mockGetLogs;
+    this.createAgent = mockCreateAgent;
+    this.startRun = vi.fn().mockResolvedValue(undefined);
+    this.stopRun = vi.fn().mockResolvedValue(undefined);
+    this.killRun = vi.fn().mockResolvedValue(undefined);
+    this.restartRun = vi.fn().mockResolvedValue(undefined);
+  }),
+}));
+
+vi.mock('../../src/lib/network-api.js', () => ({
+  NetworkApiClient: vi.fn(function (this: { getStatus: ReturnType<typeof vi.fn>; getConfig: ReturnType<typeof vi.fn> }) {
+    this.getStatus = vi.fn().mockResolvedValue({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      services: [],
+    });
+    this.getConfig = vi.fn().mockResolvedValue({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+  }),
+}));
+
+afterEach(() => {
+  cleanup();
+  window.location.hash = '';
+  vi.clearAllMocks();
+  mockListSessions.mockResolvedValue([
+    {
+      id: 'sess-1',
+      projectId: 'test-project',
+      state: 'active',
+      messageCount: 2,
+      preview: 'Dispatch accepted.',
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    },
+  ]);
+});
 
 describe('ChatShell', () => {
   it('renders Frankenbeast branding and keeps the version in the sidebar footer', () => {
@@ -106,5 +272,65 @@ describe('ChatShell', () => {
     expect(screen.getByRole('button', { name: 'Close navigation menu' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Dispatch' }).getAttribute('class')).toContain('button--primary');
     expect(screen.getByRole('button', { name: 'Reject' }).getAttribute('class')).toContain('button--secondary');
+  });
+
+  it('launches tracked agents from the beasts page using the selected chat session', async () => {
+    window.location.hash = '#/beasts';
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Design Doc -> Chunk Creation')).toBeDefined();
+    });
+
+    fireEvent.change(screen.getByLabelText('Design Doc -> Chunk Creation designDocPath'), {
+      target: { value: 'docs/plans/design.md' },
+    });
+    fireEvent.change(screen.getByLabelText('Design Doc -> Chunk Creation outputDir'), {
+      target: { value: 'docs/chunks' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Design Doc -> Chunk Creation' }));
+
+    await waitFor(() => {
+      expect(mockCreateAgent).toHaveBeenCalledWith({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: { designDocPath: 'docs/plans/design.md', outputDir: 'docs/chunks' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { designDocPath: 'docs/plans/design.md', outputDir: 'docs/chunks' },
+        chatSessionId: 'sess-1',
+      });
+    });
+  });
+
+  it('renders tracked-agent status and startup logs in the beasts detail flow', async () => {
+    window.location.hash = '#/beasts';
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Tracked Agents')).toBeDefined();
+    });
+
+    expect(screen.getByText('dispatching')).toBeDefined();
+    expect(screen.getByText('sent planning command')).toBeDefined();
+    expect(screen.getByText('started from chat')).toBeDefined();
+    expect(mockListAgents).toHaveBeenCalled();
+    expect(mockGetAgent).toHaveBeenCalledWith('agent-1');
   });
 });

@@ -10,10 +10,16 @@ import type {
   BeastRunAttempt,
   BeastRunEvent,
   BeastRunStatus,
+  TrackedAgent,
+  TrackedAgentEvent,
+  TrackedAgentInitAction,
+  TrackedAgentStatus,
 } from '../types.js';
+import { UnknownTrackedAgentError } from '../errors.js';
 import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
 
 interface CreateRunInput {
+  trackedAgentId?: string | undefined;
   definitionId: string;
   definitionVersion: number;
   executionMode: BeastExecutionMode;
@@ -58,8 +64,36 @@ interface AppendEventInput {
   createdAt: string;
 }
 
+interface CreateTrackedAgentInput {
+  definitionId: string;
+  source: BeastDispatchSource;
+  status: TrackedAgentStatus;
+  createdByUser: string;
+  initAction: TrackedAgentInitAction;
+  initConfig: Readonly<Record<string, unknown>>;
+  chatSessionId?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface UpdateTrackedAgentPatch {
+  status?: TrackedAgentStatus | undefined;
+  chatSessionId?: string | undefined;
+  dispatchRunId?: string | undefined;
+  updatedAt?: string | undefined;
+}
+
+interface AppendTrackedAgentEventInput {
+  level: TrackedAgentEvent['level'];
+  type: string;
+  message: string;
+  payload: Readonly<Record<string, unknown>>;
+  createdAt: string;
+}
+
 type BeastRunRow = {
   id: string;
+  tracked_agent_id: string | null;
   definition_id: string;
   definition_version: number;
   status: BeastRunStatus;
@@ -109,6 +143,31 @@ type BeastInterviewSessionRow = {
   updated_at: string;
 };
 
+type TrackedAgentRow = {
+  id: string;
+  definition_id: string;
+  source: BeastDispatchSource;
+  status: TrackedAgentStatus;
+  created_by_user: string;
+  init_action: string;
+  init_config: string;
+  chat_session_id: string | null;
+  dispatch_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TrackedAgentEventRow = {
+  id: string;
+  agent_id: string;
+  sequence: number;
+  level: TrackedAgentEvent['level'];
+  type: string;
+  message: string;
+  payload: string;
+  created_at: string;
+};
+
 function prefixedId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
@@ -123,11 +182,14 @@ export class SQLiteBeastRepository {
     for (const statement of BEAST_SQLITE_SCHEMA_STATEMENTS) {
       this.db.prepare(statement).run();
     }
+
+    this.migrateLegacySchema();
   }
 
   createRun(input: CreateRunInput): BeastRun {
     const run: BeastRun = {
       id: prefixedId('run'),
+      ...(input.trackedAgentId ? { trackedAgentId: input.trackedAgentId } : {}),
       definitionId: input.definitionId,
       definitionVersion: input.definitionVersion,
       status: 'queued',
@@ -142,6 +204,7 @@ export class SQLiteBeastRepository {
     this.db.prepare(
       `INSERT INTO beast_runs (
         id,
+        tracked_agent_id,
         definition_id,
         definition_version,
         status,
@@ -151,9 +214,10 @@ export class SQLiteBeastRepository {
         dispatched_by_user,
         created_at,
         attempt_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.id,
+      run.trackedAgentId ?? null,
       run.definitionId,
       run.definitionVersion,
       run.status,
@@ -166,6 +230,10 @@ export class SQLiteBeastRepository {
     );
 
     return run;
+  }
+
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   getRun(runId: string): BeastRun | undefined {
@@ -317,6 +385,139 @@ export class SQLiteBeastRepository {
     return rows.map(mapEvent);
   }
 
+  createTrackedAgent(input: CreateTrackedAgentInput): TrackedAgent {
+    const agent: TrackedAgent = {
+      id: prefixedId('agent'),
+      definitionId: input.definitionId,
+      source: input.source,
+      status: input.status,
+      createdByUser: input.createdByUser,
+      initAction: input.initAction,
+      initConfig: input.initConfig,
+      ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+    };
+
+    this.db.prepare(
+      `INSERT INTO tracked_agents (
+        id,
+        definition_id,
+        source,
+        status,
+        created_by_user,
+        init_action,
+        init_config,
+        chat_session_id,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      agent.id,
+      agent.definitionId,
+      agent.source,
+      agent.status,
+      agent.createdByUser,
+      JSON.stringify(agent.initAction),
+      JSON.stringify(agent.initConfig),
+      agent.chatSessionId ?? null,
+      agent.createdAt,
+      agent.updatedAt,
+    );
+
+    return agent;
+  }
+
+  getTrackedAgent(agentId: string): TrackedAgent | undefined {
+    const row = this.db.prepare('SELECT * FROM tracked_agents WHERE id = ?').get(agentId) as TrackedAgentRow | undefined;
+    return row ? mapTrackedAgent(row) : undefined;
+  }
+
+  requireTrackedAgent(agentId: string): TrackedAgent {
+    return this.getTrackedAgentOrThrow(agentId);
+  }
+
+  listTrackedAgents(): TrackedAgent[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM tracked_agents ORDER BY created_at DESC, id DESC',
+    ).all() as TrackedAgentRow[];
+    return rows.map(mapTrackedAgent);
+  }
+
+  updateTrackedAgent(agentId: string, patch: UpdateTrackedAgentPatch): TrackedAgent {
+    const current = this.getTrackedAgentOrThrow(agentId);
+    const next: TrackedAgent = {
+      ...current,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.chatSessionId !== undefined ? { chatSessionId: patch.chatSessionId } : {}),
+      ...(patch.dispatchRunId !== undefined ? { dispatchRunId: patch.dispatchRunId } : {}),
+      ...(patch.updatedAt !== undefined ? { updatedAt: patch.updatedAt } : {}),
+    };
+
+    this.db.prepare(
+      `UPDATE tracked_agents
+         SET status = ?,
+             chat_session_id = ?,
+             dispatch_run_id = ?,
+             updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      next.status,
+      next.chatSessionId ?? null,
+      next.dispatchRunId ?? null,
+      next.updatedAt,
+      agentId,
+    );
+
+    return next;
+  }
+
+  appendTrackedAgentEvent(agentId: string, input: AppendTrackedAgentEventInput): TrackedAgentEvent {
+    this.getTrackedAgentOrThrow(agentId);
+    const event: TrackedAgentEvent = {
+      id: prefixedId('agent_event'),
+      agentId,
+      sequence: nextTrackedAgentEventSequence(this.db, agentId),
+      level: input.level,
+      type: input.type,
+      message: input.message,
+      payload: input.payload,
+      createdAt: input.createdAt,
+    };
+
+    this.db.prepare(
+      `INSERT INTO tracked_agent_events (
+        id,
+        agent_id,
+        sequence,
+        level,
+        type,
+        message,
+        payload,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      event.id,
+      event.agentId,
+      event.sequence,
+      event.level,
+      event.type,
+      event.message,
+      JSON.stringify(event.payload),
+      event.createdAt,
+    );
+
+    return event;
+  }
+
+  listTrackedAgentEvents(agentId: string): TrackedAgentEvent[] {
+    this.getTrackedAgentOrThrow(agentId);
+    const rows = this.db.prepare(
+      'SELECT * FROM tracked_agent_events WHERE agent_id = ? ORDER BY sequence ASC',
+    ).all(agentId) as TrackedAgentEventRow[];
+    return rows.map(mapTrackedAgentEvent);
+  }
+
   createInterviewSession(input: Omit<BeastInterviewSession, 'id'>): BeastInterviewSession {
     const session: BeastInterviewSession = {
       id: prefixedId('interview'),
@@ -387,6 +588,17 @@ export class SQLiteBeastRepository {
     this.db.close();
   }
 
+  private migrateLegacySchema(): void {
+    this.ensureColumnExists('beast_runs', 'tracked_agent_id', 'ALTER TABLE beast_runs ADD COLUMN tracked_agent_id TEXT');
+  }
+
+  private ensureColumnExists(table: string, column: string, alterStatement: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((entry) => entry.name === column)) {
+      this.db.prepare(alterStatement).run();
+    }
+  }
+
   private insertAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {
     const run = this.getRunOrThrow(runId);
     const attempt: BeastRunAttempt = {
@@ -444,6 +656,14 @@ export class SQLiteBeastRepository {
     }
     return attempt;
   }
+
+  private getTrackedAgentOrThrow(agentId: string): TrackedAgent {
+    const agent = this.getTrackedAgent(agentId);
+    if (!agent) {
+      throw new UnknownTrackedAgentError(agentId);
+    }
+    return agent;
+  }
 }
 
 function nextEventSequence(db: Database.Database, runId: string): number {
@@ -453,9 +673,17 @@ function nextEventSequence(db: Database.Database, runId: string): number {
   return row.current_sequence + 1;
 }
 
+function nextTrackedAgentEventSequence(db: Database.Database, agentId: string): number {
+  const row = db.prepare(
+    'SELECT COALESCE(MAX(sequence), 0) AS current_sequence FROM tracked_agent_events WHERE agent_id = ?',
+  ).get(agentId) as { current_sequence: number };
+  return row.current_sequence + 1;
+}
+
 function mapRun(row: BeastRunRow): BeastRun {
   return {
     id: row.id,
+    ...(row.tracked_agent_id ? { trackedAgentId: row.tracked_agent_id } : {}),
     definitionId: row.definition_id,
     definitionVersion: row.definition_version,
     status: row.status,
@@ -511,5 +739,34 @@ function mapInterviewSession(row: BeastInterviewSessionRow): BeastInterviewSessi
     answers: JSON.parse(row.answers) as Readonly<Record<string, unknown>>,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
+  return {
+    id: row.id,
+    definitionId: row.definition_id,
+    source: row.source,
+    status: row.status,
+    createdByUser: row.created_by_user,
+    initAction: JSON.parse(row.init_action) as TrackedAgentInitAction,
+    initConfig: JSON.parse(row.init_config) as Readonly<Record<string, unknown>>,
+    ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
+    ...(row.dispatch_run_id ? { dispatchRunId: row.dispatch_run_id } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapTrackedAgentEvent(row: TrackedAgentEventRow): TrackedAgentEvent {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    sequence: row.sequence,
+    level: row.level,
+    type: row.type,
+    message: row.message,
+    payload: JSON.parse(row.payload) as Readonly<Record<string, unknown>>,
+    createdAt: row.created_at,
   };
 }

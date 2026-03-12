@@ -119,6 +119,8 @@ export { BeastLogStore } from './beasts/events/beast-log-store.js';
 export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
 export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
 export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
+export { AgentService } from './beasts/services/agent-service.js';
+export { AgentInitService } from './beasts/services/agent-init-service.js';
 export { BeastDispatchService } from './beasts/services/beast-dispatch-service.js';
 export { BeastRunService } from './beasts/services/beast-run-service.js';
 export type { BeastExecutor } from './beasts/execution/beast-executor.js';

@@ -6,6 +6,7 @@ import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
 import { BeastInterviewService } from './services/beast-interview-service.js';
+import { AgentService } from './services/agent-service.js';
 import { BeastRunService } from './services/beast-run-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 
@@ -15,6 +16,7 @@ export interface BeastServicePaths {
 }
 
 export interface BeastServiceBundle {
+  agents: AgentService;
   catalog: BeastCatalogService;
   dispatch: BeastDispatchService;
   runs: BeastRunService;
@@ -33,6 +35,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   };
 
   return {
+    agents: new AgentService(repository),
     catalog,
     dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
     runs: new BeastRunService(repository, catalog, executors, metrics, logStore),

@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.16.3](https://github.com/djm204/frankenbeast/compare/v0.16.2...v0.16.3) (2026-03-11)
+
+
+### Miscellaneous
+
+* **main:** release franken-orchestrator 0.14.2 ([8a41a9f](https://github.com/djm204/frankenbeast/commit/8a41a9f7665826b8994967e3972369e4bf845b8c))
+
+## [0.16.2](https://github.com/djm204/frankenbeast/compare/v0.16.1...v0.16.2) (2026-03-11)
+
+
+### Bug Fixes
+
+* fix the connection between dashboard and backend, and make some UI changes ([d137437](https://github.com/djm204/frankenbeast/commit/d1374374b3e0e6195b58a7fd8f19a74dc7f6a40f))
+
+
+### Miscellaneous
+
+* **main:** release franken-orchestrator 0.14.1 ([3d8b754](https://github.com/djm204/frankenbeast/commit/3d8b754310111e59c50f0c2d180c441380a35b24))
+* **main:** release franken-orchestrator 0.14.1 ([2d784f7](https://github.com/djm204/frankenbeast/commit/2d784f79eaa3f34db01f59739c46b67e4d0c54e6))
+* update README ([b514e04](https://github.com/djm204/frankenbeast/commit/b514e045599d44cb8d8236493a107defe4da4790))
+
+
+### Documentation
+
+* add agent init workflow design and plan ([95421a0](https://github.com/djm204/frankenbeast/commit/95421a04cc78bc330acff3a1349af3948eb1e23e))
+
 ## [0.16.1](https://github.com/djm204/frankenbeast/compare/v0.16.0...v0.16.1) (2026-03-11)
 
 
