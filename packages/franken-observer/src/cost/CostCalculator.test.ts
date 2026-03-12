@@ -30,7 +30,10 @@ describe('CostCalculator', () => {
     })
 
     it('returns 0 for an unknown model', () => {
-      const cost = calc.calculate({
+      const quietCalc = new CostCalculator(DEFAULT_PRICING, {
+        onUnknownModel: () => {},
+      })
+      const cost = quietCalc.calculate({
         model: 'unknown-model-xyz',
         promptTokens: 1000,
         completionTokens: 500,
