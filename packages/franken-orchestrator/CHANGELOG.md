@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.2...franken-orchestrator-v0.19.0) (2026-03-12)
+
+
+### Features
+
+* **orchestrator:** unify issue pipeline with BeastLoop and optimize context window ([ffa6299](https://github.com/djm204/frankenbeast/commit/ffa6299f446663cc724da6311467824d75bed0c5))
+
+
+### Bug Fixes
+
+* **orchestrator:** standardize issue execution via chunk files ([63942f6](https://github.com/djm204/frankenbeast/commit/63942f6b2a6aff3088a1f5c55c652719717fe7f1))
+* **orchestrator:** standardize issue execution via chunk files ([1e6d2eb](https://github.com/djm204/frankenbeast/commit/1e6d2ebbd6e8ad662ca6d70158078bf65070c28a))
+
 ## [0.18.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.1...franken-orchestrator-v0.18.2) (2026-03-12)
 
 
