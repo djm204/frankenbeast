@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.16.0...franken-orchestrator-v0.17.0) (2026-03-12)
+
+
+### Features
+
+* add frankenbeast chat persona ([05e75f0](https://github.com/djm204/frankenbeast/commit/05e75f047fecee13145ed26b41cbe7b3db6051dd))
+* add frankenbeast chat persona ([a56c434](https://github.com/djm204/frankenbeast/commit/a56c434d7d6660ce491eb175f62060e88febfe3c))
+
+
+### Bug Fixes
+
+* start tracked beast agents from dashboard ([c71865f](https://github.com/djm204/frankenbeast/commit/c71865fe25c0c1341f7228cd718d25156056d479))
+* start tracked beast agents from dashboard ([be65772](https://github.com/djm204/frankenbeast/commit/be65772b5fff6be06246a6817ef6a2d4e1afd3f0))
+
 ## [0.16.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.15.0...franken-orchestrator-v0.16.0) (2026-03-12)
 
 

@@ -7,6 +7,13 @@
 
 * add beast dashboard resume controls and path validation ([195bc31](https://github.com/djm204/frankenbeast/commit/195bc310cdbf9754e0af1c84ffd80febf4dba227))
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/frankenfirewall-v0.4.0...frankenfirewall-v0.5.0) (2026-03-12)
+
+
+### Features
+
+* add beast dashboard resume controls and path validation ([195bc31](https://github.com/djm204/frankenbeast/commit/195bc310cdbf9754e0af1c84ffd80febf4dba227))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/frankenfirewall-v0.3.1...frankenfirewall-v0.4.0) (2026-03-10)
 
 
