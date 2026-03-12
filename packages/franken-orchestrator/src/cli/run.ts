@@ -30,6 +30,7 @@ import { startChatServer } from '../http/chat-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { parse as parseDotenv } from 'dotenv';
+import { createSecretStore } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
 import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
@@ -42,6 +43,7 @@ import {
   startNetworkService,
   stopNetworkService,
 } from '../network/network-supervisor-runtime.js';
+import type { ISecretStore } from '../network/secret-store.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -108,18 +110,40 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
 }
 
-async function resolveBeastOperatorToken(root: string): Promise<string | undefined> {
+export async function resolveBeastOperatorToken(
+  root: string,
+  options?: { secretStore?: ISecretStore | undefined; config?: OrchestratorConfig | undefined } | undefined,
+): Promise<string | undefined> {
+  // 1. Secret store: highest priority when a store and operatorTokenRef are configured
+  const { secretStore, config } = options ?? {};
+  if (secretStore && config) {
+    const lookupKey = config.network.operatorTokenRef;
+    if (lookupKey) {
+      try {
+        const storeToken = await secretStore.resolve(lookupKey);
+        if (storeToken?.trim()) {
+          return storeToken.trim();
+        }
+      } catch {
+        // Secret store unavailable (e.g. missing CLI binary) — fall through to env vars
+      }
+    }
+  }
+
+  // 2. Environment variables
   const token = process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? process.env.VITE_BEAST_OPERATOR_TOKEN;
   const trimmed = token?.trim();
   if (trimmed) {
     return trimmed;
   }
 
+  // 3. Root .env file
   const rootEnvToken = await readOperatorTokenFromEnvFile(join(root, '.env'));
   if (rootEnvToken?.trim()) {
     return rootEnvToken.trim();
   }
 
+  // 4. franken-web .env.local
   const fileToken = await readOperatorTokenFromEnvFile(join(root, 'packages', 'franken-web', '.env.local'));
   return fileToken?.trim() ? fileToken.trim() : undefined;
 }
@@ -132,8 +156,6 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   } catch {
     return undefined;
   }
-
-  return undefined;
 }
 
 async function createChatSurfaceDeps(
@@ -265,7 +287,23 @@ export async function main(): Promise<void> {
 
     if (args.subcommand === 'chat-server') {
       let mutableConfig = config;
-      const beastOperatorToken = await resolveBeastOperatorToken(root);
+      // Attempt to create a secret store for operator token resolution.
+      // Only succeeds when a passphrase is available (non-interactive boot path).
+      let bootSecretStore: import('../network/secret-store.js').ISecretStore | undefined;
+      try {
+        const secureBackend = config.network.secureBackend ?? 'local-encrypted';
+        bootSecretStore = createSecretStore(secureBackend, {
+          projectRoot: root,
+          passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+        });
+      } catch {
+        // No passphrase available — fall through to env var / .env file resolution
+        bootSecretStore = undefined;
+      }
+      const beastOperatorToken = await resolveBeastOperatorToken(root, {
+        secretStore: bootSecretStore,
+        config,
+      });
       const beastServices = beastOperatorToken ? createBeastServices(paths) : undefined;
       const server = await startChatServer({
         sessionStoreDir,

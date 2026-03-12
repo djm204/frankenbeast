@@ -1,0 +1,68 @@
+{
+  "maxCritiqueIterations": 3,
+  "maxTotalTokens": 100000,
+  "maxDurationMs": 300000,
+  "enableHeartbeat": true,
+  "enableTracing": true,
+  "minCritiqueScore": 0.7,
+
+  "providers": {
+    "default": "claude",
+    "fallbackChain": ["claude", "gemini", "aider"],
+    "overrides": {
+      "claude": {
+        "command": "claude",
+        "model": "claude-sonnet-4-6",
+        "extraArgs": ["--verbose"]
+      },
+      "gemini": {
+        "command": "gemini",
+        "model": "gemini-2.0-flash"
+      },
+      "aider": {
+        "command": "aider",
+        "extraArgs": ["--yes-always"]
+      }
+    }
+  },
+
+  "network": {
+    "mode": "secure",
+    "secureBackend": "local-encrypted",
+    "operatorTokenRef": "frankenbeast/operator-token"
+  },
+
+  "chat": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 3737,
+    "model": "claude-sonnet-4-6"
+  },
+
+  "dashboard": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 5173,
+    "apiUrl": "http://127.0.0.1:3737"
+  },
+
+  "comms": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 3200,
+    "orchestratorWsUrl": "ws://127.0.0.1:3737/v1/chat/ws",
+    "orchestratorTokenRef": "frankenbeast/comms-token",
+    "slack": {
+      "enabled": false,
+      "appId": "A0123456789",
+      "botTokenRef": "frankenbeast/slack-bot-token",
+      "signingSecretRef": "frankenbeast/slack-signing-secret"
+    },
+    "discord": {
+      "enabled": false,
+      "applicationId": "123456789012345678",
+      "botTokenRef": "frankenbeast/discord-bot-token",
+      "publicKeyRef": "frankenbeast/discord-public-key"
+    }
+  }
+}

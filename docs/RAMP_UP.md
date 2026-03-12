@@ -166,6 +166,16 @@ All modules use `tsc` for builds.
 | `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
+## Secret Store
+
+- **4 backends** selectable via `network.secureBackend`: `os-keychain`, `1password`, `bitwarden`, `local-encrypted`
+- All backends implement the `ISecretStore` interface (`get(key)`, `set(key, value)`, `delete(key)`, `has(key)`)
+- The config file stores **logical keys** (e.g. `frankenbeast/operator-token`), never secret values
+- `SecretResolver` runs at boot in the network supervisor — resolves all `*Ref` fields from `ISecretStore` into `ResolvedSecrets` injected into service dependencies
+- `frankenbeast init` generates the operator token and writes it to the backend
+- `FRANKENBEAST_PASSPHRASE` env var enables headless decryption with `local-encrypted` backend (CI/CD)
+- See [ADR-018](adr/018-secret-store-architecture.md) for design rationale
+
 ## Development Practices
 
 - **TDD**: Red → Green → Refactor. Tests before implementation.

@@ -986,3 +986,41 @@ flowchart TD
 ## Web Dashboard (franken-web)
 
 React-based development tool for chat, tracked-agent launch/detail flows, configuration, and metrics visualization. Lives in `packages/franken-web/`, connects to `frankenbeast chat-server` via WebSocket, and uses authenticated Beast control HTTP routes for operator actions. Not published to npm; private monorepo package for local development.
+
+## Secret Store
+
+Frankenbeast stores secrets outside the config file. Config references secrets by **logical key** (e.g. `frankenbeast/operator-token`). At boot, `SecretResolver` reads those keys from `ISecretStore` and injects the resolved values into service dependencies.
+
+### Backends
+
+| Backend | `secureBackend` value | Best for |
+|---------|----------------------|----------|
+| OS keychain (Keychain / GNOME / DPAPI) | `os-keychain` | Local development |
+| 1Password | `1password` | Teams using 1Password vaults |
+| Bitwarden | `bitwarden` | Teams using Bitwarden |
+| Local encrypted file | `local-encrypted` | CI/CD and offline environments |
+
+### Architecture
+
+```mermaid
+flowchart LR
+    Wizard[Init Wizard] --> Store[ISecretStore]
+    Store --> BE{Backend}
+    BE --> OP[1Password]
+    BE --> BW[Bitwarden]
+    BE --> OS[OS Keychain]
+    BE --> LE[Local Encrypted]
+
+    Supervisor[Network Supervisor] --> Resolver[SecretResolver]
+    Resolver --> Store
+    Resolver --> RS[ResolvedSecrets]
+    RS --> Services[Service Dependencies]
+```
+
+- `ISecretStore` — four-method interface: `get(key)`, `set(key, value)`, `delete(key)`, `has(key)`
+- `SecretResolver` — reads `*Ref` fields from `OrchestratorConfig`, resolves each key, returns a typed `ResolvedSecrets` record
+- `frankenbeast init` — interactive wizard: generates operator token, writes to backend
+- `FRANKENBEAST_PASSPHRASE` — env var for headless `local-encrypted` decryption (CI/CD)
+- Legacy backend keys (`macos-keychain`, `windows-credential-manager`, `linux-secret-service`) are remapped to `os-keychain` at parse time
+
+**Design reference:** See [ADR-018](adr/018-secret-store-architecture.md).

@@ -70,3 +70,23 @@ A shared secret that authenticates the web dashboard to the Beast control API (`
 - Never commit `.env.local` or any file containing the token
 - Use a strong, random value (e.g., `openssl rand -hex 32`)
 - The token is embedded in the Vite build output — treat production bundles accordingly
+
+## Getting the operator token
+
+`frankenbeast init` generates the operator token and stores it in the configured secret backend (OS keychain, 1Password, Bitwarden, or local-encrypted file). The token is printed once during `init`.
+
+**Steps:**
+
+1. Run `frankenbeast init` from the project root (first-time setup).
+2. Copy the printed token value.
+3. Set it in the repo root `.env` (preferred, shared by dashboard and orchestrator):
+   ```env
+   FRANKENBEAST_BEAST_OPERATOR_TOKEN=<paste-token-here>
+   ```
+   Or, for dashboard-only override, set it in `packages/franken-web/.env.local` (never committed):
+   ```env
+   VITE_BEAST_OPERATOR_TOKEN=<paste-token-here>
+   ```
+4. Ensure the orchestrator (`frankenbeast chat-server` or `frankenbeast network`) resolves the same token — it reads it from the secret store configured via `network.secureBackend` in your config file.
+
+If you lose the token, run `frankenbeast init --regenerate-token` to rotate it (updates both the secret store and prints the new value).

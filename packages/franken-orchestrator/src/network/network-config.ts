@@ -4,18 +4,22 @@ const HostSchema = z.string().min(1).default('127.0.0.1');
 const PortSchema = z.number().int().min(1).max(65_535);
 
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
-export const SecureBackendSchema = z.enum([
-  '1password',
-  'bitwarden',
-  'macos-keychain',
-  'windows-credential-manager',
-  'linux-secret-service',
-  'local-encrypted',
-]);
+
+const LEGACY_BACKEND_MAP: Record<string, string> = {
+  'macos-keychain': 'os-keychain',
+  'windows-credential-manager': 'os-keychain',
+  'linux-secret-service': 'os-keychain',
+};
+
+export const SecureBackendSchema = z.preprocess(
+  (val) => (typeof val === 'string' ? (LEGACY_BACKEND_MAP[val] ?? val) : val),
+  z.enum(['1password', 'bitwarden', 'os-keychain', 'local-encrypted']),
+);
 
 export const NetworkOperatorConfigSchema = z.object({
   mode: NetworkModeSchema.default('secure'),
   secureBackend: SecureBackendSchema.default('local-encrypted'),
+  operatorTokenRef: z.string().min(1).optional(),
 });
 
 export const ChatServiceConfigSchema = z.object({

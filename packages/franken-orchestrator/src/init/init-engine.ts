@@ -6,6 +6,7 @@ import { FileInitStateStore } from './init-state-store.js';
 import { runInitWizard } from './init-wizard.js';
 import type { InitState } from './init-types.js';
 import { verifyInit } from './init-verify.js';
+import type { ISecretStore } from '../network/secret-store.js';
 
 export interface InitEngineResult {
   config: OrchestratorConfig;
@@ -16,6 +17,7 @@ interface RunInteractiveInitOptions {
   configFile: string;
   stateStore: FileInitStateStore;
   io: InterviewIO;
+  secretStore?: ISecretStore | undefined;
 }
 
 type RunRepairInitOptions = RunInteractiveInitOptions;
@@ -44,6 +46,7 @@ export async function runInteractiveInit(options: RunInteractiveInitOptions): Pr
     io: options.io,
     initialState,
     baseConfig,
+    secretStore: options.secretStore,
   });
 
   await saveConfig(options.configFile, result.config);
@@ -92,6 +95,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
     initialState,
     baseConfig,
     scope,
+    secretStore: options.secretStore,
   });
 
   await saveConfig(options.configFile, result.config);

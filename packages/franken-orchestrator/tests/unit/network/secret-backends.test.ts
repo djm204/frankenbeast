@@ -14,7 +14,7 @@ describe('secret backends', () => {
     expect(detected.map((backend) => backend.id)).toEqual([
       '1password',
       'bitwarden',
-      'os-store',
+      'os-keychain',
       'local-encrypted',
     ]);
   });

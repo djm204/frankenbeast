@@ -468,6 +468,69 @@ npx tsx scripts/seed.ts
 npx tsx scripts/verify-setup.ts
 ```
 
+## Secret Management
+
+Frankenbeast stores secrets outside the config file. The config references secrets by **logical key** — a short string like `frankenbeast/operator-token` — and resolves them at boot via the configured `secureBackend`.
+
+### How it works
+
+1. `frankenbeast init` runs an interactive wizard that generates the operator token and persists it to your chosen backend.
+2. The config file stores logical keys (not the secret values) under `network.operatorTokenRef`, `comms.orchestratorTokenRef`, and channel `*Ref` fields.
+3. At startup, `SecretResolver` reads those keys from `ISecretStore` and injects the resolved values into the service dependencies.
+
+### Backend options
+
+| Backend | Key | Best for |
+|---------|-----|----------|
+| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Local dev on macOS, Linux, Windows |
+| 1Password | `1password` | Teams using 1Password vaults |
+| Bitwarden | `bitwarden` | Teams using Bitwarden |
+| Local encrypted file | `local-encrypted` | CI/CD or offline environments |
+
+Set `network.secureBackend` in `frankenbeast.example.json` (or your project's `frankenbeast.config.json`) to choose a backend.
+
+### Setup per backend
+
+**OS keychain (default for local dev):**
+```bash
+frankenbeast init   # interactive — generates and stores token automatically
+```
+
+**Local encrypted file (CI/CD):**
+```bash
+export FRANKENBEAST_PASSPHRASE=<strong-random-passphrase>
+frankenbeast init --non-interactive
+```
+The passphrase encrypts the local vault at `.frankenbeast/secrets.enc`. Set `FRANKENBEAST_PASSPHRASE` in your CI environment.
+
+**1Password / Bitwarden:**
+```bash
+frankenbeast init --backend 1password   # opens browser sign-in flow
+```
+Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+
+### Operator token setup
+
+`frankenbeast init` generates a strong random operator token and stores it in the backend. To wire the franken-web dashboard:
+
+1. Run `frankenbeast init` — it prints the token once after generation.
+2. Copy the token into `packages/franken-web/.env.local` as `VITE_BEAST_OPERATOR_TOKEN=<token>`.
+3. The orchestrator resolves the same token from the secret store on startup — both sides must match.
+
+### Non-interactive / CI usage
+
+```bash
+export FRANKENBEAST_PASSPHRASE=<passphrase>
+frankenbeast run --config frankenbeast.config.json
+```
+
+With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault without prompting.
+
+### References
+
+- [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale
+- [ADR-017](docs/adr/017-network-operator-control-plane.md) — network operator control plane and token auth
+
 ## Configuration
 
 ### Environment Variables

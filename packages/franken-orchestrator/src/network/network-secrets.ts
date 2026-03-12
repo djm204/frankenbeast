@@ -1,10 +1,5 @@
-import { createHash } from 'node:crypto';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { setNetworkConfigValue, isSensitiveConfigPath } from './network-config-paths.js';
-import { bitwardenBackend } from './secret-backends/bitwarden.js';
-import { localEncryptedStoreBackend } from './secret-backends/local-encrypted-store.js';
-import { onePasswordBackend } from './secret-backends/one-password.js';
-import { osStoreBackend } from './secret-backends/os-store.js';
 
 export interface SecretBackend {
   id: string;
@@ -19,13 +14,31 @@ export interface SecretBackendDetectionOptions {
 }
 
 const CATALOG: SecretBackend[] = [
-  onePasswordBackend,
-  bitwardenBackend,
-  osStoreBackend,
-  localEncryptedStoreBackend,
+  {
+    id: '1password',
+    displayName: '1Password',
+    recommended: true,
+  },
+  {
+    id: 'bitwarden',
+    displayName: 'Bitwarden',
+    recommended: true,
+  },
+  {
+    id: 'os-keychain',
+    displayName: 'OS Keychain',
+    recommended: true,
+  },
+  {
+    id: 'local-encrypted',
+    displayName: 'Local Encrypted Store',
+    recommended: false,
+    warning: 'Local encrypted storage is not the optimal solution for production use.',
+  },
 ];
 
 const SENSITIVE_CONFIG_PATHS = [
+  'network.operatorTokenRef',
   'comms.orchestratorTokenRef',
   'comms.slack.botTokenRef',
   'comms.slack.signingSecretRef',
@@ -34,18 +47,6 @@ const SENSITIVE_CONFIG_PATHS = [
 
 export function resolveSecretMode(config: OrchestratorConfig): 'secure' | 'insecure' {
   return config.network.mode;
-}
-
-export function createSecretRef(options: {
-  path: string;
-  rawValue: string;
-  mode: 'secure' | 'insecure';
-}): string {
-  const digest = createHash('sha256')
-    .update(`${options.path}:${options.rawValue}`)
-    .digest('hex')
-    .slice(0, 12);
-  return `secret://${options.mode}/${options.path}/${digest}`;
 }
 
 export function redactSensitiveConfig(config: OrchestratorConfig): OrchestratorConfig {
@@ -77,15 +78,15 @@ export async function detectAvailableSecretBackends(
   const detected: SecretBackend[] = [];
 
   if (await options.commandExists('op')) {
-    detected.push(onePasswordBackend);
+    detected.push(CATALOG[0]!); // 1password
   }
   if (await options.commandExists('bw')) {
-    detected.push(bitwardenBackend);
+    detected.push(CATALOG[1]!); // bitwarden
   }
   if (await options.osStoreAvailable()) {
-    detected.push(osStoreBackend);
+    detected.push(CATALOG[2]!); // os-keychain
   }
 
-  detected.push(localEncryptedStoreBackend);
+  detected.push(CATALOG[3]!); // local-encrypted
   return detected;
 }
