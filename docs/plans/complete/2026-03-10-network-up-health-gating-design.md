@@ -86,4 +86,3 @@ Add or update tests for:
 - not printing `Started ...` before health confirmation
 - stopping partially started services when a later startup fails
 - suppressing child banner output in managed mode
-
