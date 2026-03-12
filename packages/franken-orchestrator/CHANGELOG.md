@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.15.0...franken-orchestrator-v0.16.0) (2026-03-12)
+
+
+### Features
+
+* add beast dashboard resume and path controls ([500999f](https://github.com/djm204/frankenbeast/commit/500999f8404ef680616341136cbe5c4eeef4fe10))
+* add beast dashboard resume controls and path validation ([195bc31](https://github.com/djm204/frankenbeast/commit/195bc310cdbf9754e0af1c84ffd80febf4dba227))
+* secret store with 4 pluggable backends ([f05846f](https://github.com/djm204/frankenbeast/commit/f05846f70dbc6b6815ae4568c829d9eedc0a1670))
+
+
+### Bug Fixes
+
+* **secret-store:** address PR review — 5 fixes for robustness and correctness ([89076b0](https://github.com/djm204/frankenbeast/commit/89076b06e9427b0adb38579f748009378ca1ae0a))
+* **secret-store:** fix exactOptionalPropertyTypes TS errors across all new interfaces ([bf8f267](https://github.com/djm204/frankenbeast/commit/bf8f267dec4f0658596a6cad03b67719031b6798))
+
 ## [0.15.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.1...franken-orchestrator-v0.15.0) (2026-03-11)
 
 
