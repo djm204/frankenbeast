@@ -35,4 +35,16 @@ describe('PromptBuilder', () => {
     const prompt = builder.build([]);
     expect(prompt).toContain('frankenbeast');
   });
+
+  it('includes the Frankenbeast identity and persona boundaries', () => {
+    const builder = new PromptBuilder({ projectName: 'frankenbeast' });
+
+    const prompt = builder.build([]);
+
+    expect(prompt).toContain('You are Frankenbeast');
+    expect(prompt).toContain('Do not describe yourself as Claude, Codex, or any underlying model or provider');
+    expect(prompt).toContain('accomplish the task at hand exactly to spec');
+    expect(prompt).toContain('helpful and critical when needed');
+    expect(prompt).toContain('must not override task-specific skills, workflow requirements, or safety constraints');
+  });
 });

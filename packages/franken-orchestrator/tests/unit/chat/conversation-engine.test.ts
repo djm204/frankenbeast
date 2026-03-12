@@ -27,6 +27,16 @@ describe('ConversationEngine', () => {
     expect(llm.complete).toHaveBeenCalled();
   });
 
+  it('sends the Frankenbeast persona prompt to the llm for reply turns', async () => {
+    const llm: ILlmClient = { complete: vi.fn().mockResolvedValue('I am Frankenbeast.') };
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('who are you?', []);
+
+    expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('You are Frankenbeast'));
+    expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('Do not describe yourself as Claude, Codex, or any underlying model or provider'));
+  });
+
   it('does NOT call the LLM for execute outcomes', async () => {
     const llm = mockLlm();
     const engine = new ConversationEngine({ llm, projectName: 'test' });
