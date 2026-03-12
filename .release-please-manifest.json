@@ -5,7 +5,7 @@
   "packages/franken-governor": "0.4.0",
   "packages/franken-heartbeat": "0.3.1",
   "packages/franken-mcp": "0.3.1",
-  "packages/franken-observer": "0.4.0",
+  "packages/franken-observer": "0.3.2",
   "packages/franken-orchestrator": "0.16.0",
   "packages/franken-planner": "0.3.1",
   "packages/franken-skills": "0.4.0",
