@@ -1,6 +1,9 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { BeastLoop } from '../beast-loop.js';
+import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
+import { writeChunkFiles, type ChunkDefinition } from '../cli/file-writer.js';
+import { getProjectPaths } from '../cli/project-root.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../deps.js';
 import type { GithubIssue, TriageResult, IssueOutcome } from './types.js';
 import type { IssueGraphBuilder } from './issue-graph-builder.js';
@@ -30,6 +33,7 @@ export interface IssueRunnerConfig {
   readonly repo: string;
   readonly issueRuntime?: IssueRuntimeSupport | undefined;
   readonly checkpoint?: ICheckpointStore | undefined;
+  readonly timeoutMs?: number | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -179,24 +183,41 @@ export class IssueRunner {
 
     git.isolate(`issue-${issue.number}`);
 
+    const planDir = resolve(`.frankenbeast/plans/issue-${issue.number}`);
+    mkdirSync(planDir, { recursive: true });
+
+    // Convert PlanGraph to ChunkDefinitions for the file writer
+    const chunkDefs: ChunkDefinition[] = graph.tasks.map(task => ({
+      id: task.id,
+      objective: task.objective,
+      dependsOn: task.dependsOn,
+      verificationCommand: 'npm test', // Default for issues
+      successCriteria: 'Issue fix is verified by tests',
+      files: [],
+      dependencies: [],
+    }));
+
+    const paths = getProjectPaths('.');
+    const issuePaths = { ...paths, plansDir: planDir };
+    writeChunkFiles(issuePaths, chunkDefs);
+
+    const realGraphBuilder = new ChunkFileGraphBuilder(planDir);
+
     // Create issue-specific deps for BeastLoop
-    const issueDeps: any = {
+    const issueDeps: BeastLoopDeps = {
       ...fullDeps,
-      logger: logger ?? fullDeps?.logger,
-      // Provide a mock graph builder that returns the pre-built issue graph
-      graphBuilder: {
-        build: async () => graph,
-      },
-      refreshPlanTasks: async () => graph.tasks,
+      logger: logger ?? fullDeps.logger,
+      graphBuilder: realGraphBuilder,
+      refreshPlanTasks: async () => (await realGraphBuilder.build({ goal: 'refresh' })).tasks,
     };
 
-    if (issueCheckpoint) {
-      issueDeps.checkpoint = issueCheckpoint;
+    const finalCheckpoint = issueCheckpoint ?? fullDeps.checkpoint;
+    if (finalCheckpoint) {
+      Object.assign(issueDeps, { checkpoint: finalCheckpoint });
     }
 
-    const loop = new BeastLoop(issueDeps as BeastLoopDeps, {
-      // Limit iterations for one-shot issues to prevent token burn
-      maxDurationMs: 3_600_000, // 1 hour max per issue
+    const loop = new BeastLoop(issueDeps, {
+      maxDurationMs: config.timeoutMs ?? 3_600_000,
     });
 
     try {
@@ -210,7 +231,7 @@ export class IssueRunner {
 
       const tokensUsed = result.tokenSpend.totalTokens;
       const status = result.status === 'completed' ? 'fixed' : 'failed';
-      const prUrl = result.status === 'completed' ? outcomesPrUrl(result) : undefined;
+      const prUrl = result.prUrl;
 
       appendIssueLog(logFile, `Issue #${issue.number} execution finished with status ${status}`);
 
@@ -232,10 +253,4 @@ export class IssueRunner {
       };
     }
   }
-}
-
-function outcomesPrUrl(result: BeastResult): string | undefined {
-  // PrCreator currently doesn't return the URL in BeastResult, but it's often in logs.
-  // We'll rely on the Session.runIssues to display it if it was created.
-  return undefined; 
 }

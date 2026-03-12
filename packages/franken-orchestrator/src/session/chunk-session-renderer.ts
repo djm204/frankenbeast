@@ -1,4 +1,4 @@
-import type { ChunkSession } from './chunk-session.js';
+import type { ChunkSession, ChunkTranscriptEntry } from './chunk-session.js';
 import type { ICliProvider } from '../skills/providers/cli-provider.js';
 
 export interface RenderedChunkSession {
@@ -8,7 +8,13 @@ export interface RenderedChunkSession {
   readonly model?: string;
 }
 
+export interface ChunkSessionRendererConfig {
+  readonly recentTurnLimit?: number;
+}
+
 export class ChunkSessionRenderer {
+  constructor(private readonly config: ChunkSessionRendererConfig = {}) {}
+
   render(session: ChunkSession, provider: ICliProvider): RenderedChunkSession {
     const sessionContinue =
       provider.supportsNativeSessionResume() &&
@@ -18,20 +24,30 @@ export class ChunkSessionRenderer {
     // Prune transcript to prevent context bloating:
     // 1. Always keep the 'objective' (first entry)
     // 2. Keep the most recent 'compaction_summary'
-    // 3. Keep only the last 3 turns of active conversation
+    // 3. Always keep ALL 'error' entries (critical for debugging)
+    // 4. Keep only the last N turns of active conversation
     const objective = session.transcript.find((e) => e.kind === 'objective');
-    const latestCompaction = [...session.transcript].reverse().find((e) => e.kind === 'compaction_summary');
     
-    // Turns are pairs of (usually) assistant output and potential user feedback.
-    // For autonomous loops, they are mostly assistant blocks.
-    const RECENT_LIMIT = 3;
+    let latestCompaction: ChunkTranscriptEntry | undefined;
+    for (let i = session.transcript.length - 1; i >= 0; i--) {
+      const entry = session.transcript[i];
+      if (entry && entry.kind === 'compaction_summary') {
+        latestCompaction = entry;
+        break;
+      }
+    }
+    
+    const errors = session.transcript.filter((e) => e.kind === 'error');
+    
+    const RECENT_LIMIT = this.config.recentTurnLimit ?? 3;
     const recentTurns = session.transcript
-      .filter((e) => e.kind !== 'objective' && e.kind !== 'compaction_summary')
+      .filter((e) => e.kind !== 'objective' && e.kind !== 'compaction_summary' && e.kind !== 'error')
       .slice(-RECENT_LIMIT);
 
     const prunedTranscript = [
       ...(objective ? [objective] : []),
       ...(latestCompaction ? [latestCompaction] : []),
+      ...errors,
       ...recentTurns,
     ]
       .map((entry) => `[${entry.kind}] ${entry.content}`)

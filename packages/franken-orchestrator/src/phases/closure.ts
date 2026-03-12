@@ -76,7 +76,10 @@ export async function runClosure(
 
   if (prCreator) {
     try {
-      await prCreator.create(result, logger);
+      const pr = await prCreator.create(result, logger);
+      if (pr) {
+        (result as any).prUrl = pr.url;
+      }
     } catch (error) {
       logger.error('Closure: PR creation failed', {
         error: error instanceof Error ? error.message : String(error),

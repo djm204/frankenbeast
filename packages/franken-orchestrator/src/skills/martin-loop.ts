@@ -404,7 +404,7 @@ export class MartinLoop {
     let totalTokens = 0;
     let activeProvider: string = config.provider;
     let pendingSleepMs = 0;
-    const promiseRegex = new RegExp(`<promise>${escapeRegex(config.promiseTag)}</promise>`);
+    const promiseRegex = new RegExp(`<promise>\\s*${escapeRegex(config.promiseTag)}\\s*</promise>`, 'i');
     let chunkSession = this.loadOrCreateChunkSession(config, activeProvider);
 
     // Provider exhaustion tracking

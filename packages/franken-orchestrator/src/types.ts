@@ -14,6 +14,7 @@ export interface BeastResult {
   readonly taskResults?: readonly TaskOutcome[] | undefined;
   readonly abortReason?: string | undefined;
   readonly error?: Error | undefined;
+  readonly prUrl?: string | undefined;
   readonly durationMs: number;
 }
 

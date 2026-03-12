@@ -16,6 +16,7 @@ const mockRun = vi.fn(async () => {
     status: 'completed',
     tokenSpend: { totalTokens: 200 },
     taskResults: [],
+    prUrl: 'https://github.com/org/repo/pull/42',
   } as unknown as BeastResult;
 });
 
@@ -133,6 +134,7 @@ describe('IssueRunner', () => {
         status: 'completed',
         tokenSpend: { totalTokens: 200 },
         taskResults: [],
+        prUrl: 'https://github.com/org/repo/pull/42',
       } as unknown as BeastResult;
     });
     runner = new IssueRunner();
@@ -301,6 +303,7 @@ describe('IssueRunner', () => {
       expect(outcome.issueTitle).toBe('Fix the thing');
       expect(outcome.status).toBe('fixed');
       expect(outcome.tokensUsed).toBe(200);
+      expect(outcome.prUrl).toBe('https://github.com/org/repo/pull/42');
       expect(outcome.error).toBeUndefined();
     });
   });
