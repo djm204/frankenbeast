@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.3.2...franken-observer-v0.4.0) (2026-03-12)
+
+
+### Features
+
+* add beast dashboard resume controls and path validation ([195bc31](https://github.com/djm204/frankenbeast/commit/195bc310cdbf9754e0af1c84ffd80febf4dba227))
+
 ## [0.3.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.3.1...franken-observer-v0.3.2) (2026-03-10)
 
 
