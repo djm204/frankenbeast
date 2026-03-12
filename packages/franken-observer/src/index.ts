@@ -68,6 +68,7 @@ export type { JudgeFunction, JudgeResponse, LLMJudgeEvalOptions } from './evals/
 export type { Trace, Span, SpanStatus, TraceStatus, StartSpanOptions, EndSpanOptions } from './core/types.js'
 export type { TokenUsage } from './core/SpanLifecycle.js'
 export type { TokenRecord, TokenTotals } from './cost/TokenCounter.js'
+export type { CostCalculatorOptions } from './cost/CostCalculator.js'
 export type { CircuitBreakerOptions, CircuitBreakerResult } from './cost/CircuitBreaker.js'
 export type { AttributionEntry, AttributionRow } from './cost/ModelAttribution.js'
 export type { ModelPricing, PricingTable } from './cost/defaultPricing.js'
