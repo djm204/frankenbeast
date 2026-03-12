@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
@@ -156,6 +156,9 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   if (reset) {
     for (const f of [checkpointFile, paths.tracesDb]) {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
+    }
+    for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
+      try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   }
 

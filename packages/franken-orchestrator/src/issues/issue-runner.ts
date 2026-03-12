@@ -73,7 +73,8 @@ function taskStage(taskId: string): 'impl' | 'harden' {
 
 function taskChunkId(taskId: string): string {
   const [, ...rest] = taskId.split(':');
-  return rest.join(':');
+  const base = rest.join(':');
+  return taskStage(taskId) === 'harden' ? `${base}/harden` : base;
 }
 
 function appendIssueLog(logFile: string | undefined, message: string): void {

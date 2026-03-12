@@ -272,6 +272,26 @@ describe('IssueRunner', () => {
       expect(skillConfig?.martin.taskId).toBe('impl:issue-89');
     });
 
+    it('uses a distinct Martin chunk identity for harden issue tasks', async () => {
+      const executor = mockExecutor();
+      const issueRuntime = makeIssueRuntimeSupport();
+      const issues = [makeIssue({ number: 89 })];
+      const triages = [makeTriage(89, 'one-shot')];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+        issueRuntime,
+      });
+
+      await runner.run(config);
+
+      const hardenCall = (executor.execute as ReturnType<typeof vi.fn>).mock.calls[1];
+      const skillConfig = hardenCall?.[2] as CliSkillConfig | undefined;
+      expect(skillConfig?.martin.chunkId).toBe('issue-89/harden');
+      expect(skillConfig?.martin.taskId).toBe('harden:issue-89');
+    });
+
     it('does not apply the chunk 10-iteration cap to one-shot issues', async () => {
       const executor = mockExecutor();
       const issues = [makeIssue({ number: 89 })];

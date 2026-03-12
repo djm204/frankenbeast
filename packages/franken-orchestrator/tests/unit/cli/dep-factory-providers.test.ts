@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 
@@ -225,5 +225,28 @@ describe('dep-factory provider wiring', () => {
       checkpointFile: expect.stringContaining('issue-89'),
       logFile: expect.stringContaining('issue-89'),
     }));
+  });
+
+  it('clears issue-scoped runtime artifacts when reset is requested', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      reset: true,
+      issueIO: {
+        read: vi.fn(async () => 'y'),
+        write: vi.fn(),
+      },
+    });
+
+    const issueCheckpoint = resolve(opts.paths.buildDir, 'issues', 'issue-89', 'issue-89.checkpoint');
+    const chunkSession = resolve(opts.paths.chunkSessionsDir, 'issue-89', 'issue-89.json');
+    mkdirSync(resolve(opts.paths.buildDir, 'issues', 'issue-89'), { recursive: true });
+    mkdirSync(resolve(opts.paths.chunkSessionsDir, 'issue-89'), { recursive: true });
+    writeFileSync(issueCheckpoint, 'impl:issue-89\n');
+    writeFileSync(chunkSession, '{}');
+
+    await createCliDeps(opts);
+
+    expect(existsSync(issueCheckpoint)).toBe(false);
+    expect(existsSync(chunkSession)).toBe(false);
   });
 });
