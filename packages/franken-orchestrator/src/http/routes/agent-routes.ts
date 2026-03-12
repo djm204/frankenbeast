@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
@@ -21,6 +22,7 @@ const CreateAgentBody = z.object({
 
 export interface AgentRoutesDeps {
   agents: AgentService;
+  dispatch?: BeastDispatchService;
   runs: BeastRunService;
   operatorToken: string;
   security: TransportSecurityService;
@@ -54,7 +56,40 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         source: agent.source,
       },
     });
-    return c.json({ data: agent }, 201);
+
+    if (body.chatSessionId) {
+      deps.agents.appendEvent(agent.id, {
+        level: 'info',
+        type: 'agent.chat.bound',
+        message: `Bound chat session ${body.chatSessionId}`,
+        payload: {
+          chatSessionId: body.chatSessionId,
+        },
+      });
+    }
+    deps.agents.appendEvent(agent.id, {
+      level: 'info',
+      type: 'agent.command.sent',
+      message: `Sent init command ${body.initAction.command}`,
+      payload: {
+        command: body.initAction.command,
+      },
+    });
+
+    if (!deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
+      return c.json({ data: agent }, 201);
+    }
+
+    await deps.dispatch.createRun({
+      definitionId: body.definitionId,
+      config: body.initConfig,
+      dispatchedBy: body.chatSessionId ? 'chat' : 'api',
+      dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
+      trackedAgentId: agent.id,
+      startNow: true,
+    });
+
+    return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
   });
 
   app.get('/v1/beasts/agents', (c) => {
@@ -124,4 +159,8 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   });
 
   return app;
+}
+
+function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
+  return kind === 'chunk-plan' || kind === 'martin-loop';
 }

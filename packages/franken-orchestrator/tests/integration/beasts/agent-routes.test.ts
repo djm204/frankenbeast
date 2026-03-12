@@ -221,6 +221,82 @@ describe('agent routes', () => {
     ]);
   });
 
+  it('dispatches chunk-plan tracked agents during creation when init config is complete', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const sessionResponse = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    expect(sessionResponse.status).toBe(201);
+    const createdSession = await sessionResponse.json() as { data: { id: string } };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+          chatSessionId: createdSession.data.id,
+        },
+        initConfig: {
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+        },
+        chatSessionId: createdSession.data.id,
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(created.data.status).toBe('running');
+    expect(created.data.dispatchRunId).toBeTruthy();
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as {
+      data: {
+        agent: { dispatchRunId?: string; chatSessionId?: string; status: string };
+        events: Array<{ type: string }>;
+      };
+    };
+
+    expect(detail.data.agent.status).toBe('running');
+    expect(detail.data.agent.chatSessionId).toBe(createdSession.data.id);
+    expect(detail.data.agent.dispatchRunId).toBeTruthy();
+    expect(detail.data.events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      'agent.created',
+      'agent.chat.bound',
+      'agent.command.sent',
+      'agent.dispatch.linked',
+    ]));
+
+    const runResponse = await app.request(`/v1/beasts/runs/${detail.data.agent.dispatchRunId}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(runResponse.status).toBe(200);
+    const runBody = await runResponse.json() as { data: { run: { trackedAgentId?: string; status: string } } };
+    expect(runBody.data.run.trackedAgentId).toBe(created.data.id);
+    expect(runBody.data.run.status).toBe('running');
+  });
+
   it('returns tracked agent detail including init metadata and linked run id', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
