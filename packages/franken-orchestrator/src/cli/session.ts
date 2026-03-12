@@ -116,7 +116,7 @@ export class Session {
       throw new Error('Issue dependencies not created');
     }
 
-    const { fetcher, triage, review, graphBuilder, runner, executor, git, prCreator, checkpoint } = issueDeps;
+    const { fetcher, triage, review, graphBuilder, runner, executor, git, prCreator, checkpoint, issueRuntime } = issueDeps;
 
     // Resolve canonical repo for the entire issues pipeline.
     let repo: string;
@@ -181,6 +181,7 @@ export class Session {
       repo,
       provider: this.config.provider,
       providers: this.config.providers,
+      issueRuntime,
     });
 
     this.displayIssueSummary(outcomes);

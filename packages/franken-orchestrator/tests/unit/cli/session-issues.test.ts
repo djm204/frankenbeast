@@ -95,6 +95,24 @@ const mockCheckpoint = {
   lastCommit: vi.fn(() => undefined),
 };
 
+const mockIssueRuntime = {
+  planNameForIssue: vi.fn((issueNumber: number) => `issue-${issueNumber}`),
+  checkpointForIssue: vi.fn((issueNumber: number) => ({
+    issueNumber,
+    has: vi.fn(() => false),
+    write: vi.fn(),
+    readAll: vi.fn(() => new Set<string>()),
+    clear: vi.fn(),
+    recordCommit: vi.fn(),
+    lastCommit: vi.fn(() => undefined),
+  })),
+  artifactsForIssue: vi.fn((issueNumber: number) => ({
+    planName: `issue-${issueNumber}`,
+    checkpointFile: `/tmp/issue-${issueNumber}.checkpoint`,
+    logFile: `/tmp/issue-${issueNumber}-build.log`,
+  })),
+};
+
 const mockPrCreator = {
   create: vi.fn(async () => ({ url: 'https://pr/1' })),
   generateCommitMessage: vi.fn(async () => 'fix: issue'),
@@ -128,6 +146,7 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
       git: mockGit,
       prCreator: mockPrCreator,
       checkpoint: mockCheckpoint,
+      issueRuntime: mockIssueRuntime,
     },
   })),
 }));
@@ -496,6 +515,7 @@ describe('Session.runIssues()', () => {
         executor: mockExecutor,
         git: mockGit,
         checkpoint: mockCheckpoint,
+        issueRuntime: mockIssueRuntime,
       }),
     );
   });

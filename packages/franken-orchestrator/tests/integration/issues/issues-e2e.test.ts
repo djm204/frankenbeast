@@ -133,6 +133,7 @@ describe('issues E2E pipeline', () => {
       baseBranch: 'main',
       noPr: false,
       repo: 'org/repo',
+      provider: 'claude',
     });
 
     // Assert: IssueOutcome has status 'fixed'
@@ -221,6 +222,7 @@ describe('issues E2E pipeline', () => {
       baseBranch: 'main',
       noPr: false,
       repo: 'org/repo',
+      provider: 'claude',
     });
 
     // Assert: 4 tasks executed (2 impl + 2 harden)
@@ -305,6 +307,7 @@ describe('issues E2E pipeline', () => {
       baseBranch: 'main',
       noPr: false,
       repo: 'org/repo',
+      provider: 'claude',
     });
 
     // Issues sorted by severity: 1 (critical) first, then 2 (high)

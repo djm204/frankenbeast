@@ -244,7 +244,8 @@ export class CliSkillExecutor {
     }
 
     // Build martin config with defaults from input when not explicitly provided
-    const isImpl = taskId?.startsWith('impl:') ?? true;
+    const isImpl = taskId ? !taskId.startsWith('harden:') : true;
+    const executionStage = isImpl ? 'impl' : 'harden';
     const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
     const martinDefaults: MartinLoopConfig = {
       prompt: input.objective,
@@ -357,10 +358,27 @@ export class CliSkillExecutor {
         this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
 
         // Auto-commit + per-commit checkpoint recording
-        const committed = this.git.autoCommit(chunkId, 'impl', iteration);
+        const committed = this.git.autoCommit(chunkId, executionStage, iteration);
         if (committed && checkpoint && taskId) {
           const commitHash = this.git.getCurrentHead();
-          checkpoint.recordCommit(taskId, 'impl', iteration, commitHash);
+          checkpoint.recordCommit(taskId, executionStage, iteration, commitHash);
+        }
+
+        if (wrappedConfig.staleMateLimit !== undefined && !result.rateLimited) {
+          const signature = normalizeStaleMateSignature(result.stdout);
+          const outputChanged = signature.length > 0 && signature !== lastStaleMateSignature;
+          if (committed || outputChanged || result.promiseDetected) {
+            stalledIterations = 0;
+          } else {
+            stalledIterations++;
+          }
+          lastStaleMateSignature = signature;
+
+          if (stalledIterations >= wrappedConfig.staleMateLimit) {
+            throw new Error(
+              `MartinLoop stale mate for chunk "${chunkId}" after ${stalledIterations} non-progress iterations`,
+            );
+          }
         }
 
         // Budget check — stops before NEXT iteration
@@ -377,6 +395,8 @@ export class CliSkillExecutor {
 
     // Run Martin loop
     let martinResult: MartinLoopResult;
+    let lastStaleMateSignature = '';
+    let stalledIterations = 0;
     try {
       martinResult = await this.martin.run(wrappedConfig);
     } catch (err) {
@@ -575,4 +595,8 @@ export class CliSkillExecutor {
       updatedAt: new Date().toISOString(),
     });
   }
+}
+
+function normalizeStaleMateSignature(stdout: string): string {
+  return stdout.replace(/\s+/g, ' ').trim();
 }

@@ -49,6 +49,16 @@ describe('FileCheckpointStore', () => {
       store.write('first-key');
       expect(existsSync(filePath)).toBe(true);
     });
+
+    it('creates parent directories for nested checkpoint paths', () => {
+      const nestedPath = join(tmpDir, 'issues', 'issue-89', 'checkpoint.log');
+      const nestedStore = new FileCheckpointStore(nestedPath);
+
+      nestedStore.write('first-key');
+
+      expect(existsSync(nestedPath)).toBe(true);
+      expect(readFileSync(nestedPath, 'utf-8')).toBe('first-key\n');
+    });
   });
 
   describe('readAll()', () => {

@@ -25,6 +25,7 @@ export interface MartinLoopConfig {
   readonly prompt: string;
   readonly promiseTag: string;
   readonly maxIterations: number;
+  readonly staleMateLimit?: number | undefined;
   readonly maxTurns: number;
   readonly provider: string;
   readonly command?: string | undefined;
