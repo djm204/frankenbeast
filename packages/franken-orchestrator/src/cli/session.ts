@@ -179,6 +179,8 @@ export class Session {
       baseBranch,
       noPr,
       repo,
+      provider: this.config.provider,
+      providers: this.config.providers,
     });
 
     this.displayIssueSummary(outcomes);

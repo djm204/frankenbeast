@@ -103,6 +103,8 @@ function makeConfig(overrides: Partial<IssueRunnerConfig> = {}): IssueRunnerConf
     baseBranch: 'main',
     noPr: true,
     repo: 'org/repo',
+    provider: 'claude',
+    providers: ['claude', 'codex'],
     ...overrides,
   };
 }
@@ -214,6 +216,26 @@ describe('IssueRunner', () => {
       await runner.run(config);
 
       expect(git.isolate).toHaveBeenCalledWith('issue-99');
+    });
+
+    it('passes the configured provider and fallback chain into Martin execution', async () => {
+      const executor = mockExecutor();
+      const issues = [makeIssue({ number: 12 })];
+      const triages = [makeTriage(12)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+        provider: 'gemini',
+        providers: ['gemini', 'codex', 'claude'],
+      });
+
+      await runner.run(config);
+
+      const firstCall = (executor.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+      const skillConfig = firstCall?.[2] as CliSkillConfig | undefined;
+      expect(skillConfig?.martin.provider).toBe('gemini');
+      expect(skillConfig?.martin.providers).toEqual(['gemini', 'codex', 'claude']);
     });
   });
 

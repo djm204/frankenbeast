@@ -18,7 +18,7 @@ export class GeminiProvider implements ICliProvider {
   readonly chatModel = 'gemini-2.0-flash';
 
   buildArgs(opts: ProviderOpts): string[] {
-    const args: string[] = ['-p', '--yolo', '--output-format', 'stream-json'];
+    const args: string[] = ['-p', '', '--yolo', '--output-format', 'stream-json'];
     if (opts.extraArgs) {
       args.push(...opts.extraArgs);
     }

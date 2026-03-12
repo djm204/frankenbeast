@@ -186,6 +186,9 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...(options.adapterModel ? { model: options.adapterModel } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
+    ...(options.providers ? { providers: options.providers } : {}),
+    registry,
+    ...(options.providersConfig ? { providerOverrides: options.providersConfig } : {}),
   });
 
   const adapterLlm = new AdapterLlmClient(

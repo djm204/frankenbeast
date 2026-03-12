@@ -20,6 +20,8 @@ export interface IssueRunnerConfig {
   readonly baseBranch: string;
   readonly noPr: boolean;
   readonly repo: string;
+  readonly provider: string;
+  readonly providers?: readonly string[] | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -136,7 +138,19 @@ export class IssueRunner {
     cumulativeTokens: number,
     budgetTokens: number,
   ): Promise<IssueOutcome> {
-    const { graphBuilder, executor, git, prCreator, checkpoint, logger, noPr, baseBranch, repo } = config;
+    const {
+      graphBuilder,
+      executor,
+      git,
+      prCreator,
+      checkpoint,
+      logger,
+      noPr,
+      baseBranch,
+      repo,
+      provider,
+      providers,
+    } = config;
 
     // Check if all tasks already checkpointed
     let graph: PlanGraph;
@@ -203,7 +217,8 @@ export class IssueRunner {
             promiseTag: `IMPL_issue-${issue.number}_DONE`,
             maxIterations: 10,
             maxTurns: 25,
-            provider: 'claude',
+            provider,
+            providers,
             timeoutMs: 600_000,
           },
           git: {
