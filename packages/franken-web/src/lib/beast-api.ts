@@ -146,14 +146,41 @@ export class BeastApiClient {
     return this.postAction(runId, 'restart');
   }
 
+  async startAgent(agentId: string): Promise<BeastRunSummary | TrackedAgentSummary> {
+    return this.postAgentAction(agentId, 'start');
+  }
+
+  async stopAgent(agentId: string): Promise<BeastRunSummary | TrackedAgentSummary> {
+    return this.postAgentAction(agentId, 'stop');
+  }
+
+  async restartAgent(agentId: string): Promise<BeastRunSummary | TrackedAgentSummary> {
+    return this.postAgentAction(agentId, 'restart');
+  }
+
   async resumeAgent(agentId: string): Promise<BeastRunSummary> {
     return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}/resume`, {
       method: 'POST',
     });
   }
 
+  async deleteAgent(agentId: string): Promise<void> {
+    await this.requestVoid(`/v1/beasts/agents/${encodeURIComponent(agentId)}`, {
+      method: 'DELETE',
+    });
+  }
+
   private async postAction(runId: string, action: 'start' | 'stop' | 'kill' | 'restart'): Promise<BeastRunSummary> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/${action}`, {
+      method: 'POST',
+    });
+  }
+
+  private async postAgentAction(
+    agentId: string,
+    action: 'start' | 'stop' | 'restart',
+  ): Promise<BeastRunSummary | TrackedAgentSummary> {
+    return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}/${action}`, {
       method: 'POST',
     });
   }
@@ -171,6 +198,19 @@ export class BeastApiClient {
     }
     const body = await response.json() as { data: T };
     return body.data;
+  }
+
+  private async requestVoid(path: string, init: RequestInit): Promise<void> {
+    const headers = normalizeHeaders(init.headers);
+    headers.authorization = `Bearer ${this.operatorToken}`;
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
   }
 }
 

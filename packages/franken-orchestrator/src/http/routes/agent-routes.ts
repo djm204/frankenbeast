@@ -140,6 +140,137 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     }
   });
 
+  app.post('/v1/beasts/agents/:agentId/start', async (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = deps.agents.getAgent(agentId);
+      if (agent.status !== 'stopped') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_STARTABLE',
+          `Tracked agent '${agentId}' is not stopped`,
+        );
+      }
+
+      if (agent.dispatchRunId) {
+        const run = await deps.runs.start(agent.dispatchRunId, 'operator');
+        deps.agents.appendEvent(agentId, {
+          level: 'info',
+          type: 'agent.start.requested',
+          message: `Start requested for linked run ${agent.dispatchRunId}`,
+          payload: {
+            runId: agent.dispatchRunId,
+          },
+        });
+        return c.json({ data: run });
+      }
+
+      const run = await dispatchDetachedAgent(deps, agentId);
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.start.requested',
+        message: `Start requested for new linked run ${run.id}`,
+        payload: {
+          runId: run.id,
+        },
+      });
+      return c.json({ data: run });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
+  app.post('/v1/beasts/agents/:agentId/stop', async (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = deps.agents.getAgent(agentId);
+      if (agent.dispatchRunId) {
+        const run = await deps.runs.stop(agent.dispatchRunId, 'operator');
+        deps.agents.appendEvent(agentId, {
+          level: 'info',
+          type: 'agent.stop.requested',
+          message: `Stop requested for linked run ${agent.dispatchRunId}`,
+          payload: {
+            runId: agent.dispatchRunId,
+          },
+        });
+        return c.json({ data: run });
+      }
+
+      const updated = deps.agents.updateAgent(agentId, { status: 'stopped' });
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.stop.requested',
+        message: 'Stop requested before a linked run was created',
+        payload: {},
+      });
+      return c.json({ data: updated });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
+  app.post('/v1/beasts/agents/:agentId/restart', async (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = deps.agents.getAgent(agentId);
+      if (agent.dispatchRunId) {
+        const run = await deps.runs.restart(agent.dispatchRunId, 'operator');
+        deps.agents.appendEvent(agentId, {
+          level: 'info',
+          type: 'agent.restart.requested',
+          message: `Restart requested for linked run ${agent.dispatchRunId}`,
+          payload: {
+            runId: agent.dispatchRunId,
+          },
+        });
+        return c.json({ data: run });
+      }
+
+      if (agent.status !== 'stopped') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_STARTABLE',
+          `Tracked agent '${agentId}' cannot restart without a linked run`,
+        );
+      }
+
+      const run = await dispatchDetachedAgent(deps, agentId);
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.restart.requested',
+        message: `Restart requested with new linked run ${run.id}`,
+        payload: {
+          runId: run.id,
+        },
+      });
+      return c.json({ data: run });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
   app.post('/v1/beasts/agents/:agentId/resume', async (c) => {
     const agentId = c.req.param('agentId');
     try {
@@ -180,9 +311,63 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     }
   });
 
+  app.delete('/v1/beasts/agents/:agentId', (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = deps.agents.getAgent(agentId);
+      if (agent.status !== 'stopped') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_DELETABLE',
+          `Tracked agent '${agentId}' is not stopped`,
+        );
+      }
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.delete.requested',
+        message: 'Soft-deleted tracked agent from the dashboard',
+        payload: {},
+      });
+      deps.agents.softDeleteAgent(agentId);
+      return c.body(null, 204);
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
   return app;
 }
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
   return kind === 'chunk-plan' || kind === 'martin-loop';
+}
+
+async function dispatchDetachedAgent(
+  deps: AgentRoutesDeps,
+  agentId: string,
+) {
+  const agent = deps.agents.getAgent(agentId);
+  if (!deps.dispatch || !shouldDispatchOnCreate(agent.initAction.kind)) {
+    throw new HttpError(
+      409,
+      'TRACKED_AGENT_NOT_STARTABLE',
+      `Tracked agent '${agentId}' cannot be started without a linked run`,
+    );
+  }
+
+  return deps.dispatch.createRun({
+    definitionId: agent.definitionId,
+    config: agent.initConfig,
+    dispatchedBy: 'dashboard',
+    dispatchedByUser: 'operator',
+    trackedAgentId: agent.id,
+    startNow: true,
+  });
 }

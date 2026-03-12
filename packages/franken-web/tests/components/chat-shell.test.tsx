@@ -124,7 +124,11 @@ const mockCreateAgent = vi.fn().mockResolvedValue({
   createdAt: '2026-03-11T00:00:02.000Z',
   updatedAt: '2026-03-11T00:00:02.000Z',
 });
+const mockDeleteAgent = vi.fn().mockResolvedValue(undefined);
+const mockRestartAgent = vi.fn().mockResolvedValue(undefined);
 const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
+const mockStartAgent = vi.fn().mockResolvedValue(undefined);
+const mockStopAgent = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -175,7 +179,11 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getRun: typeof mockGetRun;
     getLogs: typeof mockGetLogs;
     createAgent: typeof mockCreateAgent;
+    deleteAgent: typeof mockDeleteAgent;
+    restartAgent: typeof mockRestartAgent;
     resumeAgent: typeof mockResumeAgent;
+    startAgent: typeof mockStartAgent;
+    stopAgent: typeof mockStopAgent;
     startRun: ReturnType<typeof vi.fn>;
     stopRun: ReturnType<typeof vi.fn>;
     killRun: ReturnType<typeof vi.fn>;
@@ -187,7 +195,11 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getRun = mockGetRun;
     this.getLogs = mockGetLogs;
     this.createAgent = mockCreateAgent;
+    this.deleteAgent = mockDeleteAgent;
+    this.restartAgent = mockRestartAgent;
     this.resumeAgent = mockResumeAgent;
+    this.startAgent = mockStartAgent;
+    this.stopAgent = mockStopAgent;
     this.startRun = vi.fn().mockResolvedValue(undefined);
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
@@ -449,9 +461,77 @@ describe('ChatShell', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Resume agent-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start agent-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart agent-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete agent-1' }));
 
     await waitFor(() => {
       expect(mockResumeAgent).toHaveBeenCalledWith('agent-1');
+    });
+    expect(mockStartAgent).toHaveBeenCalledWith('agent-1');
+    expect(mockRestartAgent).toHaveBeenCalledWith('agent-1');
+    expect(mockDeleteAgent).toHaveBeenCalledWith('agent-1');
+  });
+
+  it('stops initializing tracked agents from the beasts page', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgents.mockResolvedValue([
+      {
+        id: 'agent-init',
+        definitionId: 'design-interview',
+        status: 'initializing',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Design flow' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { goal: 'Design flow' },
+        chatSessionId: 'sess-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+    ]);
+    mockGetAgent.mockResolvedValue({
+      agent: {
+        id: 'agent-init',
+        definitionId: 'design-interview',
+        status: 'initializing',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Design flow' },
+          chatSessionId: 'sess-1',
+        },
+        initConfig: { goal: 'Design flow' },
+        chatSessionId: 'sess-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+      events: [],
+    });
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop agent-init' })).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop agent-init' }));
+
+    await waitFor(() => {
+      expect(mockStopAgent).toHaveBeenCalledWith('agent-init');
     });
   });
 });

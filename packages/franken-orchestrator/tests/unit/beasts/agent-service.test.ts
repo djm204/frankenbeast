@@ -97,4 +97,28 @@ describe('AgentService', () => {
     expect(detail.agent.dispatchRunId).toBe(run.id);
     expect(detail.events).toEqual([event]);
   });
+
+  it('hides soft-deleted tracked agents from list and detail lookups', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+
+    const agent = service.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: { chunkDirectory: 'docs/chunks' },
+      },
+      initConfig: { chunkDirectory: 'docs/chunks' },
+    });
+
+    service.updateAgent(agent.id, { status: 'stopped' });
+    service.softDeleteAgent(agent.id);
+
+    expect(service.listAgents()).toEqual([]);
+    expect(() => service.getAgent(agent.id)).toThrow(`Unknown tracked agent: ${agent.id}`);
+  });
 });

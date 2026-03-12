@@ -140,4 +140,42 @@ describe('BeastApiClient', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('controls tracked agents through the agent-specific endpoints', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          id: 'agent-1',
+          status: 'stopped',
+        },
+      }),
+    });
+
+    await client.startAgent('agent-1');
+    await client.stopAgent('agent-1');
+    await client.restartAgent('agent-1');
+    await client.deleteAgent('agent-1');
+
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3000/v1/beasts/agents/agent-1/start',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:3000/v1/beasts/agents/agent-1/stop',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:3000/v1/beasts/agents/agent-1/restart',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      4,
+      'http://localhost:3000/v1/beasts/agents/agent-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
 });

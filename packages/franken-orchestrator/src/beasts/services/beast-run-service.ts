@@ -54,7 +54,25 @@ export class BeastRunService {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
     if (!attemptId) {
-      throw new Error(`Beast run has no active attempt: ${runId}`);
+      const stoppedAt = new Date().toISOString();
+      const updated = this.repository.transaction(() => {
+        const stoppedRun = this.repository.updateRun(run.id, {
+          status: 'stopped',
+          finishedAt: stoppedAt,
+          stopReason: 'operator_stop',
+        });
+        this.repository.appendEvent(run.id, {
+          type: 'run.stopped',
+          payload: {
+            stopReason: 'operator_stop',
+          },
+          createdAt: stoppedAt,
+        });
+        return stoppedRun;
+      });
+      this.metrics.recordRunStopped(run.definitionId);
+      this.syncTrackedAgent(updated);
+      return updated;
     }
     await this.executorFor(run).stop(run.id, attemptId);
     this.metrics.recordRunStopped(run.definitionId);
@@ -110,6 +128,10 @@ export class BeastRunService {
 
   private syncTrackedAgent(run: BeastRun): void {
     if (!run.trackedAgentId) {
+      return;
+    }
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent || trackedAgent.status === 'deleted') {
       return;
     }
 
