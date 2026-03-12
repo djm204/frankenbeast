@@ -2,7 +2,14 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 import type { IAdapter } from './adapter-llm-client.js';
 import { createDefaultRegistry, type ICliProvider, type ProviderRegistry } from '../skills/providers/cli-provider.js';
 
-type CliTransformed = { prompt: string; maxTurns: number; model: string | undefined; chatMode: boolean; sessionContinue: boolean };
+type CliTransformed = {
+  prompt: string;
+  maxTurns: number;
+  model: string | undefined;
+  chatMode: boolean;
+  sessionContinue: boolean;
+  requestId?: string | undefined;
+};
 
 type ProviderOverride = {
   command?: string | undefined;
@@ -50,6 +57,7 @@ export class CliLlmAdapter implements IAdapter {
   };
   private readonly _spawn: SpawnFn;
   private readonly registry: ProviderRegistry;
+  private readonly responseProviders = new Map<string, string>();
   private chatCallCount = 0;
 
   constructor(
@@ -78,16 +86,24 @@ export class CliLlmAdapter implements IAdapter {
 
   transformRequest(request: unknown): CliTransformed {
     const req = request as {
+      id?: string;
       messages: Array<{ role: string; content: string }>;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
     const sessionContinue = this.opts.chatMode && this.chatCallCount > 0;
-    return { prompt: last?.content ?? '', maxTurns: 1, model: this.opts.model, chatMode: this.opts.chatMode, sessionContinue };
+    return {
+      prompt: last?.content ?? '',
+      maxTurns: 1,
+      model: this.opts.model,
+      chatMode: this.opts.chatMode,
+      sessionContinue,
+      ...(req.id ? { requestId: req.id } : {}),
+    };
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns, model, chatMode, sessionContinue } = providerRequest as CliTransformed;
+    const { prompt, maxTurns, model, chatMode, sessionContinue, requestId } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
     const exhaustedProviders = new Map<string, { stderr: string; stdout: string }>();
@@ -110,6 +126,9 @@ export class CliLlmAdapter implements IAdapter {
       });
 
       if (result.exitCode === 0) {
+        if (requestId) {
+          this.responseProviders.set(requestId, activeProvider);
+        }
         return result.stdout;
       }
 
@@ -138,7 +157,9 @@ export class CliLlmAdapter implements IAdapter {
   transformResponse(providerResponse: unknown, _requestId: string): { content: string | null } {
     const raw = providerResponse as string;
     if (!raw) return { content: '' };
-    const normalized = this.provider.normalizeOutput(raw);
+    const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
+    this.responseProviders.delete(_requestId);
+    const normalized = this.resolveProvider(providerName).normalizeOutput(raw);
     return { content: normalized };
   }
 
@@ -165,10 +186,10 @@ export class CliLlmAdapter implements IAdapter {
   private resolveModel(name: string, requestModel: string | undefined): string | undefined {
     const override = this.opts.providerOverrides?.[name]?.model;
     if (override !== undefined) return override;
-    if (name === this.provider.name && this.opts.model !== undefined) {
-      return this.opts.model;
+    if (name === this.provider.name) {
+      return this.opts.model ?? requestModel;
     }
-    return requestModel;
+    return undefined;
   }
 
   private captureEnv(): Record<string, string> {

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { CliLlmAdapter } from '../../../src/adapters/cli-llm-adapter.js';
+import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
 import { CodexProvider } from '../../../src/skills/providers/codex-provider.js';
 
@@ -116,6 +117,7 @@ function createQueuedSpawn(results: MockSpawnResult[]): {
 // --- Tests ---
 
 describe('CliLlmAdapter', () => {
+  const aiderProvider = new AiderProvider();
   const claudeProvider = new ClaudeProvider();
   const codexProvider = new CodexProvider();
   const baseOpts = { workingDir: '/tmp/test' };
@@ -156,7 +158,14 @@ describe('CliLlmAdapter', () => {
           { role: 'user', content: 'second message' },
         ],
       });
-      expect(result).toEqual({ prompt: 'second message', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
+      expect(result).toEqual({
+        prompt: 'second message',
+        maxTurns: 1,
+        model: undefined,
+        chatMode: false,
+        sessionContinue: false,
+        requestId: 'req-1',
+      });
     });
 
     it('returns empty prompt when no user messages exist', () => {
@@ -167,7 +176,14 @@ describe('CliLlmAdapter', () => {
         model: 'adapter',
         messages: [{ role: 'assistant', content: 'hello' }],
       });
-      expect(result).toEqual({ prompt: '', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
+      expect(result).toEqual({
+        prompt: '',
+        maxTurns: 1,
+        model: undefined,
+        chatMode: false,
+        sessionContinue: false,
+        requestId: 'req-2',
+      });
     });
   });
 
@@ -424,6 +440,65 @@ describe('CliLlmAdapter', () => {
         expect(calls[1]!.cmd).toBe('codex');
         expect(calls[2]!.cmd).toBe('claude');
       });
+
+      it('does not forward the selected provider model to fallback providers in chat mode', async () => {
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'claude fallback success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          {
+            ...baseOpts,
+            chatMode: true,
+            model: 'codex-mini',
+            providers: ['claude', 'codex'],
+          },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-chat-1',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        expect(request.model).toBe('codex-mini');
+        await adapter.execute(request);
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.cmd).toBe('codex');
+        expect(calls[1]!.cmd).toBe('claude');
+        expect(calls[1]!.args).not.toContain('codex-mini');
+      });
+
+      it('normalizes successful fallback output with the provider that produced it', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: '\u001b[31mfallback output\u001b[0m', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['aider', 'claude'],
+          },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-fallback-1',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-fallback-1');
+
+        expect(response.content).toBe('fallback output');
+      });
     });
   });
 
@@ -598,7 +673,7 @@ describe('CliLlmAdapter', () => {
   });
 
   describe('integration: full flow', () => {
-    it('transforms request, executes with ClaudeProvider, and transforms stream-json response', async () => {
+      it('transforms request, executes with ClaudeProvider, and transforms stream-json response', async () => {
       const streamOutput = [
         '{"type":"content_block_delta","delta":{"type":"text_delta","text":"The answer is 42"}}',
       ].join('\n');
@@ -614,7 +689,14 @@ describe('CliLlmAdapter', () => {
       };
 
       const transformed = adapter.transformRequest(request);
-      expect(transformed).toEqual({ prompt: 'What is the answer?', maxTurns: 1, model: undefined, chatMode: false, sessionContinue: false });
+      expect(transformed).toEqual({
+        prompt: 'What is the answer?',
+        maxTurns: 1,
+        model: undefined,
+        chatMode: false,
+        sessionContinue: false,
+        requestId: 'req-1',
+      });
 
       const rawResponse = await adapter.execute(transformed);
       expect(typeof rawResponse).toBe('string');
