@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.1...franken-orchestrator-v0.18.2) (2026-03-12)
+
+
+### Bug Fixes
+
+* **orchestrator:** address issue runtime review feedback ([a1dc2fd](https://github.com/djm204/frankenbeast/commit/a1dc2fd05e08e969aa3edf2e3c7602501853b532))
+* **orchestrator:** make one-shot issues issue-aware and resumable ([09488cb](https://github.com/djm204/frankenbeast/commit/09488cb6f49ee2179ce9d2d0cfaff2f19cd1ef4f))
+* **orchestrator:** make one-shot issues issue-aware and resumable ([66a5f4a](https://github.com/djm204/frankenbeast/commit/66a5f4a08680225f41d805bd217bbd5b81bc483d))
+
 ## [0.18.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.0...franken-orchestrator-v0.18.1) (2026-03-12)
 
 

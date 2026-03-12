@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.1...franken-observer-v0.4.2) (2026-03-12)
+
+
+### Bug Fixes
+
+* **orchestrator:** make one-shot issues issue-aware and resumable ([09488cb](https://github.com/djm204/frankenbeast/commit/09488cb6f49ee2179ce9d2d0cfaff2f19cd1ef4f))
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.0...franken-observer-v0.4.1) (2026-03-12)
 
 
