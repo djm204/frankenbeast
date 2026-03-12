@@ -207,4 +207,23 @@ describe('dep-factory provider wiring', () => {
       command: '/usr/local/bin/codex',
     }));
   });
+
+  it('creates issue-scoped runtime artifact helpers for the issues pipeline', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      issueIO: {
+        read: vi.fn(async () => 'y'),
+        write: vi.fn(),
+      },
+    });
+
+    const result = await createCliDeps(opts);
+    const artifacts = result.issueDeps?.issueRuntime?.artifactsForIssue(89);
+
+    expect(artifacts).toEqual(expect.objectContaining({
+      planName: 'issue-89',
+      checkpointFile: expect.stringContaining('issue-89'),
+      logFile: expect.stringContaining('issue-89'),
+    }));
+  });
 });

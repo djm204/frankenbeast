@@ -1,4 +1,5 @@
-import { appendFileSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { ICheckpointStore } from '../deps.js';
 
 export class FileCheckpointStore implements ICheckpointStore {
@@ -9,6 +10,7 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   write(key: string): void {
+    mkdirSync(dirname(this.filePath), { recursive: true });
     appendFileSync(this.filePath, key + '\n');
   }
 

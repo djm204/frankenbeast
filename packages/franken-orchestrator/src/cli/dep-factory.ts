@@ -20,7 +20,7 @@ import { IssueTriage } from '../issues/issue-triage.js';
 import { IssueGraphBuilder } from '../issues/issue-graph-builder.js';
 import { IssueReview } from '../issues/issue-review.js';
 import type { ReviewIO } from '../issues/issue-review.js';
-import { IssueRunner } from '../issues/issue-runner.js';
+import { IssueRunner, type IssueRuntimeSupport, type IssueRuntimeArtifacts } from '../issues/issue-runner.js';
 import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
@@ -71,6 +71,7 @@ export interface IssueCliDeps {
   git: GitBranchIsolator;
   prCreator?: PrCreator | undefined;
   checkpoint: FileCheckpointStore;
+  issueRuntime: IssueRuntimeSupport;
 }
 
 export interface CliDeps {
@@ -121,6 +122,24 @@ function createStubSkills(planDir: string): ISkillsModule {
       } catch { return []; }
     },
     execute: async () => { throw new Error('No skills in CLI mode'); },
+  };
+}
+
+function issueArtifactsFor(paths: ProjectPaths, issueNumber: number): IssueRuntimeArtifacts {
+  const planName = `issue-${issueNumber}`;
+  const issueDir = resolve(paths.buildDir, 'issues', planName);
+  return {
+    planName,
+    checkpointFile: resolve(issueDir, `${planName}.checkpoint`),
+    logFile: resolve(issueDir, `${planName}-build.log`),
+  };
+}
+
+function createIssueRuntimeSupport(paths: ProjectPaths): IssueRuntimeSupport {
+  return {
+    planNameForIssue: (issueNumber: number) => issueArtifactsFor(paths, issueNumber).planName,
+    checkpointForIssue: (issueNumber: number) => new FileCheckpointStore(issueArtifactsFor(paths, issueNumber).checkpointFile),
+    artifactsForIssue: (issueNumber: number) => issueArtifactsFor(paths, issueNumber),
   };
 }
 
@@ -267,6 +286,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   let issueDeps: IssueCliDeps | undefined;
   if (options.issueIO) {
     const completeFn = (prompt: string) => adapterLlm.complete(prompt);
+    const issueRuntime = createIssueRuntimeSupport(paths);
     issueDeps = {
       fetcher: new IssueFetcher(),
       triage: new IssueTriage(completeFn),
@@ -277,6 +297,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       git: gitIso,
       prCreator,
       checkpoint,
+      issueRuntime,
     };
   }
 

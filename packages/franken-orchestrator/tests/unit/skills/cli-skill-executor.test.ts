@@ -598,6 +598,24 @@ describe('CliSkillExecutor', () => {
         'martin',
       );
     });
+
+    it('aborts when stale-mate limit is reached without commits or output change', async () => {
+      git.autoCommit.mockReturnValue(false);
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1, stdout: 'still working' }));
+        config.onIteration?.(2, makeIterResult({ iteration: 2, stdout: 'still working' }));
+        config.onIteration?.(3, makeIterResult({ iteration: 3, stdout: 'still working' }));
+        return { completed: false, iterations: 3, output: 'still working', tokensUsed: 300 };
+      });
+
+      await expect(createAndExecute(
+        'cli:issue-89',
+        makeSkillInput(),
+        makeCliConfig({ martin: { staleMateLimit: 2, maxIterations: 1000 } }),
+        undefined,
+        'impl:issue-89',
+      )).rejects.toThrow(/stale mate/i);
+    });
   });
 
   describe('per-commit checkpoint recording', () => {

@@ -8,6 +8,7 @@ import type { CliSkillExecutor } from '../../../src/skills/cli-skill-executor.js
 import type { GitBranchIsolator } from '../../../src/skills/git-branch-isolator.js';
 import type { PrCreator } from '../../../src/closure/pr-creator.js';
 import type { CliSkillConfig } from '../../../src/skills/cli-types.js';
+import type { IssueRuntimeArtifacts, IssueRuntimeSupport } from '../../../src/issues/issue-runner.js';
 
 // ── Factories ──
 
@@ -106,6 +107,18 @@ function makeConfig(overrides: Partial<IssueRunnerConfig> = {}): IssueRunnerConf
     provider: 'claude',
     providers: ['claude', 'codex'],
     ...overrides,
+  };
+}
+
+function makeIssueRuntimeSupport(): IssueRuntimeSupport {
+  return {
+    planNameForIssue: vi.fn((issueNumber: number) => `issue-${issueNumber}`),
+    checkpointForIssue: vi.fn((_issueNumber: number) => mockCheckpoint()),
+    artifactsForIssue: vi.fn((issueNumber: number): IssueRuntimeArtifacts => ({
+      planName: `issue-${issueNumber}`,
+      checkpointFile: `/tmp/issue-${issueNumber}.checkpoint`,
+      logFile: `/tmp/issue-${issueNumber}-build.log`,
+    })),
   };
 }
 
@@ -236,6 +249,61 @@ describe('IssueRunner', () => {
       const skillConfig = firstCall?.[2] as CliSkillConfig | undefined;
       expect(skillConfig?.martin.provider).toBe('gemini');
       expect(skillConfig?.martin.providers).toEqual(['gemini', 'codex', 'claude']);
+    });
+
+    it('uses issue-aware Martin identity for one-shot issues', async () => {
+      const executor = mockExecutor();
+      const issueRuntime = makeIssueRuntimeSupport();
+      const issues = [makeIssue({ number: 89 })];
+      const triages = [makeTriage(89, 'one-shot')];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+        issueRuntime,
+      });
+
+      await runner.run(config);
+
+      const firstCall = (executor.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+      const skillConfig = firstCall?.[2] as CliSkillConfig | undefined;
+      expect(skillConfig?.martin.planName).toBe('issue-89');
+      expect(skillConfig?.martin.chunkId).toBe('issue-89');
+      expect(skillConfig?.martin.taskId).toBe('impl:issue-89');
+    });
+
+    it('does not apply the chunk 10-iteration cap to one-shot issues', async () => {
+      const executor = mockExecutor();
+      const issues = [makeIssue({ number: 89 })];
+      const triages = [makeTriage(89, 'one-shot')];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+      });
+
+      await runner.run(config);
+
+      const firstCall = (executor.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+      const skillConfig = firstCall?.[2] as CliSkillConfig | undefined;
+      expect(skillConfig?.martin.maxIterations).not.toBe(10);
+    });
+
+    it('keeps the chunk 10-iteration cap for decomposed chunk tasks', async () => {
+      const executor = mockExecutor();
+      const issues = [makeIssue({ number: 90 })];
+      const triages = [makeTriage(90, 'chunked')];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+      });
+
+      await runner.run(config);
+
+      const firstCall = (executor.execute as ReturnType<typeof vi.fn>).mock.calls[0];
+      const skillConfig = firstCall?.[2] as CliSkillConfig | undefined;
+      expect(skillConfig?.martin.maxIterations).toBe(10);
     });
   });
 
@@ -432,6 +500,7 @@ describe('IssueRunner', () => {
         triageResults: triages,
         executor,
         checkpoint,
+        logger: mockLogger(),
       });
 
       const outcomes = await runner.run(config);
@@ -442,6 +511,35 @@ describe('IssueRunner', () => {
       // Issue 2 should be executed
       // executor.execute called only for issue 2's tasks
       expect(executor.execute).toHaveBeenCalledTimes(2);
+    });
+
+    it('recovers unfinished one-shot issue work from the last checkpointed commit before resuming', async () => {
+      const checkpoint = mockCheckpoint(new Set());
+      checkpoint.lastCommit = vi.fn((taskId: string, stage: string) =>
+        taskId === 'impl:issue-89' && stage === 'impl' ? 'abc123' : undefined,
+      );
+      const executor = {
+        execute: vi.fn(async () => ({ output: 'done', tokensUsed: 100 })),
+        recoverDirtyFiles: vi.fn(async () => 'clean'),
+      } as unknown as CliSkillExecutor;
+      const issues = [makeIssue({ number: 89 })];
+      const triages = [makeTriage(89, 'one-shot')];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        executor,
+        checkpoint,
+        logger: mockLogger(),
+      });
+
+      await runner.run(config);
+
+      expect((executor.recoverDirtyFiles as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+        'impl:issue-89',
+        'impl',
+        checkpoint,
+        expect.anything(),
+      );
     });
   });
 

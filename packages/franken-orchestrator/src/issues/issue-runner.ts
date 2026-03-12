@@ -1,11 +1,25 @@
-import type { PlanGraph, PlanTask, ICheckpointStore, ILogger, SkillInput, SkillResult } from '../deps.js';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { PlanGraph, ICheckpointStore, ILogger, SkillInput } from '../deps.js';
 import type { GithubIssue, TriageResult, IssueOutcome } from './types.js';
 import type { IssueGraphBuilder } from './issue-graph-builder.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import type { PrCreator } from '../closure/pr-creator.js';
-import type { CliSkillConfig } from '../skills/cli-types.js';
+import type { CliSkillConfig, IterationResult } from '../skills/cli-types.js';
 import type { BeastResult, TaskOutcome } from '../types.js';
+
+export interface IssueRuntimeArtifacts {
+  readonly planName: string;
+  readonly checkpointFile: string;
+  readonly logFile: string;
+}
+
+export interface IssueRuntimeSupport {
+  planNameForIssue(issueNumber: number): string;
+  checkpointForIssue(issueNumber: number): ICheckpointStore;
+  artifactsForIssue(issueNumber: number): IssueRuntimeArtifacts;
+}
 
 export interface IssueRunnerConfig {
   readonly issues: readonly GithubIssue[];
@@ -22,6 +36,7 @@ export interface IssueRunnerConfig {
   readonly repo: string;
   readonly provider: string;
   readonly providers?: readonly string[] | undefined;
+  readonly issueRuntime?: IssueRuntimeSupport | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -32,9 +47,9 @@ const SEVERITY_ORDER: Record<string, number> = {
 };
 
 const NO_SEVERITY = 4;
-
-/** Dollars-to-tokens conversion factor (approximate). */
 const TOKENS_PER_DOLLAR = 1_000_000;
+const ONE_SHOT_MAX_ITERATIONS = 1_000;
+const ONE_SHOT_STALE_MATE_LIMIT = 3;
 
 function extractSeverity(labels: readonly string[]): number {
   for (const label of labels) {
@@ -52,21 +67,28 @@ function findTriage(triages: readonly TriageResult[], issueNumber: number): Tria
   return triages.find(t => t.issueNumber === issueNumber);
 }
 
+function taskStage(taskId: string): 'impl' | 'harden' {
+  return taskId.startsWith('harden:') ? 'harden' : 'impl';
+}
+
+function taskChunkId(taskId: string): string {
+  const [, ...rest] = taskId.split(':');
+  return rest.join(':');
+}
+
+function appendIssueLog(logFile: string | undefined, message: string): void {
+  if (!logFile) return;
+  mkdirSync(dirname(logFile), { recursive: true });
+  appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+}
+
 export class IssueRunner {
   async run(config: IssueRunnerConfig): Promise<IssueOutcome[]> {
     const {
       issues,
       triageResults,
-      graphBuilder,
-      executor,
-      git,
-      prCreator,
-      checkpoint,
-      logger,
       budget,
-      baseBranch,
-      noPr,
-      repo,
+      logger,
     } = config;
 
     if (issues.length === 0) return [];
@@ -81,7 +103,6 @@ export class IssueRunner {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
 
-      // Budget exceeded — skip remaining
       if (budgetExceeded) {
         outcomes.push({
           issueNumber: issue.number,
@@ -107,9 +128,7 @@ export class IssueRunner {
       }
 
       try {
-        const outcome = await this.processIssue(
-          issue, triage, config, cumulativeTokens, budgetTokens,
-        );
+        const outcome = await this.processIssue(issue, triage, config, cumulativeTokens, budgetTokens);
         cumulativeTokens += outcome.tokensUsed;
         outcomes.push(outcome);
 
@@ -117,7 +136,6 @@ export class IssueRunner {
           budgetExceeded = true;
         }
       } catch (err) {
-        // Catch-all for unexpected errors
         outcomes.push({
           issueNumber: issue.number,
           issueTitle: issue.title,
@@ -150,9 +168,14 @@ export class IssueRunner {
       repo,
       provider,
       providers,
+      issueRuntime,
     } = config;
 
-    // Check if all tasks already checkpointed
+    const runtimeArtifacts = issueRuntime?.artifactsForIssue(issue.number);
+    const issueCheckpoint = issueRuntime?.checkpointForIssue(issue.number) ?? checkpoint;
+    const planName = issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
+    const logFile = runtimeArtifacts?.logFile;
+
     let graph: PlanGraph;
     try {
       graph = await graphBuilder.buildForIssue(issue, triage);
@@ -166,9 +189,9 @@ export class IssueRunner {
       };
     }
 
-    // Checkpoint: skip if all tasks already done
-    if (checkpoint && graph.tasks.every(t => checkpoint.has(t.id))) {
+    if (issueCheckpoint && graph.tasks.every(t => issueCheckpoint.has(t.id))) {
       logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
+      appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -177,15 +200,12 @@ export class IssueRunner {
       };
     }
 
-    // Branch isolation for this issue
     git.isolate(`issue-${issue.number}`);
 
-    // Execute each task
     let issueTokens = 0;
     const taskOutcomes: TaskOutcome[] = [];
 
     for (const task of graph.tasks) {
-      // Budget check before each task
       if (cumulativeTokens + issueTokens >= budgetTokens) {
         return {
           issueNumber: issue.number,
@@ -196,13 +216,19 @@ export class IssueRunner {
         };
       }
 
-      // Skip if already checkpointed
-      if (checkpoint?.has(task.id)) {
+      if (issueCheckpoint?.has(task.id)) {
+        appendIssueLog(logFile, `Skipping checkpointed task ${task.id}`);
         taskOutcomes.push({ taskId: task.id, status: 'success' });
         continue;
       }
 
       try {
+        const stage = taskStage(task.id);
+        if (issueCheckpoint?.lastCommit(task.id, stage)) {
+          appendIssueLog(logFile, `Recovering ${task.id} from checkpointed commit`);
+          await executor.recoverDirtyFiles(task.id, stage, issueCheckpoint, logger);
+        }
+
         const input: SkillInput = {
           objective: task.objective,
           context: { adrs: [], knownErrors: [], rules: [] },
@@ -214,11 +240,32 @@ export class IssueRunner {
         const skillConfig: CliSkillConfig = {
           martin: {
             prompt: task.objective,
-            promiseTag: `IMPL_issue-${issue.number}_DONE`,
-            maxIterations: 10,
+            promiseTag: stage === 'harden'
+              ? `HARDEN_issue-${issue.number}_DONE`
+              : `IMPL_issue-${issue.number}_DONE`,
+            maxIterations: triage.complexity === 'chunked' ? 10 : ONE_SHOT_MAX_ITERATIONS,
             maxTurns: 25,
             provider,
             providers,
+            planName,
+            chunkId: taskChunkId(task.id),
+            taskId: task.id,
+            ...(triage.complexity === 'one-shot' ? { staleMateLimit: ONE_SHOT_STALE_MATE_LIMIT } : {}),
+            onProviderAttempt: (activeProvider: string, iteration: number) => {
+              appendIssueLog(logFile, `Task ${task.id} iteration ${iteration} provider ${activeProvider}`);
+            },
+            onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
+              appendIssueLog(logFile, `Task ${task.id} provider switch ${fromProvider} -> ${toProvider} (${reason})`);
+            },
+            onSleep: (durationMs: number, source: string) => {
+              appendIssueLog(logFile, `Task ${task.id} sleeping ${durationMs}ms (${source})`);
+            },
+            onIteration: (iteration: number, result: IterationResult) => {
+              appendIssueLog(
+                logFile,
+                `Task ${task.id} iteration ${iteration} exit=${result.exitCode} rateLimited=${result.rateLimited} promise=${result.promiseDetected}`,
+              );
+            },
             timeoutMs: 600_000,
           },
           git: {
@@ -229,13 +276,13 @@ export class IssueRunner {
           },
         };
 
-        const result = await executor.execute(task.id, input, skillConfig, checkpoint, task.id);
+        const result = await executor.execute(task.id, input, skillConfig, issueCheckpoint, task.id);
         issueTokens += result.tokensUsed ?? 0;
         taskOutcomes.push({ taskId: task.id, status: 'success', output: result.output });
-
-        // Record checkpoint
-        checkpoint?.write(task.id);
+        appendIssueLog(logFile, `Task ${task.id} completed`);
+        issueCheckpoint?.write(task.id);
       } catch (err) {
+        appendIssueLog(logFile, `Task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
         taskOutcomes.push({
           taskId: task.id,
           status: 'failure',
@@ -251,7 +298,6 @@ export class IssueRunner {
       }
     }
 
-    // All tasks succeeded — create PR if configured
     let prUrl: string | undefined;
     if (!noPr && prCreator) {
       try {
@@ -275,6 +321,7 @@ export class IssueRunner {
         if (prResult) {
           prUrl = prResult.url;
           logger?.info(`[issues] Issue #${issue.number} fixed, PR: ${prUrl}`, undefined, 'issues');
+          appendIssueLog(logFile, `Issue #${issue.number} fixed with PR ${prUrl}`);
         }
       } catch (err) {
         logger?.warn(
@@ -282,9 +329,10 @@ export class IssueRunner {
           undefined,
           'issues',
         );
-        // Continue without PR — don't fail the outcome
       }
     }
+
+    appendIssueLog(logFile, `Issue #${issue.number} completed`);
 
     return {
       issueNumber: issue.number,
