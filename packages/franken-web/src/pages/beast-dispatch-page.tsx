@@ -13,10 +13,9 @@ interface BeastDispatchPageProps {
   error: string | null;
   onDispatch(definitionId: string, config: Record<string, unknown>): void;
   onKill(runId: string): void;
+  onResume(agentId: string): void;
   onRefresh(): void;
-  onRestart(runId: string): void;
   onSelectAgent(agentId: string): void;
-  onStart(runId: string): void;
   onStop(runId: string): void;
   agentDetail: (TrackedAgentDetail & { run?: BeastRunDetail | null }) | null;
   agents: TrackedAgentSummary[];
@@ -37,6 +36,10 @@ function buildPromptId(definition: BeastCatalogEntry, prompt: BeastInterviewProm
   return `${definition.label} ${prompt.key}`;
 }
 
+function isBrowserFakePath(value: string): boolean {
+  return /^[a-zA-Z]:\\fakepath\\/i.test(value.trim());
+}
+
 function validatePrompt(prompt: BeastInterviewPrompt, value: string): string | null {
   const trimmed = value.trim();
   if (prompt.required && !trimmed) {
@@ -47,6 +50,9 @@ function validatePrompt(prompt: BeastInterviewPrompt, value: string): string | n
   }
 
   if (prompt.kind === 'file') {
+    if (isBrowserFakePath(trimmed)) {
+      return 'Browser file pickers cannot provide a server path. Enter a repo path manually.';
+    }
     if (trimmed.endsWith('/')) {
       return 'Enter a file path, not a directory path.';
     }
@@ -174,14 +180,14 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                             <option key={option} value={option}>{option}</option>
                           ))}
                         </select>
-                      ) : prompt.kind === 'file' || prompt.kind === 'directory' ? (
+                      ) : prompt.kind === 'directory' ? (
                         <div className="beast-path-picker">
                           <input
                             aria-label={inputId}
                             className="field-control"
                             disabled={props.disabled}
                             onChange={(event) => updateField(definition.id, prompt, event.target.value)}
-                            placeholder={prompt.kind === 'file' ? 'path/to/design.md' : 'path/to/chunks'}
+                            placeholder="path/to/chunks"
                             type="text"
                             value={inputValue}
                           />
@@ -191,9 +197,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                             onClick={() => pickerRefs.current[`${definition.id}:${prompt.key}`]?.click()}
                             type="button"
                           >
-                            {prompt.kind === 'file'
-                              ? `Choose file for ${definition.label} ${prompt.key}`
-                              : `Choose directory for ${definition.label} ${prompt.key}`}
+                            {`Choose directory for ${definition.label} ${prompt.key}`}
                           </button>
                           <input
                             ref={(element) => {
@@ -208,7 +212,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                               }
                             }}
                             type="file"
-                            {...(prompt.kind === 'directory' ? { webkitdirectory: '' as unknown as undefined } : {})}
+                            {...{ webkitdirectory: '' as unknown as undefined }}
                           />
                         </div>
                       ) : (
@@ -217,6 +221,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                           className="field-control"
                           disabled={props.disabled}
                           onChange={(event) => updateField(definition.id, prompt, event.target.value)}
+                          placeholder={prompt.kind === 'file' ? 'path/to/design.md' : undefined}
                           type="text"
                           value={inputValue}
                         />
@@ -263,10 +268,15 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                 </div>
                 {agent.dispatchRunId && (
                   <div className="beast-run-row__actions">
-                    <button className="button button--secondary button--compact" onClick={() => props.onStart(agent.dispatchRunId!)} type="button">Start {agent.dispatchRunId}</button>
-                    <button className="button button--secondary button--compact" onClick={() => props.onRestart(agent.dispatchRunId!)} type="button">Restart {agent.dispatchRunId}</button>
-                    <button className="button button--secondary button--compact" onClick={() => props.onStop(agent.dispatchRunId!)} type="button">Stop {agent.dispatchRunId}</button>
-                    <button className="button button--secondary button--compact" onClick={() => props.onKill(agent.dispatchRunId!)} type="button">Kill {agent.dispatchRunId}</button>
+                    {agent.status === 'running' && (
+                      <>
+                        <button className="button button--secondary button--compact" onClick={() => props.onStop(agent.dispatchRunId!)} type="button">Pause {agent.dispatchRunId}</button>
+                        <button className="button button--secondary button--compact" onClick={() => props.onKill(agent.dispatchRunId!)} type="button">Kill {agent.dispatchRunId}</button>
+                      </>
+                    )}
+                    {agent.status === 'stopped' && (
+                      <button className="button button--secondary button--compact" onClick={() => props.onResume(agent.id)} type="button">Resume {agent.id}</button>
+                    )}
                   </div>
                 )}
               </article>
