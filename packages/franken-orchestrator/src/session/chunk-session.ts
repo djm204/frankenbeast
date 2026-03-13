@@ -58,6 +58,10 @@ export interface CreateChunkSessionInput {
   readonly maxTokens: number;
 }
 
+export function chunkSessionStorageKey(chunkId: string, taskId?: string): string {
+  return encodeURIComponent(taskId ?? chunkId);
+}
+
 export function createChunkTranscriptEntry(kind: ChunkTranscriptKind, content: string): ChunkTranscriptEntry {
   return {
     kind,

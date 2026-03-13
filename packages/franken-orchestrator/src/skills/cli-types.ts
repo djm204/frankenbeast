@@ -17,6 +17,7 @@ export interface IterationResult {
   readonly durationMs: number;
   readonly rateLimited: boolean;
   readonly promiseDetected: boolean;
+  readonly emittedPromiseTags?: readonly string[] | undefined;
   readonly tokensEstimated: number;
   readonly sleepMs: number;
 }
@@ -63,6 +64,7 @@ export interface MartinLoopResult {
   readonly iterations: number;
   readonly output: string;
   readonly tokensUsed: number;
+  readonly emittedPromiseTags?: readonly string[] | undefined;
 }
 
 export interface GitIsolationConfig {
