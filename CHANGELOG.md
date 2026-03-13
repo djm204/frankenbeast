@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/djm204/frankenbeast/compare/v0.19.0...v0.19.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** isolate issue stage sessions ([#212](https://github.com/djm204/frankenbeast/issues/212)) ([44a2c61](https://github.com/djm204/frankenbeast/commit/44a2c617327540bfd04253062e6017487656a3e2))
+
 ## [0.19.0](https://github.com/djm204/frankenbeast/compare/v0.18.2...v0.19.0) (2026-03-12)
 
 
