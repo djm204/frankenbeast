@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { GitIsolationConfig, MergeResult } from './cli-types.js';
@@ -104,10 +104,10 @@ export class GitBranchIsolator {
     this.config = config;
   }
 
-  private git(cmd: string): string {
-    return execSync(`git ${cmd}`, {
+  private git(args: readonly string[], cwd = this.config.workingDir): string {
+    return execFileSync('git', [...args], {
       encoding: 'utf-8',
-      cwd: this.config.workingDir,
+      cwd,
     }).trim();
   }
 
@@ -122,9 +122,9 @@ export class GitBranchIsolator {
    */
   private safeCheckout(target: string): void {
     try {
-      this.git(`checkout ${target}`);
+      this.git(['checkout', target]);
     } catch (err: unknown) {
-      const stderr = (err as { stderr?: string }).stderr ?? String(err);
+      const stderr = this.stderrFromError(err);
       const conflicts = parseConflictingFiles(stderr);
 
       if (conflicts.length === 0 || !conflicts.every(isExpendable)) {
@@ -135,7 +135,7 @@ export class GitBranchIsolator {
       for (const file of conflicts) {
         try { unlinkSync(resolve(this.config.workingDir, file)); } catch { /* already gone */ }
       }
-      this.git(`checkout ${target}`);
+      this.git(['checkout', target]);
     }
   }
 
@@ -143,12 +143,12 @@ export class GitBranchIsolator {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
     this.ensureBranch(this.config.baseBranch);
-    const exists = this.git(`branch --list ${branch}`);
+    const exists = this.git(['branch', '--list', branch]);
     if (exists.length > 0) {
       this.safeCheckout(branch);
       return;
     }
-    this.git(`checkout -b ${branch}`);
+    this.git(['checkout', '-b', branch]);
   }
 
   /**
@@ -156,9 +156,9 @@ export class GitBranchIsolator {
    * If the branch doesn't exist locally, create it from current HEAD.
    */
   private ensureBranch(branchName: string): void {
-    const exists = this.git(`branch --list ${branchName}`);
+    const exists = this.git(['branch', '--list', branchName]);
     if (exists.length === 0) {
-      this.git(`checkout -b ${branchName}`);
+      this.git(['checkout', '-b', branchName]);
       return;
     }
     try {
@@ -177,15 +177,15 @@ export class GitBranchIsolator {
   autoCommit(chunkId: string, stage: string, iteration: number): boolean {
     assertSafeId(chunkId);
     assertSafeId(stage);
-    const status = this.git('status --porcelain');
+    const status = this.git(['status', '--porcelain']);
     if (status.length === 0) return false;
     try {
       this.commitDirtySubmodules(status, `auto: ${stage} ${chunkId} iter ${iteration}`);
-      this.git('add -A');
+      this.git(['add', '-A']);
       this.unstageBannedFiles();
       const scope = this.detectStagedScope();
       const msg = `auto${scope}: ${stage} ${chunkId} iter ${iteration}`;
-      this.git(`commit -m "${msg}"`);
+      this.git(['commit', '-m', msg]);
       return true;
     } catch {
       return false;
@@ -198,7 +198,7 @@ export class GitBranchIsolator {
    */
   private detectStagedScope(): string {
     try {
-      const staged = this.git('diff --cached --name-only');
+      const staged = this.git(['diff', '--cached', '--name-only']);
       if (!staged) return '';
       const files = staged.split('\n').filter(f => f.length > 0);
       return buildCommitScope(detectAffectedPackages(files));
@@ -213,13 +213,13 @@ export class GitBranchIsolator {
    */
   private unstageBannedFiles(): void {
     try {
-      const staged = this.git('diff --cached --name-only');
+      const staged = this.git(['diff', '--cached', '--name-only']);
       if (staged.length === 0) return;
       const banned = staged.split('\n').filter(f =>
         BANNED_STAGE_PATTERNS.some(p => p.test(f)),
       );
       for (const file of banned) {
-        try { this.git(`reset HEAD -- "${file}"`); } catch { /* already unstaged */ }
+        try { this.git(['reset', 'HEAD', '--', file]); } catch { /* already unstaged */ }
       }
     } catch { /* non-fatal */ }
   }
@@ -234,14 +234,9 @@ export class GitBranchIsolator {
     const dirtySubmodules = parseDirtySubmodules(porcelainStatus);
     for (const sub of dirtySubmodules) {
       try {
-        execSync(`git add -A`, {
-          encoding: 'utf-8',
-          cwd: resolve(this.config.workingDir, sub),
-        });
-        execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
-          encoding: 'utf-8',
-          cwd: resolve(this.config.workingDir, sub),
-        });
+        const submoduleDir = resolve(this.config.workingDir, sub);
+        this.git(['add', '-A'], submoduleDir);
+        this.git(['commit', '-m', message], submoduleDir);
       } catch {
         // Submodule commit failed (nothing to commit, etc.) — continue
       }
@@ -252,7 +247,7 @@ export class GitBranchIsolator {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
     const count = parseInt(
-      this.git(`rev-list --count ${this.config.baseBranch}..${branch}`),
+      this.git(['rev-list', '--count', `${this.config.baseBranch}..${branch}`]),
       10,
     ) || 0;
 
@@ -263,11 +258,10 @@ export class GitBranchIsolator {
     this.safeCheckout(this.config.baseBranch);
     try {
       if (commitMessage) {
-        const safeMsg = commitMessage.replace(/"/g, '\\"');
-        this.git(`merge --squash ${branch}`);
-        this.git(`commit -m "${safeMsg}"`);
+        this.git(['merge', '--squash', branch]);
+        this.git(['commit', '-m', commitMessage]);
       } else {
-        this.git(`merge ${branch} --no-edit`);
+        this.git(['merge', branch, '--no-edit']);
       }
       return { merged: true, commits: count };
     } catch {
@@ -285,7 +279,7 @@ export class GitBranchIsolator {
 
   getConflictedFiles(): string[] {
     try {
-      const output = this.git('diff --name-only --diff-filter=U');
+      const output = this.git(['diff', '--name-only', '--diff-filter=U']);
       return output.split('\n').filter(f => f.length > 0);
     } catch {
       return [];
@@ -293,50 +287,56 @@ export class GitBranchIsolator {
   }
 
   getConflictDiff(): string {
-    return this.git('diff');
+    return this.git(['diff']);
   }
 
   completeMerge(commitMessage: string): void {
-    const safeMsg = commitMessage.replace(/"/g, '\\"');
-    this.git('add -A');
-    this.git(`commit -m "${safeMsg}"`);
+    this.git(['add', '-A']);
+    this.git(['commit', '-m', commitMessage]);
   }
 
   abortMerge(): void {
     try {
-      this.git('merge --abort');
+      this.git(['merge', '--abort']);
     } catch {
       // MERGE_HEAD may be missing — force-clean the index
-      this.git('reset --hard HEAD');
+      this.git(['reset', '--hard', 'HEAD']);
     }
   }
 
   hasMeaningfulChange(previousHead: string): boolean {
-    const status = this.git('status --porcelain');
+    const status = this.git(['status', '--porcelain']);
     if (status.length > 0) return true;
-    const head = this.git('rev-parse HEAD');
+    const head = this.git(['rev-parse', 'HEAD']);
     return head !== previousHead;
   }
 
   getCurrentHead(): string {
-    return this.git('rev-parse HEAD');
+    return this.git(['rev-parse', 'HEAD']);
   }
 
   getDiffStat(chunkId: string): string {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
-    return this.git(`diff --stat ${this.config.baseBranch}..${branch}`);
+    return this.git(['diff', '--stat', `${this.config.baseBranch}..${branch}`]);
   }
 
   getStatus(): string {
-    return this.git('status --porcelain');
+    return this.git(['status', '--porcelain']);
   }
 
   resetHard(commitHash: string): void {
-    this.git(`reset --hard ${commitHash}`);
+    this.git(['reset', '--hard', commitHash]);
   }
 
   getWorkingDir(): string {
     return this.config.workingDir;
+  }
+
+  private stderrFromError(err: unknown): string {
+    const stderr = (err as { stderr?: string | Buffer }).stderr;
+    if (typeof stderr === 'string') return stderr;
+    if (Buffer.isBuffer(stderr)) return stderr.toString('utf-8');
+    return String(err);
   }
 }

@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { resolveBaseBranch, detectCurrentBranch } from '../../../src/cli/base-branch.js';
 
-const mockedExecSync = vi.mocked(execSync);
+const mockedExecFileSync = vi.mocked(execFileSync);
 
 function mockIO(answers: string[] = []): InterviewIO {
   let idx = 0;
@@ -20,15 +20,16 @@ function mockIO(answers: string[] = []): InterviewIO {
 
 describe('detectCurrentBranch', () => {
   beforeEach(() => {
-    mockedExecSync.mockReset();
+    mockedExecFileSync.mockReset();
   });
 
   it('returns a branch name when in a git repo', () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const branch = detectCurrentBranch('/some/repo');
     expect(branch).toBe('feat/my-feature');
-    expect(mockedExecSync).toHaveBeenCalledWith(
-      'git rev-parse --abbrev-ref HEAD',
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
       expect.objectContaining({
         cwd: '/some/repo',
         encoding: 'utf-8',
@@ -38,13 +39,13 @@ describe('detectCurrentBranch', () => {
   });
 
   it('trims whitespace from branch name', () => {
-    mockedExecSync.mockReturnValue('  main  \n');
+    mockedExecFileSync.mockReturnValue('  main  \n' as never);
     const branch = detectCurrentBranch('/some/repo');
     expect(branch).toBe('main');
   });
 
-  it('returns undefined when execSync throws (non-git directory)', () => {
-    mockedExecSync.mockImplementation(() => {
+  it('returns undefined when git execution throws (non-git directory)', () => {
+    mockedExecFileSync.mockImplementation(() => {
       throw new Error('fatal: not a git repository');
     });
     const branch = detectCurrentBranch('/tmp');
@@ -54,7 +55,7 @@ describe('detectCurrentBranch', () => {
 
 describe('resolveBaseBranch', () => {
   beforeEach(() => {
-    mockedExecSync.mockReset();
+    mockedExecFileSync.mockReset();
   });
 
   it('uses CLI override without prompting', async () => {
@@ -66,7 +67,7 @@ describe('resolveBaseBranch', () => {
   });
 
   it('returns main silently when on main', async () => {
-    mockedExecSync.mockReturnValue('main\n');
+    mockedExecFileSync.mockReturnValue('main\n' as never);
     const io = mockIO();
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('main');
@@ -75,7 +76,7 @@ describe('resolveBaseBranch', () => {
   });
 
   it('returns master silently when on master', async () => {
-    mockedExecSync.mockReturnValue('master\n');
+    mockedExecFileSync.mockReturnValue('master\n' as never);
     const io = mockIO();
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('master');
@@ -84,7 +85,7 @@ describe('resolveBaseBranch', () => {
   });
 
   it('defaults to main when not in a git repo', async () => {
-    mockedExecSync.mockImplementation(() => {
+    mockedExecFileSync.mockImplementation(() => {
       throw new Error('fatal: not a git repository');
     });
     const io = mockIO();
@@ -96,7 +97,7 @@ describe('resolveBaseBranch', () => {
   });
 
   it('prompts user when on non-main branch', async () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const io = mockIO(['y']);
     await resolveBaseBranch('/some/dir', undefined, io);
     expect(io.ask).toHaveBeenCalledWith(
@@ -105,42 +106,42 @@ describe('resolveBaseBranch', () => {
   });
 
   it('uses current branch when user confirms with "y"', async () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const io = mockIO(['y']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('feat/my-feature');
   });
 
   it('uses current branch when user confirms with "yes"', async () => {
-    mockedExecSync.mockReturnValue('develop\n');
+    mockedExecFileSync.mockReturnValue('develop\n' as never);
     const io = mockIO(['yes']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('develop');
   });
 
   it('uses current branch when user confirms with "YES" (case-insensitive)', async () => {
-    mockedExecSync.mockReturnValue('develop\n');
+    mockedExecFileSync.mockReturnValue('develop\n' as never);
     const io = mockIO(['YES']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('develop');
   });
 
   it('falls back to main when user answers "n"', async () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const io = mockIO(['n']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('main');
   });
 
   it('falls back to main when user answers anything else', async () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const io = mockIO(['maybe']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('main');
   });
 
   it('falls back to main when user answers empty string', async () => {
-    mockedExecSync.mockReturnValue('feat/my-feature\n');
+    mockedExecFileSync.mockReturnValue('feat/my-feature\n' as never);
     const io = mockIO(['']);
     const result = await resolveBaseBranch('/some/dir', undefined, io);
     expect(result).toBe('main');

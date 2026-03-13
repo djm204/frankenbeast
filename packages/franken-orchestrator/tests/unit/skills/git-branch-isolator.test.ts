@@ -1,14 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GitIsolationConfig } from '../../../src/skills/cli-types.js';
 
-vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
+const { execCompatMock } = vi.hoisted(() => ({
+  execCompatMock: vi.fn(),
 }));
 
-import { execSync } from 'node:child_process';
+function renderGitArg(arg: string): string {
+  if (/[\s"]/u.test(arg)) {
+    return `"${arg.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+  return arg;
+}
+
+vi.mock('node:child_process', () => ({
+  execFileSync: vi.fn((bin: string, args: readonly string[], opts?: Record<string, unknown>) =>
+    execCompatMock(`${bin} ${args.map(renderGitArg).join(' ')}`, opts),
+  ),
+}));
+
+import { execFileSync } from 'node:child_process';
 import { GitBranchIsolator, parseDirtySubmodules, detectAffectedPackages, buildCommitScope } from '../../../src/skills/git-branch-isolator.js';
 
-const mockExecSync = execSync as unknown as ReturnType<typeof vi.fn>;
+const mockExecFileSync = execFileSync as unknown as ReturnType<typeof vi.fn>;
+const mockExecSync = execCompatMock;
+
+function expectGit(args: string[], cwd = '/fake/repo'): void {
+  expect(mockExecFileSync).toHaveBeenCalledWith(
+    'git',
+    args,
+    expect.objectContaining({ cwd, encoding: 'utf-8' }),
+  );
+}
 
 function makeConfig(overrides?: Partial<GitIsolationConfig>): GitIsolationConfig {
   return {
@@ -38,22 +60,10 @@ describe('GitBranchIsolator', () => {
       });
       isolator.isolate('03_my_chunk');
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git branch --list main',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout main',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git branch --list chunk/03_my_chunk',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout -b chunk/03_my_chunk',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expectGit(['branch', '--list', 'main']);
+      expectGit(['checkout', 'main']);
+      expectGit(['branch', '--list', 'chunk/03_my_chunk']);
+      expectGit(['checkout', '-b', 'chunk/03_my_chunk']);
     });
 
     it('recovers from dirty index (leftover merge) and retries checkout', () => {
@@ -75,10 +85,7 @@ describe('GitBranchIsolator', () => {
       isolator.isolate('03_my_chunk');
 
       expect(checkoutAttempts).toBe(2);
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git merge --abort',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expectGit(['merge', '--abort']);
     });
 
     it('creates baseBranch from current HEAD when it does not exist', () => {
@@ -91,14 +98,8 @@ describe('GitBranchIsolator', () => {
       const iso = new GitBranchIsolator(makeConfig({ baseBranch: 'feat/monorepo-migration' }));
       iso.isolate('03_my_chunk');
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout -b feat/monorepo-migration',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout -b chunk/03_my_chunk',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expectGit(['checkout', '-b', 'feat/monorepo-migration']);
+      expectGit(['checkout', '-b', 'chunk/03_my_chunk']);
     });
 
     it('checks out existing baseBranch when it already exists', () => {
@@ -109,10 +110,7 @@ describe('GitBranchIsolator', () => {
       });
       isolator.isolate('03_my_chunk');
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout main',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expectGit(['checkout', 'main']);
     });
 
     it('checks out existing branch when it already exists', () => {
@@ -124,12 +122,10 @@ describe('GitBranchIsolator', () => {
 
       isolator.isolate('03_my_chunk');
 
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git checkout chunk/03_my_chunk',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
-      expect(mockExecSync).not.toHaveBeenCalledWith(
-        'git checkout -b chunk/03_my_chunk',
+      expectGit(['checkout', 'chunk/03_my_chunk']);
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        ['checkout', '-b', 'chunk/03_my_chunk'],
         expect.anything(),
       );
     });

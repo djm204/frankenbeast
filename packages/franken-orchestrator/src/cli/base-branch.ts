@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { InterviewIO } from '../planning/interview-loop.js';
 
 /**
@@ -7,7 +7,7 @@ import type { InterviewIO } from '../planning/interview-loop.js';
  */
 export function detectCurrentBranch(workingDir: string): string | undefined {
   try {
-    return execSync('git rev-parse --abbrev-ref HEAD', {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: workingDir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
