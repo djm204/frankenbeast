@@ -8,10 +8,10 @@ describe('tryExtractTextFromNode', () => {
     expect(out).toEqual(['hello']);
   });
 
-  it('skips whitespace-only strings', () => {
+  it('preserves whitespace-only strings', () => {
     const out: string[] = [];
     tryExtractTextFromNode('   ', out);
-    expect(out).toEqual([]);
+    expect(out).toEqual(['   ']);
   });
 
   it('extracts text from direct keys (text, output_text, output)', () => {

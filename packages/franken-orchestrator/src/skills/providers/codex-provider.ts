@@ -30,19 +30,24 @@ export class CodexProvider implements ICliProvider {
       .filter((line) => line.length > 0);
 
     const extracted: string[] = [];
-    let parsedJsonLines = 0;
 
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as unknown;
-        parsedJsonLines++;
-        tryExtractTextFromNode(parsed, extracted);
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed, parts);
+        if (parts.length > 0) {
+          extracted.push(parts.join(''));
+        } else if (Array.isArray(parsed)) {
+          // If valid JSON array but no text extracted (e.g. raw array from triage),
+          // preserve the original line. We avoid preserving objects to skip structural frames.
+          extracted.push(line);
+        }
       } catch {
         extracted.push(line);
       }
     }
 
-    if (parsedJsonLines > 0 && extracted.length === 0) return '';
     return extracted.join('\n').trim();
   }
 

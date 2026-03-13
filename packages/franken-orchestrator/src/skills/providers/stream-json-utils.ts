@@ -122,7 +122,8 @@ function extractJsonStructure(text: string): string | null {
 /** Recursively extract text from a stream-json node. */
 export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
+    // Preserve whitespace tokens if they are non-empty
+    if (node.length > 0) out.push(node);
     return;
   }
   if (!node || typeof node !== 'object') return;
@@ -136,7 +137,7 @@ export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   const directKeys = ['text', 'output_text', 'output'];
   for (const key of directKeys) {
     const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
+    if (typeof value === 'string' && value.length > 0) {
       out.push(value);
     }
   }

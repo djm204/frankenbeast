@@ -75,6 +75,10 @@ export class ClaudeProvider implements ICliProvider {
         tryExtractTextFromNode(obj, parts);
         if (parts.length > 0) {
           extracted.push(parts.join(''));
+        } else if (Array.isArray(obj)) {
+          // If it's a raw JSON array (e.g. from triage), preserve it.
+          // We don't preserve objects here because they are likely structural stream-json.
+          extracted.push(trimmed);
         }
       } catch {
         extracted.push(trimmed);
