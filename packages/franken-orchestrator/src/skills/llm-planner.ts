@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
+import { cleanLlmJson } from './providers/stream-json-utils.js';
 
 type RawPlanResponse = { tasks?: unknown };
 
@@ -37,9 +38,10 @@ export class LlmPlanner implements IPlannerModule {
 
   private parsePlan(response: string, intent: PlanIntent): PlanGraph {
     const fallback = this.singleTaskPlan(intent.goal);
+    const text = cleanLlmJson(response);
 
     try {
-      const parsed = JSON.parse(response) as RawPlanResponse;
+      const parsed = JSON.parse(text) as RawPlanResponse;
       if (!parsed || !Array.isArray(parsed.tasks)) {
         return fallback;
       }

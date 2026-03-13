@@ -1,4 +1,5 @@
 import type { GithubIssue, IIssueTriage, IssueComplexity, TriageResult } from './types.js';
+import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
 type CompleteFn = (prompt: string) => Promise<string>;
 
@@ -62,13 +63,14 @@ Return ONLY the JSON array, no other text.`;
   }
 
   private extractAndParse(raw: string): unknown[] {
-    const start = raw.indexOf('[');
-    const end = raw.lastIndexOf(']');
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error('No JSON array found in LLM response');
+    const text = cleanLlmJson(raw);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`Failed to parse LLM response as JSON: ${err instanceof Error ? err.message : String(err)}. Raw output start: "${raw.slice(0, 100)}..."`);
     }
-    const jsonStr = raw.slice(start, end + 1);
-    const parsed: unknown = JSON.parse(jsonStr);
+
     if (!Array.isArray(parsed)) {
       throw new Error('Parsed value is not an array');
     }

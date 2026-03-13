@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
+import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
 export class PlannerPortAdapter implements IPlannerModule {
   private readonly llmClient: ILlmClient;
@@ -28,9 +29,10 @@ export class PlannerPortAdapter implements IPlannerModule {
 
   private parsePlan(response: string, intent: PlanIntent): PlanGraph {
     const fallback = this.singleTaskPlan(intent.goal);
+    const text = cleanLlmJson(response);
 
     try {
-      const parsed = JSON.parse(response) as { tasks?: unknown };
+      const parsed = JSON.parse(text) as { tasks?: unknown };
       if (!parsed || !Array.isArray(parsed.tasks)) {
         return fallback;
       }
