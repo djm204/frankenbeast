@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.3...franken-orchestrator-v0.20.0) (2026-03-13)
+
+
+### Features
+
+* add enabledModules to CliDepOptions with env var fallback ([f4234c3](https://github.com/djm204/frankenbeast/commit/f4234c341cae10c61e3b49b614a8f43cd8505b82))
+* add EpisodicMemoryPortAdapter bridging EpisodicMemoryStore to IMemoryModule ([a3ce9d8](https://github.com/djm204/frankenbeast/commit/a3ce9d84a122a24ba98fbd41a7dc7f7f70e94763))
+* add ModuleConfig type and TrackedAgent.moduleConfig field ([69b1552](https://github.com/djm204/frankenbeast/commit/69b1552f804bf07dc30ecc1fbc1abec82aba4738))
+* add SkillRegistryBridge to adapt ISkillRegistry to SkillRegistryPort ([5b3bba0](https://github.com/djm204/frankenbeast/commit/5b3bba0786f6a50c5a8a636373ae83cdf6bcce6e))
+* inject FRANKENBEAST_MODULE_* env vars from run config into beast processes ([6e7aa16](https://github.com/djm204/frankenbeast/commit/6e7aa16a069f4801750b6ee14de57143646cb532))
+* wire per-agent module toggle persistence and dispatch plumbing ([6ead11e](https://github.com/djm204/frankenbeast/commit/6ead11ef18447806863eaa8cb0cc3136638f0204))
+* wire real EpisodicMemoryPortAdapter into createCliDeps with module toggle gate ([7979020](https://github.com/djm204/frankenbeast/commit/7979020f60a74c22efd630555d6a4f55f106f3c2))
+* wire real Firewall, Skills, Memory modules into BeastLoop (Tiers 1-2) ([b835f52](https://github.com/djm204/frankenbeast/commit/b835f529b6167984d54586d8194485664418eef6))
+* wire real FirewallPortAdapter into createCliDeps with module toggle gate ([62ff60e](https://github.com/djm204/frankenbeast/commit/62ff60eabba5b27ca08b4df6a9ac54e0e925c0b3))
+* wire real SkillsPortAdapter into createCliDeps with module toggle gate ([9591a55](https://github.com/djm204/frankenbeast/commit/9591a552507e3519f8cda7825cc2fad5c4404229))
+
 ## [0.19.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.2...franken-orchestrator-v0.19.3) (2026-03-13)
 
 

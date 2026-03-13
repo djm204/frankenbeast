@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.20.0](https://github.com/djm204/frankenbeast/compare/v0.19.3...v0.20.0) (2026-03-13)
+
+
+### Features
+
+* wire real Firewall, Skills, Memory modules into BeastLoop (Tiers 1-2) ([b835f52](https://github.com/djm204/frankenbeast/commit/b835f529b6167984d54586d8194485664418eef6))
+
+
+### Miscellaneous
+
+* add firewall, skills, brain workspace deps to orchestrator ([a8317b7](https://github.com/djm204/frankenbeast/commit/a8317b74d0ed177e55ee46eaa1da6cabcd3ac6ad))
+* delete auto merge workflow that doesnt work ([c496042](https://github.com/djm204/frankenbeast/commit/c4960427453f48d183d08d945e7c9ae6b8a51a0e))
+* **franken-orchestrator:** implement you-are-hardening-chunk-homepfkdevfrankenbeas ([362d813](https://github.com/djm204/frankenbeast/commit/362d81366976d04ea822f3d32797b8525504891d))
+* implement you-are-hardening-chunk-homepfkdevfrankenbeas ([1b1917c](https://github.com/djm204/frankenbeast/commit/1b1917ca8feaf0bdcea735876253d7918cb3d619))
+
+
+### Documentation
+
+* mark tiers 1-2 wiring design as implemented ([57ffee1](https://github.com/djm204/frankenbeast/commit/57ffee10153a7dc88632607a56d7b99f00188ea1))
+
 ## [0.19.3](https://github.com/djm204/frankenbeast/compare/v0.19.2...v0.19.3) (2026-03-13)
 
 
