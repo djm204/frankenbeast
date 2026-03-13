@@ -278,7 +278,7 @@ export class Session {
     } else {
       const stored = readDesignDoc(paths);
       if (!stored) {
-        throw new Error('No design document found. Run "frankenbeast interview" first, or provide --design-doc.');
+        throw new Error(`No design document found at ${paths.designDocFile}. Run "frankenbeast interview" first, or provide --design-doc.`);
       }
       designContent = stored;
     }

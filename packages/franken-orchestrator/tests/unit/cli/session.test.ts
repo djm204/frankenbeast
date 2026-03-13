@@ -372,6 +372,16 @@ describe('Session', () => {
       );
     });
 
+    it('includes the searched path in the error when design doc is missing', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockReadDesignDoc.mockReturnValueOnce(undefined);
+      const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
+
+      await expect(new Session(config).start()).rejects.toThrow(
+        config.paths.designDocFile,
+      );
+    });
+
     it('writes chunk files and runs review loop', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       mockReadDesignDoc.mockReturnValueOnce('# Design');
