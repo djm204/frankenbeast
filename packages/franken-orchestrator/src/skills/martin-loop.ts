@@ -22,51 +22,10 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
+import { classifyCommandFailure, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
 
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
-  const combined = `${stderr}\n${stdout}`;
-
-  // Anthropic "retry-after: 30" header
-  const retryAfterHeaderMatch = combined.match(/retry.?after:?\s*(\d+)\s*s?/i);
-  if (retryAfterHeaderMatch?.[1]) {
-    return { sleepSeconds: parseInt(retryAfterHeaderMatch[1], 10), source: 'retry-after header' };
-  }
-
-  // "Please retry after 25s"
-  const retryAfterPatternMatch = combined.match(/retry.?after\s+(\d+)\s*s?/i);
-  if (retryAfterPatternMatch?.[1]) {
-    return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after header' };
-  }
-
-  // "try again in 5 minutes" / "try again in 30 seconds"
-  const minutesMatch = combined.match(/try again in (\d+) minute/i);
-  if (minutesMatch?.[1]) return { sleepSeconds: parseInt(minutesMatch[1], 10) * 60, source: 'minutes pattern' };
-  const secondsMatch = combined.match(/try again in (\d+) second/i);
-  if (secondsMatch?.[1]) return { sleepSeconds: parseInt(secondsMatch[1], 10), source: 'seconds pattern' };
-
-  // "rate limit resets at 2026-03-05T20:15:00Z" or epoch timestamp
-  const isoMatch = combined.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
-  if (isoMatch?.[1]) {
-    const resetAt = new Date(isoMatch[1]).getTime();
-    const now = Date.now();
-    if (resetAt > now) return { sleepSeconds: Math.ceil((resetAt - now) / 1000), source: 'reset-at timestamp' };
-  }
-
-  // "x-ratelimit-reset: <epoch>" header
-  const epochMatch = combined.match(/x-ratelimit-reset:\s*(\d{10,13})/i);
-  if (epochMatch?.[1]) {
-    const epoch = parseInt(epochMatch[1], 10);
-    const resetMs = epoch > 1e12 ? epoch : epoch * 1000;
-    const now = Date.now();
-    if (resetMs > now) return { sleepSeconds: Math.ceil((resetMs - now) / 1000), source: 'x-ratelimit-reset epoch' };
-  }
-
-  // OpenAI / Codex "resets in Ns"
-  const resetsInMatch = combined.match(/resets?\s+in\s+(\d+)\s*s/i);
-  if (resetsInMatch?.[1]) return { sleepSeconds: parseInt(resetsInMatch[1], 10), source: 'resets-in pattern' };
-
-  // No parseable reset time
-  return { sleepSeconds: -1, source: 'unknown' };
+  return parseResetTimeText(`${stderr}\n${stdout}`);
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -416,7 +375,7 @@ export class MartinLoop {
     let chunkSession = this.loadOrCreateChunkSession(config, activeProvider);
 
     // Provider exhaustion tracking
-    const exhaustedProviders = new Map<string, { stderr: string; stdout: string }>();
+    const exhaustedProviders = new Map<string, CommandFailure>();
 
     while (iteration < config.maxIterations) {
       iteration++;
@@ -457,7 +416,28 @@ export class MartinLoop {
 
       // Never treat timed-out iterations as rate-limited — the timeout killed the
       // process, any "rate limit" text in stdout is the model's code, not an API error.
-      const rateLimited = !result.timedOut && resolved.isRateLimited(result.stderr);
+      const failure = result.exitCode === 0
+        ? undefined
+        : classifyCommandFailure({
+          tool: 'llm',
+          provider: activeProvider,
+          command: resolved.command,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          normalizedOutput: normalizedStdout,
+          detectRateLimit: (text) => resolved.isRateLimited(text),
+          parseRetryAfterMs: (text) => {
+            const providerMs = resolved.parseRetryAfter(text);
+            if (providerMs !== undefined) {
+              return providerMs;
+            }
+            const parsed = parseResetTimeText(text);
+            return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+          },
+        });
+      const rateLimited = failure?.rateLimited ?? false;
       const promiseDetected = promiseRegex.test(normalizedStdout);
 
       const iterResult: IterationResult = {
@@ -472,6 +452,7 @@ export class MartinLoop {
         emittedPromiseTags,
         tokensEstimated,
         sleepMs: pendingSleepMs,
+        ...(failure ? { failure } : {}),
       };
 
       // Reset pendingSleepMs after reporting it
@@ -520,7 +501,7 @@ export class MartinLoop {
         config.onRateLimit?.(activeProvider);
 
         // Track this provider as exhausted
-        exhaustedProviders.set(activeProvider, { stderr: result.stderr, stdout: normalizedStdout });
+        exhaustedProviders.set(activeProvider, failure!);
 
         // Find next non-exhausted provider
         const nextProvider = providers.find(p => !exhaustedProviders.has(p));
@@ -545,23 +526,19 @@ export class MartinLoop {
         let shortestSource = 'unknown';
 
         for (const [providerName, data] of exhaustedProviders) {
-          const providerImpl = this.registry.get(providerName);
-          const retryMs = providerImpl.parseRetryAfter(data.stderr);
-
-          if (retryMs !== undefined) {
-            // Provider-specific parsing succeeded (returns milliseconds)
-            const sleepSeconds = retryMs / 1000;
+          if (data.retryAfterMs !== undefined) {
+            const sleepSeconds = data.retryAfterMs / 1000;
             if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
               shortestSleep = sleepSeconds;
               shortestSource = `${providerName} parseRetryAfter`;
             }
-          } else {
-            // Fallback to generic parseResetTime
-            const parsed = parseResetTime(data.stderr, data.stdout);
-            if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
-              shortestSleep = parsed.sleepSeconds;
-              shortestSource = parsed.source;
-            }
+            continue;
+          }
+
+          const parsed = parseResetTime(data.stderr, data.stdout);
+          if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
+            shortestSleep = parsed.sleepSeconds;
+            shortestSource = parsed.source;
           }
         }
 

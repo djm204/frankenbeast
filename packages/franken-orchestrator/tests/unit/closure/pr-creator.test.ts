@@ -353,4 +353,30 @@ describe('PrCreator issue reference integration', () => {
       }
     });
   });
+
+  describe('standardized subprocess failures', () => {
+    it('logs a canonical failure payload when gh pr create fails', async () => {
+      const exec = mockExec({
+        'gh pr create': Object.assign(new Error('gh failed'), {
+          status: 1,
+          stderr: Buffer.from('rate limit exceeded'),
+        }),
+      });
+      const logger = makeLogger();
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+
+      const result = await creator.create(baseResult, logger);
+
+      expect(result).toBeNull();
+      expect(logger.error).toHaveBeenCalledWith(
+        'PrCreator: failed to create PR',
+        expect.objectContaining({
+          kind: 'command_failed',
+          tool: 'gh',
+          command: 'gh pr create',
+          stderr: 'rate limit exceeded',
+        }),
+      );
+    });
+  });
 });

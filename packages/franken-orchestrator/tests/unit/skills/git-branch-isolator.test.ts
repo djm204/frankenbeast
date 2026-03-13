@@ -129,6 +129,29 @@ describe('GitBranchIsolator', () => {
         expect.anything(),
       );
     });
+
+    it('throws standardized git failures for real checkout conflicts', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
+        if (cmd === 'git checkout main') {
+          throw Object.assign(new Error('checkout failed'), {
+            status: 1,
+            stderr: Buffer.from('error: The following untracked working tree files would be overwritten by checkout:\n\tREADME.md\nAborting'),
+          });
+        }
+        return '';
+      });
+
+      expect(() => isolator.isolate('03_my_chunk')).toThrowError(
+        expect.objectContaining({
+          cause: expect.objectContaining({
+            kind: 'command_failed',
+            tool: 'git',
+            command: 'git checkout main',
+          }),
+        }),
+      );
+    });
   });
 
   describe('autoCommit()', () => {

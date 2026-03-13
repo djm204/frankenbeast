@@ -652,20 +652,34 @@ describe('MartinLoop — Rate Limit Resilience', () => {
     vi.useRealTimers();
   });
 
-  it('only detects rate limits from stderr, not from stdout code output', async () => {
-    // Stdout has "rate limit" text (code about rate limiting) but stderr is clean
+  it('falls back when the provider emits rate-limit details on stdout only', async () => {
     queueMock({
-      stdout: 'function handleRateLimit(status: 429) { ... }\n<promise>IMPL_X_DONE</promise>',
+      stdout: 'rate limit exceeded\nretry-after: 6',
+      stderr: '',
+      exitCode: 1,
+    });
+    queueMock({
+      stdout: 'fallback success\n<promise>IMPL_X_DONE</promise>',
       stderr: '',
       exitCode: 0,
     });
 
     const onRateLimit = vi.fn();
+    const onIteration = vi.fn();
     const loop = new MartinLoop();
-    const result = await loop.run(baseConfig({ onRateLimit }));
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+      onRateLimit,
+      onIteration,
+    }));
 
     expect(result.completed).toBe(true);
     expect(result.iterations).toBe(1);
-    expect(onRateLimit).not.toHaveBeenCalled();
+    expect(onRateLimit).toHaveBeenCalledWith('claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+
+    const firstIter = (onIteration.mock.calls[0] as [number, IterationResult]);
+    expect(firstIter[1].rateLimited).toBe(true);
   });
 });

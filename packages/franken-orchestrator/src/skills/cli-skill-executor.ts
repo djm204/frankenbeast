@@ -329,16 +329,15 @@ export class CliSkillExecutor {
         }
         // Surface errors on terminal when iteration fails (non-rate-limit)
         if (result.exitCode !== 0 && !result.rateLimited) {
-          const stderrExcerpt = result.stderr?.trim().split('\n').slice(-5).join('\n') ?? '';
-          const stdoutExcerpt = !stderrExcerpt && result.stdout
-            ? result.stdout.trim().split('\n').slice(-5).join('\n')
-            : '';
-          this.logger?.error(`MartinLoop: iter ${iteration} failed (exit ${result.exitCode})`, {
-            chunkId,
-            exitCode: result.exitCode,
-            ...(stderrExcerpt && { stderr: stderrExcerpt }),
-            ...(stdoutExcerpt && { stdout: stdoutExcerpt }),
-          }, 'martin');
+          this.logger?.error(
+            `MartinLoop: iter ${iteration} failed (exit ${result.exitCode})`,
+            result.failure ?? {
+              chunkId,
+              exitCode: result.exitCode,
+              stderr: result.stderr?.trim().split('\n').slice(-5).join('\n') ?? '',
+            },
+            'martin',
+          );
         }
         // Create iteration span
         const iterSpan = this.observer.startSpan(this.observer.trace, {

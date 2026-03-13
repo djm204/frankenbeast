@@ -10,6 +10,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import type { ILogger } from '../deps.js';
+import { isCommandFailure } from '../errors/command-failure.js';
 
 // ── ANSI escape codes ──
 
@@ -296,6 +297,9 @@ export class BeastLogger implements ILogger {
 
   private withData(msg: string, data: unknown): string {
     if (data === undefined) return msg;
+    if (isCommandFailure(data)) {
+      return `${msg} | ${data.summary}`;
+    }
     return `${msg} | ${safeStringify(data)}`;
   }
 

@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { IAdapter } from './adapter-llm-client.js';
 import { createDefaultRegistry, type ICliProvider, type ProviderRegistry } from '../skills/providers/cli-provider.js';
+import { classifyCommandFailure, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
 
 type CliTransformed = {
   prompt: string;
@@ -106,7 +107,7 @@ export class CliLlmAdapter implements IAdapter {
     const { prompt, maxTurns, model, chatMode, sessionContinue, requestId } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
-    const exhaustedProviders = new Map<string, { stderr: string; stdout: string }>();
+    const exhaustedProviders = new Map<string, CommandFailure>();
     const sleepFn = this.opts._sleepFn ?? defaultSleep;
     const initialProvider = this.provider.name;
     let activeProvider = initialProvider;
@@ -132,14 +133,30 @@ export class CliLlmAdapter implements IAdapter {
         return result.stdout;
       }
 
-      if (!provider.isRateLimited(result.stderr)) {
-        throw new Error(`CLI exited with code ${result.exitCode}: ${result.stderr}`);
+      const failure = classifyCommandFailure({
+        tool: 'llm',
+        provider: activeProvider,
+        command: this.resolveCommand(activeProvider),
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        normalizedOutput: provider.normalizeOutput(result.stdout),
+        detectRateLimit: (text) => provider.isRateLimited(text),
+        parseRetryAfterMs: (text) => {
+          const providerMs = provider.parseRetryAfter(text);
+          if (providerMs !== undefined) {
+            return providerMs;
+          }
+          const parsed = parseResetTimeText(text);
+          return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+        },
+      });
+
+      if (!failure.rateLimited) {
+        throw new Error(failure.summary, { cause: failure });
       }
 
-      exhaustedProviders.set(activeProvider, {
-        stderr: result.stderr,
-        stdout: result.stdout,
-      });
+      exhaustedProviders.set(activeProvider, failure);
 
       const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
       if (nextProvider) {
@@ -200,20 +217,12 @@ export class CliLlmAdapter implements IAdapter {
     return rawEnv;
   }
 
-  private resolveSleepMs(exhaustedProviders: Map<string, { stderr: string; stdout: string }>): number {
+  private resolveSleepMs(exhaustedProviders: Map<string, CommandFailure>): number {
     let shortestMs = Number.POSITIVE_INFINITY;
 
-    for (const [providerName, output] of exhaustedProviders) {
-      const provider = this.resolveProvider(providerName);
-      const parsedMs = provider.parseRetryAfter(output.stderr);
-      if (parsedMs !== undefined) {
-        shortestMs = Math.min(shortestMs, parsedMs);
-        continue;
-      }
-
-      const parsed = parseResetTime(output.stderr, output.stdout);
-      if (parsed >= 0) {
-        shortestMs = Math.min(shortestMs, parsed);
+    for (const [, failure] of exhaustedProviders) {
+      if (failure.retryAfterMs !== undefined) {
+        shortestMs = Math.min(shortestMs, failure.retryAfterMs);
       }
     }
 
@@ -306,44 +315,4 @@ function normalizeProviderChain(
 
 function defaultSleep(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
-}
-
-function parseResetTime(stderr: string, stdout: string): number {
-  const combined = `${stderr}\n${stdout}`;
-
-  const retryAfterHeaderMatch = combined.match(/retry.?after:?\s*(\d+)\s*s?/i);
-  if (retryAfterHeaderMatch?.[1]) {
-    return parseInt(retryAfterHeaderMatch[1], 10) * 1000;
-  }
-
-  const retryAfterPatternMatch = combined.match(/retry.?after\s+(\d+)\s*s?/i);
-  if (retryAfterPatternMatch?.[1]) {
-    return parseInt(retryAfterPatternMatch[1], 10) * 1000;
-  }
-
-  const minutesMatch = combined.match(/try again in (\d+) minute/i);
-  if (minutesMatch?.[1]) return parseInt(minutesMatch[1], 10) * 60_000;
-
-  const secondsMatch = combined.match(/try again in (\d+) second/i);
-  if (secondsMatch?.[1]) return parseInt(secondsMatch[1], 10) * 1000;
-
-  const isoMatch = combined.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
-  if (isoMatch?.[1]) {
-    const resetAt = new Date(isoMatch[1]).getTime();
-    const now = Date.now();
-    if (resetAt > now) return resetAt - now;
-  }
-
-  const epochMatch = combined.match(/x-ratelimit-reset:\s*(\d{10,13})/i);
-  if (epochMatch?.[1]) {
-    const epoch = parseInt(epochMatch[1], 10);
-    const resetMs = epoch > 1e12 ? epoch : epoch * 1000;
-    const now = Date.now();
-    if (resetMs > now) return resetMs - now;
-  }
-
-  const resetsInMatch = combined.match(/resets?\s+in\s+(\d+)\s*s/i);
-  if (resetsInMatch?.[1]) return parseInt(resetsInMatch[1], 10) * 1000;
-
-  return -1;
 }
