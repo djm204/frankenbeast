@@ -99,3 +99,13 @@ export interface BeastInterviewSession {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+export interface ModuleConfig {
+  readonly firewall?: boolean | undefined;
+  readonly skills?: boolean | undefined;
+  readonly memory?: boolean | undefined;
+  readonly planner?: boolean | undefined;
+  readonly critique?: boolean | undefined;
+  readonly governor?: boolean | undefined;
+  readonly heartbeat?: boolean | undefined;
+}
