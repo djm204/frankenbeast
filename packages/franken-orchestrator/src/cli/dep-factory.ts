@@ -17,6 +17,8 @@ import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
 import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
+import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
+import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
 import { IssueTriage } from '../issues/issue-triage.js';
 import { IssueGraphBuilder } from '../issues/issue-graph-builder.js';
@@ -63,6 +65,8 @@ export interface CliDepOptions {
   chatMode?: boolean | undefined;
   /** Security tier for firewall guardrails. Default: 'MODERATE'. */
   firewallSecurityTier?: 'STRICT' | 'MODERATE' | 'PERMISSIVE';
+  /** Directory containing project-local skills. Default: <root>/skills */
+  skillsDir?: string;
   /** Per-module enable/disable toggles. Defaults to all enabled. Falls back to FRANKENBEAST_MODULE_* env vars. */
   enabledModules?: import('../beasts/types.js').ModuleConfig;
 }
@@ -268,6 +272,22 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
+  // Skills (dynamic import — optional module)
+  let skills: ISkillsModule = createStubSkills(options.planDirOverride ?? paths.plansDir);
+  if (modules.skills) {
+    try {
+      const { createRegistry } = await import('@franken/skills');
+      const skillsRegistry = createRegistry({
+        localSkillsDir: options.skillsDir ?? resolve(paths.root, 'skills'),
+      });
+      await skillsRegistry.sync();
+      const registryBridge = new SkillRegistryBridge(skillsRegistry);
+      skills = new SkillsPortAdapter(registryBridge, adapterLlm);
+    } catch (error) {
+      logger.warn(`Skills module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
+
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
@@ -320,7 +340,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   const deps: BeastLoopDeps = {
     firewall,
-    skills: createStubSkills(options.planDirOverride ?? paths.plansDir),
+    skills,
     memory: stubMemory,
     planner: stubPlanner,
     observer: observerBridge,
