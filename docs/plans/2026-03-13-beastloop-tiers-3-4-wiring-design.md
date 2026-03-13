@@ -304,7 +304,35 @@ Same pattern as Tiers 1-2: each module is constructed in a try/catch. On failure
 | `tests/unit/adapters/governor-wiring.test.ts` | **New** — unit tests for governor wiring |
 | `tests/integration/cli/dep-factory-critique-governor.test.ts` | **New** — integration test for wiring + fallback |
 
-### 8. Out of Scope
+### 8. Per-Agent Module Configuration
+
+Critique and Governor wiring respects the per-agent module toggle architecture defined in the Tiers 1-2 design doc (Section 8). Each module is gated by the resolved `modules` config:
+
+```typescript
+let critique: ICritiqueModule = stubCritique;
+if (modules.critique) {
+  try {
+    // ... real critique wiring ...
+  } catch (error) {
+    logger.warn(`Critique module unavailable, using stub: ${errorMessage(error)}`, 'dep-factory');
+  }
+}
+
+let governor: IGovernorModule = stubGovernor;
+if (modules.governor) {
+  try {
+    // ... real governor wiring ...
+  } catch (error) {
+    logger.warn(`Governor module unavailable, using stub: ${errorMessage(error)}`, 'dep-factory');
+  }
+}
+```
+
+When `modules.critique` is `false`, the stub auto-passes all plan reviews. When `modules.governor` is `false`, the stub auto-approves all requests. This allows operators to run agents without HITL approval gates or critique overhead when not needed.
+
+The env vars `FRANKENBEAST_MODULE_CRITIQUE` and `FRANKENBEAST_MODULE_GOVERNOR` control these toggles when running as a beast-dispatched process. See Tiers 1-2 design doc Section 8 for the full flow.
+
+### 9. Out of Scope
 
 - Bridging critique's `MemoryPort` to real episodic/semantic stores — deferred until Memory bridges are mature
 - Bridging critique's `GuardrailsPort` to real firewall sandbox — deferred until sandbox execution is needed

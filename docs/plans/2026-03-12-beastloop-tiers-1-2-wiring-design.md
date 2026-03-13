@@ -303,7 +303,114 @@ This means the CLI never crashes due to a module initialization failure.
 | `tests/unit/cli/dep-factory-modules.test.ts` | **New** — unit tests for all 3 wirings |
 | `tests/integration/cli/dep-factory-wiring.test.ts` | **New** — integration test for wiring + fallback |
 
-### 8. Out of Scope
+### 8. Per-Agent Module Configuration
+
+Each beast agent in the dashboard can toggle individual modules on/off. When a module is disabled for an agent, the stub is used instead of the real implementation. This makes each agent modular — an agent that only needs firewall + memory can disable skills, critique, governor, and heartbeat.
+
+#### 8.1 ModuleConfig Type
+
+```typescript
+// src/beasts/types.ts (add to existing types)
+export interface ModuleConfig {
+  readonly firewall?: boolean;   // default: true
+  readonly skills?: boolean;     // default: true
+  readonly memory?: boolean;     // default: true
+  readonly planner?: boolean;    // default: true
+  readonly critique?: boolean;   // default: true
+  readonly governor?: boolean;   // default: true
+  readonly heartbeat?: boolean;  // default: true
+}
+```
+
+#### 8.2 TrackedAgent Module Config
+
+Module toggles are stored on the `TrackedAgent` as a universal field (not per-definition):
+
+```typescript
+// In TrackedAgent (agent-types.ts)
+readonly moduleConfig?: ModuleConfig | undefined;
+```
+
+The dashboard renders toggle switches for each module when creating/editing an agent. When a run is dispatched from an agent, the `moduleConfig` is merged into the run's environment.
+
+#### 8.3 BeastDefinition Process Spec
+
+`buildProcessSpec()` receives module config and passes it as env vars:
+
+```typescript
+// Universal env vars set by ProcessBeastExecutor before spawning
+FRANKENBEAST_MODULE_FIREWALL=true|false
+FRANKENBEAST_MODULE_SKILLS=true|false
+FRANKENBEAST_MODULE_MEMORY=true|false
+FRANKENBEAST_MODULE_CRITIQUE=true|false
+FRANKENBEAST_MODULE_GOVERNOR=true|false
+FRANKENBEAST_MODULE_HEARTBEAT=true|false
+```
+
+The `ProcessBeastExecutor.start()` method reads `moduleConfig` from the tracked agent and injects these env vars into the process spec's `env` — this is universal, not per-definition.
+
+#### 8.4 CliDepOptions Integration
+
+```typescript
+export interface CliDepOptions {
+  // ... existing fields ...
+
+  /** Per-module enable/disable. Defaults to all enabled. Read from env vars if not set. */
+  enabledModules?: ModuleConfig;
+}
+```
+
+At the top of `createCliDeps()`, resolve the effective module config:
+
+```typescript
+const modules: Required<ModuleConfig> = {
+  firewall: options.enabledModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
+  skills: options.enabledModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
+  memory: options.enabledModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
+  planner: options.enabledModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
+  critique: options.enabledModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
+  governor: options.enabledModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+  heartbeat: options.enabledModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
+};
+```
+
+Each module wiring block is then gated:
+
+```typescript
+let firewall: IFirewallModule = stubFirewall;
+if (modules.firewall) {
+  try {
+    // ... real wiring ...
+  } catch (error) {
+    logger.warn(`Firewall module unavailable, using stub: ${errorMessage(error)}`, 'dep-factory');
+  }
+}
+```
+
+When `modules.firewall` is `false`, the real wiring is never attempted — the stub is used unconditionally. This is distinct from the try/catch fallback (which handles construction failures). The toggle is an explicit operator choice; the fallback is a safety net.
+
+#### 8.5 Dashboard Integration (franken-web)
+
+The beast dispatch page in `franken-web` renders module toggle switches per agent:
+
+- Default: all modules enabled (toggles ON)
+- Each toggle maps to a field in `moduleConfig`
+- Toggles are stored on the `TrackedAgent` and persisted to SQLite
+- The API route `POST /v1/beasts/agents` accepts `moduleConfig` in the request body
+- The API route `PATCH /v1/beasts/agents/:agentId` allows updating `moduleConfig`
+- Toggle state is displayed in the agent detail view
+
+Dashboard UI implementation is in `packages/franken-web/` and is out of scope for the orchestrator wiring plan. The orchestrator changes (types, env vars, CliDepOptions) are the foundation that the dashboard consumes.
+
+#### 8.6 Flow Summary
+
+```
+Dashboard toggle → TrackedAgent.moduleConfig → ProcessBeastExecutor
+  → FRANKENBEAST_MODULE_* env vars → createCliDeps() → modules config
+  → if disabled: stub | if enabled: try real wiring, catch → stub
+```
+
+### 9. Out of Scope
 
 - Semantic memory (Chroma) — deferred to a later tier
 - `MemoryOrchestrator` — requires semantic store, deferred
