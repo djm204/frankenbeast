@@ -39,6 +39,10 @@ export class GeminiProvider implements ICliProvider {
         tryExtractTextFromNode(obj, parts);
         if (parts.length > 0) {
           extracted.push(parts.join(''));
+        } else if (Array.isArray(obj)) {
+          // If it's a raw JSON array (likely a triage or plan result),
+          // preserve the entire line as-is.
+          extracted.push(trimmed);
         }
       } catch {
         extracted.push(trimmed);
