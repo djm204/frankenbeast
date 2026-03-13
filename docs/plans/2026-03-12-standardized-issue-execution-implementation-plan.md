@@ -2,9 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Standardize `frankenbeast issues` so one-shot issues execute as real orchestrator tasks and chunked issues run through the normal chunk-file pipeline.
+**Goal:** Standardize `frankenbeast issues` so both one-shot and chunked issues run through the normal chunk-file pipeline.
 
-**Architecture:** Keep `IssueRunner` as the issue-level orchestrator, but split its execution path by triage complexity. One-shot issues build executable CLI tasks and run `BeastLoop` directly. Chunked issues materialize real chunk files in an issue plan directory, then execute through `ChunkFileGraphBuilder` plus the existing chunk-file `BeastLoop` flow.
+**Decision update (2026-03-12):** This implementation plan supersedes the earlier split-path draft. After the PR review findings and follow-up clarification, one-shot issues were moved onto the same chunk-file execution path as chunked issues.
+
+**Architecture:** Keep `IssueRunner` as the issue-level orchestrator, but use triage complexity only to decide how many chunk definitions to produce. One-shot issues emit one chunk file; chunked issues emit multiple chunk files. Both then execute through `ChunkFileGraphBuilder` plus the existing chunk-file `BeastLoop` flow.
 
 **Tech Stack:** TypeScript, Vitest, Node.js fs/path utilities, workspace package `franken-orchestrator`
 
@@ -19,7 +21,7 @@
 **Step 1: Write the failing tests**
 
 Add tests proving:
-- one-shot issue graphs execute real CLI work instead of passing through zero-skill tasks
+- one-shot issues write a single issue chunk plan and execute through the chunk-file path
 - issue PR creation still receives `{ issueNumber }`
 - issue outcomes preserve the created PR URL
 
@@ -30,7 +32,7 @@ Expected: FAIL because the current `BeastLoop` issue path does not preserve issu
 
 **Step 3: Write minimal implementation**
 
-- make one-shot issue tasks executable
+- make one-shot issues emit one chunk definition
 - preserve issue-aware PR creation metadata
 - align issue outcome reporting with the created PR
 

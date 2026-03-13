@@ -4,11 +4,21 @@
 
 Make `frankenbeast issues` use the least special-case execution flow possible:
 
-- one-shot issues execute as real CLI-driven tasks through the orchestrator
-- chunked issues materialize chunk files in an issue-specific plan directory
-- chunked issues then run through the normal chunk-file `BeastLoop` pipeline
+- one-shot issues materialize a single chunk file in an issue-specific plan directory
+- chunked issues materialize multiple chunk files in an issue-specific plan directory
+- all issue execution then runs through the normal chunk-file `BeastLoop` pipeline
 
 This must restore task execution, checkpoint compatibility, and issue-aware PR behavior for PR #208.
+
+## Decision Change
+
+The initial design draft kept a direct one-shot execution path and only sent chunked issues through chunk files. On 2026-03-12, that was rejected after the PR review findings and follow-up clarification because it still left `issues` with a second runtime path.
+
+Final direction:
+
+- issue triage is only the source of work
+- chunk files remain the canonical execution surface
+- one-shot issues are represented as a one-chunk plan instead of a direct executor path
 
 ## Current Problems
 
@@ -19,41 +29,29 @@ This must restore task execution, checkpoint compatibility, and issue-aware PR b
 
 ## Decision
 
-### One-shot issues
+All issues standardize on the chunk-file pipeline:
 
-One-shot issues stay direct, but they must use the same execution contract as normal orchestrator execution:
-
-- `IssueGraphBuilder` emits executable tasks with `requiredSkills: ['cli:<chunk-id>']`
-- `IssueRunner` builds an issue-specific `BeastLoopDeps` bag and runs `BeastLoop`
-- `IssueRunner` passes issue-specific metadata needed for PR creation and outcome reporting
-- checkpoint checks align with `runExecution()` by using `${taskId}:done`
-
-This preserves the simple path for small issues without inventing a second executor.
-
-### Chunked issues
-
-Chunked issues standardize fully on the chunk-file pipeline:
-
-- `IssueGraphBuilder` still decomposes the issue into `ChunkDefinition[]`
+- `IssueGraphBuilder` produces `ChunkDefinition[]`
+- one-shot issues yield one chunk definition
+- chunked issues yield multiple chunk definitions
 - `IssueRunner` writes chunk files into `.frankenbeast/plans/issue-<number>/`
-- the runner invokes `BeastLoop` with a `ChunkFileGraphBuilder` rooted at that plan directory
+- `BeastLoop` executes those chunk files through `ChunkFileGraphBuilder`
 - execution, refresh, checkpoints, and closure all behave like normal chunk-file work
-
-This is the most standardized path because it reuses the existing chunk-file architecture instead of encoding chunk semantics in issue-specific graphs.
 
 ## Architecture
 
 ### Dispatcher behavior
 
-`IssueRunner.processIssue()` becomes a dispatcher:
+`IssueRunner.processIssue()` becomes a chunk-plan dispatcher:
 
 - `one-shot`:
-  - build an executable graph
-  - run `BeastLoop` directly
+  - build one chunk definition
+  - write one issue chunk file
 - `chunked`:
-  - build chunk definitions
-  - write issue plan files
-  - construct a chunk-file graph builder for that plan directory
+  - build multiple chunk definitions
+  - write multiple issue chunk files
+- both:
+  - construct a chunk-file graph builder for the issue plan directory
   - run `BeastLoop` against that plan
 
 ### PR behavior
@@ -73,10 +71,10 @@ The issue runner must stop using bare task IDs for completion checks and instead
 
 ## Testing Strategy
 
-- Unit tests for one-shot execution prove issue graphs are executable and PR metadata survives.
-- Unit tests for chunked execution prove issue plan directories are written and normal chunk-file graph builders are used.
+- Unit tests for one-shot execution prove single-chunk issue plans are written and PR metadata survives.
+- Unit tests for chunked execution prove multi-chunk issue plan directories are written and normal chunk-file graph builders are used.
 - Integration tests for `issues-e2e.test.ts` prove:
-  - one-shot issues execute and finish as `fixed`
+  - one-shot issues execute as a one-chunk plan and finish as `fixed`
   - chunked issues execute real impl/harden tasks
   - per-issue failures do not abort later issues
 
