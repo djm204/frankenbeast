@@ -101,6 +101,24 @@ describe('MartinLoop', () => {
     expect(result.tokensUsed).toBeGreaterThan(0);
   });
 
+  it('captures emitted promise tags even when the exact stage tag does not match', async () => {
+    queueMock({ stdout: 'Verified proof\n<promise>IMPL_X_DONE</promise>\n', exitCode: 0 });
+
+    const onIteration = vi.fn();
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      promiseTag: 'HARDEN_X_DONE',
+      maxIterations: 1,
+      onIteration,
+    }));
+
+    expect(result.completed).toBe(false);
+    expect(result.emittedPromiseTags).toEqual(['IMPL_X_DONE']);
+    const iter = onIteration.mock.calls[0] as [number, IterationResult];
+    expect(iter[1].promiseDetected).toBe(false);
+    expect(iter[1].emittedPromiseTags).toEqual(['IMPL_X_DONE']);
+  });
+
   // ── 2. Max iterations exhaustion ──
 
   it('returns completed: false when max iterations reached without promise', async () => {
@@ -519,6 +537,47 @@ describe('MartinLoop', () => {
     expect(result.completed).toBe(true);
     const promptArg = (mockSpawn.mock.calls[0]![1] as string[]).at(-1)!;
     expect(promptArg).toContain('resume from canonical state');
+  });
+
+  it('does not reuse impl session metadata when harden runs for the same chunk', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-stage-session-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(root);
+    const seeded = {
+      ...createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:01_demo',
+        chunkId: '01_demo',
+        promiseTag: 'IMPL_01_demo_DONE',
+        workingDir: '/tmp/test-project',
+        provider: 'claude',
+        maxTokens: 200000,
+      }),
+      iterations: 1,
+      activeProvider: 'claude',
+      transcript: [createChunkTranscriptEntry('objective', 'implementation stage proof')],
+    };
+    sessionStore.save(seeded);
+
+    queueMock({ stdout: 'verified\n<promise>HARDEN_01_demo_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      planName: 'demo-plan',
+      taskId: 'harden:01_demo',
+      chunkId: '01_demo',
+      promiseTag: 'HARDEN_01_demo_DONE',
+      sessionStore,
+      renderer: new ChunkSessionRenderer(),
+      maxIterations: 1,
+    }));
+
+    expect(result.completed).toBe(true);
+    const promptArg = (mockSpawn.mock.calls[0]![1] as string[]).at(-1)!;
+    expect(promptArg).toContain('Task: harden:01_demo');
+    expect(promptArg).toContain('Promise tag: HARDEN_01_demo_DONE');
+    expect(promptArg).not.toContain('Task: impl:01_demo');
+    expect(promptArg).not.toContain('Promise tag: IMPL_01_demo_DONE');
   });
 
   it('creates a snapshot before compaction and resumes with compacted state', async () => {

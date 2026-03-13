@@ -314,6 +314,9 @@ export class CliSkillExecutor {
           exitCode: result.exitCode,
           rateLimited: result.rateLimited,
           promiseDetected: result.promiseDetected,
+          ...(result.emittedPromiseTags && result.emittedPromiseTags.length > 0
+            ? { emittedPromiseTags: result.emittedPromiseTags }
+            : {}),
           sleepMs: result.sleepMs,
         }, 'martin');
         // Full raw output -> build.log only (via debug, always captured)
@@ -470,11 +473,19 @@ export class CliSkillExecutor {
     });
 
     if (!martinResult.completed) {
-      const errorMsg = `MartinLoop did not complete for chunk "${chunkId}" after ${martinResult.iterations} iterations (no promise tag detected)`;
+      const emittedTagsMsg = martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
+        ? `; emitted tags: ${martinResult.emittedPromiseTags.join(', ')}`
+        : '';
+      const errorMsg =
+        `MartinLoop did not complete for chunk "${chunkId}" after ${martinResult.iterations} iterations `
+        + `(no matching promise tag detected${emittedTagsMsg})`;
       this.logger?.error('CliSkillExecutor: chunk failed — promise not detected', {
         chunkId,
         iterations: martinResult.iterations,
         tokensUsed: chunkTokensUsed,
+        ...(martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
+          ? { emittedPromiseTags: martinResult.emittedPromiseTags }
+          : {}),
       });
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: errorMsg });
       throw new Error(errorMsg);
@@ -584,7 +595,7 @@ export class CliSkillExecutor {
     }
 
     const chunkId = this.extractChunkId(taskId);
-    const session = sessionStore.load(planName, chunkId);
+    const session = sessionStore.load(planName, chunkId, taskId);
     if (!session) {
       return;
     }

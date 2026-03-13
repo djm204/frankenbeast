@@ -73,6 +73,13 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function extractPromiseTags(output: string): string[] {
+  const matches = output.matchAll(/<promise>\s*([^<]+?)\s*<\/promise>/gi);
+  return [...matches]
+    .map((match) => match[1]?.trim())
+    .filter((tag): tag is string => Boolean(tag && tag.length > 0));
+}
+
 function abortError(): Error {
   const error = new Error('MartinLoop sleep aborted');
   error.name = 'AbortError';
@@ -404,6 +411,7 @@ export class MartinLoop {
     let totalTokens = 0;
     let activeProvider: string = config.provider;
     let pendingSleepMs = 0;
+    let lastEmittedPromiseTags: string[] = [];
     const promiseRegex = new RegExp(`<promise>\\s*${escapeRegex(config.promiseTag)}\\s*</promise>`, 'i');
     let chunkSession = this.loadOrCreateChunkSession(config, activeProvider);
 
@@ -444,6 +452,8 @@ export class MartinLoop {
 
       const tokensEstimated = resolved.estimateTokens(normalizedStdout);
       totalTokens += tokensEstimated;
+      const emittedPromiseTags = extractPromiseTags(normalizedStdout);
+      lastEmittedPromiseTags = emittedPromiseTags;
 
       // Never treat timed-out iterations as rate-limited — the timeout killed the
       // process, any "rate limit" text in stdout is the model's code, not an API error.
@@ -459,6 +469,7 @@ export class MartinLoop {
         durationMs,
         rateLimited,
         promiseDetected,
+        emittedPromiseTags,
         tokensEstimated,
         sleepMs: pendingSleepMs,
       };
@@ -602,13 +613,31 @@ export class MartinLoop {
         const stripped = normalizedStdout.replace(promiseRegex, '').trim();
         if (stripped.length === 0) {
           // Promise without meaningful changes — reject
-          return { completed: false, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+          return {
+            completed: false,
+            iterations: iteration,
+            output: lastOutput,
+            tokensUsed: totalTokens,
+            emittedPromiseTags: lastEmittedPromiseTags,
+          };
         }
-        return { completed: true, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+        return {
+          completed: true,
+          iterations: iteration,
+          output: lastOutput,
+          tokensUsed: totalTokens,
+          emittedPromiseTags: lastEmittedPromiseTags,
+        };
       }
     }
 
-    return { completed: false, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+    return {
+      completed: false,
+      iterations: iteration,
+      output: lastOutput,
+      tokensUsed: totalTokens,
+      emittedPromiseTags: lastEmittedPromiseTags,
+    };
   }
 
   private loadOrCreateChunkSession(config: MartinLoopConfig, providerName: string): ChunkSession | undefined {
@@ -616,7 +645,7 @@ export class MartinLoop {
       return undefined;
     }
 
-    const existing = config.sessionStore.load(config.planName, config.chunkId);
+    const existing = config.sessionStore.load(config.planName, config.chunkId, config.taskId);
     if (existing) {
       return existing;
     }

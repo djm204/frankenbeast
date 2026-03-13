@@ -252,11 +252,30 @@ describe('CliSkillExecutor', () => {
         iterations: 5,
         output: 'partial output',
         tokensUsed: 500,
+        emittedPromiseTags: [],
       });
 
       await expect(createAndExecute()).rejects.toThrow(
-        /MartinLoop did not complete.*after 5 iterations.*no promise tag detected/,
+        /MartinLoop did not complete.*after 5 iterations.*no matching promise tag detected/,
       );
+    });
+
+    it('mentions emitted mismatched promise tags in the failure message', async () => {
+      martin.run.mockResolvedValue({
+        completed: false,
+        iterations: 1,
+        output: 'proof\n<promise>IMPL_01_types_DONE</promise>',
+        tokensUsed: 100,
+        emittedPromiseTags: ['IMPL_01_types_DONE'],
+      });
+
+      await expect(createAndExecute(
+        'cli:01_types',
+        makeSkillInput(),
+        makeCliConfig(),
+        undefined,
+        'harden:01_types',
+      )).rejects.toThrow(/emitted tags: IMPL_01_types_DONE/);
     });
   });
 
