@@ -172,6 +172,7 @@ vi.mock('../../src/lib/api.js', () => ({
 }));
 
 vi.mock('../../src/lib/beast-api.js', () => ({
+  MODULE_CONFIG_KEYS: ['firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat'],
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
     listAgents: typeof mockListAgents;

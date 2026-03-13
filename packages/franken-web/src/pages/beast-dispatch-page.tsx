@@ -3,16 +3,18 @@ import type {
   BeastCatalogEntry,
   BeastInterviewPrompt,
   BeastRunDetail,
+  ModuleConfig,
   TrackedAgentDetail,
   TrackedAgentSummary,
 } from '../lib/beast-api';
+import { MODULE_CONFIG_KEYS } from '../lib/beast-api';
 
 interface BeastDispatchPageProps {
   catalog: BeastCatalogEntry[];
   disabled: boolean;
   error: string | null;
   onDelete(agentId: string): void;
-  onDispatch(definitionId: string, config: Record<string, unknown>): void;
+  onDispatch(definitionId: string, config: Record<string, unknown>, moduleConfig?: ModuleConfig): void;
   onKill(runId: string): void;
   onRestart(agentId: string): void;
   onResume(agentId: string): void;
@@ -26,6 +28,7 @@ interface BeastDispatchPageProps {
 }
 
 type FormState = Record<string, Record<string, string>>;
+type ModuleTogglesState = Record<string, ModuleConfig>;
 type FormErrors = Record<string, Record<string, string>>;
 
 function buildInitialFormState(catalog: BeastCatalogEntry[]): FormState {
@@ -93,6 +96,7 @@ function canRestartAgent(agent: TrackedAgentSummary): boolean {
 
 export function BeastDispatchPage(props: BeastDispatchPageProps) {
   const [forms, setForms] = useState<FormState>(() => buildInitialFormState(props.catalog));
+  const [moduleToggles, setModuleToggles] = useState<ModuleTogglesState>({});
   const [errors, setErrors] = useState<FormErrors>({});
   const pickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -132,6 +136,17 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
     });
   }
 
+  function toggleModule(definitionId: string, key: keyof ModuleConfig) {
+    setModuleToggles((current) => {
+      const definitionToggles = current[definitionId] ?? {};
+      const currentValue = definitionToggles[key] ?? true;
+      return {
+        ...current,
+        [definitionId]: { ...definitionToggles, [key]: !currentValue },
+      };
+    });
+  }
+
   function submitDefinition(definition: BeastCatalogEntry) {
     const values = forms[definition.id] ?? {};
     const nextErrors = validateDefinition(definition, values);
@@ -142,7 +157,9 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
-    props.onDispatch(definition.id, values);
+    const toggles = moduleToggles[definition.id];
+    const hasDisabled = toggles && Object.values(toggles).some((v) => v === false);
+    props.onDispatch(definition.id, values, hasDisabled ? toggles : undefined);
   }
 
   return (
@@ -246,6 +263,26 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                   );
                 })}
               </div>
+              <details className="beast-card__modules">
+                <summary>Module Toggles</summary>
+                <div className="beast-card__module-grid">
+                  {MODULE_CONFIG_KEYS.map((key) => {
+                    const isEnabled = moduleToggles[definition.id]?.[key] ?? true;
+                    return (
+                      <label className="beast-module-toggle" key={key}>
+                        <input
+                          aria-label={`${definition.label} module ${key}`}
+                          checked={isEnabled}
+                          disabled={props.disabled}
+                          onChange={() => toggleModule(definition.id, key)}
+                          type="checkbox"
+                        />
+                        <span>{key}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </details>
               <button
                 className="button button--primary"
                 disabled={props.disabled}
@@ -324,6 +361,9 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
               <p>Init Action: {props.agentDetail.agent.initAction.command}</p>
               <p>Chat Session: {props.agentDetail.agent.chatSessionId ?? 'none'}</p>
               <p>Linked Run: {props.agentDetail.agent.dispatchRunId ?? 'pending'}</p>
+              {props.agentDetail.agent.moduleConfig && (
+                <p>Modules: {MODULE_CONFIG_KEYS.filter((k) => props.agentDetail!.agent.moduleConfig?.[k] === false).map((k) => `-${k}`).join(' ') || 'all enabled'}</p>
+              )}
               <section>
                 <h4>Startup Logs</h4>
                 <pre className="beast-detail__logs">{props.agentDetail.events.map((event) => event.message).join('\n')}</pre>

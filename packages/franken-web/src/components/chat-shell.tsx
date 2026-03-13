@@ -453,7 +453,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setBeastError(error instanceof Error ? error.message : 'Unable to delete tracked agent.');
               });
             }}
-            onDispatch={(definitionId, config) => {
+            onDispatch={(definitionId, config, moduleConfig) => {
               if (!beastClient) {
                 return;
               }
@@ -472,6 +472,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 initAction,
                 initConfig: config,
                 ...(initAction.chatSessionId ? { chatSessionId: initAction.chatSessionId } : {}),
+                ...(moduleConfig ? { moduleConfig } : {}),
               }).then((agent) => {
                 setSelectedBeastAgentId(agent.id);
                 setBeastRefreshNonce((current) => current + 1);
