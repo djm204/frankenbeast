@@ -9,6 +9,16 @@ import type { BeastRunService } from '../../beasts/services/beast-run-service.js
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
+const ModuleConfigSchema = z.object({
+  firewall: z.boolean().optional(),
+  skills: z.boolean().optional(),
+  memory: z.boolean().optional(),
+  planner: z.boolean().optional(),
+  critique: z.boolean().optional(),
+  governor: z.boolean().optional(),
+  heartbeat: z.boolean().optional(),
+}).strict();
+
 const CreateAgentBody = z.object({
   definitionId: z.string().min(1),
   initAction: z.object({
@@ -19,6 +29,7 @@ const CreateAgentBody = z.object({
   }).strict(),
   initConfig: z.record(z.string(), z.unknown()),
   chatSessionId: z.string().min(1).optional(),
+  moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
 
 export interface AgentRoutesDeps {
@@ -57,6 +68,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       initAction: body.initAction,
       initConfig: body.initConfig,
       ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
+      ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
     });
     deps.agents.appendEvent(agent.id, {
       level: 'info',
@@ -98,6 +110,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
         trackedAgentId: agent.id,
         startNow: true,
+        ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -369,5 +382,6 @@ async function dispatchDetachedAgent(
     dispatchedByUser: 'operator',
     trackedAgentId: agent.id,
     startNow: true,
+    ...(agent.moduleConfig ? { moduleConfig: agent.moduleConfig } : {}),
   });
 }

@@ -1,4 +1,5 @@
 import type {
+  ModuleConfig,
   TrackedAgent,
   TrackedAgentEvent,
   TrackedAgentInitAction,
@@ -13,6 +14,7 @@ export interface CreateTrackedAgentRequest {
   readonly initAction: TrackedAgentInitAction;
   readonly initConfig: Readonly<Record<string, unknown>>;
   readonly chatSessionId?: string | undefined;
+  readonly moduleConfig?: ModuleConfig | undefined;
 }
 
 export interface AppendTrackedAgentEventRequest {
@@ -26,6 +28,7 @@ export interface UpdateTrackedAgentRequest {
   readonly status?: TrackedAgent['status'] | undefined;
   readonly chatSessionId?: string | undefined;
   readonly dispatchRunId?: string | undefined;
+  readonly moduleConfig?: ModuleConfig | undefined;
 }
 
 export interface TrackedAgentDetail {
@@ -49,6 +52,7 @@ export class AgentService {
       initAction: request.initAction,
       initConfig: request.initConfig,
       ...(request.chatSessionId ? { chatSessionId: request.chatSessionId } : {}),
+      ...(request.moduleConfig ? { moduleConfig: request.moduleConfig } : {}),
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -103,6 +107,7 @@ export class AgentService {
       ...(request.status !== undefined ? { status: request.status } : {}),
       ...(request.chatSessionId !== undefined ? { chatSessionId: request.chatSessionId } : {}),
       ...(request.dispatchRunId !== undefined ? { dispatchRunId: request.dispatchRunId } : {}),
+      ...(request.moduleConfig !== undefined ? { moduleConfig: request.moduleConfig } : {}),
       updatedAt: this.now(),
     });
   }

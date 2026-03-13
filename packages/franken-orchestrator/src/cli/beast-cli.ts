@@ -40,6 +40,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         dispatchedByUser: actor,
         executionMode: 'process',
         startNow: true,
+        ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
       });
       print(`Spawned ${run.definitionId} as ${run.id}`);
       return;

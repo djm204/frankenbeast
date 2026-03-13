@@ -12,12 +12,23 @@ import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
+const ModuleConfigSchema = z.object({
+  firewall: z.boolean().optional(),
+  skills: z.boolean().optional(),
+  memory: z.boolean().optional(),
+  planner: z.boolean().optional(),
+  critique: z.boolean().optional(),
+  governor: z.boolean().optional(),
+  heartbeat: z.boolean().optional(),
+}).strict();
+
 const CreateRunBody = z.object({
   definitionId: z.string().min(1),
   config: z.record(z.string(), z.unknown()),
   trackedAgentId: z.string().min(1).optional(),
   executionMode: z.enum(['process', 'container']).optional(),
   startNow: z.boolean().optional(),
+  moduleConfig: ModuleConfigSchema.optional(),
 }).strict();
 
 const InterviewAnswerBody = z.object({
@@ -77,6 +88,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
         ...(body.trackedAgentId ? { trackedAgentId: body.trackedAgentId } : {}),
         ...(body.executionMode ? { executionMode: body.executionMode } : {}),
         ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),
+        ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError && body.trackedAgentId) {

@@ -72,6 +72,7 @@ export interface CliArgs {
   initVerify: boolean;
   initRepair: boolean;
   initNonInteractive: boolean;
+  moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network']);
@@ -146,6 +147,15 @@ Beast Commands:
   beasts kill <run-id>                Force-stop a Beast
   beasts restart <run-id>             Restart a Beast with a new attempt
 
+Module Toggles (for beasts spawn):
+  --no-firewall                       Disable firewall module
+  --no-skills                         Disable skills module
+  --no-memory                         Disable memory module
+  --no-planner                        Disable planner module
+  --no-critique                       Disable critique module
+  --no-governor                       Disable governor module
+  --no-heartbeat                      Disable heartbeat module
+
 Examples:
   frankenbeast                              # full interactive flow
   frankenbeast --design-doc design.md       # skip interview
@@ -213,6 +223,13 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       'target-upstream': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       set: { type: 'string', multiple: true },
+      'no-firewall': { type: 'boolean', default: false },
+      'no-skills': { type: 'boolean', default: false },
+      'no-memory': { type: 'boolean', default: false },
+      'no-planner': { type: 'boolean', default: false },
+      'no-critique': { type: 'boolean', default: false },
+      'no-governor': { type: 'boolean', default: false },
+      'no-heartbeat': { type: 'boolean', default: false },
     },
     allowPositionals: true,
     strict: true,
@@ -275,6 +292,21 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueLimit = 30;
   }
 
+  const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']
+    || values['no-planner'] || values['no-critique'] || values['no-governor'] || values['no-heartbeat'];
+
+  const moduleConfig = hasModuleFlags
+    ? {
+        ...(values['no-firewall'] ? { firewall: false } : {}),
+        ...(values['no-skills'] ? { skills: false } : {}),
+        ...(values['no-memory'] ? { memory: false } : {}),
+        ...(values['no-planner'] ? { planner: false } : {}),
+        ...(values['no-critique'] ? { critique: false } : {}),
+        ...(values['no-governor'] ? { governor: false } : {}),
+        ...(values['no-heartbeat'] ? { heartbeat: false } : {}),
+      } as import('../beasts/types.js').ModuleConfig
+    : undefined;
+
   return {
     subcommand,
     beastAction,
@@ -312,5 +344,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueRepo: values.repo,
     targetUpstream: values['target-upstream'] ?? undefined,
     dryRun: values['dry-run'] ?? undefined,
+    moduleConfig,
   };
 }
