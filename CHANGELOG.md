@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.21.0](https://github.com/djm204/frankenbeast/compare/v0.20.0...v0.21.0) (2026-03-13)
+
+
+### Features
+
+* add module toggle UI to beast dispatch dashboard ([98e9dba](https://github.com/djm204/frankenbeast/commit/98e9dbaf41142cc16df71dda34776a4db96200f3))
+* add module toggle UI to beast dispatch dashboard ([c13a1a3](https://github.com/djm204/frankenbeast/commit/c13a1a34849b67b0f1a41c59cba749ee291a7d59))
+
+
+### Documentation
+
+* add comprehensive data flow guide ([441c310](https://github.com/djm204/frankenbeast/commit/441c310a14280aeb5456f71f9499c321183af45b))
+
 ## [0.20.0](https://github.com/djm204/frankenbeast/compare/v0.19.3...v0.20.0) (2026-03-13)
 
 
