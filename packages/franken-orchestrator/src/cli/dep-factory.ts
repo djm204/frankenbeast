@@ -15,6 +15,8 @@ import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
 import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
+import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
 import { IssueTriage } from '../issues/issue-triage.js';
 import { IssueGraphBuilder } from '../issues/issue-graph-builder.js';
@@ -59,6 +61,8 @@ export interface CliDepOptions {
   adapterModel?: string | undefined;
   /** When true, omit tool/permission flags — used for conversational chat. */
   chatMode?: boolean | undefined;
+  /** Security tier for firewall guardrails. Default: 'MODERATE'. */
+  firewallSecurityTier?: 'STRICT' | 'MODERATE' | 'PERMISSIVE';
   /** Per-module enable/disable toggles. Defaults to all enabled. Falls back to FRANKENBEAST_MODULE_* env vars. */
   enabledModules?: import('../beasts/types.js').ModuleConfig;
 }
@@ -233,6 +237,37 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     options.provider,
   );
 
+  // Firewall (dynamic import — optional module)
+  let firewall: IFirewallModule = stubFirewall;
+  if (modules.firewall) {
+    try {
+      const { runPipeline, ClaudeAdapter } = await import('@franken/firewall');
+      const firewallConfig = {
+        project_name: basename(paths.root),
+        security_tier: options.firewallSecurityTier ?? 'MODERATE',
+        schema_version: 1 as const,
+        agnostic_settings: {
+          redact_pii: false,
+          max_token_spend_per_call: budget,
+          allowed_providers: ['anthropic' as const],
+        },
+        safety_hooks: { pre_flight: [] as string[], post_flight: [] as string[] },
+      };
+      firewall = new FirewallPortAdapter({
+        runPipeline: runPipeline as unknown as FirewallPortAdapterDeps['runPipeline'],
+        adapter: new ClaudeAdapter({
+          apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+          model: options.adapterModel ?? 'claude-sonnet-4-6',
+        }) as unknown as FirewallPortAdapterDeps['adapter'],
+        config: firewallConfig,
+        provider: 'anthropic',
+        model: options.adapterModel ?? 'claude-sonnet-4-6',
+      });
+    } catch (error) {
+      logger.warn(`Firewall module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
+
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
@@ -284,7 +319,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   };
 
   const deps: BeastLoopDeps = {
-    firewall: stubFirewall,
+    firewall,
     skills: createStubSkills(options.planDirOverride ?? paths.plansDir),
     memory: stubMemory,
     planner: stubPlanner,
