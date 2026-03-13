@@ -7,6 +7,7 @@ import type { FileChunkSessionStore } from '../session/chunk-session-store.js';
 import type { FileChunkSessionSnapshotStore } from '../session/chunk-session-snapshot-store.js';
 import type { ChunkSessionRenderer } from '../session/chunk-session-renderer.js';
 import type { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
+import type { CommandFailure } from '../errors/command-failure.js';
 
 export interface IterationResult {
   readonly iteration: number;
@@ -20,6 +21,7 @@ export interface IterationResult {
   readonly emittedPromiseTags?: readonly string[] | undefined;
   readonly tokensEstimated: number;
   readonly sleepMs: number;
+  readonly failure?: CommandFailure | undefined;
 }
 
 export interface MartinLoopConfig {

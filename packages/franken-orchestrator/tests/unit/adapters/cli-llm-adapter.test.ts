@@ -323,6 +323,31 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow('something went wrong');
       });
 
+      it('attaches a standardized failure object to non-rate-limit exits', async () => {
+        const { spawnFn } = createMockSpawn({
+          stdout: '',
+          stderr: 'permission denied',
+          exitCode: 1,
+        });
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+        try {
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+          throw new Error('expected execute to throw');
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          const cause = (error as Error & { cause?: unknown }).cause as Record<string, unknown> | undefined;
+          expect(cause).toEqual(expect.objectContaining({
+            kind: 'command_failed',
+            tool: 'llm',
+            provider: 'claude',
+            exitCode: 1,
+            stderr: 'permission denied',
+            rateLimited: false,
+          }));
+        }
+      });
+
       it('kills child process on timeout and rejects', async () => {
         const { spawnFn } = createMockSpawn({
           neverExit: true,
@@ -395,6 +420,28 @@ describe('CliLlmAdapter', () => {
       it('switches to the next provider when the selected provider is rate limited', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'codex success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('codex success');
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+      });
+
+      it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stdout: 'rate limit exceeded\nretry-after: 4', stderr: '', exitCode: 1 },
           { stdout: 'codex success', exitCode: 0 },
         ]);
         const adapter = new CliLlmAdapter(

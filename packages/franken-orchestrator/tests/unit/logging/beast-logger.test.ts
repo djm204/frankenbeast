@@ -9,6 +9,7 @@ import {
   renderBanner,
   shouldRenderGraphicBanner,
 } from '../../../src/logging/beast-logger.js';
+import type { CommandFailure } from '../../../src/errors/command-failure.js';
 
 // ── stripAnsi ──
 
@@ -305,6 +306,31 @@ describe('BeastLogger', () => {
       expect(entries[0]).toContain('Execution: task failed');
       expect(entries[0]).toContain('"taskId": "impl:11_rate_limit_resilience"');
       expect(entries[0]).toContain('"error": "boom"');
+    });
+
+    it('renders command failures concisely on the terminal but captures full fields in file logs', () => {
+      const failure: CommandFailure = {
+        kind: 'command_failed',
+        tool: 'gh',
+        command: 'gh pr create',
+        exitCode: 1,
+        timedOut: false,
+        retryable: false,
+        rateLimited: false,
+        stdout: '',
+        stderr: 'permission denied',
+        summary: 'gh command failed: gh pr create (exit 1)',
+      };
+      const logger = new BeastLogger({ verbose: false, captureForFile: true });
+
+      logger.error('PrCreator: failed to create PR', failure, 'git');
+
+      const terminal = consoleLogSpy.mock.calls[0]![0] as string;
+      const entries = logger.getLogEntries();
+      expect(stripAnsi(terminal)).toContain('gh command failed: gh pr create (exit 1)');
+      expect(stripAnsi(terminal)).not.toContain('"stderr":"permission denied"');
+      expect(entries[0]).toContain('"stderr": "permission denied"');
+      expect(entries[0]).toContain('"tool": "gh"');
     });
   });
 

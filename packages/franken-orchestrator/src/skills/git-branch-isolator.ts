@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { GitIsolationConfig, MergeResult } from './cli-types.js';
+import { commandFailureFromExecError, isCommandFailure } from '../errors/command-failure.js';
 
 const SAFE_ID = /^[a-zA-Z0-9_\-./]+$/;
 
@@ -105,10 +106,19 @@ export class GitBranchIsolator {
   }
 
   private git(args: readonly string[], cwd = this.config.workingDir): string {
-    return execFileSync('git', [...args], {
-      encoding: 'utf-8',
-      cwd,
-    }).trim();
+    try {
+      return execFileSync('git', [...args], {
+        encoding: 'utf-8',
+        cwd,
+      }).trim();
+    } catch (error) {
+      const failure = commandFailureFromExecError({
+        tool: 'git',
+        command: `git ${args.join(' ')}`,
+        error,
+      });
+      throw new Error(failure.summary, { cause: failure });
+    }
   }
 
   private branchName(chunkId: string): string {
@@ -334,6 +344,10 @@ export class GitBranchIsolator {
   }
 
   private stderrFromError(err: unknown): string {
+    const cause = (err as { cause?: unknown }).cause;
+    if (isCommandFailure(cause)) {
+      return cause.stderr || cause.summary;
+    }
     const stderr = (err as { stderr?: string | Buffer }).stderr;
     if (typeof stderr === 'string') return stderr;
     if (Buffer.isBuffer(stderr)) return stderr.toString('utf-8');

@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import type { ILlmClient } from '@franken/types';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
+import { commandFailureFromExecError } from '../errors/command-failure.js';
 
 export interface PrCreatorConfig {
   readonly targetBranch: string;
@@ -194,7 +195,7 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to create PR', { error: stringifyError(error) });
+      logger?.error('PrCreator: failed to create PR', this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' }));
       return null;
     }
   }
@@ -203,7 +204,7 @@ export class PrCreator {
     try {
       return this.exec(cmd);
     } catch (error) {
-      logger?.error('PrCreator: command failed', { cmd, error: stringifyError(error) });
+      logger?.error('PrCreator: command failed', this.commandFailure('git', cmd, error));
       return null;
     }
   }
@@ -213,7 +214,7 @@ export class PrCreator {
       this.exec(`git push ${this.config.remote} ${branch}`);
       return true;
     } catch (error) {
-      logger?.error('PrCreator: failed to push branch', { branch, error: stringifyError(error) });
+      logger?.error('PrCreator: failed to push branch', this.commandFailure('git', `git push ${this.config.remote} ${branch}`, error, { branch }));
       return false;
     }
   }
@@ -228,9 +229,25 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to list PRs', { error: stringifyError(error) });
+      logger?.error('PrCreator: failed to list PRs', this.commandFailure('gh', 'gh pr list', error, {
+        rawCommand: `gh pr list --head ${branch} --json url --limit 1`,
+      }));
       return null;
     }
+  }
+
+  private commandFailure(
+    tool: string,
+    command: string,
+    error: unknown,
+    details?: Record<string, unknown>,
+  ) {
+    return commandFailureFromExecError({
+      tool,
+      command,
+      error,
+      details,
+    });
   }
 
   private async tryGeneratePrFromLlm(
