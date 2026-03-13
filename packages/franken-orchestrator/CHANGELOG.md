@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.2...franken-orchestrator-v0.19.3) (2026-03-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** use robust cleanLlmJson for issue triage and planning ([1e88e62](https://github.com/djm204/frankenbeast/commit/1e88e6222bc1149311fb8ade17ac8eafa3525bc0))
+* **orchestrator:** use robust cleanLlmJson for issue triage and planning ([33dbf5a](https://github.com/djm204/frankenbeast/commit/33dbf5a483debc2460116f2b1cbbf0cd029a8061))
+
 ## [0.19.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.1...franken-orchestrator-v0.19.2) (2026-03-13)
 
 
