@@ -17,6 +17,7 @@ import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
 import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
+import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
 import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
 import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -176,7 +177,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   // Reset if requested
   if (reset) {
-    for (const f of [checkpointFile, paths.tracesDb]) {
+    const memoryDbPath = resolve(paths.buildDir, 'memory.db');
+    for (const f of [checkpointFile, paths.tracesDb, memoryDbPath]) {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
     }
     for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
@@ -288,6 +290,25 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
+  // Memory (dynamic import — optional module)
+  let memory: IMemoryModule = stubMemory;
+  if (modules.memory) {
+    try {
+      const { EpisodicMemoryStore } = await import('franken-brain');
+      const Database = (await import('better-sqlite3')).default;
+      const memoryDbPath = resolve(paths.buildDir, 'memory.db');
+      const memoryDb = new Database(memoryDbPath);
+      const episodicStore = new EpisodicMemoryStore(memoryDb);
+      memory = new EpisodicMemoryPortAdapter({
+        episodicStore,
+        projectId: basename(paths.root),
+        projectRoot: paths.root,
+      });
+    } catch (error) {
+      logger.warn(`Memory module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
+
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
@@ -341,7 +362,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const deps: BeastLoopDeps = {
     firewall,
     skills,
-    memory: stubMemory,
+    memory,
     planner: stubPlanner,
     observer: observerBridge,
     critique: stubCritique,
