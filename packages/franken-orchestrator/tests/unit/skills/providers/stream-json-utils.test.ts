@@ -1,5 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS, parseCommonRetryAfterMs, collapseWhitespace } from '../../../../src/skills/providers/stream-json-utils.js';
+
+describe('parseCommonRetryAfterMs', () => {
+  it('parses retry-after header with seconds', () => {
+    expect(parseCommonRetryAfterMs('retry-after: 60')).toBe(60000);
+    expect(parseCommonRetryAfterMs('retry-after: 30s')).toBe(30000);
+  });
+
+  it('parses "retry after Xs" pattern', () => {
+    expect(parseCommonRetryAfterMs('Please retry after 25s')).toBe(25000);
+  });
+
+  it('parses "try again in N minute(s)"', () => {
+    expect(parseCommonRetryAfterMs('try again in 5 minutes')).toBe(300000);
+    expect(parseCommonRetryAfterMs('try again in 1 minute')).toBe(60000);
+  });
+
+  it('parses "try again in N second(s)"', () => {
+    expect(parseCommonRetryAfterMs('try again in 30 seconds')).toBe(30000);
+  });
+
+  it('parses "resets in Ns"', () => {
+    expect(parseCommonRetryAfterMs('Rate limit resets in 10s')).toBe(10000);
+  });
+
+  it('returns undefined for unknown patterns', () => {
+    expect(parseCommonRetryAfterMs('some other error')).toBeUndefined();
+  });
+});
+
+describe('collapseWhitespace', () => {
+  it('collapses multiple spaces', () => {
+    expect(collapseWhitespace('hello   world')).toBe('hello world');
+  });
+
+  it('preserves single spaces', () => {
+    expect(collapseWhitespace('hello world')).toBe('hello world');
+  });
+
+  it('preserves newlines', () => {
+    expect(collapseWhitespace('hello\n\nworld')).toBe('hello\n\nworld');
+  });
+
+  it('collapses tabs into single spaces', () => {
+    expect(collapseWhitespace('hello\t\tworld')).toBe('hello world');
+  });
+});
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {

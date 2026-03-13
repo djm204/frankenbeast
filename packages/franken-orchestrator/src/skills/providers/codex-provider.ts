@@ -6,7 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS, parseCommonRetryAfterMs, collapseWhitespace } from './stream-json-utils.js';
 
 const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 
@@ -33,14 +33,14 @@ export class CodexProvider implements ICliProvider {
 
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line) as unknown;
+        const parsed = JSON.parse(line) as any;
         const parts: string[] = [];
         tryExtractTextFromNode(parsed, parts);
+        
         if (parts.length > 0) {
           extracted.push(parts.join(''));
-        } else if (Array.isArray(parsed)) {
-          // If valid JSON array but no text extracted (e.g. raw array from triage),
-          // preserve the original line. We avoid preserving objects to skip structural frames.
+        } else if (Array.isArray(parsed) || (typeof parsed === 'object' && parsed !== null && !parsed.type)) {
+          // Preserve valid JSON that isn't a structural frame (no 'type' field)
           extracted.push(line);
         }
       } catch {
@@ -48,7 +48,7 @@ export class CodexProvider implements ICliProvider {
       }
     }
 
-    return extracted.join('\n').trim();
+    return collapseWhitespace(extracted.join('\n').trim());
   }
 
   estimateTokens(text: string): number {
@@ -60,19 +60,7 @@ export class CodexProvider implements ICliProvider {
   }
 
   parseRetryAfter(stderr: string): number | undefined {
-    // "resets in 30s"
-    const resetsInMatch = stderr.match(/resets?\s+in\s+(\d+)\s*s/i);
-    if (resetsInMatch?.[1]) {
-      return parseInt(resetsInMatch[1], 10) * 1000;
-    }
-
-    // "retry-after: 30"
-    const retryAfterMatch = stderr.match(/retry.?after:?\s*(\d+)\s*s?/i);
-    if (retryAfterMatch?.[1]) {
-      return parseInt(retryAfterMatch[1], 10) * 1000;
-    }
-
-    return undefined;
+    return parseCommonRetryAfterMs(stderr);
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {
