@@ -9,7 +9,52 @@
 export const BASE_RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
-/** Recursively extract text from a stream-json node. */
+/**
+ * Shared rate-limit reset parser. 
+ * Extracts duration in milliseconds from standard header/error patterns.
+ */
+export function parseCommonRetryAfterMs(text: string): number | undefined {
+  // "retry-after: 60" or "retry-after: 60s"
+  const retryAfterHeaderMatch = text.match(/retry.?after:?\s*(\d+)\s*s?/i);
+  if (retryAfterHeaderMatch?.[1]) {
+    return parseInt(retryAfterHeaderMatch[1], 10) * 1000;
+  }
+
+  // "retry after 25s"
+  const retryAfterPatternMatch = text.match(/retry.?after\s+(\d+)\s*s?/i);
+  if (retryAfterPatternMatch?.[1]) {
+    return parseInt(retryAfterPatternMatch[1], 10) * 1000;
+  }
+
+  // "try again in 5 minutes"
+  const minutesMatch = text.match(/try again in (\d+) minute/i);
+  if (minutesMatch?.[1]) {
+    return parseInt(minutesMatch[1], 10) * 60 * 1000;
+  }
+
+  // "try again in 30 seconds"
+  const secondsMatch = text.match(/try again in (\d+) second/i);
+  if (secondsMatch?.[1]) {
+    return parseInt(secondsMatch[1], 10) * 1000;
+  }
+
+  // "resets in 30s"
+  const resetsInMatch = text.match(/resets?\s+in\s+(\d+)\s*s/i);
+  if (resetsInMatch?.[1]) {
+    return parseInt(resetsInMatch[1], 10) * 1000;
+  }
+
+  return undefined;
+}
+
+/**
+ * Collapses multiple spaces into one, while preserving single spaces and newlines.
+ * Prevents whitespace bloat from models that emit redundant space tokens.
+ */
+export function collapseWhitespace(text: string): string {
+  return text.replace(/[ \t]{2,}/g, ' ');
+}
+
 /**
  * Strip JSON objects containing "hookSpecificOutput" from text.
  * Hook output leaks from spawned CLI processes when project-scoped hooks fire
@@ -122,7 +167,7 @@ function extractJsonStructure(text: string): string | null {
 /** Recursively extract text from a stream-json node. */
 export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
+    if (node.length > 0) out.push(node);
     return;
   }
   if (!node || typeof node !== 'object') return;
@@ -136,7 +181,7 @@ export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   const directKeys = ['text', 'output_text', 'output'];
   for (const key of directKeys) {
     const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
+    if (typeof value === 'string' && value.length > 0) {
       out.push(value);
     }
   }

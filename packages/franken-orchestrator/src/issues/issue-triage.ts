@@ -4,7 +4,7 @@ import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 type CompleteFn = (prompt: string) => Promise<string>;
 
 const VALID_COMPLEXITIES = new Set<string>(['one-shot', 'chunked']);
-const MAX_BODY_LENGTH = 2000;
+const MAX_BODY_LENGTH = 16000;
 
 export class IssueTriage implements IIssueTriage {
   private readonly complete: CompleteFn;

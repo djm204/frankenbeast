@@ -6,7 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS, parseCommonRetryAfterMs, collapseWhitespace } from './stream-json-utils.js';
 
 // Re-export for backward compatibility (used by providers/index.ts)
 export { tryExtractTextFromNode } from './stream-json-utils.js';
@@ -59,7 +59,7 @@ export class ClaudeProvider implements ICliProvider {
         const obj = JSON.parse(trimmed) as Record<string, unknown>;
         if (obj['type'] === 'result' && typeof obj['result'] === 'string') {
           const text = (obj['result'] as string).trim();
-          if (text.length > 0) return text;
+          if (text.length > 0) return collapseWhitespace(text);
         }
       } catch { /* not JSON, skip */ }
     }
@@ -70,18 +70,22 @@ export class ClaudeProvider implements ICliProvider {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
       try {
-        const obj = JSON.parse(trimmed) as unknown;
+        const obj = JSON.parse(trimmed) as any;
         const parts: string[] = [];
         tryExtractTextFromNode(obj, parts);
+        
         if (parts.length > 0) {
           extracted.push(parts.join(''));
+        } else if (Array.isArray(obj) || (typeof obj === 'object' && obj !== null && !obj.type)) {
+          // Preserve valid JSON that isn't a structural frame (no 'type' field)
+          extracted.push(trimmed);
         }
       } catch {
         extracted.push(trimmed);
       }
     }
 
-    return extracted.join('\n').trim();
+    return collapseWhitespace(extracted.join('\n').trim());
   }
 
   estimateTokens(text: string): number {
@@ -93,37 +97,7 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   parseRetryAfter(stderr: string): number | undefined {
-    // "retry-after: 30" or "retry-after: 30s"
-    const retryAfterHeaderMatch = stderr.match(/retry.?after:?\s*(\d+)\s*s?/i);
-    if (retryAfterHeaderMatch?.[1]) {
-      return parseInt(retryAfterHeaderMatch[1], 10) * 1000;
-    }
-
-    // "retry after 25s"
-    const retryAfterPatternMatch = stderr.match(/retry.?after\s+(\d+)\s*s?/i);
-    if (retryAfterPatternMatch?.[1]) {
-      return parseInt(retryAfterPatternMatch[1], 10) * 1000;
-    }
-
-    // "try again in 5 minutes"
-    const minutesMatch = stderr.match(/try again in (\d+) minute/i);
-    if (minutesMatch?.[1]) {
-      return parseInt(minutesMatch[1], 10) * 60 * 1000;
-    }
-
-    // "try again in 30 seconds"
-    const secondsMatch = stderr.match(/try again in (\d+) second/i);
-    if (secondsMatch?.[1]) {
-      return parseInt(secondsMatch[1], 10) * 1000;
-    }
-
-    // "resets in 30s"
-    const resetsInMatch = stderr.match(/resets?\s+in\s+(\d+)\s*s/i);
-    if (resetsInMatch?.[1]) {
-      return parseInt(resetsInMatch[1], 10) * 1000;
-    }
-
-    return undefined;
+    return parseCommonRetryAfterMs(stderr);
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {

@@ -69,8 +69,8 @@ describe('IssueTriage', () => {
       expect(prompt).toMatch(/multi-file|architectural/i);
     });
 
-    it('truncates issue bodies to 2000 characters', async () => {
-      const longBody = 'x'.repeat(3000);
+    it('truncates issue bodies to 16000 characters', async () => {
+      const longBody = 'x'.repeat(20000);
       const completeFn = vi.fn<CompleteFn>(async () =>
         makeTriageResponse([
           { issueNumber: 1, complexity: 'chunked', rationale: 'Big', estimatedScope: '5 files' },
@@ -81,10 +81,10 @@ describe('IssueTriage', () => {
       await triage.triage([makeIssue({ number: 1, body: longBody })]);
 
       const prompt = completeFn.mock.calls[0]![0];
-      // Body should be truncated — prompt should NOT contain the full 3000-char body
+      // Body should be truncated — prompt should NOT contain the full 20000-char body
       expect(prompt).not.toContain(longBody);
       // But should contain the truncated portion
-      expect(prompt).toContain('x'.repeat(2000));
+      expect(prompt).toContain('x'.repeat(16000));
     });
 
     it('parses valid LLM JSON response into TriageResult[]', async () => {

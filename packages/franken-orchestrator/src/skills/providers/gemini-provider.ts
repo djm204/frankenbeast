@@ -6,7 +6,7 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode } from './stream-json-utils.js';
+import { tryExtractTextFromNode, parseCommonRetryAfterMs, collapseWhitespace } from './stream-json-utils.js';
 
 // Gemini adds RESOURCE_EXHAUSTED to the shared base patterns
 const RATE_LIMIT_PATTERNS =
@@ -34,18 +34,23 @@ export class GeminiProvider implements ICliProvider {
       if (trimmed.length === 0) continue;
 
       try {
-        const obj = JSON.parse(trimmed) as unknown;
+        const obj = JSON.parse(trimmed) as any;
         const parts: string[] = [];
         tryExtractTextFromNode(obj, parts);
+        
         if (parts.length > 0) {
           extracted.push(parts.join(''));
+        } else if (Array.isArray(obj) || (typeof obj === 'object' && obj !== null && !obj.type)) {
+          // If it's valid JSON (array or non-structural object) but no text was extracted,
+          // it's likely raw data (like triage results or config blocks). Preserve it.
+          extracted.push(trimmed);
         }
       } catch {
         extracted.push(trimmed);
       }
     }
 
-    return extracted.join('\n').trim();
+    return collapseWhitespace(extracted.join('\n').trim());
   }
 
   estimateTokens(text: string): number {
@@ -57,25 +62,7 @@ export class GeminiProvider implements ICliProvider {
   }
 
   parseRetryAfter(stderr: string): number | undefined {
-    // "retry-after: 60"
-    const retryAfterMatch = stderr.match(/retry.?after:?\s*(\d+)\s*s?/i);
-    if (retryAfterMatch?.[1]) {
-      return parseInt(retryAfterMatch[1], 10) * 1000;
-    }
-
-    // "retry after 25s"
-    const retryAfterPatternMatch = stderr.match(/retry.?after\s+(\d+)\s*s?/i);
-    if (retryAfterPatternMatch?.[1]) {
-      return parseInt(retryAfterPatternMatch[1], 10) * 1000;
-    }
-
-    // "resets in 30s"
-    const resetsInMatch = stderr.match(/resets?\s+in\s+(\d+)\s*s/i);
-    if (resetsInMatch?.[1]) {
-      return parseInt(resetsInMatch[1], 10) * 1000;
-    }
-
-    return undefined;
+    return parseCommonRetryAfterMs(stderr);
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {
