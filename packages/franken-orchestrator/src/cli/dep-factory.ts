@@ -59,6 +59,8 @@ export interface CliDepOptions {
   adapterModel?: string | undefined;
   /** When true, omit tool/permission flags — used for conversational chat. */
   chatMode?: boolean | undefined;
+  /** Per-module enable/disable toggles. Defaults to all enabled. Falls back to FRANKENBEAST_MODULE_* env vars. */
+  enabledModules?: import('../beasts/types.js').ModuleConfig;
 }
 
 export interface IssueCliDeps {
@@ -146,6 +148,17 @@ function createIssueRuntimeSupport(paths: ProjectPaths): IssueRuntimeSupport {
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const { paths, baseBranch, budget, verbose, noPr, reset } = options;
+
+  // Resolve per-agent module toggles (options > env vars > default enabled)
+  const modules = {
+    firewall: options.enabledModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
+    skills: options.enabledModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
+    memory: options.enabledModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
+    planner: options.enabledModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
+    critique: options.enabledModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
+    governor: options.enabledModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+    heartbeat: options.enabledModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
+  };
 
   // Derive plan name for plan-specific build artifacts
   const planName = options.planDirOverride
