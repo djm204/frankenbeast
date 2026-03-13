@@ -131,4 +131,14 @@ describe('GeminiProvider', () => {
   it('normalizeOutput passes through plain text', () => {
     expect(provider.normalizeOutput('plain output')).toBe('plain output');
   });
+
+  it('normalizeOutput preserves raw JSON arrays', () => {
+    const raw = '[{"issueNumber": 1}]';
+    expect(provider.normalizeOutput(raw)).toBe(raw);
+  });
+
+  it('normalizeOutput skips structural JSON objects (no text keys)', () => {
+    const raw = '{"type": "ping"}';
+    expect(provider.normalizeOutput(raw)).toBe('');
+  });
 });
