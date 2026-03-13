@@ -173,10 +173,9 @@ export class CliLlmAdapter implements IAdapter {
 
   transformResponse(providerResponse: unknown, _requestId: string): { content: string | null } {
     const raw = providerResponse as string;
-    if (!raw) return { content: '' };
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
-    const normalized = this.resolveProvider(providerName).normalizeOutput(raw);
+    const normalized = this.resolveProvider(providerName).normalizeOutput(raw ?? '');
     return { content: normalized };
   }
 
