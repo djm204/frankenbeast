@@ -19,7 +19,7 @@ function makeCli(entries: RawSkillEntry[]): ISkillCli {
 
 describe("DiscoveryService", () => {
   it("maps valid RawSkillEntry to UnifiedSkillContract with all required fields", async () => {
-    const cli = makeCli(loadFixture("valid-list-output.json"));
+    const cli = makeCli(loadFixture("valid-flat-entries.json"));
     const service = new DiscoveryService(cli);
     const contracts = await service.discover();
     expect(contracts).toHaveLength(2);

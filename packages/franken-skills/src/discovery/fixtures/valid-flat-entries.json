@@ -1,0 +1,36 @@
+[
+  {
+    "skill_id": "deploy-to-vercel",
+    "metadata": {
+      "name": "Deploy to Vercel",
+      "description": "Deploys the current project to Vercel using the Vercel CLI",
+      "source": "GLOBAL"
+    },
+    "interface": {
+      "input_schema": { "type": "object", "properties": { "projectId": { "type": "string" } }, "required": ["projectId"] },
+      "output_schema": { "type": "object", "properties": { "url": { "type": "string" } } }
+    },
+    "constraints": {
+      "is_destructive": false,
+      "requires_hitl": true,
+      "sandbox_type": "DOCKER"
+    }
+  },
+  {
+    "skill_id": "run-tests",
+    "metadata": {
+      "name": "Run Tests",
+      "description": "Executes the project test suite and returns results",
+      "source": "GLOBAL"
+    },
+    "interface": {
+      "input_schema": { "type": "object", "properties": { "pattern": { "type": "string" } } },
+      "output_schema": { "type": "object", "properties": { "passed": { "type": "number" }, "failed": { "type": "number" } } }
+    },
+    "constraints": {
+      "is_destructive": false,
+      "requires_hitl": false,
+      "sandbox_type": "LOCAL"
+    }
+  }
+]
