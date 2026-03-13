@@ -1,4 +1,4 @@
-import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun } from '../types.js';
+import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor } from '../execution/beast-executor.js';
@@ -18,6 +18,7 @@ export interface CreateBeastRunRequest {
   readonly trackedAgentId?: string | undefined;
   readonly executionMode?: BeastExecutionMode | undefined;
   readonly startNow?: boolean | undefined;
+  readonly moduleConfig?: ModuleConfig | undefined;
 }
 
 export class BeastDispatchService {
@@ -32,6 +33,10 @@ export class BeastDispatchService {
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
     const definition = this.getDefinitionOrThrow(request.definitionId);
     const config = definition.configSchema.parse(request.config);
+    const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
+    const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
+      ? { ...config, modules: moduleConfig }
+      : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     const createdAt = new Date().toISOString();
     const linkedAt = new Date().toISOString();
@@ -45,7 +50,7 @@ export class BeastDispatchService {
         definitionId: definition.id,
         definitionVersion: definition.version,
         executionMode,
-        configSnapshot: config,
+        configSnapshot,
         dispatchedBy: request.dispatchedBy,
         dispatchedByUser: request.dispatchedByUser,
         createdAt,
@@ -155,6 +160,12 @@ export class BeastDispatchService {
 
   private executorFor(mode: BeastExecutionMode): BeastExecutor {
     return mode === 'container' ? this.executors.container : this.executors.process;
+  }
+
+  private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {
+    if (!trackedAgentId) return undefined;
+    const agent = this.repository.getTrackedAgent(trackedAgentId);
+    return agent?.moduleConfig;
   }
 
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {

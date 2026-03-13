@@ -2,7 +2,19 @@ import { BeastLogStore } from '../events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
-import type { BeastDefinition, BeastRun, BeastRunAttempt } from '../types.js';
+import type { BeastDefinition, BeastRun, BeastRunAttempt, ModuleConfig } from '../types.js';
+
+function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
+  if (!config) return {};
+  const env: Record<string, string> = {};
+  const keys: (keyof ModuleConfig)[] = ['firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat'];
+  for (const key of keys) {
+    if (config[key] !== undefined) {
+      env[`FRANKENBEAST_MODULE_${key.toUpperCase()}`] = String(config[key]);
+    }
+  }
+  return env;
+}
 
 export class ProcessBeastExecutor implements BeastExecutor {
   constructor(
@@ -13,7 +25,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
-    const handle = await this.supervisor.spawn(processSpec);
+    const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
+    const mergedSpec = {
+      ...processSpec,
+      env: { ...processSpec.env, ...moduleEnv },
+    };
+    const handle = await this.supervisor.spawn(mergedSpec);
     const startedAt = new Date().toISOString();
     const attempt = this.repository.createAttempt(run.id, {
       status: 'running',

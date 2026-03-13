@@ -10,6 +10,7 @@ import type {
   BeastRunAttempt,
   BeastRunEvent,
   BeastRunStatus,
+  ModuleConfig,
   TrackedAgent,
   TrackedAgentEvent,
   TrackedAgentInitAction,
@@ -72,6 +73,7 @@ interface CreateTrackedAgentInput {
   initAction: TrackedAgentInitAction;
   initConfig: Readonly<Record<string, unknown>>;
   chatSessionId?: string | undefined;
+  moduleConfig?: ModuleConfig | undefined;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,6 +82,7 @@ interface UpdateTrackedAgentPatch {
   status?: TrackedAgentStatus | undefined;
   chatSessionId?: string | undefined;
   dispatchRunId?: string | undefined;
+  moduleConfig?: ModuleConfig | undefined;
   updatedAt?: string | undefined;
 }
 
@@ -153,6 +156,7 @@ type TrackedAgentRow = {
   init_config: string;
   chat_session_id: string | null;
   dispatch_run_id: string | null;
+  module_config: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -395,6 +399,7 @@ export class SQLiteBeastRepository {
       initAction: input.initAction,
       initConfig: input.initConfig,
       ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
+      ...(input.moduleConfig ? { moduleConfig: input.moduleConfig } : {}),
       createdAt: input.createdAt,
       updatedAt: input.updatedAt,
     };
@@ -409,9 +414,10 @@ export class SQLiteBeastRepository {
         init_action,
         init_config,
         chat_session_id,
+        module_config,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       agent.id,
       agent.definitionId,
@@ -421,6 +427,7 @@ export class SQLiteBeastRepository {
       JSON.stringify(agent.initAction),
       JSON.stringify(agent.initConfig),
       agent.chatSessionId ?? null,
+      agent.moduleConfig ? JSON.stringify(agent.moduleConfig) : null,
       agent.createdAt,
       agent.updatedAt,
     );
@@ -455,6 +462,7 @@ export class SQLiteBeastRepository {
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.chatSessionId !== undefined ? { chatSessionId: patch.chatSessionId } : {}),
       ...(patch.dispatchRunId !== undefined ? { dispatchRunId: patch.dispatchRunId } : {}),
+      ...(patch.moduleConfig !== undefined ? { moduleConfig: patch.moduleConfig } : {}),
       ...(patch.updatedAt !== undefined ? { updatedAt: patch.updatedAt } : {}),
     };
 
@@ -463,12 +471,14 @@ export class SQLiteBeastRepository {
          SET status = ?,
              chat_session_id = ?,
              dispatch_run_id = ?,
+             module_config = ?,
              updated_at = ?
        WHERE id = ?`,
     ).run(
       next.status,
       next.chatSessionId ?? null,
       next.dispatchRunId ?? null,
+      next.moduleConfig ? JSON.stringify(next.moduleConfig) : null,
       next.updatedAt,
       agentId,
     );
@@ -594,6 +604,7 @@ export class SQLiteBeastRepository {
 
   private migrateLegacySchema(): void {
     this.ensureColumnExists('beast_runs', 'tracked_agent_id', 'ALTER TABLE beast_runs ADD COLUMN tracked_agent_id TEXT');
+    this.ensureColumnExists('tracked_agents', 'module_config', 'ALTER TABLE tracked_agents ADD COLUMN module_config TEXT');
   }
 
   private ensureColumnExists(table: string, column: string, alterStatement: string): void {
@@ -757,6 +768,7 @@ function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
     initConfig: JSON.parse(row.init_config) as Readonly<Record<string, unknown>>,
     ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
     ...(row.dispatch_run_id ? { dispatchRunId: row.dispatch_run_id } : {}),
+    ...(row.module_config ? { moduleConfig: JSON.parse(row.module_config) as ModuleConfig } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

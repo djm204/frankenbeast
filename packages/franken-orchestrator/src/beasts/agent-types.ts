@@ -1,4 +1,4 @@
-import type { BeastDispatchSource } from './types.js';
+import type { BeastDispatchSource, ModuleConfig } from './types.js';
 
 export const TRACKED_AGENT_STATUSES = [
   'initializing',
@@ -38,6 +38,7 @@ export interface TrackedAgent {
   readonly initConfig: Readonly<Record<string, unknown>>;
   readonly chatSessionId?: string | undefined;
   readonly dispatchRunId?: string | undefined;
+  readonly moduleConfig?: ModuleConfig | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

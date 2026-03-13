@@ -61,6 +61,7 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     init_config TEXT NOT NULL,
     chat_session_id TEXT,
     dispatch_run_id TEXT,
+    module_config TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (dispatch_run_id) REFERENCES beast_runs(id)

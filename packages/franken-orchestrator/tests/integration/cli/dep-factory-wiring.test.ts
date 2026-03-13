@@ -1,0 +1,160 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execSync } from 'node:child_process';
+import { createCliDeps } from '../../../src/cli/dep-factory.js';
+import { EpisodicMemoryPortAdapter } from '../../../src/adapters/episodic-memory-port-adapter.js';
+import type { ProjectPaths } from '../../../src/cli/project-root.js';
+
+function createTempPaths(): ProjectPaths {
+  const root = join(tmpdir(), `dep-factory-wiring-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(root, { recursive: true });
+
+  // GitBranchIsolator needs a real git repo
+  execSync('git init', { cwd: root, stdio: 'ignore' });
+  execSync('git commit --allow-empty -m "init"', { cwd: root, stdio: 'ignore' });
+
+  const fbDir = join(root, '.frankenbeast');
+  mkdirSync(fbDir, { recursive: true });
+  const buildDir = join(root, '.build');
+  mkdirSync(buildDir, { recursive: true });
+  const plansDir = join(fbDir, 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  const beastsDir = join(fbDir, 'beasts');
+  mkdirSync(beastsDir, { recursive: true });
+  const beastLogsDir = join(beastsDir, 'logs');
+  mkdirSync(beastLogsDir, { recursive: true });
+  const sessionsDir = join(buildDir, 'sessions');
+  const snapshotsDir = join(buildDir, 'snapshots');
+
+  return {
+    root,
+    frankenbeastDir: fbDir,
+    plansDir,
+    buildDir,
+    beastsDir,
+    beastLogsDir,
+    beastsDb: join(beastsDir, 'beasts.db'),
+    chunkSessionsDir: sessionsDir,
+    chunkSessionSnapshotsDir: snapshotsDir,
+    checkpointFile: join(buildDir, 'session.checkpoint'),
+    tracesDb: join(buildDir, 'traces.db'),
+    logFile: join(buildDir, 'session-build.log'),
+    designDocFile: join(fbDir, 'design.md'),
+    configFile: join(fbDir, 'config.json'),
+    llmResponseFile: join(fbDir, 'llm-response.json'),
+  };
+}
+
+// These tests call createCliDeps() which internally creates many runtime objects.
+// The dynamic imports for @franken/firewall and @franken/skills may succeed or fail
+// depending on build state. Memory (franken-brain + better-sqlite3) should always work.
+describe('dep-factory wiring integration', () => {
+  const cleanups: string[] = [];
+
+  afterEach(() => {
+    for (const dir of cleanups) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    cleanups.length = 0;
+  });
+
+  it('creates real EpisodicMemoryPortAdapter when modules are enabled', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+
+    // Memory should always be available (franken-brain + better-sqlite3 are direct deps)
+    expect(deps.memory).toBeInstanceOf(EpisodicMemoryPortAdapter);
+    await finalize();
+  });
+
+  it('uses stubs when enabledModules disables firewall and memory', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+      enabledModules: { firewall: false, memory: false },
+    });
+
+    // When disabled, should use stubs (not instanceof real adapters)
+    expect(deps.memory).not.toBeInstanceOf(EpisodicMemoryPortAdapter);
+    // Stub memory should still work
+    const ctx = await deps.memory.getContext('test');
+    expect(ctx).toEqual({ adrs: [], knownErrors: [], rules: [] });
+    await finalize();
+  });
+
+  it('resets memory.db when reset is true', { timeout: 15_000 }, async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    // First run creates memory.db
+    const first = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+    await first.finalize();
+
+    // Second run with reset should succeed (db recreated)
+    const second = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: true,
+    });
+    expect(second.deps.memory).toBeInstanceOf(EpisodicMemoryPortAdapter);
+    await second.finalize();
+  });
+
+  it('falls back gracefully when modules fail to construct', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    // All modules enabled — if any fail to construct, they fall back to stubs
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+
+    // deps should always have all modules populated (real or stub)
+    expect(deps.firewall).toBeDefined();
+    expect(deps.skills).toBeDefined();
+    expect(deps.memory).toBeDefined();
+    expect(deps.planner).toBeDefined();
+    expect(deps.critique).toBeDefined();
+    expect(deps.governor).toBeDefined();
+    expect(deps.heartbeat).toBeDefined();
+    await finalize();
+  });
+});
