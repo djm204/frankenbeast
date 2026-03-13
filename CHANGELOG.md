@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/djm204/frankenbeast/compare/v0.19.1...v0.19.2) (2026-03-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** standardize subprocess failures ([#213](https://github.com/djm204/frankenbeast/issues/213)) ([130bce2](https://github.com/djm204/frankenbeast/commit/130bce266b71dcc84ba3e3b463d8ff5b4b46a475))
+
 ## [0.19.1](https://github.com/djm204/frankenbeast/compare/v0.19.0...v0.19.1) (2026-03-13)
 
 
