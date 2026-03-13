@@ -40,6 +40,20 @@ export interface TrackedAgentInitAction {
   chatSessionId?: string;
 }
 
+export interface ModuleConfig {
+  firewall?: boolean;
+  skills?: boolean;
+  memory?: boolean;
+  planner?: boolean;
+  critique?: boolean;
+  governor?: boolean;
+  heartbeat?: boolean;
+}
+
+export const MODULE_CONFIG_KEYS: readonly (keyof ModuleConfig)[] = [
+  'firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat',
+] as const;
+
 export interface TrackedAgentSummary {
   id: string;
   definitionId: string;
@@ -48,6 +62,7 @@ export interface TrackedAgentSummary {
   createdByUser: string;
   initAction: TrackedAgentInitAction;
   initConfig: Record<string, unknown>;
+  moduleConfig?: ModuleConfig;
   chatSessionId?: string;
   dispatchRunId?: string;
   createdAt: string;
@@ -109,6 +124,7 @@ export class BeastApiClient {
     trackedAgentId?: string;
     executionMode?: 'process' | 'container';
     startNow?: boolean;
+    moduleConfig?: ModuleConfig;
   }): Promise<BeastRunSummary> {
     return this.request('/v1/beasts/runs', {
       method: 'POST',
@@ -122,6 +138,7 @@ export class BeastApiClient {
     initAction: TrackedAgentInitAction;
     initConfig: Record<string, unknown>;
     chatSessionId?: string;
+    moduleConfig?: ModuleConfig;
   }): Promise<TrackedAgentSummary> {
     return this.request('/v1/beasts/agents', {
       method: 'POST',

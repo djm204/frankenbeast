@@ -192,7 +192,7 @@ describe('BeastDispatchPage', () => {
       provider: 'claude',
       objective: 'Ship monitoring',
       chunkDirectory: 'docs/chunks',
-    });
+    }, undefined);
     expect((screen.getByLabelText('Design Doc -> Chunk Creation designDocPath') as HTMLInputElement).value).toBe('docs/plans/design.md');
     expect(onSelectAgent).toHaveBeenCalledWith('agent-1');
     expect(onStop).toHaveBeenCalledWith('agent-1');
@@ -308,5 +308,90 @@ describe('BeastDispatchPage', () => {
     expect(onRestart).toHaveBeenCalledWith('agent-stopped');
     expect(onDelete).toHaveBeenCalledWith('agent-stopped');
     expect(screen.queryByRole('button', { name: 'Stop agent-stopped' })).toBeNull();
+  });
+
+  it('passes moduleConfig when modules are toggled off', () => {
+    const onDispatch = vi.fn();
+
+    render(
+      <BeastDispatchPage
+        catalog={[
+          {
+            id: 'martin-loop',
+            label: 'Martin Loop',
+            description: 'Run Martin loop',
+            executionModeDefault: 'process',
+            interviewPrompts: [
+              { key: 'objective', prompt: 'Objective', kind: 'string', required: true },
+            ],
+          },
+        ]}
+        disabled={false}
+        error={null}
+        onDispatch={onDispatch}
+        onDelete={vi.fn()}
+        onRestart={vi.fn()}
+        onStart={vi.fn()}
+        onKill={vi.fn()}
+        onResume={vi.fn()}
+        onRefresh={vi.fn()}
+        onSelectAgent={vi.fn()}
+        onStop={vi.fn()}
+        agentDetail={null}
+        agents={[]}
+        selectedAgentId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Martin Loop module firewall'));
+    fireEvent.click(screen.getByLabelText('Martin Loop module critique'));
+
+    fireEvent.change(screen.getByLabelText('Martin Loop objective'), { target: { value: 'Ship it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Martin Loop' }));
+
+    expect(onDispatch).toHaveBeenCalledWith(
+      'martin-loop',
+      { objective: 'Ship it' },
+      expect.objectContaining({ firewall: false, critique: false }),
+    );
+  });
+
+  it('omits moduleConfig when all modules remain enabled', () => {
+    const onDispatch = vi.fn();
+
+    render(
+      <BeastDispatchPage
+        catalog={[
+          {
+            id: 'martin-loop',
+            label: 'Martin Loop',
+            description: 'Run Martin loop',
+            executionModeDefault: 'process',
+            interviewPrompts: [
+              { key: 'objective', prompt: 'Objective', kind: 'string', required: true },
+            ],
+          },
+        ]}
+        disabled={false}
+        error={null}
+        onDispatch={onDispatch}
+        onDelete={vi.fn()}
+        onRestart={vi.fn()}
+        onStart={vi.fn()}
+        onKill={vi.fn()}
+        onResume={vi.fn()}
+        onRefresh={vi.fn()}
+        onSelectAgent={vi.fn()}
+        onStop={vi.fn()}
+        agentDetail={null}
+        agents={[]}
+        selectedAgentId={null}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Martin Loop objective'), { target: { value: 'Ship it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Martin Loop' }));
+
+    expect(onDispatch).toHaveBeenCalledWith('martin-loop', { objective: 'Ship it' }, undefined);
   });
 });
