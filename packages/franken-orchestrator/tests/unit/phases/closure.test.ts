@@ -20,6 +20,11 @@ const mixedOutcomes: TaskOutcome[] = [
   { taskId: 't2', status: 'failure', error: 'boom' },
 ];
 
+const allSkippedOutcomes: TaskOutcome[] = [
+  { taskId: 't1', status: 'skipped' },
+  { taskId: 't2', status: 'skipped' },
+];
+
 describe('runClosure', () => {
   it('returns completed result when all tasks succeed', async () => {
     const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), successOutcomes);
@@ -79,6 +84,23 @@ describe('runClosure', () => {
     expect(result.status).toBe('completed'); // Non-fatal
     const failAudit = result.sessionId; // just ensure it didn't throw
     expect(failAudit).toBeTruthy();
+  });
+
+  it('returns skipped status when all tasks are skipped', async () => {
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), allSkippedOutcomes);
+
+    expect(result.status).toBe('skipped');
+    expect(result.taskResults).toHaveLength(2);
+  });
+
+  it('returns failed status when mix of skipped and failed tasks', async () => {
+    const skippedAndFailed: TaskOutcome[] = [
+      { taskId: 't1', status: 'skipped' },
+      { taskId: 't2', status: 'failure', error: 'boom' },
+    ];
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), skippedAndFailed);
+
+    expect(result.status).toBe('failed');
   });
 
   it('includes plan summary when plan exists', async () => {
