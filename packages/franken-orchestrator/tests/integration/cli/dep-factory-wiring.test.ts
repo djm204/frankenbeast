@@ -31,6 +31,7 @@ function createTempPaths(): ProjectPaths {
   return {
     root,
     frankenbeastDir: fbDir,
+    llmCacheDir: join(fbDir, '.cache', 'llm'),
     plansDir,
     buildDir,
     beastsDir,

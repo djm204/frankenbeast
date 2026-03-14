@@ -2,14 +2,20 @@ import type { GithubIssue, IIssueTriage, IssueComplexity, TriageResult } from '.
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
 type CompleteFn = (prompt: string) => Promise<string>;
+type CacheAwareCompleteFn = (prompt: string, hint?: {
+  operation?: string;
+  workId?: string;
+  stablePrefix?: string;
+  workPrefix?: string;
+}) => Promise<string>;
 
 const VALID_COMPLEXITIES = new Set<string>(['one-shot', 'chunked']);
 const MAX_BODY_LENGTH = 2000;
 
 export class IssueTriage implements IIssueTriage {
-  private readonly complete: CompleteFn;
+  private readonly complete: CacheAwareCompleteFn;
 
-  constructor(complete: CompleteFn) {
+  constructor(complete: CompleteFn | CacheAwareCompleteFn) {
     this.complete = complete;
   }
 
@@ -18,7 +24,12 @@ export class IssueTriage implements IIssueTriage {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const raw = await this.complete(prompt);
+      const raw = await this.complete(prompt, {
+        operation: 'issue-triage',
+        workId: `issues:${issues.map((issue) => issue.number).sort((a, b) => a - b).join('-')}`,
+        stablePrefix: 'surface:issues:triage',
+        workPrefix: issues.map((issue) => `#${issue.number}:${issue.title}`).join('\n'),
+      });
       try {
         const parsed = this.extractAndParse(raw);
         return this.toTriageResults(parsed);

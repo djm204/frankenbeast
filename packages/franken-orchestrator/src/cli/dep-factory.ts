@@ -15,6 +15,7 @@ import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
 import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
 import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
@@ -172,7 +173,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   // Derive plan name for plan-specific build artifacts
   const planName = options.planDirOverride
     ? basename(options.planDirOverride).replace(/\/$/, '')
-    : 'session';
+    : basename(paths.plansDir) === 'plans' ? 'session' : basename(paths.plansDir);
   const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
 
   // Reset if requested
@@ -242,6 +243,18 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     observerBridge.observerDeps as never,
     options.provider,
   );
+  const cachedLlm = new CachedCliLlmClient({
+    cacheRootDir: paths.llmCacheDir,
+    cliAdapter: cliLlmAdapter,
+    projectId: paths.root,
+    provider: options.provider,
+    model: override?.model ?? options.adapterModel ?? options.provider,
+    operation: 'cli-session',
+    workId: `session:${planName}`,
+    stablePrefix: 'surface:cli',
+    workPrefix: `plan:${planName}`,
+    observer: observerBridge.observerDeps as never,
+  });
 
   // Firewall (dynamic import — optional module)
   let firewall: IFirewallModule = stubFirewall;
@@ -313,7 +326,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const prCreator = noPr ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
     undefined,
-    adapterLlm,
+    cachedLlm,
   );
 
   // Commit message generator — delegates to PrCreator's LLM prompt
@@ -336,7 +349,12 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       renderer: chunkSessionRenderer,
       compactor: new ChunkSessionCompactor({
         summarize: async (prompt: string) => {
-          const response = await adapterLlm.complete(prompt);
+          const response = await cachedLlm.complete(prompt, {
+            operation: 'chunk-session-compaction',
+            workId: `chunk-compactor:${planName}`,
+            stablePrefix: 'surface:chunk-session-compactor',
+            workPrefix: `plan:${planName}`,
+          });
           return response.trim();
         },
       }),
@@ -378,7 +396,20 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   // Issue pipeline deps (only created when issueIO is provided)
   let issueDeps: IssueCliDeps | undefined;
   if (options.issueIO) {
-    const completeFn = (prompt: string) => adapterLlm.complete(prompt);
+    const completeFn = (
+      prompt: string,
+      hint?: {
+        operation?: string;
+        workId?: string;
+        stablePrefix?: string;
+        workPrefix?: string;
+      },
+    ) => cachedLlm.complete(prompt, {
+      operation: hint?.operation ?? 'issues',
+      workId: hint?.workId,
+      stablePrefix: hint?.stablePrefix ?? 'surface:issues',
+      workPrefix: hint?.workPrefix,
+    });
     const issueRuntime = createIssueRuntimeSupport(paths);
     issueDeps = {
       fetcher: new IssueFetcher(),

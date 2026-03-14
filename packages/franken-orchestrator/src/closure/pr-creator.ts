@@ -3,6 +3,7 @@ import type { ILlmClient } from '@franken/types';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
+import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
 
 export interface PrCreatorConfig {
   readonly targetBranch: string;
@@ -54,7 +55,12 @@ export class PrCreator {
         diffStat,
       ].join('\n');
 
-      const raw = await this.llm.complete(prompt);
+      const raw = await completeWithCacheHint(this.llm, prompt, {
+        operation: 'commit-message',
+        workId: `commit:${scope || 'root'}`,
+        stablePrefix: 'surface:commit-message',
+        workPrefix: chunkObjective,
+      });
       const msg = cleanCommitMessage(raw);
       const subject = msg.split('\n')[0] ?? '';
       if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
@@ -71,6 +77,7 @@ export class PrCreator {
     diffStat: string,
     result: BeastResult,
     issueNumber?: number,
+    cacheWorkId?: string,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
@@ -103,7 +110,12 @@ export class PrCreator {
 
       const prompt = promptLines.join('\n');
 
-      const raw = await this.llm.complete(prompt);
+      const raw = await completeWithCacheHint(this.llm, prompt, {
+        operation: 'pr-description',
+        workId: cacheWorkId,
+        stablePrefix: 'surface:pr-description',
+        workPrefix: issueNumber != null ? `issue:${issueNumber}` : result.projectId,
+      });
       return parsePrDescription(raw);
     } catch {
       return null;
@@ -165,7 +177,7 @@ export class PrCreator {
     let title: string;
     let body: string;
 
-    const llmResult = await this.tryGeneratePrFromLlm(result, logger, options?.issueNumber);
+    const llmResult = await this.tryGeneratePrFromLlm(result, logger, options?.issueNumber, branch);
     if (llmResult) {
       title = llmResult.title;
       body = llmResult.body;
@@ -254,6 +266,7 @@ export class PrCreator {
     result: BeastResult,
     logger?: ILogger,
     issueNumber?: number,
+    branch?: string,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
@@ -265,7 +278,13 @@ export class PrCreator {
         `git diff --stat ${this.config.targetBranch}..HEAD`,
         logger,
       ) ?? '';
-      return await this.generatePrDescription(commitLog, diffStat, result, issueNumber);
+      return await this.generatePrDescription(
+        commitLog,
+        diffStat,
+        result,
+        issueNumber,
+        branch ? `pr:${branch}` : undefined,
+      );
     } catch {
       return null;
     }
