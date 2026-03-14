@@ -322,6 +322,15 @@ describe('createCliDeps — cliLlmAdapter field', () => {
       noPr: true,
       verbose: false,
       reset: false,
+      enabledModules: {
+        firewall: false,
+        skills: false,
+        memory: false,
+        planner: false,
+        critique: false,
+        governor: false,
+        heartbeat: false,
+      },
     });
 
     expect(result.cliLlmAdapter).toBeDefined();

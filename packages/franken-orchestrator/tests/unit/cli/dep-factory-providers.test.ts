@@ -119,6 +119,15 @@ function makeOpts(overrides: Partial<CliDepOptions> = {}): CliDepOptions {
     noPr: true,
     verbose: false,
     reset: false,
+    enabledModules: {
+      firewall: false,
+      skills: false,
+      memory: false,
+      planner: false,
+      critique: false,
+      governor: false,
+      heartbeat: false,
+    },
     ...overrides,
   };
 }
