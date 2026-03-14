@@ -19,6 +19,7 @@ import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
 import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
+import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
 import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
 import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -416,13 +417,57 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     },
   );
 
-  const finalize = async () => {
+  let finalize = async () => {
     if (traceViewerHandle) {
       await traceViewerHandle.stop();
     }
     // Log entries are now written incrementally by BeastLogger (crash-safe).
     // No batch write needed here.
   };
+
+  // Governor (dynamic import — optional module)
+  let governor: IGovernorModule = stubGovernor;
+  if (modules.governor) {
+    try {
+      const { ApprovalGateway, CliChannel, defaultConfig } = await import('@franken/governor');
+      const { createInterface } = await import('node:readline/promises');
+      const { stdin, stdout } = await import('node:process');
+
+      const useDefaultDecision = !stdin.isTTY;
+
+      const rl = createInterface({ input: stdin, output: stdout });
+
+      const cliChannel = new CliChannel({
+        readline: { question: (prompt: string) => rl.question(prompt) },
+        operatorName: 'operator',
+      });
+
+      const noopAuditRecorder = {
+        record: async () => {},
+      };
+
+      const gateway = new ApprovalGateway({
+        channel: cliChannel,
+        auditRecorder: noopAuditRecorder,
+        config: defaultConfig(),
+      });
+
+      governor = new GovernorPortAdapter({
+        gateway: gateway as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
+        projectId: basename(paths.root),
+        ...(useDefaultDecision ? { defaultDecision: 'approved' as const } : {}),
+      });
+
+      // Close readline on finalize to prevent dangling handles
+      const previousFinalize = finalize;
+      finalize = async () => {
+        rl.close();
+        await previousFinalize();
+      };
+    } catch (error) {
+      logger.warn(`Governor module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
 
   const deps: BeastLoopDeps = {
     firewall,
@@ -431,7 +476,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     planner: stubPlanner,
     observer: observerBridge,
     critique,
-    governor: stubGovernor,
+    governor,
     heartbeat: stubHeartbeat,
     logger,
     clock: () => new Date(),
