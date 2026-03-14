@@ -1,133 +1,192 @@
 # franken-orchestrator Ramp-Up
 
-The Beast Loop orchestrator wires all 8 Frankenbeast modules (firewall, skills, memory, planner, observer, critique, governor, heartbeat) into a single agent pipeline that takes user input and produces a `BeastResult`.
+`franken-orchestrator` is no longer just the eight-module `BeastLoop`. It is the product package that owns:
 
-## Directory Structure
+- the core orchestration pipeline
+- the CLI/session workflow for interview, plan, run, and issues
+- CLI-backed provider integration
+- request-serving surfaces like chat-server and the managed network
+- Beast run management
+- local init flows
+- persistent LLM caching for repeated work
 
-```
-src/
-  index.ts                          # Public API barrel
-  beast-loop.ts                     # BeastLoop class — top-level run(input)
-  deps.ts                           # BeastLoopDeps + all port interfaces
-  types.ts                          # BeastInput, BeastResult, TaskOutcome, BeastPhase
-  logger.ts                         # NullLogger default
-  config/
-    orchestrator-config.ts          # Zod schema, OrchestratorConfig, defaultConfig()
-  context/
-    franken-context.ts              # BeastContext class (mutable state)
-    context-factory.ts              # createContext(BeastInput) → BeastContext
-  phases/
-    ingestion.ts                    # Phase 1a: firewall scan → sanitizedIntent
-    hydration.ts                    # Phase 1b: memory frontload → enrich context
-    planning.ts                     # Phase 2: plan + critique loop
-    execution.ts                    # Phase 3: topological task execution
-    closure.ts                      # Phase 4: token spend, heartbeat, assemble result
-  breakers/
-    injection-breaker.ts            # checkInjection(FirewallResult)
-    budget-breaker.ts               # checkBudget(spend, maxTokens)
-    critique-spiral-breaker.ts      # checkCritiqueSpiral(iter, max, score)
-  planning/
-    chunk-file-graph-builder.ts     # Mode 1: .md chunk files → PlanGraph
-    llm-graph-builder.ts            # Mode 2: LLM decomposes design doc → PlanGraph
-    interview-loop.ts               # Mode 3: user interview → design doc → PlanGraph
-  skills/
-    cli-types.ts                    # MartinLoopConfig, CliSkillConfig, GitIsolationConfig
-    cli-skill-executor.ts           # CliSkillExecutor: git isolate → ralph → merge
-    martin-loop.ts                   # MartinLoop: spawn claude/codex, promise detection, rate-limit fallback
-    git-branch-isolator.ts          # GitBranchIsolator: branch per chunk, auto-commit, merge
-    llm-skill-handler.ts            # LlmSkillHandler
-    llm-planner.ts                  # LlmPlanner
-  adapters/
-    adapter-llm-client.ts           # AdapterLlmClient wrapping IAdapter
-    firewall-adapter.ts, memory-adapter.ts, etc.
-  checkpoint/
-    file-checkpoint-store.ts        # FileCheckpointStore: append-only file, recordCommit/lastCommit
-  resilience/
-    context-serializer.ts           # serialize/deserializeContext, saveContext, loadContext
-    graceful-shutdown.ts            # GracefulShutdown: SIGTERM/SIGINT → save context + cleanup
-    module-initializer.ts           # checkModuleHealth(deps), allHealthy()
-  logging/
-    beast-logger.ts                 # BeastLogger, ANSI helpers, budgetBar, statusBadge
-  closure/
-    pr-creator.ts                   # PrCreator: auto-create GitHub PR via gh CLI
-  cli/
-    args.ts                         # parseArgs() → CliArgs
-    config-loader.ts                # loadConfig(): file > env > CLI merge
-    run.ts                          # bin entry (frankenbeast CLI)
-```
+## Architecture Layers
 
-## Core Flow
+### 1. Core orchestration
 
-`BeastLoop.run(input: BeastInput): Promise<BeastResult>`
+The core `BeastLoop` still lives under `src/beast-loop.ts` and `src/phases/*`.
 
-1. **Ingestion** -- `runIngestion(ctx, firewall)` -- firewall scans raw input; blocked = `InjectionDetectedError`; else sets `ctx.sanitizedIntent`
-2. **Hydration** -- `runHydration(ctx, memory)` -- frontloads ADRs/errors/rules into `ctx.sanitizedIntent.context`
-3. **Planning** -- `runPlanning(ctx, planner, critique, config, graphBuilder?)` -- if `graphBuilder` provided, uses it directly; otherwise loops planner+critique up to `maxCritiqueIterations`; throws `CritiqueSpiralError` on exhaustion
-4. **Execution** -- `runExecution(ctx, skills, governor, memory, observer, ...)` -- topological task execution; HITL check via governor; supports CLI skill delegation, checkpoint skip, plan refresh
-5. **Closure** -- `runClosure(ctx, observer, heartbeat, config, outcomes, prCreator?)` -- collects token spend, optional heartbeat pulse, optional PR creation, returns `BeastResult`
+- `src/context/*`
+  Builds and mutates `BeastContext`
+- `src/phases/*`
+  Ingestion, hydration, planning, execution, closure
+- `src/breakers/*`
+  Injection, budget, and critique-spiral circuit breakers
+- `src/deps.ts`
+  Port interfaces and `BeastLoopDeps`
 
-## Key Types
+### 2. Work execution and CLI product surface
 
-**BeastContext** (mutable state accumulator):
-`projectId`, `sessionId`, `userInput`, `sanitizedIntent?`, `plan?`, `phase`, `tokenSpend`, `audit[]`, `elapsedMs()`
+The CLI/session layer is where most real package behavior now lives.
 
-**BeastLoopDeps** (all ports):
-`firewall`, `skills`, `memory`, `planner`, `observer`, `critique`, `governor`, `heartbeat`, `logger`, `clock`, plus optional: `graphBuilder`, `prCreator`, `mcp`, `cliExecutor`, `checkpoint`, `refreshPlanTasks`
+- `src/cli/run.ts`
+  Main CLI entrypoint
+- `src/cli/session.ts`
+  Interview, planning, execution, and issues session flow
+- `src/cli/dep-factory.ts`
+  Runtime wiring for providers, observers, skills, issue pipeline, PR creation, and chunk-session stores
+- `src/planning/*`
+  Design-doc decomposition, validation, remediation, chunk-file writing
+- `src/issues/*`
+  GitHub issue fetch, triage, review, graph building, execution orchestration
+- `src/skills/*`
+  CLI skill execution, Martin loop, git isolation, provider registry
+- `src/session/*`
+  Chunk-session persistence, compaction, rendering, GC
 
-**OrchestratorConfig**: `maxCritiqueIterations` (3), `maxTotalTokens` (100k), `maxDurationMs` (300k), `enableHeartbeat`, `enableTracing`, `minCritiqueScore` (0.7). Config priority: CLI > env (`FRANKEN_*`) > file > defaults.
+### 3. Serving, Beast, and local platform features
 
-## Circuit Breakers
+- `src/chat/*`
+  Conversation engine and chat runtime
+- `src/http/*`
+  Chat server and HTTP routes
+- `src/network/*`
+  Managed local service lifecycle and secrets integration
+- `src/beasts/*`
+  Beast catalog, run persistence, agent init, durable run services
+- `src/init/*`
+  Repo bootstrap/init flows
 
-- `checkInjection(result)` -- halts on `result.blocked`
-- `checkBudget(spend, max)` -- halts when `totalTokens > max`
-- `checkCritiqueSpiral(iter, max, score)` -- halts when iterations exhausted
+## Provider and LLM Stack
 
-## Planning Builders (GraphBuilder interface)
+The package is CLI-provider driven.
 
-- **ChunkFileGraphBuilder(dir)** -- Mode 1: reads numbered `.md` files, produces `impl:` + `harden:` task pairs in linear order
-- **LlmGraphBuilder(llm, opts?)** -- Mode 2: LLM decomposes a design doc into chunks with dependency DAG; validates no cycles; produces `impl:` + `harden:` pairs
-- **InterviewLoop(llm, io, graphBuilder)** -- Mode 3: asks user clarifying questions, generates design doc, delegates to `LlmGraphBuilder`
+- `src/skills/providers/*.ts`
+  Provider-specific CLI adapters and cache capability metadata
+- `src/adapters/cli-llm-adapter.ts`
+  Normalizes prompt execution through Claude, Codex, Gemini, or Aider CLIs
+- `src/adapters/adapter-llm-client.ts`
+  Simple `ILlmClient` wrapper for adapter-backed completion
 
-## CLI Skill Execution
+The provider capability model is explicit now. Providers advertise whether they support:
 
-- **CliSkillExecutor(ralph, git, observer)** -- orchestrates git isolation, Martin loop, merge, observer spans, budget checks, dirty-file recovery
-- **MartinLoop** -- spawns `claude`/`codex` CLI per iteration; detects `<promise>TAG</promise>` in output; multi-provider fallback on rate limit; parses reset times; abort-signal aware
-- **GitBranchIsolator(config)** -- `isolate(chunkId)`, `autoCommit()`, `merge()`, `resetHard()`
+- native work-session continuation
+- persistent reuse across processes
+- managed-cache fallback only
 
-## Crash Recovery
+## Intelligent Cache Model
 
-- **FileCheckpointStore(path)** -- append-only file; `has(key)`, `write(key)`, `recordCommit()`, `lastCommit()`; execution phase skips tasks with `checkpoint.has(\`${taskId}:done\`)`
-- **Context serialization** -- `saveContext(ctx, path)` / `loadContext(path)`; `ContextSnapshot` is the JSON shape
-- **GracefulShutdown** -- installs SIGTERM/SIGINT handlers; saves context snapshot + runs cleanup handlers
+LLM caching now lives under `src/cache/*`.
 
-## CLI (bin: frankenbeast)
+- `src/cache/cached-cli-llm-client.ts`
+  Cache-aware `ILlmClient` for CLI-backed providers
+- `src/cache/cached-llm-client.ts`
+  Applies exact-response reuse and native-session fallback logic
+- `src/cache/llm-cache-store.ts`
+  Disk-backed cache entries
+- `src/cache/provider-session-store.ts`
+  Disk-backed provider session metadata
+- `src/cache/llm-cache-policy.ts`
+  Stable/work/volatile prompt partitioning
 
-```
-frankenbeast --project-id <id> [--config <path>] [--provider <name>] [--model <name>]
-             [--dry-run] [--verbose] [--resume <snapshot-path>] [--help]
+Cache root:
+
+```text
+.frankenbeast/.cache/llm
 ```
 
-Full execution currently requires concrete module implementations; `--dry-run` and `--resume` work.
+Scope rules:
 
-## Build & Test
+- project-stable material can persist across runs in the same repo
+- work-local state is isolated by work id
+- unrelated issues do not share provider-session state or dynamic prompt history
+
+Wired today:
+
+- plan decomposition
+- issue triage
+- issue chunk decomposition
+- PR description generation
+- commit message generation
+- chunk-session compaction
+
+Not wired yet:
+
+- chat and chat-server persistent work-session reuse
+
+Reason:
+
+The current chat/runtime path does not yet propagate a safe conversation work id through `ILlmClient.complete(prompt)`.
+
+## `.frankenbeast/` Filesystem Contract
+
+Important locations:
+
+```text
+.frankenbeast/
+  config.json
+  plans/
+    <plan>/
+      design.md
+      llm-response.json        # legacy path; no longer the primary cache
+  .cache/
+    llm/
+  .build/
+    *.checkpoint
+    build-traces.db
+    memory.db
+    beasts.db
+    beasts/
+    issues/
+    chunk-sessions/
+    chunk-session-snapshots/
+  chat/
+```
+
+`ProjectPaths` is defined in `src/cli/project-root.ts`.
+
+## Most Important Files To Read First
+
+Read in this order if you need fast orientation:
+
+1. `src/cli/run.ts`
+2. `src/cli/session.ts`
+3. `src/cli/dep-factory.ts`
+4. `src/beast-loop.ts`
+5. `src/phases/execution.ts`
+6. `src/planning/llm-graph-builder.ts`
+7. `src/issues/issue-runner.ts`
+8. `src/skills/cli-skill-executor.ts`
+9. `src/skills/martin-loop.ts`
+10. `src/cache/cached-cli-llm-client.ts`
+
+## Current Behavioral Notes
+
+- `--resume` is still not a full CLI session resume path; actual recovery comes from checkpoints and chunk-session persistence.
+- `ProjectPaths.llmResponseFile` still exists, but intelligent caching now lives in `.frankenbeast/.cache/llm`.
+- CLI mode still uses stubbed module ports for parts of the original eight-module loop and relies on graph builders plus CLI skill execution for most real work.
+- `compose-infra` exists in the network registry model but remains hard-disabled.
+- Both `tests/` and `test/` are active in this package; do not assume one canonical test root.
+
+## Build and Verification
 
 ```sh
-npm run build          # tsc
-npm test               # vitest run
-npm run test:watch     # vitest
-npm run test:coverage  # vitest run --coverage
-npm run typecheck      # tsc --noEmit
+npm run build
+npm run typecheck
+npm test
 ```
 
-## Dependencies
+## Dependencies That Matter
 
-- `@franken/types` (local workspace) -- `TokenSpend`, `ILlmClient`
-- `zod` ^3.24 -- config validation
-- Node >= 22
-
-## Gotchas
-
-- `TokenBudgetBreaker.check()` (from franken-observer) is sync and always returns `{tripped: false}` -- use `checkAsync()` instead
-- `executeTask()` is stub-level for non-CLI skills -- it calls `skills.execute()` but real LLM orchestration relies on `CliSkillExecutor`
-- CLI `--resume` currently only displays snapshot info; full re-execution from saved phase is not wired
-- `MartinLoop` rate-limit detection only checks stderr (not stdout) to avoid false positives when the model's output discusses rate limiting
+- `@franken/types`
+  Shared `ILlmClient`, spend types, and core interfaces
+- `@franken/skills`
+  Local/project skill registry
+- `@franken/firewall`
+  Optional firewall module wiring
+- `franken-brain`
+  Optional memory store wiring
+- `better-sqlite3`
+  Local persistence for memory and Beast services
+- `hono`
+  HTTP/chat server routes
