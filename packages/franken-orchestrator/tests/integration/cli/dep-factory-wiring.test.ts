@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { createCliDeps } from '../../../src/cli/dep-factory.js';
 import { EpisodicMemoryPortAdapter } from '../../../src/adapters/episodic-memory-port-adapter.js';
+import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 
 function createTempPaths(): ProjectPaths {
@@ -130,6 +131,45 @@ describe('dep-factory wiring integration', () => {
     });
     expect(second.deps.memory).toBeInstanceOf(EpisodicMemoryPortAdapter);
     await second.finalize();
+  });
+
+  it('creates real CritiquePortAdapter when modules are enabled', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+
+    expect(deps.critique).toBeInstanceOf(CritiquePortAdapter);
+    await finalize();
+  });
+
+  it('uses critique stub when enabledModules.critique is false', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+      enabledModules: { critique: false },
+    });
+
+    expect(deps.critique).not.toBeInstanceOf(CritiquePortAdapter);
+    const result = await deps.critique.reviewPlan({ tasks: [] });
+    expect(result).toEqual({ verdict: 'pass', findings: [], score: 1.0 });
+    await finalize();
   });
 
   it('falls back gracefully when modules fail to construct', async () => {
