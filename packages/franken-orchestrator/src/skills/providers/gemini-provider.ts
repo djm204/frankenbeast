@@ -99,4 +99,12 @@ export class GeminiProvider implements ICliProvider {
   defaultContextWindowTokens(): number {
     return 1_048_576;
   }
+
+  getCacheCapabilities() {
+    return {
+      nativeWorkSessions: false,
+      persistentAcrossProcesses: false,
+      promptReuse: 'managed' as const,
+    };
+  }
 }
