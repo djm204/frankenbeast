@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
@@ -19,6 +19,9 @@ import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
 import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
+import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
+import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
+import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
 import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
 import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -71,6 +74,10 @@ export interface CliDepOptions {
   skillsDir?: string;
   /** Per-module enable/disable toggles. Defaults to all enabled. Falls back to FRANKENBEAST_MODULE_* env vars. */
   enabledModules?: import('../beasts/types.js').ModuleConfig;
+  /** Max critique loop iterations before halting. Default: 3. */
+  critiqueMaxIterations?: number;
+  /** Consensus threshold for critique pass verdict. Default: 0.7. */
+  critiqueConsensusThreshold?: number;
 }
 
 export interface IssueCliDeps {
@@ -154,6 +161,22 @@ function createIssueRuntimeSupport(paths: ProjectPaths): IssueRuntimeSupport {
     checkpointForIssue: (issueNumber: number) => new FileCheckpointStore(issueArtifactsFor(paths, issueNumber).checkpointFile),
     artifactsForIssue: (issueNumber: number) => issueArtifactsFor(paths, issueNumber),
   };
+}
+
+function discoverWorkspacePackages(root: string): string[] {
+  const packagesDir = resolve(root, 'packages');
+  try {
+    return readdirSync(packagesDir)
+      .map(dir => {
+        try {
+          const pkg = JSON.parse(
+            readFileSync(resolve(packagesDir, dir, 'package.json'), 'utf-8'),
+          );
+          return pkg.name as string;
+        } catch { return null; }
+      })
+      .filter((name): name is string => name !== null);
+  } catch { return []; }
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
@@ -322,6 +345,50 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
+  // Critique (dynamic import — optional module)
+  let critique: ICritiqueModule = stubCritique;
+  if (modules.critique) {
+    try {
+      const critiqueModule = await import('@franken/critique');
+      const { createReviewer } = critiqueModule;
+
+      const critiqueGuardrails = {
+        getSafetyRules: async () => [] as never[],
+        executeSandbox: async () => ({ success: true as const, output: '', exitCode: 0, timedOut: false }),
+      };
+      const critiqueMemory = {
+        searchADRs: async () => [] as never[],
+        searchEpisodic: async () => [] as never[],
+        recordLesson: async () => {},
+      };
+      const critiqueObservability = {
+        getTokenSpend: (sessionId: string) => observerBridge.getTokenSpend(sessionId),
+      };
+
+      const knownPackages = discoverWorkspacePackages(paths.root);
+
+      const reviewer = createReviewer({
+        guardrails: critiqueGuardrails,
+        memory: critiqueMemory,
+        observability: critiqueObservability,
+        knownPackages,
+      });
+
+      critique = new CritiquePortAdapter({
+        loop: { run: (input: never, config: never) => reviewer.review(input, config) },
+        config: {
+          maxIterations: options.critiqueMaxIterations ?? 3,
+          tokenBudget: budget,
+          consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
+          sessionId: `cli-critique-${Date.now()}`,
+          taskId: 'plan-review',
+        },
+      });
+    } catch (error) {
+      logger.warn(`Critique module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
+
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
@@ -369,7 +436,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     },
   );
 
-  const finalize = async () => {
+  let finalize = async () => {
     if (traceViewerHandle) {
       await traceViewerHandle.stop();
     }
@@ -377,14 +444,66 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     // No batch write needed here.
   };
 
+  // Governor (dynamic import — optional module)
+  let governor: IGovernorModule = stubGovernor;
+  if (modules.governor) {
+    try {
+      const { ApprovalGateway, CliChannel, defaultConfig } = await import('@franken/governor');
+      const { createInterface } = await import('node:readline/promises');
+      const { stdin, stdout } = await import('node:process');
+
+      if (!stdin.isTTY) {
+        // Non-interactive mode (CI, piped input) — auto-approve without readline.
+        // defaultDecision short-circuits before gateway is called, so gateway is a no-op placeholder.
+        governor = new GovernorPortAdapter({
+          gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as never,
+          projectId: basename(paths.root),
+          defaultDecision: 'approved' as const,
+        });
+      } else {
+        const rl = createInterface({ input: stdin, output: stdout });
+
+        const cliChannel = new CliChannel({
+          readline: { question: (prompt: string) => rl.question(prompt) },
+          operatorName: 'operator',
+        });
+
+        // No-op audit recorder — audit persistence requires episodic store bridge (future)
+        const noopAuditRecorder = {
+          record: async () => {},
+        };
+
+        const gateway = new ApprovalGateway({
+          channel: cliChannel,
+          auditRecorder: noopAuditRecorder,
+          config: defaultConfig(),
+        });
+
+        governor = new GovernorPortAdapter({
+          gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
+          projectId: basename(paths.root),
+        });
+
+        // Close readline on finalize to prevent dangling handles
+        const previousFinalize = finalize;
+        finalize = async () => {
+          rl.close();
+          await previousFinalize();
+        };
+      }
+    } catch (error) {
+      logger.warn(`Governor module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+    }
+  }
+
   const deps: BeastLoopDeps = {
     firewall,
     skills,
     memory,
     planner: stubPlanner,
     observer: observerBridge,
-    critique: stubCritique,
-    governor: stubGovernor,
+    critique,
+    governor,
     heartbeat: stubHeartbeat,
     logger,
     clock: () => new Date(),
