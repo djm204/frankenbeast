@@ -20,6 +20,7 @@ import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
+import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
 import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
 import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -434,9 +435,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       const { stdin, stdout } = await import('node:process');
 
       if (!stdin.isTTY) {
-        // Non-interactive mode (CI, piped input) — auto-approve without readline
+        // Non-interactive mode (CI, piped input) — auto-approve without readline.
+        // defaultDecision short-circuits before gateway is called, so gateway is a no-op placeholder.
         governor = new GovernorPortAdapter({
-          gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
+          gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as never,
           projectId: basename(paths.root),
           defaultDecision: 'approved' as const,
         });
@@ -460,7 +462,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
         });
 
         governor = new GovernorPortAdapter({
-          gateway: gateway as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
+          gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
           projectId: basename(paths.root),
         });
 
