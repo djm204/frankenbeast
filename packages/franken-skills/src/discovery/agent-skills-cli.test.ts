@@ -45,10 +45,11 @@ describe("AgentSkillsCli", () => {
     const entries = await cli.list();
     expect(entries).toHaveLength(2);
     expect(entries[0]?.skill_id).toBe("deploy-to-vercel");
-    expect(entries[0]?.metadata?.source).toBe("engineering");
+    expect(entries[0]?.metadata?.source).toBe("GLOBAL");
     expect(entries[0]?.metadata?.description).toBe("Deploys the current project to Vercel using the Vercel CLI");
+    expect(entries[0]?.interface).toEqual({ input_schema: { type: "object" }, output_schema: { type: "object" } });
     expect(entries[1]?.skill_id).toBe("run-tests");
-    expect(entries[1]?.metadata?.source).toBe("engineering");
+    expect(entries[1]?.metadata?.source).toBe("GLOBAL");
   });
 
   it("list() accepts legacy flat array format for backwards compatibility", async () => {
