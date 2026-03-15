@@ -3,7 +3,12 @@ import type { GithubIssue, TriageResult } from './types.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
 
-type CompleteFn = (prompt: string) => Promise<string>;
+type CompleteFn = (prompt: string, hint?: {
+  operation?: string;
+  workId?: string;
+  stablePrefix?: string;
+  workPrefix?: string;
+}) => Promise<string>;
 
 /**
  * Builds a PlanGraph for a single GitHub issue.
@@ -52,7 +57,12 @@ export class IssueGraphBuilder {
     }
 
     const prompt = this.buildDecompositionPrompt(issue);
-    const raw = await this.complete(prompt);
+    const raw = await this.complete(prompt, {
+      operation: 'issue-graph',
+      workId: `issue:${issue.number}`,
+      stablePrefix: 'surface:issues:graph',
+      workPrefix: `issue:${issue.number}\ncomplexity:${triage.complexity}\ntitle:${issue.title}`,
+    });
     return this.parseResponse(raw);
   }
 

@@ -109,6 +109,7 @@ vi.mock('../../../src/cli/project-root.js', () => ({
   getProjectPaths: vi.fn((root: string) => ({
     root,
     frankenbeastDir: `${root}/.frankenbeast`,
+    llmCacheDir: `${root}/.frankenbeast/.cache/llm`,
     plansDir: `${root}/.frankenbeast/plans`,
     buildDir: `${root}/.frankenbeast/.build`,
     beastsDir: `${root}/.frankenbeast/.build/beasts`,

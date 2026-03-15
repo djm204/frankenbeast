@@ -230,7 +230,8 @@ describe('PrCreator', () => {
       expect(result).not.toBeNull();
       expect(result!.title).toBe('feat(orchestrator): add CLI execution pipeline');
       expect(result!.body).toContain('## Summary');
-      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('proj-123'));
+      expect(llm.complete).toHaveBeenCalled();
+      expect(llm.complete.mock.calls[0]?.[0]).toContain('proj-123');
     });
 
     it('falls back to null when LLM is not provided', async () => {
@@ -283,8 +284,9 @@ describe('PrCreator', () => {
       const msg = await creator.generateCommitMessage('src/auth.ts | 42 +++ 3 ---', 'Add JWT authentication');
 
       expect(msg).toBe('feat(auth): add JWT validation\n\nmade with Frankenbeast 🧟');
-      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('Add JWT authentication'));
-      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('src/auth.ts'));
+      expect(llm.complete).toHaveBeenCalled();
+      expect(llm.complete.mock.calls[0]?.[0]).toContain('Add JWT authentication');
+      expect(llm.complete.mock.calls[0]?.[0]).toContain('src/auth.ts');
     });
 
     it('falls back to null when LLM is not provided', async () => {

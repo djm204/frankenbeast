@@ -84,6 +84,7 @@ describe('handleInitCommand', () => {
       paths: {
         root: tempDir,
         frankenbeastDir,
+        llmCacheDir: join(frankenbeastDir, '.cache', 'llm'),
         plansDir: join(frankenbeastDir, 'plans'),
         buildDir: join(frankenbeastDir, '.build'),
         beastsDir: join(frankenbeastDir, '.build', 'beasts'),

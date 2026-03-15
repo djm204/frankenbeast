@@ -1,7 +1,17 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { IAdapter } from './adapter-llm-client.js';
-import { createDefaultRegistry, type ICliProvider, type ProviderRegistry } from '../skills/providers/cli-provider.js';
+import {
+  createDefaultRegistry,
+  resolveProviderCacheCapabilities,
+  type ICliProvider,
+  type ProviderRegistry,
+} from '../skills/providers/cli-provider.js';
 import { classifyCommandFailure, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
+
+type CliCacheSessionHint = {
+  key: string;
+  persist?: boolean;
+};
 
 type CliTransformed = {
   prompt: string;
@@ -9,6 +19,7 @@ type CliTransformed = {
   model: string | undefined;
   chatMode: boolean;
   sessionContinue: boolean;
+  cacheSession?: CliCacheSessionHint | undefined;
   requestId?: string | undefined;
 };
 
@@ -59,6 +70,7 @@ export class CliLlmAdapter implements IAdapter {
   private readonly _spawn: SpawnFn;
   private readonly registry: ProviderRegistry;
   private readonly responseProviders = new Map<string, string>();
+  private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionKey: string }>();
   private chatCallCount = 0;
 
   constructor(
@@ -89,11 +101,16 @@ export class CliLlmAdapter implements IAdapter {
     const req = request as {
       id?: string;
       messages: Array<{ role: string; content: string }>;
+      cacheSession?: CliCacheSessionHint;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
-    const sessionContinue = this.opts.chatMode && this.chatCallCount > 0;
-    return {
+    const cacheSession = req.cacheSession;
+    const cacheCapabilities = resolveProviderCacheCapabilities(this.provider);
+    const sessionContinue = this.opts.chatMode
+      ? this.chatCallCount > 0
+      : Boolean(cacheSession?.key && cacheCapabilities.nativeWorkSessions);
+    const transformed: CliTransformed = {
       prompt: last?.content ?? '',
       maxTurns: 1,
       model: this.opts.model,
@@ -101,10 +118,14 @@ export class CliLlmAdapter implements IAdapter {
       sessionContinue,
       ...(req.id ? { requestId: req.id } : {}),
     };
+    if (cacheSession) {
+      transformed.cacheSession = cacheSession;
+    }
+    return transformed;
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns, model, chatMode, sessionContinue, requestId } = providerRequest as CliTransformed;
+    const { prompt, maxTurns, model, chatMode, sessionContinue, requestId, cacheSession } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
     const exhaustedProviders = new Map<string, CommandFailure>();
@@ -129,8 +150,19 @@ export class CliLlmAdapter implements IAdapter {
       if (result.exitCode === 0) {
         if (requestId) {
           this.responseProviders.set(requestId, activeProvider);
+          if (cacheSession?.persist && resolveProviderCacheCapabilities(provider).persistentAcrossProcesses) {
+            this.responseSessions.set(requestId, {
+              provider: activeProvider,
+              ...(this.resolveModel(activeProvider, model) ? { model: this.resolveModel(activeProvider, model) } : {}),
+              sessionKey: cacheSession.key,
+            });
+          }
         }
         return result.stdout;
+      }
+
+      if (requestId) {
+        this.responseSessions.delete(requestId);
       }
 
       const failure = classifyCommandFailure({
@@ -181,6 +213,15 @@ export class CliLlmAdapter implements IAdapter {
 
   validateCapabilities(feature: string): boolean {
     return feature === 'text-completion';
+  }
+
+  consumeSessionMetadata(requestId: string): { provider: string; model?: string | undefined; sessionKey: string } | undefined {
+    const session = this.responseSessions.get(requestId);
+    if (!session) {
+      return undefined;
+    }
+    this.responseSessions.delete(requestId);
+    return session;
   }
 
   private resolveProvider(name: string): ICliProvider {

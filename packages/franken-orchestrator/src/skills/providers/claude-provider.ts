@@ -150,4 +150,12 @@ export class ClaudeProvider implements ICliProvider {
   defaultContextWindowTokens(): number {
     return 200_000;
   }
+
+  getCacheCapabilities() {
+    return {
+      nativeWorkSessions: true,
+      persistentAcrossProcesses: true,
+      promptReuse: 'native' as const,
+    };
+  }
 }

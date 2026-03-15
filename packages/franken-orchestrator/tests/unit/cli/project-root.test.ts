@@ -47,6 +47,7 @@ describe('project-root', () => {
       const paths = getProjectPaths(testDir);
       expect(paths.root).toBe(testDir);
       expect(paths.frankenbeastDir).toBe(resolve(testDir, '.frankenbeast'));
+      expect(paths.llmCacheDir).toBe(resolve(testDir, '.frankenbeast/.cache/llm'));
       expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans'));
       expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
       expect(paths.beastsDir).toBe(resolve(testDir, '.frankenbeast/.build/beasts'));

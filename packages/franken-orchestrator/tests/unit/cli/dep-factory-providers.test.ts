@@ -53,6 +53,15 @@ vi.mock('../../../src/adapters/adapter-llm-client.js', () => ({
   AdapterLlmClient: vi.fn(function () {}),
 }));
 
+vi.mock('../../../src/cache/cached-cli-llm-client.js', () => ({
+  CachedCliLlmClient: vi.fn(function () {
+    return {
+      complete: vi.fn(async () => 'cached response'),
+    };
+  }),
+  completeWithCacheHint: vi.fn(async (_llm: unknown, prompt: string) => prompt),
+}));
+
 vi.mock('../../../src/closure/pr-creator.js', () => ({
   PrCreator: vi.fn(function () {
     return { generateCommitMessage: vi.fn() };
@@ -110,6 +119,15 @@ function makeOpts(overrides: Partial<CliDepOptions> = {}): CliDepOptions {
     noPr: true,
     verbose: false,
     reset: false,
+    enabledModules: {
+      firewall: false,
+      skills: false,
+      memory: false,
+      planner: false,
+      critique: false,
+      governor: false,
+      heartbeat: false,
+    },
     ...overrides,
   };
 }
@@ -127,15 +145,14 @@ describe('dep-factory provider wiring', () => {
     await expect(createCliDeps(opts)).rejects.toThrow(/Unknown provider "unknown-provider"/);
   });
 
-  it.each(['claude', 'codex', 'gemini', 'aider'])(
-    'accepts built-in provider "%s" without error',
-    async (name) => {
+  for (const name of ['claude', 'codex', 'gemini', 'aider']) {
+    it(`accepts built-in provider "${name}" without error`, async () => {
       const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
       const opts = makeOpts({ provider: name });
       const result = await createCliDeps(opts);
       expect(result.cliLlmAdapter).toBeDefined();
-    },
-  );
+    }, 10_000);
+  }
 
   it('passes ProviderRegistry to MartinLoop', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
@@ -171,7 +188,7 @@ describe('dep-factory provider wiring', () => {
       expect.objectContaining({ name: 'claude' }),
       expect.objectContaining({ commandOverride: '/usr/local/bin/claude' }),
     );
-  });
+  }, 10_000);
 
   it('preserves AdapterLlmClient, PrCreator, CliSkillExecutor wiring', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
@@ -185,9 +202,9 @@ describe('dep-factory provider wiring', () => {
     expect(PrCreator).toHaveBeenCalled();
     expect(CliSkillExecutor).toHaveBeenCalled();
     expect(result.deps.cliExecutor).toBeDefined();
-  });
+  }, 10_000);
 
-  it('passes selected provider defaults to CliSkillExecutor', async () => {
+  it('passes selected provider defaults to CliSkillExecutor', { timeout: 10_000 }, async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'codex',

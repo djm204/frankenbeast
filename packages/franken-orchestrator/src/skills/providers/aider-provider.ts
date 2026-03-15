@@ -60,4 +60,12 @@ export class AiderProvider implements ICliProvider {
   defaultContextWindowTokens(): number {
     return 128_000;
   }
+
+  getCacheCapabilities() {
+    return {
+      nativeWorkSessions: false,
+      persistentAcrossProcesses: false,
+      promptReuse: 'managed' as const,
+    };
+  }
 }

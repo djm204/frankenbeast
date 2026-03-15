@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
@@ -23,6 +23,7 @@ import { isNoOpDesign } from './noop-detector.js';
 import { writeDesignDoc, readDesignDoc } from './file-writer.js';
 import { resolveUpstreamRepo } from './upstream-repo.js';
 import type { ChunkDefinition } from './file-writer.js';
+import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
 
@@ -283,10 +284,21 @@ export class Session {
       designContent = stored;
     }
 
-    const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
-    // Wrap LLM to cache raw responses to the plan directory.
-    // Spinner + stream progress handler shows real-time activity (no ProgressLlmClient needed).
-    const cachingLlm = this.wrapWithResponseCache(adapterLlm, paths);
+    const inferredPlanName = paths.plansDir.split('/').filter(Boolean).pop() ?? 'plans';
+    const planName = this.config.planDirOverride
+      ? this.config.planDirOverride.split('/').filter(Boolean).pop() ?? 'session'
+      : inferredPlanName === 'plans' ? 'session' : inferredPlanName;
+    const cachingLlm = new CachedCliLlmClient({
+      cacheRootDir: paths.llmCacheDir,
+      cliAdapter: cliLlmAdapter,
+      projectId: paths.root,
+      provider: this.config.provider,
+      model: this.config.provider,
+      operation: 'plan-build',
+      workId: `plan:${planName}`,
+      stablePrefix: 'surface:plan',
+      workPrefix: `plan:${planName}`,
+    });
     const contextGatherer = new PlanContextGatherer(paths.root);
     const llmGraphBuilder = new LlmGraphBuilder(cachingLlm, contextGatherer);
     const chunkWriter = new ChunkFileWriter(paths.plansDir);
@@ -452,23 +464,6 @@ export class Session {
     console.log(
       `\n  ${fixed === outcomes.length ? A.green : A.red}${A.bold}Result: ${fixed} fixed, ${failed} failed, ${skipped} skipped${A.reset}\n`,
     );
-  }
-
-  private wrapWithResponseCache(
-    llm: { complete(prompt: string): Promise<string> },
-    paths: ProjectPaths,
-  ): { complete(prompt: string): Promise<string> } {
-    return {
-      async complete(prompt: string): Promise<string> {
-        const response = await llm.complete(prompt);
-        try {
-          writeFileSync(paths.llmResponseFile, response, 'utf-8');
-        } catch {
-          // Non-fatal — caching is best-effort
-        }
-        return response;
-      },
-    };
   }
 
   private buildDepOptions(): CliDepOptions {

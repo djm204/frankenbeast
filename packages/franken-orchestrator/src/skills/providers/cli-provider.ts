@@ -25,6 +25,12 @@ export interface ProviderOpts {
   readonly sessionContinue?: boolean | undefined;
 }
 
+export interface ProviderCacheCapabilities {
+  readonly nativeWorkSessions: boolean;
+  readonly persistentAcrossProcesses: boolean;
+  readonly promptReuse: 'native' | 'managed';
+}
+
 export interface ICliProvider {
   readonly name: string;
   readonly command: string;
@@ -39,6 +45,25 @@ export interface ICliProvider {
   supportsStreamJson(): boolean;
   supportsNativeSessionResume(): boolean;
   defaultContextWindowTokens(): number;
+  getCacheCapabilities?(): ProviderCacheCapabilities;
+}
+
+export function resolveProviderCacheCapabilities(provider: ICliProvider): ProviderCacheCapabilities {
+  if (provider.getCacheCapabilities) {
+    return provider.getCacheCapabilities();
+  }
+
+  return provider.supportsNativeSessionResume()
+    ? {
+        nativeWorkSessions: true,
+        persistentAcrossProcesses: true,
+        promptReuse: 'native',
+      }
+    : {
+        nativeWorkSessions: false,
+        persistentAcrossProcesses: false,
+        promptReuse: 'managed',
+      };
 }
 
 export class ProviderRegistry {

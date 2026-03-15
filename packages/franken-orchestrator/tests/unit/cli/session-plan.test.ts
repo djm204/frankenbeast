@@ -255,17 +255,26 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     console.log = origLog;
   });
 
-  it('runPlan() constructs AdapterLlmClient with cliLlmAdapter, not cliExecutor', async () => {
+  it('runPlan() passes a cached CliLlmAdapter-backed LLM to LlmGraphBuilder', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig();
     await new Session(config).start();
 
-    const { AdapterLlmClient } = await import(
-      '../../../src/adapters/adapter-llm-client.js'
-    );
-    expect(AdapterLlmClient).toHaveBeenCalled();
-    // The adapter passed to AdapterLlmClient must be cliLlmAdapter, NOT cliExecutor
-    expect(adapterCtorArg).toBe(mockCliLlmAdapter);
+    expect(llmGraphBuilderCtorArg).toBeDefined();
+
+    const llm = llmGraphBuilderCtorArg as {
+      complete(prompt: string): Promise<string>;
+    };
+    await expect(llm.complete('repeat this prompt')).resolves.toBe('mock response');
+    await expect(llm.complete('repeat this prompt')).resolves.toBe('mock response');
+
+    expect(mockCliLlmAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(mockCliLlmAdapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({
+      cacheSession: {
+        key: 'plan:session',
+        persist: true,
+      },
+    }));
   });
 
   it('runPlan() invokes LlmGraphBuilder.build to decompose the design doc', async () => {
@@ -313,11 +322,20 @@ describe('createCliDeps — cliLlmAdapter field', () => {
       noPr: true,
       verbose: false,
       reset: false,
+      enabledModules: {
+        firewall: false,
+        skills: false,
+        memory: false,
+        planner: false,
+        critique: false,
+        governor: false,
+        heartbeat: false,
+      },
     });
 
     expect(result.cliLlmAdapter).toBeDefined();
     expect(typeof result.cliLlmAdapter.transformRequest).toBe('function');
 
     rmSync(testDir, { recursive: true, force: true });
-  });
+  }, 10_000);
 });

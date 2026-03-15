@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 export interface ProjectPaths {
   root: string;
   frankenbeastDir: string;
+  llmCacheDir: string;
   plansDir: string;
   buildDir: string;
   beastsDir: string;
@@ -87,6 +88,7 @@ export function generatePlanName(designDocPath?: string): string {
  */
 export function getProjectPaths(root: string, planName?: string): ProjectPaths {
   const frankenbeastDir = resolve(root, '.frankenbeast');
+  const llmCacheDir = resolve(frankenbeastDir, '.cache', 'llm');
   const plansBaseDir = resolve(frankenbeastDir, 'plans');
   const plansDir = planName ? resolve(plansBaseDir, planName) : plansBaseDir;
   const buildDir = resolve(frankenbeastDir, '.build');
@@ -94,6 +96,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
   return {
     root,
     frankenbeastDir,
+    llmCacheDir,
     plansDir,
     buildDir,
     beastsDir,
