@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.22.0](https://github.com/djm204/frankenbeast/compare/v0.21.0...v0.22.0) (2026-03-15)
+
+
+### Features
+
+* **franken-orchestrator:** add intelligent LLM caching ([c00307c](https://github.com/djm204/frankenbeast/commit/c00307c91c7612f38aa86962f07d04e7feec6b61))
+* **franken-orchestrator:** cache repeated planning and issue prompts ([89b3591](https://github.com/djm204/frankenbeast/commit/89b3591b3b92213f14129f60d4cce3b40b15b941))
+* wire critique and governor modules in dep-factory (Tiers 3-4) ([8d55339](https://github.com/djm204/frankenbeast/commit/8d553399167860bad06a03c85e5b6045a0fb8b1e))
+
+
+### Documentation
+
+* mark beastloop tiers 3-4 wiring as implemented ([2c4bdc4](https://github.com/djm204/frankenbeast/commit/2c4bdc489667acb4b8750594fcd88746bbcf707d))
+* update RAMP_UP files across all packages to reflect current integration status ([a6f9f62](https://github.com/djm204/frankenbeast/commit/a6f9f627373e426278eaa98471d3f78da8064d26))
+* update RAMP_UP for all packages with accurate integration status ([78220d6](https://github.com/djm204/frankenbeast/commit/78220d6ffb22720eae325f2f3f94823e6a29a463))
+
 ## [0.21.0](https://github.com/djm204/frankenbeast/compare/v0.20.0...v0.21.0) (2026-03-13)
 
 
