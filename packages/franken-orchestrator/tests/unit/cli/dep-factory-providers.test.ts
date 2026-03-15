@@ -76,6 +76,78 @@ vi.mock('../../../src/cli/trace-viewer.js', () => ({
   setupTraceViewer: vi.fn(async () => ({ stop: vi.fn() })),
 }));
 
+vi.mock('../../../src/session/chunk-session-store.js', () => ({
+  FileChunkSessionStore: vi.fn(function () {
+    return { list: vi.fn(() => []), load: vi.fn(), save: vi.fn(), remove: vi.fn() };
+  }),
+}));
+
+vi.mock('../../../src/session/chunk-session-snapshot-store.js', () => ({
+  FileChunkSessionSnapshotStore: vi.fn(function () {
+    return { save: vi.fn(), load: vi.fn(), list: vi.fn(() => []) };
+  }),
+}));
+
+vi.mock('../../../src/session/chunk-session-renderer.js', () => ({
+  ChunkSessionRenderer: vi.fn(function () {
+    return { render: vi.fn(() => '') };
+  }),
+}));
+
+vi.mock('../../../src/session/chunk-session-compactor.js', () => ({
+  ChunkSessionCompactor: vi.fn(function () {
+    return { compact: vi.fn() };
+  }),
+}));
+
+vi.mock('../../../src/session/chunk-session-gc.js', () => ({
+  ChunkSessionGc: vi.fn(function () {
+    return { collect: vi.fn() };
+  }),
+}));
+
+vi.mock('../../../src/adapters/firewall-adapter.js', () => ({
+  FirewallPortAdapter: vi.fn(function () {
+    return { sanitize: vi.fn(async (input: string) => ({ sanitized: input, violations: [] })) };
+  }),
+}));
+
+vi.mock('../../../src/adapters/episodic-memory-port-adapter.js', () => ({
+  EpisodicMemoryPortAdapter: vi.fn(function () {
+    return { hydrate: vi.fn(async () => ({ context: '' })) };
+  }),
+}));
+
+vi.mock('../../../src/adapters/skill-registry-bridge.js', () => ({
+  SkillRegistryBridge: vi.fn(function () {}),
+}));
+
+vi.mock('../../../src/adapters/skills-adapter.js', () => ({
+  SkillsPortAdapter: vi.fn(function () {
+    return { execute: vi.fn() };
+  }),
+}));
+
+vi.mock('../../../src/issues/issue-fetcher.js', () => ({
+  IssueFetcher: vi.fn(function () {}),
+}));
+
+vi.mock('../../../src/issues/issue-triage.js', () => ({
+  IssueTriage: vi.fn(function () {}),
+}));
+
+vi.mock('../../../src/issues/issue-graph-builder.js', () => ({
+  IssueGraphBuilder: vi.fn(function () {}),
+}));
+
+vi.mock('../../../src/issues/issue-review.js', () => ({
+  IssueReview: vi.fn(function () {}),
+}));
+
+vi.mock('../../../src/issues/issue-runner.js', () => ({
+  IssueRunner: vi.fn(function () {}),
+}));
+
 vi.mock('@franken/firewall', () => ({
   scanForInjection: vi.fn(() => ({ passed: true, violations: [] })),
   maskPii: vi.fn((request: unknown) => ({ passed: true, value: request, violations: [] })),
