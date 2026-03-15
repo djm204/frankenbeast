@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.4.0...franken-skills-v0.4.1) (2026-03-15)
+
+
+### Bug Fixes
+
+* use --json flag for agent-skills CLI discovery ([6ddc4da](https://github.com/djm204/frankenbeast/commit/6ddc4da7d0a98c6b988a6cefbdc2244d43dadbaf))
+* use --json flag for agent-skills CLI discovery ([3549dc8](https://github.com/djm204/frankenbeast/commit/3549dc8930c3a785e24957406af9b4db8eddbb1f))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.3.1...franken-skills-v0.4.0) (2026-03-12)
 
 

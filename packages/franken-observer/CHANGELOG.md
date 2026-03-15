@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.2...franken-observer-v0.4.3) (2026-03-15)
+
+
+### Bug Fixes
+
+* replace flaky setTimeout race with proper Promise in PostMortemGenerator E2E test ([49a4d7d](https://github.com/djm204/frankenbeast/commit/49a4d7df67fbe452679bdba59a085e8d4b570701))
+
 ## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.1...franken-observer-v0.4.2) (2026-03-12)
 
 

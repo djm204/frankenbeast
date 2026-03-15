@@ -1,6 +1,6 @@
 {
   "name": "@frankenbeast/observer",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "MOD-05 – Observability and Evaluation for the Frankenbeast system",
   "type": "module",
   "main": "dist/index.js",
