@@ -145,14 +145,15 @@ describe('PostMortemGenerator', () => {
       const detector = new LoopDetector({ windowSize: 3, repeatThreshold: 3 })
       const emitter = new InterruptEmitter()
 
-      let postMortemPath: string | null = null
+      const postMortemDone = new Promise<string>(resolve => {
+        emitter.on('interrupt', async signal => {
+          const path = await gen.generate(trace, signal)
+          resolve(path)
+        })
+      })
 
       detector.on('loop-detected', result => {
         emitter.emit({ traceId: trace.id, ...result, timestamp: Date.now() })
-      })
-
-      emitter.on('interrupt', async signal => {
-        postMortemPath = await gen.generate(trace, signal)
       })
 
       // Replay the trace spans through the detector
@@ -160,8 +161,7 @@ describe('PostMortemGenerator', () => {
         detector.check(span.name)
       }
 
-      // Wait for async file write
-      await new Promise(r => setTimeout(r, 50))
+      const postMortemPath = await postMortemDone
 
       expect(postMortemPath).not.toBeNull()
       expect(existsSync(postMortemPath!)).toBe(true)

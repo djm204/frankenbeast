@@ -39,13 +39,35 @@ describe("AgentSkillsCli", () => {
     vi.clearAllMocks();
   });
 
-  it("list() returns parsed RawSkillEntry[] from fixture stdout", async () => {
+  it("list() flattens categorized --list --json output into RawSkillEntry[]", async () => {
     mockExecFile.mockImplementation(makeExecFileImpl(validFixture));
     const cli = new AgentSkillsCli();
     const entries = await cli.list();
     expect(entries).toHaveLength(2);
     expect(entries[0]?.skill_id).toBe("deploy-to-vercel");
+    expect(entries[0]?.metadata?.source).toBe("engineering");
+    expect(entries[0]?.metadata?.description).toBe("Deploys the current project to Vercel using the Vercel CLI");
     expect(entries[1]?.skill_id).toBe("run-tests");
+    expect(entries[1]?.metadata?.source).toBe("engineering");
+  });
+
+  it("list() accepts legacy flat array format for backwards compatibility", async () => {
+    const legacyOutput = JSON.stringify([
+      { skill_id: "legacy-skill", metadata: { name: "Legacy", description: "Old format", source: "GLOBAL" } },
+    ]);
+    mockExecFile.mockImplementation(makeExecFileImpl(legacyOutput));
+    const cli = new AgentSkillsCli();
+    const entries = await cli.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.skill_id).toBe("legacy-skill");
+  });
+
+  it("throws PARSE_ERROR on unexpected JSON shape", async () => {
+    mockExecFile.mockImplementation(makeExecFileImpl(JSON.stringify({ unexpected: true })));
+    const cli = new AgentSkillsCli();
+    await expect(cli.list()).rejects.toSatisfy(
+      (e: unknown) => e instanceof SkillRegistryError && e.code === "PARSE_ERROR",
+    );
   });
 
   it("throws SkillRegistryError(CLI_FAILURE) on non-zero exit code", async () => {
