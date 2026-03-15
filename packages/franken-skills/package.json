@@ -1,6 +1,6 @@
 {
   "name": "@franken/skills",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Skill Frontloading & Registry — MOD-02 of the Frankenbeast agentic system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
