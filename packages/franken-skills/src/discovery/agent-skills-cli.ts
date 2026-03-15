@@ -20,7 +20,11 @@ function flattenListJson(json: AgentSkillsListJson): RawSkillEntry[] {
         metadata: {
           name: skill.name,
           description: skill.description,
-          source: category,
+          source: "GLOBAL",
+        },
+        interface: {
+          input_schema: { type: "object" },
+          output_schema: { type: "object" },
         },
         constraints: {
           is_destructive: false,
