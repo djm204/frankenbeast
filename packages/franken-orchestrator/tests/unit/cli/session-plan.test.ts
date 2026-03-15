@@ -302,9 +302,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
 
 describe('createCliDeps — cliLlmAdapter field', () => {
   it('returns a cliLlmAdapter with transformRequest method', async () => {
-    const { createCliDeps: realCreateCliDeps } = await vi.importActual<
-      typeof import('../../../src/cli/dep-factory.js')
-    >('../../../src/cli/dep-factory.js');
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
 
     const testDir = resolve(
       tmpdir(),
@@ -314,7 +312,7 @@ describe('createCliDeps — cliLlmAdapter field', () => {
     const paths = getProjectPaths(testDir);
     scaffoldFrankenbeast(paths);
 
-    const result = await realCreateCliDeps({
+    const result = await createCliDeps({
       paths,
       baseBranch: 'main',
       budget: 5,
@@ -337,5 +335,5 @@ describe('createCliDeps — cliLlmAdapter field', () => {
     expect(typeof result.cliLlmAdapter.transformRequest).toBe('function');
 
     rmSync(testDir, { recursive: true, force: true });
-  }, 10_000);
+  });
 });
