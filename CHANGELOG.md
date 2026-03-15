@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/djm204/frankenbeast/compare/v0.22.0...v0.22.1) (2026-03-15)
+
+
+### Bug Fixes
+
+* **orchestrator:** add missing @franken/critique and @franken/governor dependencies ([31e71f0](https://github.com/djm204/frankenbeast/commit/31e71f01d4aacd062ec42aebcf7bca3762a7de39))
+
 ## [0.22.0](https://github.com/djm204/frankenbeast/compare/v0.21.0...v0.22.0) (2026-03-15)
 
 
