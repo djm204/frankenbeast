@@ -39,7 +39,9 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@franken/critique": "*",
     "@franken/firewall": "*",
+    "@franken/governor": "*",
     "@franken/skills": "*",
     "@franken/types": "*",
     "@frankenbeast/observer": "*",
