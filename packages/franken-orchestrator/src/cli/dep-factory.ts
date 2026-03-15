@@ -433,37 +433,44 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       const { createInterface } = await import('node:readline/promises');
       const { stdin, stdout } = await import('node:process');
 
-      const useDefaultDecision = !stdin.isTTY;
+      if (!stdin.isTTY) {
+        // Non-interactive mode (CI, piped input) — auto-approve without readline
+        governor = new GovernorPortAdapter({
+          gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
+          projectId: basename(paths.root),
+          defaultDecision: 'approved' as const,
+        });
+      } else {
+        const rl = createInterface({ input: stdin, output: stdout });
 
-      const rl = createInterface({ input: stdin, output: stdout });
+        const cliChannel = new CliChannel({
+          readline: { question: (prompt: string) => rl.question(prompt) },
+          operatorName: 'operator',
+        });
 
-      const cliChannel = new CliChannel({
-        readline: { question: (prompt: string) => rl.question(prompt) },
-        operatorName: 'operator',
-      });
+        // No-op audit recorder — audit persistence requires episodic store bridge (future)
+        const noopAuditRecorder = {
+          record: async () => {},
+        };
 
-      const noopAuditRecorder = {
-        record: async () => {},
-      };
+        const gateway = new ApprovalGateway({
+          channel: cliChannel,
+          auditRecorder: noopAuditRecorder,
+          config: defaultConfig(),
+        });
 
-      const gateway = new ApprovalGateway({
-        channel: cliChannel,
-        auditRecorder: noopAuditRecorder,
-        config: defaultConfig(),
-      });
+        governor = new GovernorPortAdapter({
+          gateway: gateway as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
+          projectId: basename(paths.root),
+        });
 
-      governor = new GovernorPortAdapter({
-        gateway: gateway as unknown as import('../adapters/governor-adapter.js').GovernorPortAdapterDeps['gateway'],
-        projectId: basename(paths.root),
-        ...(useDefaultDecision ? { defaultDecision: 'approved' as const } : {}),
-      });
-
-      // Close readline on finalize to prevent dangling handles
-      const previousFinalize = finalize;
-      finalize = async () => {
-        rl.close();
-        await previousFinalize();
-      };
+        // Close readline on finalize to prevent dangling handles
+        const previousFinalize = finalize;
+        finalize = async () => {
+          rl.close();
+          await previousFinalize();
+        };
+      }
     } catch (error) {
       logger.warn(`Governor module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
     }
