@@ -12,7 +12,9 @@
     }
   },
   "bin": {
-    "frankenbeast": "./dist/cli/run.js"
+    "frankenbeast": "./dist/cli/run.js",
+    "franken": "./dist/cli/run.js",
+    "frkn": "./dist/cli/run.js"
   },
   "files": [
     "dist"

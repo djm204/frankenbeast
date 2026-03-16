@@ -349,6 +349,8 @@ See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup gu
 
 ## Usage
 
+The CLI is available as `frankenbeast`, `franken`, or `frkn` — all are identical.
+
 ### Interactive Session (idea to PR)
 
 ```bash
