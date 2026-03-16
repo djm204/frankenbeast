@@ -1,7 +1,7 @@
 # ADR 016: External Communications Gateway
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 Frankenbeast requires the ability to interact with users through external messaging platforms (Slack, Discord, Telegram, WhatsApp) while maintaining a single canonical conversation model. These platforms primarily use asynchronous HTTP webhooks for inbound events, whereas the Frankenbeast orchestrator provides a real-time, streaming WebSocket interface for the web dashboard.
