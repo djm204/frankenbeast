@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 
@@ -11,7 +12,7 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
 
   return {
-    plugins: [react()],
+    plugins: [tailwindcss(), react()],
     define: {
       __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
     },
