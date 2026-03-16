@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.4.1...franken-skills-v0.4.2) (2026-03-15)
+
+
+### Bug Fixes
+
+* **skills:** fix global skill discovery validation failures ([2dc938e](https://github.com/djm204/frankenbeast/commit/2dc938e70ace981a5b1ecebe89c5d290d4dca4c5))
+* **skills:** set source to GLOBAL and add interface field in skill flattener ([035d6be](https://github.com/djm204/frankenbeast/commit/035d6be862e03a91615866a9fa9ff3e63289617a))
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.4.0...franken-skills-v0.4.1) (2026-03-15)
 
 
