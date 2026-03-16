@@ -1,6 +1,5 @@
 import { useBeastStore } from '../../../stores/beast-store';
 import { PresetCardGroup } from '../shared/preset-card';
-import { GapBanner } from '../shared/gap-banner';
 import * as Accordion from '@radix-ui/react-accordion';
 
 const GIT_PRESETS = {
@@ -41,8 +40,6 @@ export function StepGit() {
 
   return (
     <div className="p-6 space-y-4">
-      <GapBanner message="Git workflow presets stored — backend applies default git behavior." />
-
       <PresetCardGroup presets={PRESET_CARDS} selected={values.preset ?? ''} onSelect={handlePresetSelect} />
 
       {values.preset && (

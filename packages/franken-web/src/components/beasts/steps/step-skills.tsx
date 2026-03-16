@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useBeastStore } from '../../../stores/beast-store';
-import { GapBanner } from '../shared/gap-banner';
 
 const STATIC_SKILLS = [
   { id: 'code-review', name: 'Code Review', description: 'Automated code review', category: 'quality' },
@@ -32,25 +31,26 @@ export function StepSkills() {
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <GapBanner message="Skill registry not yet available — showing static skill list." />
-
+    <div className="p-6 space-y-5">
       {/* Selected chips */}
       {selected.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {selected.map((id) => {
-            const skill = STATIC_SKILLS.find((s) => s.id === id);
-            return (
-              <span key={id} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-beast-accent-soft text-beast-accent text-xs border border-beast-accent/30">
-                {skill?.name ?? id}
-                <button type="button" onClick={() => removeSkill(id)} className="hover:text-beast-danger" aria-label={`Remove ${skill?.name ?? id}`}>
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </span>
-            );
-          })}
+        <div>
+          <h3 className="text-xs font-medium text-beast-muted mb-2 uppercase tracking-wide">Selected</h3>
+          <div className="flex flex-wrap gap-2">
+            {selected.map((id) => {
+              const skill = STATIC_SKILLS.find((s) => s.id === id);
+              return (
+                <span key={id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-beast-accent-soft text-beast-accent text-xs font-medium border border-beast-accent/30">
+                  {skill?.name ?? id}
+                  <button type="button" onClick={() => removeSkill(id)} className="hover:text-beast-danger p-0.5" aria-label={`Remove ${skill?.name ?? id}`}>
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -60,13 +60,13 @@ export function StepSkills() {
         placeholder="Search skills..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2
+        className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2.5
           text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none
           focus:ring-2 focus:ring-beast-accent"
       />
 
       {/* Skill cards */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((skill) => {
           const isSelected = selected.includes(skill.id);
           return (
@@ -74,15 +74,15 @@ export function StepSkills() {
               key={skill.id}
               type="button"
               onClick={() => isSelected ? removeSkill(skill.id) : addSkill(skill.id)}
-              className={`p-3 rounded-xl border text-left transition-colors
+              className={`p-4 rounded-xl border-2 text-left transition-all min-h-[5rem]
                 ${isSelected
-                  ? 'border-beast-accent bg-beast-accent-soft'
-                  : 'border-beast-border bg-beast-panel hover:bg-beast-elevated'
+                  ? 'border-beast-accent bg-beast-accent-soft ring-1 ring-beast-accent/30'
+                  : 'border-beast-border bg-beast-panel hover:bg-beast-elevated hover:border-beast-subtle'
                 }`}
             >
               <h3 className="text-sm font-medium text-beast-text">{skill.name}</h3>
-              <p className="text-xs text-beast-subtle mt-0.5">{skill.description}</p>
-              <span className="text-[10px] text-beast-muted mt-1 inline-block">{skill.category}</span>
+              <p className="text-xs text-beast-subtle mt-1 leading-relaxed">{skill.description}</p>
+              <span className="text-[10px] text-beast-muted mt-2 inline-block px-1.5 py-0.5 rounded bg-beast-control">{skill.category}</span>
             </button>
           );
         })}

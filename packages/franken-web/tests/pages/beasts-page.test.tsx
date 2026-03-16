@@ -25,7 +25,7 @@ const baseProps = {
   logs: [] as string[],
   selectedAgentId: null,
   onClose: vi.fn(),
-  onCreate: vi.fn(),
+  onLaunch: vi.fn(),
   onDelete: vi.fn(),
   onKill: vi.fn(),
   onRestart: vi.fn(),
@@ -47,11 +47,11 @@ describe('BeastsPage', () => {
     expect(baseProps.onSelectAgent).toHaveBeenCalledWith('agent-1');
   });
 
-  it('shows Create Agent button that calls onCreate', () => {
+  it('shows Create Agent button that opens wizard dialog', () => {
     render(<BeastsPage {...baseProps} />);
-    const btns = screen.getAllByRole('button', { name: /create agent/i });
-    fireEvent.click(btns[0]!);
-    expect(baseProps.onCreate).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
+    // Wizard opens — step indicator renders
+    expect(screen.getByText('Identity')).toBeTruthy();
   });
 
   it('shows error banner when error prop is set', () => {

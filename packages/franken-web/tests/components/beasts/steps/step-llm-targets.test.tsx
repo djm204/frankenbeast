@@ -20,8 +20,10 @@ describe('StepLlmTargets', () => {
     expect(screen.getByText(/per-action overrides/i)).toBeTruthy();
   });
 
-  it('shows gap banner for per-action routing', () => {
+  it('renders action type override cards', () => {
     render(<StepLlmTargets />);
-    expect(screen.getByText(/per-action routing not yet wired/i)).toBeTruthy();
+    expect(screen.getByText('planning')).toBeTruthy();
+    expect(screen.getByText('execution')).toBeTruthy();
+    expect(screen.getByText('critique')).toBeTruthy();
   });
 });

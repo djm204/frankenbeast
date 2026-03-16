@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import type { TrackedAgentDetail, TrackedAgentSummary, BeastCatalogEntry } from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
+import { WizardDialog } from '../components/beasts/wizard-dialog';
+import { useBeastStore } from '../stores/beast-store';
 
 interface BeastsPageProps {
   agents: TrackedAgentSummary[];
@@ -11,7 +14,7 @@ interface BeastsPageProps {
   logs: string[];
   selectedAgentId: string | null;
   onClose: () => void;
-  onCreate: () => void;
+  onLaunch: (config: Record<string, unknown>) => void;
   onDelete: (agentId: string) => void;
   onKill: (agentId: string) => void;
   onRestart: (agentId: string) => void;
@@ -29,7 +32,7 @@ export function BeastsPage({
   logs,
   selectedAgentId,
   onClose,
-  onCreate,
+  onLaunch,
   onDelete,
   onKill,
   onRestart,
@@ -38,6 +41,19 @@ export function BeastsPage({
   onStart,
   onStop,
 }: BeastsPageProps) {
+  const [showWizard, setShowWizard] = useState(false);
+  const resetWizard = useBeastStore((s) => s.resetWizard);
+
+  function handleOpenWizard() {
+    resetWizard();
+    setShowWizard(true);
+  }
+
+  function handleLaunch(config: Record<string, unknown>) {
+    setShowWizard(false);
+    onLaunch(config);
+  }
+
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-beast-bg">
       {error && (
@@ -46,15 +62,16 @@ export function BeastsPage({
         </div>
       )}
 
-      <div className="flex items-center justify-between px-4 py-3 border-b border-beast-border shrink-0">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-beast-border shrink-0">
         <h2 className="text-beast-text font-semibold text-lg">Beasts</h2>
         <button
           type="button"
-          onClick={onCreate}
+          onClick={handleOpenWizard}
           disabled={disabled}
-          className="px-3 py-1.5 rounded-lg bg-beast-accent text-beast-bg text-sm font-medium hover:bg-beast-accent-strong transition-colors disabled:opacity-50"
+          className="px-4 py-2 rounded-lg bg-beast-accent text-beast-bg text-sm font-medium
+            hover:bg-beast-accent-strong transition-colors disabled:opacity-50"
         >
-          Create Agent
+          + Create Agent
         </button>
       </div>
 
@@ -62,7 +79,7 @@ export function BeastsPage({
         agents={agents}
         selectedAgentId={selectedAgentId}
         onSelectAgent={onSelectAgent}
-        onCreateAgent={onCreate}
+        onCreateAgent={handleOpenWizard}
       />
 
       {agentDetail && (
@@ -79,6 +96,12 @@ export function BeastsPage({
           onKill={() => onKill(agentDetail.agent.id)}
         />
       )}
+
+      <WizardDialog
+        isOpen={showWizard}
+        onClose={() => setShowWizard(false)}
+        onLaunch={handleLaunch}
+      />
     </main>
   );
 }

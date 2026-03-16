@@ -1,6 +1,5 @@
 import { useBeastStore } from '../../../stores/beast-store';
 import { ProviderModelSelect, type ProviderOption } from '../shared/provider-model-select';
-import { GapBanner } from '../shared/gap-banner';
 
 const FALLBACK_PROVIDERS: ProviderOption[] = [
   {
@@ -41,26 +40,26 @@ export function StepLlmTargets() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h3 className="text-sm font-medium text-beast-text mb-2">Default Model</h3>
+    <div className="p-6 space-y-8">
+      <div className="max-w-lg">
+        <h3 className="text-sm font-medium text-beast-text mb-3">Default Model</h3>
         <ProviderModelSelect
           providers={FALLBACK_PROVIDERS}
           value={{ provider: values.defaultProvider ?? '', model: values.defaultModel ?? '' }}
           onChange={updateDefault}
         />
-        <p className="text-xs text-beast-subtle mt-1">Falls back to process-level config if unset</p>
+        <p className="text-xs text-beast-subtle mt-2">Falls back to process-level config if unset</p>
       </div>
 
       <div>
-        <h3 className="text-sm font-medium text-beast-text mb-2">Per-Action Overrides</h3>
-        <GapBanner message="Per-action routing not yet wired — all actions will use the default model." />
-        <div className="space-y-3 mt-3">
+        <h3 className="text-sm font-medium text-beast-text mb-3">Per-Action Overrides</h3>
+        <p className="text-xs text-beast-subtle mb-4">Override the default model for specific agent actions.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {ACTION_TYPES.map((action) => {
             const override = values.overrides?.[action];
             return (
-              <div key={action} className="p-3 rounded-lg bg-beast-elevated border border-beast-border">
-                <h4 className="text-xs font-medium text-beast-muted mb-2 capitalize">{action}</h4>
+              <div key={action} className="p-4 rounded-xl bg-beast-elevated border border-beast-border">
+                <h4 className="text-xs font-medium text-beast-muted mb-3 capitalize">{action}</h4>
                 <ProviderModelSelect
                   providers={FALLBACK_PROVIDERS}
                   value={{ provider: override?.provider ?? '', model: override?.model ?? '' }}

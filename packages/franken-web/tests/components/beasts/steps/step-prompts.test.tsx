@@ -23,6 +23,6 @@ describe('StepPrompts', () => {
 
   it('renders file picker section', () => {
     render(<StepPrompts />);
-    expect(screen.getByText(/files/i)).toBeTruthy();
+    expect(screen.getByText('Files')).toBeTruthy();
   });
 });
