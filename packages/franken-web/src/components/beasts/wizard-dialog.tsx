@@ -5,12 +5,12 @@ import { StepIdentity } from './steps/step-identity';
 import { StepWorkflow } from './steps/step-workflow';
 import { StepLlmTargets } from './steps/step-llm-targets';
 import { StepModules } from './steps/step-modules';
+import { StepSkills } from './steps/step-skills';
+import { StepPrompts } from './steps/step-prompts';
+import { StepGit } from './steps/step-git';
+import { StepReview } from './steps/step-review';
 
 const STEP_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git', 'Review'];
-
-function StepPlaceholder({ label }: { label: string }) {
-  return <div className="p-6 text-beast-muted text-center">{label} — coming soon</div>;
-}
 
 interface WizardDialogProps {
   isOpen: boolean;
@@ -27,15 +27,19 @@ export function WizardDialog({ isOpen, onClose, onLaunch }: WizardDialogProps) {
 
   function handleNext() {
     if (isLastStep) {
-      const sectionKeys = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git', 'review'];
-      const config: Record<string, unknown> = {};
-      for (let i = 0; i < STEP_LABELS.length; i++) {
-        if (stepValues[i]) config[sectionKeys[i]!] = stepValues[i];
-      }
-      onLaunch(config);
+      buildAndLaunch();
     } else {
       nextStep();
     }
+  }
+
+  function buildAndLaunch() {
+    const sectionKeys = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git', 'review'];
+    const config: Record<string, unknown> = {};
+    for (let i = 0; i < STEP_LABELS.length; i++) {
+      if (stepValues[i]) config[sectionKeys[i]!] = stepValues[i];
+    }
+    onLaunch(config);
   }
 
   function renderStep() {
@@ -44,8 +48,26 @@ export function WizardDialog({ isOpen, onClose, onLaunch }: WizardDialogProps) {
       case 1: return <StepWorkflow />;
       case 2: return <StepLlmTargets />;
       case 3: return <StepModules />;
-      default: return <StepPlaceholder label={STEP_LABELS[wizardStep] ?? ''} />;
+      case 4: return <StepSkills />;
+      case 5: return <StepPrompts />;
+      case 6: return <StepGit />;
+      case 7: return <StepReview onLaunch={onLaunch} />;
+      default: return null;
     }
+  }
+
+  function renderFormView() {
+    return (
+      <div className="space-y-6 p-6">
+        <FormSection title="Identity"><StepIdentity /></FormSection>
+        <FormSection title="Workflow"><StepWorkflow /></FormSection>
+        <FormSection title="LLM Targets"><StepLlmTargets /></FormSection>
+        <FormSection title="Modules"><StepModules /></FormSection>
+        <FormSection title="Skills"><StepSkills /></FormSection>
+        <FormSection title="Prompts"><StepPrompts /></FormSection>
+        <FormSection title="Git"><StepGit /></FormSection>
+      </div>
+    );
   }
 
   return (
@@ -78,40 +100,66 @@ export function WizardDialog({ isOpen, onClose, onLaunch }: WizardDialogProps) {
             </div>
           </div>
 
-          {/* Step indicator */}
-          <WizardStepIndicator
-            steps={STEP_LABELS}
-            currentStep={wizardStep}
-            highestCompleted={highestCompleted}
-            onStepClick={setWizardStep}
-          />
+          {/* Step indicator (wizard mode only) */}
+          {wizardMode === 'wizard' && (
+            <WizardStepIndicator
+              steps={STEP_LABELS}
+              currentStep={wizardStep}
+              highestCompleted={highestCompleted}
+              onStepClick={setWizardStep}
+            />
+          )}
 
-          {/* Step content */}
+          {/* Content */}
           <div className="flex-1 overflow-y-auto">
-            {renderStep()}
+            {wizardMode === 'wizard' ? renderStep() : renderFormView()}
           </div>
 
           {/* Footer */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-beast-border">
-            <button
-              type="button"
-              onClick={prevStep}
-              disabled={isFirstStep}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-beast-muted hover:text-beast-text
-                hover:bg-beast-elevated border border-beast-border disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleNext}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-beast-accent text-beast-bg hover:bg-beast-accent-strong"
-            >
-              {isLastStep ? 'Launch' : wizardStep === STEP_LABELS.length - 2 ? 'Review' : 'Next'}
-            </button>
+            {wizardMode === 'wizard' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={prevStep}
+                  disabled={isFirstStep}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-beast-muted hover:text-beast-text
+                    hover:bg-beast-elevated border border-beast-border disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-beast-accent text-beast-bg hover:bg-beast-accent-strong"
+                >
+                  {isLastStep ? 'Launch' : wizardStep === STEP_LABELS.length - 2 ? 'Review' : 'Next'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div />
+                <button
+                  type="button"
+                  onClick={buildAndLaunch}
+                  className="px-6 py-2 rounded-lg text-sm font-medium transition-colors bg-beast-accent text-beast-bg hover:bg-beast-accent-strong"
+                >
+                  Launch
+                </button>
+              </>
+            )}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-beast-border bg-beast-elevated">
+      <h3 className="px-4 py-3 text-sm font-medium text-beast-accent border-b border-beast-border">{title}</h3>
+      <div className="-m-0">{children}</div>
+    </section>
   );
 }
