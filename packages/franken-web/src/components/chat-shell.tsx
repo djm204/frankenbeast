@@ -450,15 +450,13 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               setSelectedBeastAgentId(null);
               setBeastAgentDetail(null);
             }}
-            onLaunch={(config) => {
-              if (!beastClient) return;
-              const definitionId = String((config.identity as Record<string, unknown>)?.definitionId ?? 'martin-loop');
+            onLaunch={async (config) => {
+              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
+              const workflow = config.workflow as Record<string, unknown> | undefined;
+              const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              void beastClient.createAgent({ definitionId, initAction, initConfig: config }).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to create agent.');
-              });
+              await beastClient.createAgent({ definitionId, initAction, initConfig: config });
+              setBeastRefreshNonce((current) => current + 1);
             }}
             onDelete={(agentId) => {
               if (!beastClient) return;

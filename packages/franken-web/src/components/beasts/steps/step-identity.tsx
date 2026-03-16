@@ -9,7 +9,7 @@ export function StepIdentity() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-xl">
+    <div className="p-8 space-y-6 max-w-xl">
       <div>
         <label htmlFor="agent-name" className="block text-sm font-medium text-beast-text mb-1.5">
           Agent Name <span className="text-beast-danger">*</span>

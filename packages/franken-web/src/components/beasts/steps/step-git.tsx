@@ -39,7 +39,7 @@ export function StepGit() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-8 space-y-6">
       <PresetCardGroup presets={PRESET_CARDS} selected={values.preset ?? ''} onSelect={handlePresetSelect} />
 
       {values.preset && (
@@ -53,26 +53,26 @@ export function StepGit() {
                 </svg>
               </Accordion.Trigger>
             </Accordion.Header>
-            <Accordion.Content className="px-4 pb-4 space-y-3">
+            <Accordion.Content className="px-5 pb-5 space-y-4">
               <div>
-                <label htmlFor="git-base" className="block text-xs font-medium text-beast-muted mb-1">Base Branch</label>
+                <label htmlFor="git-base" className="block text-xs font-medium text-beast-muted mb-1.5">Base Branch</label>
                 <input
                   id="git-base"
                   type="text"
                   value={values.baseBranch ?? ''}
                   onChange={(e) => updateField('baseBranch', e.target.value)}
-                  className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+                  className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
                 />
               </div>
               <div>
-                <label htmlFor="git-pattern" className="block text-xs font-medium text-beast-muted mb-1">Branch Naming Pattern</label>
+                <label htmlFor="git-pattern" className="block text-xs font-medium text-beast-muted mb-1.5">Branch Naming Pattern</label>
                 <input
                   id="git-pattern"
                   type="text"
                   value={values.branchPattern ?? ''}
                   onChange={(e) => updateField('branchPattern', e.target.value)}
                   placeholder="feat/{agent-name}/{id}"
-                  className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+                  className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -86,24 +86,24 @@ export function StepGit() {
                 <label htmlFor="git-pr" className="text-sm text-beast-text">Create PR</label>
               </div>
               <div>
-                <label htmlFor="git-convention" className="block text-xs font-medium text-beast-muted mb-1">Commit Convention</label>
+                <label htmlFor="git-convention" className="block text-xs font-medium text-beast-muted mb-1.5">Commit Convention</label>
                 <select
                   id="git-convention"
                   value={values.commitConvention ?? 'conventional'}
                   onChange={(e) => updateField('commitConvention', e.target.value)}
-                  className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+                  className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
                 >
                   <option value="conventional">Conventional Commits</option>
                   <option value="freeform">Freeform</option>
                 </select>
               </div>
               <div>
-                <label htmlFor="git-merge" className="block text-xs font-medium text-beast-muted mb-1">Merge Strategy</label>
+                <label htmlFor="git-merge" className="block text-xs font-medium text-beast-muted mb-1.5">Merge Strategy</label>
                 <select
                   id="git-merge"
                   value={values.mergeStrategy ?? 'merge'}
                   onChange={(e) => updateField('mergeStrategy', e.target.value)}
-                  className="w-full bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+                  className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
                 >
                   <option value="merge">Merge</option>
                   <option value="squash">Squash</option>

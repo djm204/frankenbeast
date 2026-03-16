@@ -29,7 +29,7 @@ export function StepReview({ onLaunch }: StepReviewProps) {
   const git = stepValues[6] as { preset?: string; baseBranch?: string } | undefined;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-8 space-y-4">
       <ReviewSection title="Identity" stepIndex={0} onEdit={setWizardStep}>
         <p className="text-sm text-beast-text">{identity?.name ?? '(not set)'}</p>
         {identity?.description && <p className="text-xs text-beast-subtle">{identity.description}</p>}
@@ -103,7 +103,7 @@ function ReviewSection({ title, stepIndex, onEdit, children }: {
   title: string; stepIndex: number; onEdit: (step: number) => void; children: ReactNode;
 }) {
   return (
-    <div className="p-3 rounded-lg bg-beast-elevated border border-beast-border">
+    <div className="p-4 rounded-lg bg-beast-elevated border border-beast-border">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-xs font-medium text-beast-muted uppercase">{title}</h3>
         <button

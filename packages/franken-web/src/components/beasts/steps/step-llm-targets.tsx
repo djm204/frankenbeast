@@ -40,7 +40,7 @@ export function StepLlmTargets() {
   }
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-8 space-y-8">
       <div className="max-w-lg">
         <h3 className="text-sm font-medium text-beast-text mb-3">Default Model</h3>
         <ProviderModelSelect
@@ -54,11 +54,11 @@ export function StepLlmTargets() {
       <div>
         <h3 className="text-sm font-medium text-beast-text mb-3">Per-Action Overrides</h3>
         <p className="text-xs text-beast-subtle mb-4">Override the default model for specific agent actions.</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {ACTION_TYPES.map((action) => {
             const override = values.overrides?.[action];
             return (
-              <div key={action} className="p-4 rounded-xl bg-beast-elevated border border-beast-border">
+              <div key={action} className="p-5 rounded-xl bg-beast-elevated border border-beast-border">
                 <h4 className="text-xs font-medium text-beast-muted mb-3 capitalize">{action}</h4>
                 <ProviderModelSelect
                   providers={FALLBACK_PROVIDERS}

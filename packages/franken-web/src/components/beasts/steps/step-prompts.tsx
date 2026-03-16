@@ -10,7 +10,7 @@ export function StepPrompts() {
   }
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-8 space-y-8">
       <div>
         <label htmlFor="prompt-text" className="block text-sm font-medium text-beast-text mb-1.5">Prompt Text</label>
         <p className="text-xs text-beast-subtle mb-2">Text injected into the agent's context before it starts working.</p>

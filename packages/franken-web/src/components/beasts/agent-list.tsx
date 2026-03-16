@@ -31,14 +31,14 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-5 py-2.5 border-b border-beast-border shrink-0">
+      <div className="flex items-center gap-4 px-6 py-3 border-b border-beast-border shrink-0">
         <input
           type="text"
           placeholder="Search agents..."
           aria-label="Search agents"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-0 bg-beast-control border border-beast-border rounded-lg px-3 py-1.5
+          className="flex-1 min-w-0 bg-beast-control border border-beast-border rounded-lg px-4 py-2
             text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none
             focus:ring-2 focus:ring-beast-accent"
         />
@@ -46,7 +46,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           aria-label="Filter by status"
-          className="bg-beast-control border border-beast-border rounded-lg px-3 py-1.5
+          className="bg-beast-control border border-beast-border rounded-lg px-4 py-2
             text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         >
           <option value="">All statuses</option>
@@ -59,14 +59,14 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
           value={density}
           onValueChange={(val) => { if (val) setDensity(val as Density); }}
           aria-label="Display density"
-          className="flex gap-0.5 bg-beast-control rounded-lg border border-beast-border p-0.5"
+          className="flex gap-1 bg-beast-control rounded-lg border border-beast-border p-1"
         >
           {(['compact', 'comfortable', 'detailed'] as const).map((d) => (
             <ToggleGroup.Item
               key={d}
               value={d}
               aria-label={`${d} density`}
-              className="px-2.5 py-1 text-xs rounded-md text-beast-subtle
+              className="px-3 py-1.5 text-xs rounded-md text-beast-subtle
                 hover:text-beast-muted
                 data-[state=on]:bg-beast-accent-soft data-[state=on]:text-beast-accent transition-colors"
             >
@@ -78,13 +78,13 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
 
       {/* Content */}
       {filtered.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-beast-muted">
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 text-beast-muted p-8">
           <p className="text-sm">{agents.length === 0 ? 'No agents yet' : 'No matching agents'}</p>
           {agents.length === 0 && (
             <button
               type="button"
               onClick={onCreateAgent}
-              className="px-4 py-2 rounded-lg border border-beast-border text-beast-muted text-sm
+              className="px-5 py-2.5 rounded-lg border border-beast-border text-beast-muted text-sm
                 hover:text-beast-text hover:bg-beast-elevated transition-colors"
             >
               Create your first agent
@@ -93,8 +93,8 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
         </div>
       ) : (
         <ScrollArea.Root className="flex-1 overflow-hidden">
-          <ScrollArea.Viewport className="h-full w-full p-4">
-            <div className="flex flex-col gap-2">
+          <ScrollArea.Viewport className="h-full w-full p-6">
+            <div className="flex flex-col gap-3">
               {filtered.map((agent) => (
                 <AgentRow
                   key={agent.id}

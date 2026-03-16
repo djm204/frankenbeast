@@ -21,7 +21,7 @@ export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
     <button
       type="button"
       onClick={() => onClick(agent.id)}
-      className={`w-full text-left rounded-xl border p-3 transition-colors duration-150
+      className={`w-full text-left rounded-xl border p-4 transition-colors duration-150
         bg-beast-panel hover:bg-beast-elevated cursor-pointer ${selectedClass}`}
     >
       <div className="flex items-center gap-3">
@@ -31,12 +31,12 @@ export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
       </div>
 
       {(density === 'comfortable' || density === 'detailed') && (
-        <div className="flex items-center gap-2 mt-1.5 ml-5">
-          <span className="text-xs px-2 py-0.5 rounded-full bg-beast-control text-beast-accent border border-beast-border">
+        <div className="flex items-center gap-2 mt-2 ml-6">
+          <span className="text-xs px-2.5 py-1 rounded-full bg-beast-control text-beast-accent border border-beast-border">
             {agent.initAction.kind}
           </span>
           {agent.moduleConfig && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-beast-control text-beast-muted border border-beast-border">
+            <span className="text-xs px-2.5 py-1 rounded-full bg-beast-control text-beast-muted border border-beast-border">
               {Object.values(agent.moduleConfig).filter(Boolean).length} modules
             </span>
           )}
@@ -44,7 +44,7 @@ export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
       )}
 
       {density === 'detailed' && (
-        <div className="flex items-center gap-3 mt-1.5 ml-5 text-xs text-beast-subtle">
+        <div className="flex items-center gap-4 mt-2 ml-6 text-xs text-beast-subtle">
           <span>by {agent.createdByUser}</span>
           {agent.dispatchRunId && <span>run: {agent.dispatchRunId.slice(0, 8)}…</span>}
         </div>

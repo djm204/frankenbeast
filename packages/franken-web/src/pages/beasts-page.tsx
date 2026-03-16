@@ -14,7 +14,7 @@ interface BeastsPageProps {
   logs: string[];
   selectedAgentId: string | null;
   onClose: () => void;
-  onLaunch: (config: Record<string, unknown>) => void;
+  onLaunch: (config: Record<string, unknown>) => Promise<void>;
   onDelete: (agentId: string) => void;
   onKill: (agentId: string) => void;
   onRestart: (agentId: string) => void;
@@ -42,33 +42,44 @@ export function BeastsPage({
   onStop,
 }: BeastsPageProps) {
   const [showWizard, setShowWizard] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
 
   function handleOpenWizard() {
     resetWizard();
+    setLaunchError(null);
     setShowWizard(true);
   }
 
-  function handleLaunch(config: Record<string, unknown>) {
-    setShowWizard(false);
-    onLaunch(config);
+  async function handleLaunch(config: Record<string, unknown>) {
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      await onLaunch(config);
+      setShowWizard(false);
+    } catch (err) {
+      setLaunchError(err instanceof Error ? err.message : 'Failed to create agent.');
+    } finally {
+      setLaunching(false);
+    }
   }
 
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-beast-bg">
       {error && (
-        <div className="px-4 py-2 bg-red-900/30 border-b border-red-700 text-red-300 text-sm">
+        <div className="px-6 py-3 bg-red-900/30 border-b border-red-700 text-red-300 text-sm">
           {error}
         </div>
       )}
 
-      <div className="flex items-center justify-between px-5 py-3 border-b border-beast-border shrink-0">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-beast-border shrink-0">
         <h2 className="text-beast-text font-semibold text-lg">Beasts</h2>
         <button
           type="button"
           onClick={handleOpenWizard}
           disabled={disabled}
-          className="px-4 py-2 rounded-lg bg-beast-accent text-beast-bg text-sm font-medium
+          className="px-5 py-2.5 rounded-lg bg-beast-accent text-beast-bg text-sm font-medium
             hover:bg-beast-accent-strong transition-colors disabled:opacity-50"
         >
           + Create Agent
@@ -101,6 +112,8 @@ export function BeastsPage({
         isOpen={showWizard}
         onClose={() => setShowWizard(false)}
         onLaunch={handleLaunch}
+        launching={launching}
+        launchError={launchError}
       />
     </main>
   );

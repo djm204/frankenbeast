@@ -31,7 +31,7 @@ export function StepSkills() {
   }
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-8 space-y-6">
       {/* Selected chips */}
       {selected.length > 0 && (
         <div>
@@ -66,7 +66,7 @@ export function StepSkills() {
       />
 
       {/* Skill cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((skill) => {
           const isSelected = selected.includes(skill.id);
           return (
