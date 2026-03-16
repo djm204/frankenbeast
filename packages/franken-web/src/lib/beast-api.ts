@@ -56,6 +56,7 @@ export const MODULE_CONFIG_KEYS: readonly (keyof ModuleConfig)[] = [
 
 export interface TrackedAgentSummary {
   id: string;
+  name?: string;
   definitionId: string;
   status: string;
   source: string;
@@ -83,6 +84,44 @@ export interface TrackedAgentEvent {
 export interface TrackedAgentDetail {
   agent: TrackedAgentSummary;
   events: TrackedAgentEvent[];
+}
+
+export interface AgentLlmConfig {
+  default?: { provider: string; model: string };
+  overrides?: Record<string, { provider: string; model: string }>;
+}
+
+export interface AgentGitConfig {
+  preset: 'one-shot' | 'feature-branch' | 'feature-branch-worktree' | 'yolo-main' | 'custom';
+  baseBranch: string;
+  branchPattern: string;
+  prCreation: boolean;
+  prTemplate?: string;
+  commitConvention: 'conventional' | 'freeform';
+  mergeStrategy: 'merge' | 'squash' | 'rebase';
+}
+
+export interface AgentDeepModuleConfig {
+  firewall?: { ruleSet?: string; customRules?: string };
+  memory?: { backend?: string; retentionPolicy?: string };
+  planner?: { maxDagDepth?: number; parallelTaskLimit?: number };
+  critique?: { maxIterations?: number; severityThreshold?: string };
+  governor?: { approvalMode?: string; escalationRules?: string };
+  heartbeat?: { reflectionInterval?: number; llmOverride?: { provider: string; model: string } };
+}
+
+export interface ExtendedAgentCreateInput {
+  name: string;
+  description?: string;
+  definitionId: string;
+  initAction: TrackedAgentInitAction;
+  moduleConfig?: ModuleConfig;
+  deepModuleConfig?: AgentDeepModuleConfig;
+  llmConfig?: AgentLlmConfig;
+  gitConfig?: AgentGitConfig;
+  skills?: string[];
+  promptText?: string;
+  promptFiles?: Array<{ name: string; content: string; tokens: number }>;
 }
 
 export class BeastApiClient {
@@ -187,6 +226,18 @@ export class BeastApiClient {
     });
   }
 
+  async killAgent(agentId: string): Promise<TrackedAgentSummary> {
+    return this.postAgentAction(agentId, 'kill');
+  }
+
+  async patchAgentConfig(agentId: string, config: Partial<ExtendedAgentCreateInput>): Promise<TrackedAgentSummary> {
+    return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+  }
+
   private async postAction(runId: string, action: 'start' | 'stop' | 'kill' | 'restart'): Promise<BeastRunSummary> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/${action}`, {
       method: 'POST',
@@ -195,7 +246,7 @@ export class BeastApiClient {
 
   private async postAgentAction(
     agentId: string,
-    action: 'start' | 'stop' | 'restart',
+    action: 'start' | 'stop' | 'restart' | 'kill',
   ): Promise<BeastRunSummary | TrackedAgentSummary> {
     return this.request(`/v1/beasts/agents/${encodeURIComponent(agentId)}/${action}`, {
       method: 'POST',
