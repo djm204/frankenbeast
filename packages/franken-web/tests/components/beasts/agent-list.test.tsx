@@ -48,10 +48,10 @@ describe('AgentList', () => {
     expect(screen.queryByText('agent-2')).toBeNull();
   });
 
-  it('has create agent button', () => {
+  it('has create agent button in empty state', () => {
     const onCreate = vi.fn();
-    render(<AgentList agents={agents} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={onCreate} />);
-    fireEvent.click(screen.getByText(/create agent/i));
+    render(<AgentList agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={onCreate} />);
+    fireEvent.click(screen.getByText(/create your first agent/i));
     expect(onCreate).toHaveBeenCalled();
   });
 });

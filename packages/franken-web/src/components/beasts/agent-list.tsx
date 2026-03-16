@@ -30,14 +30,14 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 p-4 border-b border-beast-border">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-beast-border">
         <input
           type="text"
           placeholder="Search agents..."
           aria-label="Search agents"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 bg-beast-control border border-beast-border rounded-lg px-3 py-2
+          className="flex-1 bg-beast-control border border-beast-border rounded-lg px-3 py-1.5
             text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none
             focus:ring-2 focus:ring-beast-accent"
         />
@@ -45,7 +45,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           aria-label="Filter by status"
-          className="bg-beast-control border border-beast-border rounded-lg px-3 py-2
+          className="bg-beast-control border border-beast-border rounded-lg px-3 py-1.5
             text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         >
           <option value="">All statuses</option>
@@ -58,40 +58,34 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
           value={density}
           onValueChange={(val) => { if (val) setDensity(val as Density); }}
           aria-label="Display density"
-          className="flex gap-1 bg-beast-control rounded-lg border border-beast-border p-0.5"
+          className="flex gap-0.5 bg-beast-control rounded-lg border border-beast-border p-0.5"
         >
           {(['compact', 'comfortable', 'detailed'] as const).map((d) => (
             <ToggleGroup.Item
               key={d}
               value={d}
               aria-label={`${d} density`}
-              className="px-2 py-1 text-xs rounded-md text-beast-muted
+              className="px-2.5 py-1 text-xs rounded-md text-beast-subtle
+                hover:text-beast-muted
                 data-[state=on]:bg-beast-accent-soft data-[state=on]:text-beast-accent transition-colors"
             >
-              {d[0]!.toUpperCase()}
+              {d.charAt(0).toUpperCase() + d.slice(1)}
             </ToggleGroup.Item>
           ))}
         </ToggleGroup.Root>
-        <button
-          type="button"
-          onClick={onCreateAgent}
-          className="px-4 py-2 rounded-lg bg-beast-accent text-beast-bg font-medium text-sm
-            hover:bg-beast-accent-strong transition-colors"
-        >
-          Create Agent
-        </button>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-beast-muted">
-          <p>{agents.length === 0 ? 'No agents yet — Create your first agent' : 'No matching agents'}</p>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-beast-muted">
+          <p className="text-sm">{agents.length === 0 ? 'No agents yet' : 'No matching agents'}</p>
           {agents.length === 0 && (
             <button
               type="button"
               onClick={onCreateAgent}
-              className="px-4 py-2 rounded-lg bg-beast-accent text-beast-bg font-medium text-sm"
+              className="px-4 py-2 rounded-lg border border-beast-border text-beast-muted text-sm
+                hover:text-beast-text hover:bg-beast-elevated transition-colors"
             >
-              Create Agent
+              Create your first agent
             </button>
           )}
         </div>
