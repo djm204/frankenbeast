@@ -14,7 +14,7 @@ export function StepReview({ onLaunch }: StepReviewProps) {
     const config: Record<string, unknown> = {};
     for (let i = 0; i < SECTION_LABELS.length; i++) {
       if (stepValues[i]) {
-        config[SECTION_LABELS[i].toLowerCase().replace(/ /g, '_')] = stepValues[i];
+        config[SECTION_LABELS[i]!.toLowerCase().replace(/ /g, '_')] = stepValues[i];
       }
     }
     onLaunch(config);

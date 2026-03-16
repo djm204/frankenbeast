@@ -18,7 +18,7 @@ export function normalizePath(path: string, env: ServerEnvironment): PathResult 
   const windowsDrivePattern = /^[A-Za-z]:\\/;
 
   if (env.isWsl && windowsDrivePattern.test(path)) {
-    const drive = path[0].toLowerCase();
+    const drive = path[0]!.toLowerCase();
     const rest = path.slice(3).replace(/\\/g, '/');
     return { normalized: `/mnt/${drive}/${rest}`, valid: true };
   }

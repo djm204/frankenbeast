@@ -22,7 +22,7 @@ describe('StepReview', () => {
     render(<StepReview onLaunch={vi.fn()} />);
     const editLinks = screen.getAllByText('Edit');
     expect(editLinks.length).toBeGreaterThan(0);
-    fireEvent.click(editLinks[0]);
+    fireEvent.click(editLinks[0]!);
     // Should have changed wizardStep
     expect(useBeastStore.getState().wizardStep).toBe(0);
   });

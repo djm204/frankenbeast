@@ -32,7 +32,7 @@ export function SinglePageForm({ onLaunch }: SinglePageFormProps) {
     const config: Record<string, unknown> = {};
     for (let i = 0; i < SECTIONS.length; i++) {
       if (stepValues[i]) {
-        config[SECTIONS[i].id] = stepValues[i];
+        config[SECTIONS[i]!.id] = stepValues[i];
       }
     }
     onLaunch(config);

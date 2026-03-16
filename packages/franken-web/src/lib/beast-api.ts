@@ -226,7 +226,7 @@ export class BeastApiClient {
     });
   }
 
-  async killAgent(agentId: string): Promise<TrackedAgentSummary> {
+  async killAgent(agentId: string): Promise<BeastRunSummary | TrackedAgentSummary> {
     return this.postAgentAction(agentId, 'kill');
   }
 

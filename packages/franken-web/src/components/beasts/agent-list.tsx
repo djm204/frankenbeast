@@ -68,7 +68,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
               className="px-2 py-1 text-xs rounded-md text-beast-muted
                 data-[state=on]:bg-beast-accent-soft data-[state=on]:text-beast-accent transition-colors"
             >
-              {d[0].toUpperCase()}
+              {d[0]!.toUpperCase()}
             </ToggleGroup.Item>
           ))}
         </ToggleGroup.Root>

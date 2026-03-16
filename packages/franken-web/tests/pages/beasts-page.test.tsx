@@ -49,7 +49,7 @@ describe('BeastsPage', () => {
   it('shows Create Agent button that calls onCreate', () => {
     render(<BeastsPage {...baseProps} />);
     const btns = screen.getAllByRole('button', { name: /create agent/i });
-    fireEvent.click(btns[0]);
+    fireEvent.click(btns[0]!);
     expect(baseProps.onCreate).toHaveBeenCalled();
   });
 

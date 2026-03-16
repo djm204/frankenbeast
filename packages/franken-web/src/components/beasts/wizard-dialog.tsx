@@ -43,7 +43,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch }: WizardDialogProps) {
       case 1: return <StepWorkflow />;
       case 2: return <StepLlmTargets />;
       case 3: return <StepModules />;
-      default: return <StepPlaceholder label={STEP_LABELS[wizardStep]} />;
+      default: return <StepPlaceholder label={STEP_LABELS[wizardStep] ?? ''} />;
     }
   }
 
