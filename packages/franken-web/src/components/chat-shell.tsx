@@ -450,8 +450,15 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               setSelectedBeastAgentId(null);
               setBeastAgentDetail(null);
             }}
-            onCreate={() => {
-              // Wizard will be wired in a future iteration
+            onLaunch={(config) => {
+              if (!beastClient) return;
+              const definitionId = String((config.identity as Record<string, unknown>)?.definitionId ?? 'martin-loop');
+              const initAction = buildInitAction(definitionId, config, selectedSessionId);
+              void beastClient.createAgent({ definitionId, initAction, initConfig: config }).then(() => {
+                setBeastRefreshNonce((current) => current + 1);
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to create agent.');
+              });
             }}
             onDelete={(agentId) => {
               if (!beastClient) return;
