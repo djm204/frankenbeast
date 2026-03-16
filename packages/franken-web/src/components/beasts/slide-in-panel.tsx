@@ -27,14 +27,14 @@ export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, onClose]);
 
+  if (!isOpen) return null;
+
   return (
     <aside
       ref={panelRef}
-      aria-hidden={!isOpen}
-      className={`fixed top-0 right-0 h-screen w-[45vw] min-w-[400px] max-w-[720px]
+      className="fixed top-0 right-0 h-screen w-[45vw] min-w-[400px] max-w-[720px]
         bg-beast-panel border-l border-beast-border shadow-2xl z-50
-        transition-transform duration-200 ease-out flex flex-col
-        ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        flex flex-col animate-in slide-in-from-right duration-200"
     >
       {children}
     </aside>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import type { TrackedAgentSummary } from '../../lib/beast-api';
-import { AgentRow, type Density, type AgentSummaryWithName } from './agent-row';
+import { AgentRow, type Density } from './agent-row';
 
 interface AgentListProps {
   agents: TrackedAgentSummary[];
@@ -17,10 +17,9 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
   const [statusFilter, setStatusFilter] = useState<string>('');
 
   const filtered = agents.filter((a) => {
-    const agentWithName = a as AgentSummaryWithName;
     if (search) {
       const q = search.toLowerCase();
-      const nameMatch = agentWithName.name?.toLowerCase().includes(q);
+      const nameMatch = a.name?.toLowerCase().includes(q);
       const idMatch = a.id.toLowerCase().includes(q);
       const kindMatch = a.initAction.kind.toLowerCase().includes(q);
       if (!nameMatch && !idMatch && !kindMatch) return false;
@@ -35,6 +34,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
         <input
           type="text"
           placeholder="Search agents..."
+          aria-label="Search agents"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 bg-beast-control border border-beast-border rounded-lg px-3 py-2
@@ -102,7 +102,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
               {filtered.map((agent) => (
                 <AgentRow
                   key={agent.id}
-                  agent={agent as AgentSummaryWithName}
+                  agent={agent}
                   density={density}
                   selected={agent.id === selectedAgentId}
                   onClick={onSelectAgent}

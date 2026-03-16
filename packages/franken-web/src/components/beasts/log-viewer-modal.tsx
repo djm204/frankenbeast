@@ -38,6 +38,7 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
             <input
               type="text"
               placeholder="Search logs..."
+              aria-label="Search logs"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="bg-beast-control border border-beast-border rounded-lg px-3 py-1.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent w-64"

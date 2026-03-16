@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import type { TrackedAgentDetail, TrackedAgentSummary, BeastCatalogEntry } from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
-import type { AgentSummaryWithName } from '../components/beasts/agent-row';
 
 interface BeastsPageProps {
   agents: TrackedAgentSummary[];
@@ -11,6 +9,7 @@ interface BeastsPageProps {
   disabled: boolean;
   error: string | null;
   logs: string[];
+  selectedAgentId: string | null;
   onClose: () => void;
   onCreate: () => void;
   onDelete: (agentId: string) => void;
@@ -28,6 +27,7 @@ export function BeastsPage({
   disabled,
   error,
   logs,
+  selectedAgentId,
   onClose,
   onCreate,
   onDelete,
@@ -38,18 +38,6 @@ export function BeastsPage({
   onStart,
   onStop,
 }: BeastsPageProps) {
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-
-  const agentsWithName: AgentSummaryWithName[] = agents.map((a) => ({
-    ...a,
-    name: (a as AgentSummaryWithName).name,
-  }));
-
-  const handleSelectAgent = (agentId: string) => {
-    setSelectedAgentId(agentId);
-    onSelectAgent(agentId);
-  };
-
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-beast-bg">
       {error && (
@@ -71,9 +59,9 @@ export function BeastsPage({
       </div>
 
       <AgentList
-        agents={agentsWithName}
+        agents={agents}
         selectedAgentId={selectedAgentId}
-        onSelectAgent={handleSelectAgent}
+        onSelectAgent={onSelectAgent}
         onCreateAgent={onCreate}
       />
 

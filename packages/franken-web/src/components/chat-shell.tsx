@@ -445,6 +445,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             disabled={!beastClient}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
+            selectedAgentId={selectedBeastAgentId}
             onClose={() => {
               setSelectedBeastAgentId(null);
               setBeastAgentDetail(null);

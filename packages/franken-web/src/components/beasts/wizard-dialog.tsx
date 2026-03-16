@@ -27,9 +27,10 @@ export function WizardDialog({ isOpen, onClose, onLaunch }: WizardDialogProps) {
 
   function handleNext() {
     if (isLastStep) {
+      const sectionKeys = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git', 'review'];
       const config: Record<string, unknown> = {};
       for (let i = 0; i < STEP_LABELS.length; i++) {
-        if (stepValues[i]) Object.assign(config, stepValues[i]);
+        if (stepValues[i]) config[sectionKeys[i]!] = stepValues[i];
       }
       onLaunch(config);
     } else {

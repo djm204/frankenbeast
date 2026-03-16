@@ -2,10 +2,9 @@ import type { TrackedAgentSummary } from '../../lib/beast-api';
 import { StatusLight } from './status-light';
 
 export type Density = 'compact' | 'comfortable' | 'detailed';
-export type AgentSummaryWithName = TrackedAgentSummary & { name?: string };
 
 interface AgentRowProps {
-  agent: AgentSummaryWithName;
+  agent: TrackedAgentSummary;
   density: Density;
   selected: boolean;
   onClick: (agentId: string) => void;

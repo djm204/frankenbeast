@@ -23,6 +23,7 @@ const baseProps = {
   disabled: false,
   error: null,
   logs: [] as string[],
+  selectedAgentId: null,
   onClose: vi.fn(),
   onCreate: vi.fn(),
   onDelete: vi.fn(),

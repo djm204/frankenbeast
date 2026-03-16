@@ -14,14 +14,14 @@ describe('SlideInPanel', () => {
     expect(screen.getByText('Panel content')).toBeTruthy();
   });
 
-  it('applies translate-x-full when closed', () => {
+  it('renders nothing when closed', () => {
     const { container } = render(
       <SlideInPanel isOpen={false} onClose={vi.fn()}>
         <div>Hidden</div>
       </SlideInPanel>
     );
-    const aside = container.querySelector('aside');
-    expect(aside?.className).toContain('translate-x-full');
+    expect(container.querySelector('aside')).toBeNull();
+    expect(screen.queryByText('Hidden')).toBeNull();
   });
 
   it('calls onClose when Escape is pressed', () => {

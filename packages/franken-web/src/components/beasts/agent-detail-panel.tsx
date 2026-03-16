@@ -7,7 +7,6 @@ import { AgentDetailReadonly } from './agent-detail-readonly';
 import { AgentDetailEdit } from './agent-detail-edit';
 import { AgentActionBar } from './agent-action-bar';
 import { LogViewerModal } from './log-viewer-modal';
-import type { AgentSummaryWithName } from './agent-row';
 
 type Mode = 'readonly' | 'edit';
 
@@ -30,7 +29,7 @@ export function AgentDetailPanel({
 }: AgentDetailPanelProps) {
   const [mode, setMode] = useState<Mode>('readonly');
   const [showLogModal, setShowLogModal] = useState(false);
-  const agent = detail.agent as AgentSummaryWithName;
+  const agent = detail.agent;
 
   return (
     <>
@@ -80,9 +79,9 @@ export function AgentDetailPanel({
           />
         ) : (
           <AgentDetailEdit
-            onSave={(values) => {
+            onSave={() => {
               // Will wire to beastClient.patchAgentConfig in future
-              console.log('Save agent config:', values);
+              setMode('readonly');
             }}
             onCancel={() => setMode('readonly')}
           />
