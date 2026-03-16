@@ -56,6 +56,13 @@ describe('AgentDetailPanel', () => {
     expect(screen.getByText('Stop')).toBeTruthy();
   });
 
+  it('shows edit form when Edit mode is selected', () => {
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+    fireEvent.click(screen.getByText('Edit'));
+    // Should show Identity section from edit form
+    expect(screen.getByText('Identity')).toBeTruthy();
+  });
+
   it('calls onClose when close button clicked', () => {
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
     fireEvent.click(screen.getByLabelText('Close panel'));

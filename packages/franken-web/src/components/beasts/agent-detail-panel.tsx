@@ -4,6 +4,7 @@ import type { TrackedAgentDetail } from '../../lib/beast-api';
 import { SlideInPanel } from './slide-in-panel';
 import { StatusLight } from './status-light';
 import { AgentDetailReadonly } from './agent-detail-readonly';
+import { AgentDetailEdit } from './agent-detail-edit';
 import { AgentActionBar } from './agent-action-bar';
 import { LogViewerModal } from './log-viewer-modal';
 import type { AgentSummaryWithName } from './agent-row';
@@ -78,9 +79,13 @@ export function AgentDetailPanel({
             onExpandLogs={() => setShowLogModal(true)}
           />
         ) : (
-          <div className="flex-1 p-4 text-beast-muted text-sm">
-            Edit mode — coming in Chunk 9
-          </div>
+          <AgentDetailEdit
+            onSave={(values) => {
+              // Will wire to beastClient.patchAgentConfig in future
+              console.log('Save agent config:', values);
+            }}
+            onCancel={() => setMode('readonly')}
+          />
         )}
 
         {/* Action bar */}
