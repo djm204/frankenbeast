@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-beast-bg: #040804;
+  --color-beast-elevated: rgba(13, 21, 14, 0.94);
+  --color-beast-panel: rgba(18, 27, 19, 0.94);
+  --color-beast-accent: #86e45f;
+  --color-beast-accent-strong: #b7ff81;
+  --color-beast-accent-soft: rgba(134, 228, 95, 0.14);
+  --color-beast-text: #f3faef;
+  --color-beast-muted: #c0d0bc;
+  --color-beast-subtle: #9fb09b;
+  --color-beast-danger: #ff7a6b;
+  --color-beast-control: rgba(22, 34, 23, 0.85);
+  --color-beast-border: rgba(134, 228, 95, 0.13);
+}
