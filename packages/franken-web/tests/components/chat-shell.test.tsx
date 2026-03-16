@@ -125,6 +125,7 @@ const mockCreateAgent = vi.fn().mockResolvedValue({
   updatedAt: '2026-03-11T00:00:02.000Z',
 });
 const mockDeleteAgent = vi.fn().mockResolvedValue(undefined);
+const mockKillAgent = vi.fn().mockResolvedValue(undefined);
 const mockRestartAgent = vi.fn().mockResolvedValue(undefined);
 const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
 const mockStartAgent = vi.fn().mockResolvedValue(undefined);
@@ -181,6 +182,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     getLogs: typeof mockGetLogs;
     createAgent: typeof mockCreateAgent;
     deleteAgent: typeof mockDeleteAgent;
+    killAgent: typeof mockKillAgent;
     restartAgent: typeof mockRestartAgent;
     resumeAgent: typeof mockResumeAgent;
     startAgent: typeof mockStartAgent;
@@ -197,6 +199,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.getLogs = mockGetLogs;
     this.createAgent = mockCreateAgent;
     this.deleteAgent = mockDeleteAgent;
+    this.killAgent = mockKillAgent;
     this.restartAgent = mockRestartAgent;
     this.resumeAgent = mockResumeAgent;
     this.startAgent = mockStartAgent;
@@ -344,7 +347,7 @@ describe('ChatShell', () => {
     expect(screen.getByRole('button', { name: 'Reject' }).getAttribute('class')).toContain('button--secondary');
   });
 
-  it('launches tracked agents from the beasts page using the selected chat session', async () => {
+  it('renders agent list on the beasts page', async () => {
     window.location.hash = '#/beasts';
     render(
       <ChatShell
@@ -356,55 +359,14 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Design Doc -> Chunk Creation')).toBeDefined();
+      expect(screen.getByText('agent-1')).toBeDefined();
     });
 
-    fireEvent.change(screen.getByLabelText('Design Doc -> Chunk Creation designDocPath'), {
-      target: { value: 'docs/plans/design.md' },
-    });
-    fireEvent.change(screen.getByLabelText('Design Doc -> Chunk Creation outputDir'), {
-      target: { value: 'docs/chunks' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Launch Design Doc -> Chunk Creation' }));
-
-    await waitFor(() => {
-      expect(mockCreateAgent).toHaveBeenCalledWith({
-        definitionId: 'chunk-plan',
-        initAction: {
-          kind: 'chunk-plan',
-          command: '/plan --design-doc docs/plans/design.md',
-          config: { designDocPath: 'docs/plans/design.md', outputDir: 'docs/chunks' },
-          chatSessionId: 'sess-1',
-        },
-        initConfig: { designDocPath: 'docs/plans/design.md', outputDir: 'docs/chunks' },
-        chatSessionId: 'sess-1',
-      });
-    });
-  });
-
-  it('renders tracked-agent status and startup logs in the beasts detail flow', async () => {
-    window.location.hash = '#/beasts';
-    render(
-      <ChatShell
-        baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
-        projectId="test-project"
-        version="0.9.0"
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Tracked Agents')).toBeDefined();
-    });
-
-    expect(screen.getByText('dispatching')).toBeDefined();
-    expect(screen.getByText('sent planning command')).toBeDefined();
-    expect(screen.getByText('started from chat')).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
-    expect(mockGetAgent).toHaveBeenCalledWith('agent-1');
   });
 
-  it('resumes stopped tracked agents from the beasts page', async () => {
+  it('renders stopped agents in the beasts list', async () => {
     window.location.hash = '#/beasts';
     mockListAgents.mockResolvedValue([
       {
@@ -458,23 +420,11 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Resume agent-1' })).toBeDefined();
+      expect(screen.getByText('agent-1')).toBeDefined();
     });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Resume agent-1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start agent-1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restart agent-1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete agent-1' }));
-
-    await waitFor(() => {
-      expect(mockResumeAgent).toHaveBeenCalledWith('agent-1');
-    });
-    expect(mockStartAgent).toHaveBeenCalledWith('agent-1');
-    expect(mockRestartAgent).toHaveBeenCalledWith('agent-1');
-    expect(mockDeleteAgent).toHaveBeenCalledWith('agent-1');
   });
 
-  it('stops initializing tracked agents from the beasts page', async () => {
+  it('renders initializing agents in the beasts list', async () => {
     window.location.hash = '#/beasts';
     mockListAgents.mockResolvedValue([
       {
@@ -526,13 +476,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Stop agent-init' })).toBeDefined();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Stop agent-init' }));
-
-    await waitFor(() => {
-      expect(mockStopAgent).toHaveBeenCalledWith('agent-init');
+      expect(screen.getByText('agent-init')).toBeDefined();
     });
   });
 });

@@ -17,7 +17,7 @@ import {
 } from '../lib/beast-api';
 import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
-import { BeastDispatchPage } from '../pages/beast-dispatch-page';
+import { BeastsPage } from '../pages/beasts-page';
 
 export interface ChatShellProps {
   baseUrl: string;
@@ -438,107 +438,72 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             </aside>
           </main>
         ) : route === 'beasts' ? (
-          <BeastDispatchPage
+          <BeastsPage
+            agents={beastAgents}
+            agentDetail={beastAgentDetail}
             catalog={beastCatalog}
             disabled={!beastClient}
             error={beastError}
+            logs={beastAgentDetail?.run?.logs ?? []}
+            onClose={() => {
+              setSelectedBeastAgentId(null);
+              setBeastAgentDetail(null);
+            }}
+            onCreate={() => {
+              // Wizard will be wired in a future iteration
+            }}
             onDelete={(agentId) => {
-              if (!beastClient) {
-                return;
-              }
+              if (!beastClient) return;
               void beastClient.deleteAgent(agentId).then(() => {
                 setSelectedBeastAgentId((current) => current === agentId ? null : current);
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to delete tracked agent.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to delete tracked agent.');
               });
             }}
-            onDispatch={(definitionId, config, moduleConfig) => {
-              if (!beastClient) {
-                return;
-              }
-              const activeDefinition = beastCatalog.find((entry) => entry.id === definitionId);
-              if (!activeDefinition) {
-                setBeastError(`Unknown Beast definition: ${definitionId}`);
-                return;
-              }
-              const initAction = buildInitAction(
-                definitionId,
-                config,
-                selectedSessionId ?? activeSessionId ?? undefined,
-              );
-              void beastClient.createAgent({
-                definitionId,
-                initAction,
-                initConfig: config,
-                ...(initAction.chatSessionId ? { chatSessionId: initAction.chatSessionId } : {}),
-                ...(moduleConfig ? { moduleConfig } : {}),
-              }).then((agent) => {
-                setSelectedBeastAgentId(agent.id);
+            onKill={(agentId) => {
+              if (!beastClient) return;
+              void beastClient.killAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to create tracked agent.');
-              });
-            }}
-            onKill={(runId) => {
-              if (!beastClient) {
-                return;
-              }
-              void beastClient.killRun(runId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to kill Beast run.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to kill tracked agent.');
               });
             }}
             onRestart={(agentId) => {
-              if (!beastClient) {
-                return;
-              }
+              if (!beastClient) return;
               void beastClient.restartAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to restart tracked agent.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to restart tracked agent.');
               });
             }}
             onResume={(agentId) => {
-              if (!beastClient) {
-                return;
-              }
+              if (!beastClient) return;
               void beastClient.resumeAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to resume tracked agent.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to resume tracked agent.');
               });
-            }}
-            onRefresh={() => {
-              setBeastRefreshNonce((current) => current + 1);
             }}
             onSelectAgent={(agentId) => {
               setSelectedBeastAgentId(agentId);
             }}
             onStart={(agentId) => {
-              if (!beastClient) {
-                return;
-              }
+              if (!beastClient) return;
               void beastClient.startAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to start tracked agent.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to start tracked agent.');
               });
             }}
             onStop={(agentId) => {
-              if (!beastClient) {
-                return;
-              }
+              if (!beastClient) return;
               void beastClient.stopAgent(agentId).then(() => {
                 setBeastRefreshNonce((current) => current + 1);
-              }).catch((error) => {
-                setBeastError(error instanceof Error ? error.message : 'Unable to stop tracked agent.');
+              }).catch((err) => {
+                setBeastError(err instanceof Error ? err.message : 'Unable to stop tracked agent.');
               });
             }}
-            agentDetail={beastAgentDetail}
-            agents={beastAgents}
-            selectedAgentId={selectedBeastAgentId}
           />
         ) : route === 'network' ? (
           <NetworkPage
