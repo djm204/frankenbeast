@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.2](https://github.com/djm204/frankenbeast/compare/v0.22.1...v0.22.2) (2026-03-16)
+
+
+### Miscellaneous
+
+* release main ([9424d30](https://github.com/djm204/frankenbeast/commit/9424d303b7d2673f805a85338f029b5f40311be9))
+* release main ([0cb248b](https://github.com/djm204/frankenbeast/commit/0cb248b7a1fda5821b7f7b1c14e2ece639cbde71))
+
 ## [0.22.1](https://github.com/djm204/frankenbeast/compare/v0.22.0...v0.22.1) (2026-03-15)
 
 
