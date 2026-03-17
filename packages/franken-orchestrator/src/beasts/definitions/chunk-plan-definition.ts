@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
+import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
 export const chunkPlanDefinition: BeastDefinition = {
   id: 'chunk-plan',
@@ -10,6 +11,7 @@ export const chunkPlanDefinition: BeastDefinition = {
   configSchema: z.object({
     designDocPath: z.string().min(1),
     outputDir: z.string().min(1),
+    projectRoot: z.string().optional(),
   }).strict(),
   interviewPrompts: [
     {
@@ -25,9 +27,16 @@ export const chunkPlanDefinition: BeastDefinition = {
       required: true,
     },
   ],
-  buildProcessSpec: () => ({
-    command: 'node',
-    args: ['-e', 'setTimeout(() => process.exit(0), 50)'],
+  buildProcessSpec: (config) => ({
+    command: process.execPath,
+    args: [
+      resolveCliEntrypoint(),
+      'plan',
+      '--design-doc', String(config.designDocPath),
+      '--output-dir', String(config.outputDir),
+    ],
+    env: { FRANKENBEAST_SPAWNED: '1' },
+    cwd: String(config.projectRoot ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'chunk-plan',

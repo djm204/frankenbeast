@@ -359,7 +359,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 }
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
-  return kind === 'chunk-plan' || kind === 'martin-loop';
+  return kind === 'chunk-plan' || kind === 'martin-loop' || kind === 'design-interview';
 }
 
 async function dispatchDetachedAgent(
