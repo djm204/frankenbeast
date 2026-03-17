@@ -17,6 +17,7 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
+import { loadRunConfigFromEnv } from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -478,6 +479,7 @@ export class Session {
       verbose: this.config.verbose,
       reset: this.config.reset,
       planDirOverride: this.config.planDirOverride,
+      runConfig: loadRunConfigFromEnv(),
     };
   }
 }

@@ -37,6 +37,7 @@ import type {
   IPlannerModule, ICritiqueModule, IGovernorModule,
   IHeartbeatModule,
 } from '../deps.js';
+import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
 
 export interface CliDepOptions {
@@ -78,6 +79,8 @@ export interface CliDepOptions {
   critiqueMaxIterations?: number;
   /** Consensus threshold for critique pass verdict. Default: 0.7. */
   critiqueConsensusThreshold?: number;
+  /** RunConfig loaded from config file passthrough (spawned agent). */
+  runConfig?: RunConfig | undefined;
 }
 
 export interface IssueCliDeps {
@@ -180,7 +183,15 @@ function discoverWorkspacePackages(root: string): string[] {
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
-  const { paths, baseBranch, budget, verbose, noPr, reset } = options;
+  // Apply RunConfig overrides (config file takes precedence for spawned agents)
+  const effectiveProvider = options.runConfig?.llmConfig?.default?.provider ?? options.provider;
+  const effectiveModel = options.runConfig?.llmConfig?.default?.model;
+  const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
+  const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
+
+  const { paths, verbose, noPr, reset } = options;
+  const baseBranch = effectiveBranch;
+  const budget = effectiveBudget;
 
   // Resolve per-agent module toggles (options > env vars > default enabled)
   const modules = {
@@ -248,12 +259,12 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     autoCommit: true,
     workingDir: paths.root,
   });
-  const resolvedProvider = registry.get(options.provider);
-  const override = options.providersConfig?.[options.provider];
+  const resolvedProvider = registry.get(effectiveProvider);
+  const override = options.providersConfig?.[effectiveProvider];
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
-    ...(options.adapterModel ? { model: options.adapterModel } : {}),
+    ...((effectiveModel ?? options.adapterModel) != null ? { model: (effectiveModel ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
     ...(options.providers ? { providers: options.providers } : {}),
@@ -264,14 +275,14 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const adapterLlm = new AdapterLlmClient(
     cliLlmAdapter,
     observerBridge.observerDeps as never,
-    options.provider,
+    effectiveProvider,
   );
   const cachedLlm = new CachedCliLlmClient({
     cacheRootDir: paths.llmCacheDir,
     cliAdapter: cliLlmAdapter,
     projectId: paths.root,
-    provider: options.provider,
-    model: override?.model ?? options.adapterModel ?? options.provider,
+    provider: effectiveProvider,
+    model: override?.model ?? effectiveModel ?? options.adapterModel ?? effectiveProvider,
     operation: 'cli-session',
     workId: `session:${planName}`,
     stablePrefix: 'surface:cli',
@@ -299,11 +310,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
         runPipeline: runPipeline as unknown as FirewallPortAdapterDeps['runPipeline'],
         adapter: new ClaudeAdapter({
           apiKey: process.env.ANTHROPIC_API_KEY ?? '',
-          model: options.adapterModel ?? 'claude-sonnet-4-6',
+          model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
         }) as unknown as FirewallPortAdapterDeps['adapter'],
         config: firewallConfig,
         provider: 'anthropic',
-        model: options.adapterModel ?? 'claude-sonnet-4-6',
+        model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
       });
     } catch (error) {
       logger.warn(`Firewall module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
@@ -409,7 +420,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     martin, gitIso, observerBridge.observerDeps,
     verifyCommand, commitMessageFn, logger,
     {
-      provider: options.provider,
+      provider: effectiveProvider,
       planName,
       sessionStore: chunkSessionStore,
       snapshotStore: chunkSessionSnapshotStore,
