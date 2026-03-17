@@ -160,6 +160,46 @@ describe('Config file passthrough', () => {
     expect(parsed.modules).toEqual({ firewall: true, skills: false });
   });
 
+  it('round-trip: validates model, maxDurationMs, and skills fields from spec', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'config-passthrough-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+
+    const configSnapshot = {
+      provider: 'claude',
+      objective: 'Spec fields test',
+      model: 'claude-sonnet-4-6',
+      maxDurationMs: 300_000,
+      skills: ['code-review', 'testing'],
+    };
+
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot,
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-16T00:00:00.000Z',
+    });
+
+    await executor.start(run, martinLoopDefinition);
+
+    const [spawnSpec] = supervisor.spawn.mock.calls[0];
+    const spec = spawnSpec as { env?: Record<string, string> };
+    const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
+    configFilePaths.push(configFilePath);
+
+    const fileContent = readFileSync(configFilePath, 'utf-8');
+    const parsed = RunConfigSchema.parse(JSON.parse(fileContent));
+
+    expect(parsed.model).toBe('claude-sonnet-4-6');
+    expect(parsed.maxDurationMs).toBe(300_000);
+    expect(parsed.skills).toEqual(['code-review', 'testing']);
+  });
+
   it('cleans up config file after process exits with failure', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'config-passthrough-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

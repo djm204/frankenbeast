@@ -119,7 +119,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     sessionStore,
     url,
     wsUrl,
-    close: () => closeServer(server),
+    close: async () => {
+      options.beastControl?.ticketStore.destroy();
+      await closeServer(server);
+    },
   };
 }
 

@@ -102,13 +102,11 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       security: opts.beastControl.security ?? transportSecurity,
       rateLimit: opts.beastControl.rateLimit,
     }));
-    if (opts.beastControl.eventBus && opts.beastControl.ticketStore) {
-      app.route('/', createBeastSseRoutes({
-        bus: opts.beastControl.eventBus,
-        ticketStore: opts.beastControl.ticketStore,
-        operatorToken: opts.beastControl.operatorToken,
-      }));
-    }
+    app.route('/', createBeastSseRoutes({
+      bus: opts.beastControl.eventBus,
+      ticketStore: opts.beastControl.ticketStore,
+      operatorToken: opts.beastControl.operatorToken,
+    }));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));

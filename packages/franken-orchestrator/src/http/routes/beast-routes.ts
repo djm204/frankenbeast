@@ -47,8 +47,8 @@ export interface BeastRoutesDeps {
   operatorToken: string;
   security: TransportSecurityService;
   rateLimit: BeastRateLimitOptions;
-  eventBus?: BeastEventBus;
-  ticketStore?: SseConnectionTicketStore;
+  eventBus: BeastEventBus;
+  ticketStore: SseConnectionTicketStore;
 }
 
 export function beastRoutes(deps: BeastRoutesDeps): Hono {

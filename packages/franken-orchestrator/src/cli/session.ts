@@ -479,10 +479,7 @@ export class Session {
       verbose: this.config.verbose,
       reset: this.config.reset,
       planDirOverride: this.config.planDirOverride,
-      runConfig: (() => {
-        try { return loadRunConfigFromEnv(); }
-        catch { return undefined; }
-      })(),
+      runConfig: loadRunConfigFromEnv(),
     };
   }
 }

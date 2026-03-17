@@ -38,6 +38,9 @@ export const RunConfigSchema = z.object({
   provider: z.string(),
   objective: z.string().optional(),
   chunkDirectory: z.string().optional(),
+  model: z.string().optional(),
+  maxDurationMs: z.number().int().positive().optional(),
+  skills: z.array(z.string()).optional(),
   llmConfig: LlmConfigSchema.optional(),
   modules: ModulesConfigSchema.optional(),
   gitConfig: GitConfigSchema.optional(),
@@ -64,5 +67,7 @@ export function loadRunConfig(filePath: string): RunConfig {
 export function loadRunConfigFromEnv(): RunConfig | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
-  return loadRunConfig(filePath);
+  const config = loadRunConfig(filePath);
+  console.log(`loaded config from ${filePath}`);
+  return config;
 }

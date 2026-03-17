@@ -202,6 +202,50 @@ describe('ProcessBeastExecutor', () => {
       );
     });
 
+    it('publishes early buffered lines to eventBus after attempt creation', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      let capturedCallbacks: ProcessCallbacks | undefined;
+
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          capturedCallbacks = callbacks as ProcessCallbacks;
+          capturedCallbacks.onStdout('early stdout');
+          capturedCallbacks.onStderr('early stderr');
+          return { pid: 4242 };
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      const logEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.log');
+      const stdoutEvents = logEvents.filter(([e]) => e.data.stream === 'stdout' && e.data.line === 'early stdout');
+      const stderrEvents = logEvents.filter(([e]) => e.data.stream === 'stderr' && e.data.line === 'early stderr');
+
+      expect(stdoutEvents).toHaveLength(1);
+      expect(stdoutEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        attemptId: attempt.id,
+        stream: 'stdout',
+        line: 'early stdout',
+      });
+      expect(stderrEvents).toHaveLength(1);
+      expect(stderrEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        attemptId: attempt.id,
+        stream: 'stderr',
+        line: 'early stderr',
+      });
+    });
+
     it('buffers early stdout lines received before attempt creation', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -480,6 +524,147 @@ describe('ProcessBeastExecutor', () => {
       });
     });
 
+    it('publishes run.status event via eventBus on spawn failure', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = {
+        spawn: vi.fn(async () => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'failed',
+      });
+    });
+
+    it('does not overwrite operator_stop status when SIGKILL exit fires after finishAttempt', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus, defaultStopTimeoutMs: 100 });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      // stop() will timeout and call finishAttempt with 'stopped'/'operator_stop'
+      await executor.stop(run.id, attempt.id);
+
+      // Verify finishAttempt wrote the correct status
+      expect(repo.getRun(run.id)).toMatchObject({ status: 'stopped', stopReason: 'operator_stop' });
+
+      // Simulate the delayed SIGKILL exit callback firing
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+      cb.onExit(null, 'SIGKILL');
+
+      // handleProcessExit should NOT overwrite the terminal status
+      const finalRun = repo.getRun(run.id);
+      expect(finalRun).toMatchObject({ status: 'stopped', stopReason: 'operator_stop' });
+    });
+  });
+
+  describe('spawn failure handling', () => {
+    it('sets run to failed with spawn_failed stop reason', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async () => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('spawn ENOENT');
+
+      const updatedRun = repo.getRun(run.id);
+      expect(updatedRun).toMatchObject({
+        status: 'failed',
+        stopReason: 'spawn_failed',
+      });
+      expect(updatedRun!.finishedAt).toBeDefined();
+    });
+
+    it('appends run.spawn_failed event with error details', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async () => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
+
+      const events = repo.listEvents(run.id);
+      const spawnEvent = events.find((e) => e.type === 'run.spawn_failed');
+      expect(spawnEvent).toBeDefined();
+      expect(spawnEvent!.payload).toMatchObject({
+        error: 'spawn ENOENT',
+        code: 'ENOENT',
+      });
+      expect(spawnEvent!.payload.command).toBeDefined();
+      expect(spawnEvent!.payload.args).toBeDefined();
+    });
+
+    it('calls onRunStatusChange on spawn failure', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const onRunStatusChange = vi.fn();
+      const supervisor = {
+        spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
+
+      expect(onRunStatusChange).toHaveBeenCalledWith(run.id);
+    });
+
+    it('cleans up config file on spawn failure', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const { existsSync } = await import('node:fs');
+      const supervisor = {
+        spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
+
+      // Config file should have been cleaned up
+      const configDir = join(process.cwd(), '.frankenbeast', '.build', 'run-configs');
+      const configPath = join(configDir, `${run.id}.json`);
+      expect(existsSync(configPath)).toBe(false);
+    });
+  });
+
+  describe('stderr buffer', () => {
     it('maintains circular stderr buffer limited to 50 lines', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -154,6 +154,11 @@ export class BeastRunService {
           ? 'failed'
           : 'stopped';
 
+    // Skip all writes if status hasn't changed (full idempotency — prevents duplicate SSE, DB events, AND redundant updateTrackedAgent writes)
+    if (trackedAgent.status === status) {
+      return;
+    }
+
     const updatedAt = new Date().toISOString();
     this.repository.updateTrackedAgent(run.trackedAgentId, {
       status,
@@ -166,9 +171,7 @@ export class BeastRunService {
       data: { agentId: run.trackedAgentId, status, updatedAt },
     });
 
-    // Only append agent event if transitioning to a terminal state (avoid duplicates)
-    if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')
-      && trackedAgent.status !== status) {
+    if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
       const level = run.status === 'failed' ? 'error' : 'info';
       const type = `agent.run.${run.status}`;
       const message = run.status === 'failed'

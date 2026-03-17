@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -135,6 +135,22 @@ describe('RunConfigLoader', () => {
       expect(result).toBeDefined();
       expect(result!.provider).toBe('claude');
       expect(result!.objective).toBe('Env-loaded');
+    });
+
+    it('logs the config file path on successful load', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
+      const config = { provider: 'claude' };
+      const filePath = join(workDir, 'log-test.json');
+      await writeFile(filePath, JSON.stringify(config));
+      process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
+
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        loadRunConfigFromEnv();
+        expect(consoleSpy).toHaveBeenCalledWith(`loaded config from ${filePath}`);
+      } finally {
+        consoleSpy.mockRestore();
+      }
     });
 
     it('returns undefined when env var is not set', () => {

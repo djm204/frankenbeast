@@ -126,6 +126,18 @@ export class ProcessBeastExecutor implements BeastExecutor {
         createdAt: failedAt,
       });
 
+      // Clean up config file written before spawn
+      const configPath = this.configFilePaths.get(run.id);
+      if (configPath) {
+        try { unlinkSync(configPath); } catch { /* already removed */ }
+        this.configFilePaths.delete(run.id);
+      }
+
+      this.options.eventBus?.publish({
+        type: 'run.status',
+        data: { runId: run.id, status: 'failed' as const, updatedAt: failedAt },
+      });
+
       this.options.onRunStatusChange?.(run.id);
       throw error;
     }
@@ -144,12 +156,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     attemptId = attempt.id;
 
-    // Flush early buffered lines
+    // Flush early buffered lines to logs and SSE
     for (const line of earlyStdoutLines) {
       void this.logs.append(run.id, attemptId, 'stdout', line);
+      this.options.eventBus?.publish({
+        type: 'run.log',
+        data: { runId: run.id, attemptId, stream: 'stdout', line },
+      });
     }
     for (const line of earlyStderrLines) {
       void this.logs.append(run.id, attemptId, 'stderr', line);
+      this.options.eventBus?.publish({
+        type: 'run.log',
+        data: { runId: run.id, attemptId, stream: 'stderr', line },
+      });
     }
 
     // Flush early exit if process died before attemptId was set
@@ -219,6 +239,24 @@ export class ProcessBeastExecutor implements BeastExecutor {
     signal: string | null,
     stderrTail: string[],
   ): void {
+    // Skip if attempt is already in a terminal state (e.g., finishAttempt already ran from stop/kill)
+    const currentAttempt = this.repository.getAttempt(attemptId);
+    if (currentAttempt && (currentAttempt.status === 'stopped' || currentAttempt.status === 'completed' || currentAttempt.status === 'failed')) {
+      // Still resolve any pending exit promise so stop() doesn't hang
+      const exitEntry = this.exitPromises.get(attemptId);
+      if (exitEntry) {
+        this.exitPromises.delete(attemptId);
+        exitEntry.resolve();
+      }
+      // Still clean up config file
+      const configPath = this.configFilePaths.get(runId);
+      if (configPath) {
+        try { unlinkSync(configPath); } catch { /* already removed */ }
+        this.configFilePaths.delete(runId);
+      }
+      return;
+    }
+
     const status: BeastRunStatus = code === 0 ? 'completed' : 'failed';
     const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
     const finishedAt = new Date().toISOString();

@@ -51,7 +51,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   return {
     agents: new AgentService(repository),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
