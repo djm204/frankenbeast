@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 interface TicketEntry {
-  token: string;
   expiresAt: number;
 }
 
@@ -21,10 +20,9 @@ export class SseConnectionTicketStore {
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
   }
 
-  issue(token: string): string {
+  issue(_token: string): string {
     const ticket = randomUUID();
     this.tickets.set(ticket, {
-      token,
       expiresAt: Date.now() + this.ttlMs,
     });
     return ticket;

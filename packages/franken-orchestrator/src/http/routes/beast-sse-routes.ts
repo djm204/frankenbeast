@@ -1,7 +1,15 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+
+function safeTokenCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export interface BeastSseRouteDeps {
   bus: BeastEventBus;
@@ -15,7 +23,7 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
 
   app.post('/v1/beasts/events/ticket', (c) => {
     const authHeader = c.req.header('Authorization');
-    if (!authHeader || authHeader !== `Bearer ${operatorToken}`) {
+    if (!authHeader || !safeTokenCompare(authHeader, `Bearer ${operatorToken}`)) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid bearer token' } }, 401);
     }
 

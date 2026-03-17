@@ -181,11 +181,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
           this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
         });
 
-        const timeoutPromise = new Promise<boolean>((resolve) =>
-          setTimeout(() => resolve(false), timeoutMs),
-        );
+        let timer: ReturnType<typeof setTimeout>;
+        const timeoutPromise = new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs);
+        });
 
         const exited = await Promise.race([exitPromise, timeoutPromise]);
+        clearTimeout(timer!);
 
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
@@ -301,6 +303,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
       createdAt: finishedAt,
     });
     void this.logs.append(runId, attempt.id, 'stderr', stopReason);
+
+    this.options.eventBus?.publish({
+      type: 'run.status',
+      data: { runId, status, updatedAt: finishedAt },
+    });
+
+    this.options.onRunStatusChange?.(runId);
     return updatedAttempt;
   }
 }

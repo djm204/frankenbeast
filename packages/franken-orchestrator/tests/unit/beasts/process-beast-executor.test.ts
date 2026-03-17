@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
+import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { martinLoopDefinition } from '../../../src/beasts/definitions/martin-loop-definition.js';
 import { ProcessBeastExecutor } from '../../../src/beasts/execution/process-beast-executor.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
@@ -410,6 +411,72 @@ describe('ProcessBeastExecutor', () => {
       expect(updatedAttempt).toMatchObject({
         status: 'failed',
         stopReason: 'unknown_exit',
+      });
+    });
+
+    it('publishes run.status event via eventBus on process exit', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      await executor.start(run, martinLoopDefinition);
+
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+      cb.onExit(0, null);
+
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'completed',
+      });
+    });
+
+    it('publishes run.status event via eventBus on operator stop (finishAttempt)', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+      await executor.stop(run.id, attempt.id);
+
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'stopped',
+      });
+    });
+
+    it('publishes run.status event via eventBus on operator kill (finishAttempt)', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+      await executor.kill(run.id, attempt.id);
+
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'stopped',
       });
     });
 
