@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
+import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
 export const martinLoopDefinition: BeastDefinition = {
   id: 'martin-loop',
@@ -34,12 +35,15 @@ export const martinLoopDefinition: BeastDefinition = {
     },
   ],
   buildProcessSpec: (config) => ({
-    command: 'node',
-    args: ['-e', `console.log("martin-loop:${String(config.objective ?? '')}")`],
-    env: {
-      FRANKENBEAST_PROVIDER: String(config.provider ?? ''),
-      FRANKENBEAST_CHUNK_DIRECTORY: String(config.chunkDirectory ?? ''),
-    },
+    command: process.execPath,
+    args: [
+      resolveCliEntrypoint(),
+      'run',
+      '--provider', String(config.provider),
+      '--chunks', String(config.chunkDirectory),
+    ],
+    env: { FRANKENBEAST_SPAWNED: '1' },
+    cwd: String(config.projectRoot ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'martin-loop',
