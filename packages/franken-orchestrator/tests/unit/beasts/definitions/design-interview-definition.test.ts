@@ -39,8 +39,7 @@ describe('designInterviewDefinition', () => {
 
     it('sets FRANKENBEAST_SPAWNED=1 in env', () => {
       const spec = designInterviewDefinition.buildProcessSpec(validConfig);
-      expect(spec.env).toBeDefined();
-      expect(spec.env!['FRANKENBEAST_SPAWNED']).toBe('1');
+      expect(spec.env).toEqual({ FRANKENBEAST_SPAWNED: '1' });
     });
 
     it('uses config.projectRoot as cwd when provided', () => {

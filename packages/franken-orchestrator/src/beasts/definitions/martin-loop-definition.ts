@@ -12,6 +12,7 @@ export const martinLoopDefinition: BeastDefinition = {
     provider: z.string().min(1),
     objective: z.string().min(1),
     chunkDirectory: z.string().min(1),
+    projectRoot: z.string().optional(),
   }).strict(),
   interviewPrompts: [
     {

@@ -11,6 +11,7 @@ export const designInterviewDefinition: BeastDefinition = {
   configSchema: z.object({
     goal: z.string().min(1),
     outputPath: z.string().min(1),
+    projectRoot: z.string().optional(),
   }).strict(),
   interviewPrompts: [
     {

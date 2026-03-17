@@ -11,6 +11,7 @@ export const chunkPlanDefinition: BeastDefinition = {
   configSchema: z.object({
     designDocPath: z.string().min(1),
     outputDir: z.string().min(1),
+    projectRoot: z.string().optional(),
   }).strict(),
   interviewPrompts: [
     {
