@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
@@ -20,6 +22,7 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
 
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
+  private readonly configFilePaths = new Map<string, string>();
 
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -31,9 +34,26 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
+
+    // Write configSnapshot to a JSON file for the spawned process to load
+    const configDir = join(
+      String(run.configSnapshot.projectRoot ?? process.cwd()),
+      '.frankenbeast',
+      '.build',
+      'run-configs',
+    );
+    mkdirSync(configDir, { recursive: true });
+    const configFilePath = join(configDir, `${run.id}.json`);
+    writeFileSync(configFilePath, JSON.stringify(run.configSnapshot, null, 2));
+    this.configFilePaths.set(run.id, configFilePath);
+
     const mergedSpec = {
       ...processSpec,
-      env: { ...processSpec.env, ...moduleEnv },
+      env: {
+        ...processSpec.env,
+        ...moduleEnv,
+        FRANKENBEAST_RUN_CONFIG: configFilePath,
+      },
     };
 
     let attemptId: string | undefined;
@@ -216,6 +236,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (exitEntry) {
       this.exitPromises.delete(attemptId);
       exitEntry.resolve();
+    }
+
+    // Clean up config file
+    const configPath = this.configFilePaths.get(runId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.configFilePaths.delete(runId);
     }
 
     this.onRunStatusChange?.(runId);
