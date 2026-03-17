@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
+import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
 export const designInterviewDefinition: BeastDefinition = {
   id: 'design-interview',
@@ -25,9 +26,16 @@ export const designInterviewDefinition: BeastDefinition = {
       required: true,
     },
   ],
-  buildProcessSpec: () => ({
-    command: 'node',
-    args: ['-e', 'setTimeout(() => process.exit(0), 50)'],
+  buildProcessSpec: (config) => ({
+    command: process.execPath,
+    args: [
+      resolveCliEntrypoint(),
+      'interview',
+      '--goal', String(config.goal),
+      '--output', String(config.outputPath),
+    ],
+    env: { FRANKENBEAST_SPAWNED: '1' },
+    cwd: String(config.projectRoot ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'design-interview',
