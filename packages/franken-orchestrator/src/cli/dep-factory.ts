@@ -193,15 +193,16 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const baseBranch = effectiveBranch;
   const budget = effectiveBudget;
 
-  // Resolve per-agent module toggles (options > env vars > default enabled)
+  // Resolve per-agent module toggles (runConfig > options > env vars > default enabled)
+  const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
   const modules = {
-    firewall: options.enabledModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
-    skills: options.enabledModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
-    memory: options.enabledModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
-    planner: options.enabledModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
-    critique: options.enabledModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
-    governor: options.enabledModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
-    heartbeat: options.enabledModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
+    firewall: effectiveModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
+    skills: effectiveModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
+    memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
+    planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
+    critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
+    governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+    heartbeat: effectiveModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
   };
 
   // Derive plan name for plan-specific build artifacts

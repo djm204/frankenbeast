@@ -8,6 +8,7 @@ export const LlmOverrideSchema = z.object({
 
 export const LlmConfigSchema = z.object({
   default: LlmOverrideSchema.optional(),
+  overrides: z.record(z.string(), LlmOverrideSchema).optional(),
 }).strict();
 
 export const ModulesConfigSchema = z.object({
@@ -21,23 +22,28 @@ export const ModulesConfigSchema = z.object({
 }).strict();
 
 export const GitConfigSchema = z.object({
+  preset: z.string().optional(),
   baseBranch: z.string().optional(),
+  branchPattern: z.string().optional(),
+  prCreation: z.enum(['auto', 'manual', 'disabled']).optional(),
+  mergeStrategy: z.enum(['merge', 'squash', 'rebase']).optional(),
 }).strict();
 
 export const PromptConfigSchema = z.object({
-  systemPrompt: z.string().optional(),
+  text: z.string().optional(),
+  files: z.array(z.string()).optional(),
 }).strict();
 
 export const RunConfigSchema = z.object({
   provider: z.string(),
-  objective: z.string(),
-  chunkDirectory: z.string(),
+  objective: z.string().optional(),
+  chunkDirectory: z.string().optional(),
   llmConfig: LlmConfigSchema.optional(),
-  modulesConfig: ModulesConfigSchema.optional(),
+  modules: ModulesConfigSchema.optional(),
   gitConfig: GitConfigSchema.optional(),
   promptConfig: PromptConfigSchema.optional(),
   maxTotalTokens: z.number().optional(),
-}).strict();
+}).passthrough();
 
 export type RunConfig = z.infer<typeof RunConfigSchema>;
 

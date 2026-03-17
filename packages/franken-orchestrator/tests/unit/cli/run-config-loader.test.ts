@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,8 +26,11 @@ describe('RunConfigLoader', () => {
             provider: 'claude',
             model: 'claude-sonnet-4-6',
           },
+          overrides: {
+            planning: { provider: 'claude', model: 'claude-opus-4-6' },
+          },
         },
-        modulesConfig: {
+        modules: {
           firewall: true,
           skills: true,
           memory: false,
@@ -38,9 +41,12 @@ describe('RunConfigLoader', () => {
         },
         gitConfig: {
           baseBranch: 'develop',
+          prCreation: 'auto',
+          mergeStrategy: 'squash',
         },
         promptConfig: {
-          systemPrompt: 'You are a helpful assistant.',
+          text: 'You are a helpful assistant.',
+          files: ['context.md'],
         },
         maxTotalTokens: 100000,
       };
@@ -53,10 +59,13 @@ describe('RunConfigLoader', () => {
       expect(result.objective).toBe('Build feature X');
       expect(result.llmConfig?.default?.provider).toBe('claude');
       expect(result.llmConfig?.default?.model).toBe('claude-sonnet-4-6');
-      expect(result.modulesConfig?.firewall).toBe(true);
-      expect(result.modulesConfig?.memory).toBe(false);
+      expect(result.llmConfig?.overrides?.planning?.model).toBe('claude-opus-4-6');
+      expect(result.modules?.firewall).toBe(true);
+      expect(result.modules?.memory).toBe(false);
       expect(result.gitConfig?.baseBranch).toBe('develop');
-      expect(result.promptConfig?.systemPrompt).toBe('You are a helpful assistant.');
+      expect(result.gitConfig?.prCreation).toBe('auto');
+      expect(result.promptConfig?.text).toBe('You are a helpful assistant.');
+      expect(result.promptConfig?.files).toEqual(['context.md']);
       expect(result.maxTotalTokens).toBe(100000);
     });
 
@@ -64,8 +73,6 @@ describe('RunConfigLoader', () => {
       workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
       const config = {
         provider: 'claude',
-        objective: 'Minimal task',
-        chunkDirectory: '/tmp/chunks',
       };
       const filePath = join(workDir, 'minimal.json');
       await writeFile(filePath, JSON.stringify(config));
@@ -73,11 +80,25 @@ describe('RunConfigLoader', () => {
       const result = loadRunConfig(filePath);
 
       expect(result.provider).toBe('claude');
-      expect(result.objective).toBe('Minimal task');
-      expect(result.chunkDirectory).toBe('/tmp/chunks');
+      expect(result.objective).toBeUndefined();
+      expect(result.chunkDirectory).toBeUndefined();
       expect(result.llmConfig).toBeUndefined();
-      expect(result.modulesConfig).toBeUndefined();
+      expect(result.modules).toBeUndefined();
       expect(result.gitConfig).toBeUndefined();
+    });
+
+    it('accepts unknown fields (passthrough mode)', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
+      const config = {
+        provider: 'claude',
+        customField: 'should-not-reject',
+      };
+      const filePath = join(workDir, 'passthrough.json');
+      await writeFile(filePath, JSON.stringify(config));
+
+      const result = loadRunConfig(filePath);
+
+      expect(result.provider).toBe('claude');
     });
 
     it('throws on invalid config (missing provider)', async () => {

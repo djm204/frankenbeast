@@ -19,8 +19,14 @@ function createSupervisorMock() {
 
 describe('Config file passthrough', () => {
   let workDir: string | undefined;
+  let configFilePaths: string[] = [];
 
   afterEach(async () => {
+    // Clean up any config files written to cwd
+    for (const p of configFilePaths) {
+      try { if (existsSync(p)) { const { unlinkSync } = await import('node:fs'); unlinkSync(p); } } catch {}
+    }
+    configFilePaths = [];
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -37,7 +43,6 @@ describe('Config file passthrough', () => {
       provider: 'claude',
       objective: 'Test passthrough',
       chunkDirectory: '/tmp/chunks',
-      projectRoot: workDir,
     };
 
     const run = repo.createRun({
@@ -59,9 +64,12 @@ describe('Config file passthrough', () => {
     expect(spec.env!['FRANKENBEAST_RUN_CONFIG']).toBeDefined();
 
     const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
+    configFilePaths.push(configFilePath);
 
-    // Config file should exist
+    // Config file should exist under cwd/.frankenbeast/.build/run-configs/
     expect(existsSync(configFilePath)).toBe(true);
+    expect(configFilePath).toContain('.frankenbeast');
+    expect(configFilePath).toContain('run-configs');
 
     // Config file content should match the configSnapshot
     const written = JSON.parse(readFileSync(configFilePath, 'utf-8'));
@@ -79,7 +87,6 @@ describe('Config file passthrough', () => {
       provider: 'claude',
       objective: 'Test cleanup',
       chunkDirectory: '/tmp/chunks',
-      projectRoot: workDir,
     };
 
     const run = repo.createRun({
@@ -98,6 +105,7 @@ describe('Config file passthrough', () => {
     const [spawnSpec] = supervisor.spawn.mock.calls[0];
     const spec = spawnSpec as { env?: Record<string, string> };
     const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
+    configFilePaths.push(configFilePath);
 
     // Verify file exists before exit
     expect(existsSync(configFilePath)).toBe(true);
@@ -122,7 +130,6 @@ describe('Config file passthrough', () => {
       provider: 'claude',
       objective: 'Test failure cleanup',
       chunkDirectory: '/tmp/chunks',
-      projectRoot: workDir,
     };
 
     const run = repo.createRun({
@@ -140,6 +147,7 @@ describe('Config file passthrough', () => {
     const [spawnSpec] = supervisor.spawn.mock.calls[0];
     const spec = spawnSpec as { env?: Record<string, string> };
     const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
+    configFilePaths.push(configFilePath);
 
     expect(existsSync(configFilePath)).toBe(true);
 
