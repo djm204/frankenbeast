@@ -271,6 +271,26 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ---
 
+## Plan 1: Foundation Execution Pipeline
+
+> Branch: `feat/plan1-execution-pipeline`. PR: #241.
+> Spec: `docs/superpowers/specs/2026-03-16-plan1-foundation-execution-pipeline.md`
+
+Six chunks implementing the beast daemon execution pipeline:
+
+- [x] **Chunk 01**: ProcessSupervisor exit handling — three-way gate (stdout closed + stderr closed + exit), CLAUDE env stripping, pid validation
+- [x] **Chunk 02**: ProcessBeastExecutor callback wiring — options-object constructor pattern, early-exit buffering, onRunStatusChange/eventBus/defaultStopTimeoutMs
+- [x] **Chunk 03**: Real buildProcessSpec — package-root traversal for CLI entrypoint resolution, configSchema validation coverage
+- [x] **Chunk 04**: Config file passthrough — write configSnapshot to JSON, pass via FRANKENBEAST_RUN_CONFIG env var, loadRunConfig/loadRunConfigFromEnv, RunConfigSchema with full spec fields. Parsed-but-unused downstream fields remain (llmConfig.overrides, gitConfig.branchPattern/prCreation/mergeStrategy, promptConfig, skills)
+- [x] **Chunk 05**: Error reporting to dashboard — spawn failure handling with eventBus publish and config cleanup, terminal-status guard preventing double-writes on stop/kill escalation, syncTrackedAgent full idempotency, agent-failure-flow integration test
+- [x] **Chunk 06**: SSE event bus + connection tickets — BeastEventBus wired into executor/run-service, SseConnectionTicketStore with single-use UUID tickets and 30s TTL, SSE routes with ticket auth, early buffered lines published to eventBus, dispatch service initial agent.status events
+
+**Tests**: 1669 orchestrator tests passing (172 files). Typecheck clean.
+
+**Remaining**: Chunk 04 parsed-but-unused config fields (4.10), SSE live delivery integration test (6.5).
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.
