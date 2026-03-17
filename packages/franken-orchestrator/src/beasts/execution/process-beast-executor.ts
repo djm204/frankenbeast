@@ -38,6 +38,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const earlyStdoutLines: string[] = [];
     const earlyStderrLines: string[] = [];
     const stderrTail: string[] = [];
+    let earlyExit: { code: number | null; signal: string | null } | undefined;
 
     const handle = await this.supervisor.spawn(mergedSpec, {
       onStdout: (line) => {
@@ -59,6 +60,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       onExit: (code, signal) => {
         if (attemptId) {
           this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail]);
+        } else {
+          earlyExit = { code, signal };
         }
       },
     });
@@ -83,6 +86,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
     for (const line of earlyStderrLines) {
       void this.logs.append(run.id, attemptId, 'stderr', line);
+    }
+
+    // Flush early exit if process died before attemptId was set
+    if (earlyExit) {
+      this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
     }
 
     this.repository.appendEvent(run.id, {
@@ -122,7 +130,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     stderrTail: string[],
   ): void {
     const status: BeastRunStatus = code === 0 ? 'completed' : 'failed';
-    const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : `exit_code_${code}`;
+    const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
     const finishedAt = new Date().toISOString();
 
     this.repository.updateAttempt(attemptId, {

@@ -352,6 +352,67 @@ describe('ProcessBeastExecutor', () => {
       expect(onRunStatusChange).toHaveBeenCalledWith(run.id);
     });
 
+    it('handles process exit before attemptId is set (early exit)', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const onRunStatusChange = vi.fn();
+
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          const cb = callbacks as ProcessCallbacks;
+          // Simulate immediate crash: stderr + exit during spawn
+          cb.onStderr('command not found');
+          cb.onExit(127, null);
+          return { pid: 4242 };
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      // Exit should have been flushed after attempt creation
+      const updatedAttempt = repo.getAttempt(attempt.id);
+      expect(updatedAttempt).toMatchObject({
+        status: 'failed',
+        exitCode: 127,
+        stopReason: 'exit_code_127',
+      });
+
+      const updatedRun = repo.getRun(run.id);
+      expect(updatedRun).toMatchObject({
+        status: 'failed',
+        latestExitCode: 127,
+      });
+
+      expect(onRunStatusChange).toHaveBeenCalledWith(run.id);
+    });
+
+    it('handles exit with null code and null signal', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+      cb.onExit(null, null);
+
+      const updatedAttempt = repo.getAttempt(attempt.id);
+      expect(updatedAttempt).toMatchObject({
+        status: 'failed',
+        stopReason: 'unknown_exit',
+      });
+    });
+
     it('maintains circular stderr buffer limited to 50 lines', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
