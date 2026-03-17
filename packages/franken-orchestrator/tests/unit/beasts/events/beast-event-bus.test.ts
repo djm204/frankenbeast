@@ -53,6 +53,21 @@ describe('BeastEventBus', () => {
     expect(missed[1].id).toBe(3);
   });
 
+  it('evicts oldest events when buffer exceeds maxBufferSize', () => {
+    const bus = new BeastEventBus(3); // buffer limited to 3
+    bus.publish({ type: 'e', data: { n: 1 } });
+    bus.publish({ type: 'e', data: { n: 2 } });
+    bus.publish({ type: 'e', data: { n: 3 } });
+    bus.publish({ type: 'e', data: { n: 4 } }); // evicts event 1
+
+    const replay = bus.replaySince(0);
+    expect(replay).toHaveLength(3);
+    expect(replay[0].id).toBe(2);
+    expect(replay[0].data).toEqual({ n: 2 });
+    expect(replay[2].id).toBe(4);
+    expect(replay[2].data).toEqual({ n: 4 });
+  });
+
   it('returns empty array if no events to replay', () => {
     const bus = new BeastEventBus();
 

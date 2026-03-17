@@ -76,7 +76,7 @@ describe('ProcessBeastExecutor', () => {
       stop: vi.fn(async () => {}),
       kill: vi.fn(async () => {}),
     };
-    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { defaultStopTimeoutMs: 100 });
     const run = repo.createRun({
       definitionId: 'martin-loop',
       definitionVersion: 1,
@@ -445,7 +445,7 @@ describe('ProcessBeastExecutor', () => {
       const eventBus = new BeastEventBus();
       const publishSpy = vi.spyOn(eventBus, 'publish');
       const supervisor = createSupervisorMock();
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus, defaultStopTimeoutMs: 100 });
       const run = createTestRun(repo);
 
       const attempt = await executor.start(run, martinLoopDefinition);

@@ -24,6 +24,7 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
 export interface ProcessBeastExecutorOptions {
   onRunStatusChange?: (runId: string) => void;
   eventBus?: BeastEventBus;
+  defaultStopTimeoutMs?: number;
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -174,8 +175,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (attempt.pid !== undefined) {
       await this.supervisor.stop(attempt.pid);
 
-      if (options?.timeoutMs !== undefined) {
-        const timeoutMs = options.timeoutMs;
+      {
+        const timeoutMs = options?.timeoutMs ?? this.options.defaultStopTimeoutMs ?? 10_000;
         const pid = attempt.pid;
         const exitPromise = new Promise<boolean>((resolve) => {
           this.exitPromises.set(attemptId, { resolve: () => resolve(true) });

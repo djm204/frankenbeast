@@ -66,12 +66,11 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
         }
       });
 
-      c.req.raw.signal.addEventListener('abort', () => {
-        unsub();
-      });
-
       await new Promise<void>((resolve) => {
-        c.req.raw.signal.addEventListener('abort', () => resolve());
+        c.req.raw.signal.addEventListener('abort', () => {
+          unsub();
+          resolve();
+        }, { once: true });
       });
     });
   });

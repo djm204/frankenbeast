@@ -7,6 +7,7 @@ import { BeastLogStore } from '../../../../src/beasts/events/beast-log-store.js'
 import { martinLoopDefinition } from '../../../../src/beasts/definitions/martin-loop-definition.js';
 import { ProcessBeastExecutor } from '../../../../src/beasts/execution/process-beast-executor.js';
 import { SQLiteBeastRepository } from '../../../../src/beasts/repository/sqlite-beast-repository.js';
+import { RunConfigSchema } from '../../../../src/cli/run-config-loader.js';
 import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-supervisor.js';
 
 function createSupervisorMock() {
@@ -117,6 +118,46 @@ describe('Config file passthrough', () => {
 
     // Config file should be cleaned up
     expect(existsSync(configFilePath)).toBe(false);
+  });
+
+  it('round-trip: written configSnapshot passes Zod validation via RunConfigSchema', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'config-passthrough-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+
+    const configSnapshot = {
+      provider: 'claude',
+      objective: 'Round-trip test',
+      chunkDirectory: '/tmp/chunks',
+      modules: { firewall: true, skills: false },
+    };
+
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot,
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-16T00:00:00.000Z',
+    });
+
+    await executor.start(run, martinLoopDefinition);
+
+    const [spawnSpec] = supervisor.spawn.mock.calls[0];
+    const spec = spawnSpec as { env?: Record<string, string> };
+    const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
+    configFilePaths.push(configFilePath);
+
+    // Simulate what spawned process does: read file and validate with RunConfigSchema
+    const fileContent = readFileSync(configFilePath, 'utf-8');
+    const parsed = RunConfigSchema.parse(JSON.parse(fileContent));
+
+    expect(parsed.provider).toBe('claude');
+    expect(parsed.objective).toBe('Round-trip test');
+    expect(parsed.modules).toEqual({ firewall: true, skills: false });
   });
 
   it('cleans up config file after process exits with failure', async () => {

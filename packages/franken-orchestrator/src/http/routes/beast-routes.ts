@@ -8,6 +8,8 @@ import { BeastDispatchService } from '../../beasts/services/beast-dispatch-servi
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
+import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
+import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
@@ -45,6 +47,8 @@ export interface BeastRoutesDeps {
   operatorToken: string;
   security: TransportSecurityService;
   rateLimit: BeastRateLimitOptions;
+  eventBus?: BeastEventBus;
+  ticketStore?: SseConnectionTicketStore;
 }
 
 export function beastRoutes(deps: BeastRoutesDeps): Hono {

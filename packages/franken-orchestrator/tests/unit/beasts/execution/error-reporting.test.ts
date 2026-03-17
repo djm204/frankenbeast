@@ -334,6 +334,42 @@ describe('Error Reporting to Dashboard', () => {
       expect(supervisor.kill).toHaveBeenCalledWith(5555);
     });
 
+    it('applies default timeout when no timeoutMs is provided (escalates stuck process)', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-sigterm-'));
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: 7777 })),
+        stop: vi.fn(async () => {
+          // stop() returns but does NOT trigger onExit — process is stuck
+        }),
+        kill: vi.fn(async () => {}),
+      };
+
+      // Override the default timeout via options for testability
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { defaultStopTimeoutMs: 100 });
+      const run = repo.createRun({
+        definitionId: 'martin-loop',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: { provider: 'claude', objective: 'test', chunkDirectory: '/tmp/chunks' },
+        dispatchedBy: 'cli',
+        dispatchedByUser: 'pfk',
+        createdAt: new Date().toISOString(),
+      });
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      // Stop WITHOUT passing timeoutMs — should use default
+      await executor.stop(run.id, attempt.id);
+
+      // Wait for timeout to fire
+      await new Promise((r) => setTimeout(r, 200));
+
+      // supervisor.kill should have been called as escalation
+      expect(supervisor.kill).toHaveBeenCalledWith(7777);
+    });
+
     it('does not escalate to kill when process exits before timeout', async () => {
       workDir = await mkdtemp(join(tmpdir(), 'franken-sigterm-'));
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -82,7 +82,6 @@ export class BeastRunService {
     }
     await this.executorFor(run).stop(run.id, attemptId);
     this.metrics.recordRunStopped(run.definitionId);
-    await this.logs.append(run.id, attemptId, 'stderr', 'operator_stop');
     const updated = this.requireRun(runId);
     this.syncTrackedAgent(updated);
     return updated;
@@ -95,7 +94,6 @@ export class BeastRunService {
       throw new Error(`Beast run has no active attempt: ${runId}`);
     }
     await this.executorFor(run).kill(run.id, attemptId);
-    await this.logs.append(run.id, attemptId, 'stderr', 'operator_kill');
     const updated = this.requireRun(runId);
     this.syncTrackedAgent(updated);
     return updated;

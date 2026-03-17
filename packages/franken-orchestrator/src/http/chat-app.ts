@@ -8,6 +8,7 @@ import type { ChatRuntime } from '../chat/runtime.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
+import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
@@ -101,6 +102,13 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       security: opts.beastControl.security ?? transportSecurity,
       rateLimit: opts.beastControl.rateLimit,
     }));
+    if (opts.beastControl.eventBus && opts.beastControl.ticketStore) {
+      app.route('/', createBeastSseRoutes({
+        bus: opts.beastControl.eventBus,
+        ticketStore: opts.beastControl.ticketStore,
+        operatorToken: opts.beastControl.operatorToken,
+      }));
+    }
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
