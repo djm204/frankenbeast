@@ -155,5 +155,26 @@ export class BeastRunService {
       ...(run.id ? { dispatchRunId: run.id } : {}),
       updatedAt: new Date().toISOString(),
     });
+
+    if (run.status === 'failed' || run.status === 'completed' || run.status === 'stopped') {
+      const level = run.status === 'failed' ? 'error' : 'info';
+      const type = `agent.run.${run.status}`;
+      const message = run.status === 'failed'
+        ? `Run ${run.id} failed with exit code ${run.latestExitCode ?? 'unknown'}`
+        : run.status === 'completed'
+          ? `Run ${run.id} completed successfully`
+          : `Run ${run.id} stopped`;
+      this.repository.appendTrackedAgentEvent(run.trackedAgentId, {
+        level,
+        type,
+        message,
+        payload: {
+          runId: run.id,
+          ...(run.latestExitCode !== undefined ? { exitCode: run.latestExitCode } : {}),
+          ...(run.stopReason ? { stopReason: run.stopReason } : {}),
+        },
+        createdAt: new Date().toISOString(),
+      });
+    }
   }
 }
