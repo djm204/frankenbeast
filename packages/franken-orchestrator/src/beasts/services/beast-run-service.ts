@@ -126,6 +126,13 @@ export class BeastRunService {
     return definition;
   }
 
+  notifyRunStatusChange(runId: string): void {
+    const run = this.repository.getRun(runId);
+    if (run) {
+      this.syncTrackedAgent(run);
+    }
+  }
+
   private syncTrackedAgent(run: BeastRun): void {
     if (!run.trackedAgentId) {
       return;
