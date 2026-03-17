@@ -1,6 +1,6 @@
 import { BeastLogStore } from '../events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
-import type { BeastExecutor } from './beast-executor.js';
+import type { BeastExecutor, StopOptions } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -19,6 +19,8 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
+  private readonly exitPromises = new Map<string, { resolve: () => void }>();
+
   constructor(
     private readonly repository: SQLiteBeastRepository,
     private readonly logs: BeastLogStore,
@@ -40,31 +42,58 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const stderrTail: string[] = [];
     let earlyExit: { code: number | null; signal: string | null } | undefined;
 
-    const handle = await this.supervisor.spawn(mergedSpec, {
-      onStdout: (line) => {
-        if (attemptId) {
-          void this.logs.append(run.id, attemptId, 'stdout', line);
-        } else {
-          earlyStdoutLines.push(line);
-        }
-      },
-      onStderr: (line) => {
-        stderrTail.push(line);
-        if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
-        if (attemptId) {
-          void this.logs.append(run.id, attemptId, 'stderr', line);
-        } else {
-          earlyStderrLines.push(line);
-        }
-      },
-      onExit: (code, signal) => {
-        if (attemptId) {
-          this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail]);
-        } else {
-          earlyExit = { code, signal };
-        }
-      },
-    });
+    let handle: { pid: number };
+    try {
+      handle = await this.supervisor.spawn(mergedSpec, {
+        onStdout: (line) => {
+          if (attemptId) {
+            void this.logs.append(run.id, attemptId, 'stdout', line);
+          } else {
+            earlyStdoutLines.push(line);
+          }
+        },
+        onStderr: (line) => {
+          stderrTail.push(line);
+          if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
+          if (attemptId) {
+            void this.logs.append(run.id, attemptId, 'stderr', line);
+          } else {
+            earlyStderrLines.push(line);
+          }
+        },
+        onExit: (code, signal) => {
+          if (attemptId) {
+            this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail]);
+          } else {
+            earlyExit = { code, signal };
+          }
+        },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorCode = (error as NodeJS.ErrnoException).code;
+      const failedAt = new Date().toISOString();
+
+      this.repository.updateRun(run.id, {
+        status: 'failed',
+        finishedAt: failedAt,
+        stopReason: 'spawn_failed',
+      });
+
+      this.repository.appendEvent(run.id, {
+        type: 'run.spawn_failed',
+        payload: {
+          error: errorMessage,
+          ...(errorCode ? { code: errorCode } : {}),
+          command: processSpec.command,
+          args: [...processSpec.args],
+        },
+        createdAt: failedAt,
+      });
+
+      this.onRunStatusChange?.(run.id);
+      throw error;
+    }
 
     const startedAt = new Date().toISOString();
     const attempt = this.repository.createAttempt(run.id, {
@@ -106,10 +135,34 @@ export class ProcessBeastExecutor implements BeastExecutor {
     return attempt;
   }
 
-  async stop(runId: string, attemptId: string): Promise<BeastRunAttempt> {
+  async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
       await this.supervisor.stop(attempt.pid);
+
+      if (options?.timeoutMs !== undefined) {
+        const timeoutMs = options.timeoutMs;
+        const pid = attempt.pid;
+        const exitPromise = new Promise<boolean>((resolve) => {
+          this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
+        });
+
+        const timeoutPromise = new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), timeoutMs),
+        );
+
+        const exited = await Promise.race([exitPromise, timeoutPromise]);
+
+        if (!exited && this.exitPromises.has(attemptId)) {
+          this.exitPromises.delete(attemptId);
+          await this.supervisor.kill(pid);
+        }
+
+        // If process exited naturally, handleProcessExit already updated status — don't overwrite
+        if (exited) {
+          return this.repository.getAttempt(attemptId) ?? attempt;
+        }
+      }
     }
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_stop');
   }
@@ -158,6 +211,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
       },
       createdAt: finishedAt,
     });
+
+    const exitEntry = this.exitPromises.get(attemptId);
+    if (exitEntry) {
+      this.exitPromises.delete(attemptId);
+      exitEntry.resolve();
+    }
 
     this.onRunStatusChange?.(runId);
   }
