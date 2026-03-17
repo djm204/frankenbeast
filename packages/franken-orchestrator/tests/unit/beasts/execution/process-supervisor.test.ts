@@ -211,13 +211,4 @@ describe('ProcessSupervisor', () => {
     });
   });
 
-  describe('spawn without callbacks (backward compatibility)', () => {
-    it('returns a handle with pid when no callbacks provided', async () => {
-      const spec = makeSpec({ command: 'echo', args: ['hello'] });
-
-      const handle = await supervisor.spawn(spec);
-
-      expect(handle.pid).toBeGreaterThan(0);
-    });
-  });
 });

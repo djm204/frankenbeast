@@ -13,7 +13,7 @@ export interface ProcessCallbacks {
 }
 
 export interface ProcessSupervisorLike {
-  spawn(spec: BeastProcessSpec, callbacks?: ProcessCallbacks): Promise<SpawnedProcessHandle>;
+  spawn(spec: BeastProcessSpec, callbacks: ProcessCallbacks): Promise<SpawnedProcessHandle>;
   stop(pid: number): Promise<void>;
   kill(pid: number): Promise<void>;
 }
@@ -39,7 +39,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
   async spawn(
     spec: BeastProcessSpec,
-    callbacks?: ProcessCallbacks,
+    callbacks: ProcessCallbacks,
   ): Promise<SpawnedProcessHandle> {
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
@@ -59,26 +59,37 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     const pid = child.pid;
     this.processes.set(pid, child);
 
-    if (callbacks) {
-      if (child.stdout) {
-        const stdoutRl = createInterface({ input: child.stdout });
-        stdoutRl.on('line', (line) => callbacks.onStdout(line));
-      }
+    let stdoutClosed = false;
+    let stderrClosed = false;
+    let exitInfo: { code: number | null; signal: string | null } | undefined;
 
-      if (child.stderr) {
-        const stderrRl = createInterface({ input: child.stderr });
-        stderrRl.on('line', (line) => callbacks.onStderr(line));
-      }
-
-      child.on('close', (code, signal) => {
+    const maybeFireExit = () => {
+      if (stdoutClosed && stderrClosed && exitInfo) {
         this.processes.delete(pid);
-        callbacks.onExit(code, signal);
-      });
+        callbacks.onExit(exitInfo.code, exitInfo.signal);
+      }
+    };
+
+    if (child.stdout) {
+      const stdoutRl = createInterface({ input: child.stdout });
+      stdoutRl.on('line', (line) => callbacks.onStdout(line));
+      stdoutRl.on('close', () => { stdoutClosed = true; maybeFireExit(); });
     } else {
-      child.on('close', () => {
-        this.processes.delete(pid);
-      });
+      stdoutClosed = true;
     }
+
+    if (child.stderr) {
+      const stderrRl = createInterface({ input: child.stderr });
+      stderrRl.on('line', (line) => callbacks.onStderr(line));
+      stderrRl.on('close', () => { stderrClosed = true; maybeFireExit(); });
+    } else {
+      stderrClosed = true;
+    }
+
+    child.on('close', (code, signal) => {
+      exitInfo = { code, signal };
+      maybeFireExit();
+    });
 
     return { pid };
   }
