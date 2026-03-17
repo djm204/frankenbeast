@@ -2,7 +2,9 @@ import { BeastLogStore } from '../events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
-import type { BeastDefinition, BeastRun, BeastRunAttempt, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
+
+const STDERR_BUFFER_SIZE = 50;
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   if (!config) return {};
@@ -21,6 +23,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     private readonly repository: SQLiteBeastRepository,
     private readonly logs: BeastLogStore,
     private readonly supervisor: ProcessSupervisorLike,
+    private readonly onRunStatusChange?: (runId: string) => void,
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
@@ -30,7 +33,39 @@ export class ProcessBeastExecutor implements BeastExecutor {
       ...processSpec,
       env: { ...processSpec.env, ...moduleEnv },
     };
-    const handle = await this.supervisor.spawn(mergedSpec);
+
+    let attemptId: string | undefined;
+    const earlyStdoutLines: string[] = [];
+    const earlyStderrLines: string[] = [];
+    const stderrTail: string[] = [];
+    let earlyExit: { code: number | null; signal: string | null } | undefined;
+
+    const handle = await this.supervisor.spawn(mergedSpec, {
+      onStdout: (line) => {
+        if (attemptId) {
+          void this.logs.append(run.id, attemptId, 'stdout', line);
+        } else {
+          earlyStdoutLines.push(line);
+        }
+      },
+      onStderr: (line) => {
+        stderrTail.push(line);
+        if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
+        if (attemptId) {
+          void this.logs.append(run.id, attemptId, 'stderr', line);
+        } else {
+          earlyStderrLines.push(line);
+        }
+      },
+      onExit: (code, signal) => {
+        if (attemptId) {
+          this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail]);
+        } else {
+          earlyExit = { code, signal };
+        }
+      },
+    });
+
     const startedAt = new Date().toISOString();
     const attempt = this.repository.createAttempt(run.id, {
       status: 'running',
@@ -42,6 +77,21 @@ export class ProcessBeastExecutor implements BeastExecutor {
         args: [...processSpec.args],
       },
     });
+
+    attemptId = attempt.id;
+
+    // Flush early buffered lines
+    for (const line of earlyStdoutLines) {
+      void this.logs.append(run.id, attemptId, 'stdout', line);
+    }
+    for (const line of earlyStderrLines) {
+      void this.logs.append(run.id, attemptId, 'stderr', line);
+    }
+
+    // Flush early exit if process died before attemptId was set
+    if (earlyExit) {
+      this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
+    }
 
     this.repository.appendEvent(run.id, {
       attemptId: attempt.id,
@@ -70,6 +120,46 @@ export class ProcessBeastExecutor implements BeastExecutor {
       await this.supervisor.kill(attempt.pid);
     }
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_kill');
+  }
+
+  private handleProcessExit(
+    runId: string,
+    attemptId: string,
+    code: number | null,
+    signal: string | null,
+    stderrTail: string[],
+  ): void {
+    const status: BeastRunStatus = code === 0 ? 'completed' : 'failed';
+    const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
+    const finishedAt = new Date().toISOString();
+
+    this.repository.updateAttempt(attemptId, {
+      status,
+      finishedAt,
+      exitCode: code ?? undefined,
+      ...(stopReason ? { stopReason } : {}),
+    });
+
+    this.repository.updateRun(runId, {
+      status,
+      finishedAt,
+      latestExitCode: code ?? undefined,
+      ...(stopReason ? { stopReason } : {}),
+    });
+
+    const eventType = code === 0 ? 'attempt.finished' : 'attempt.failed';
+    this.repository.appendEvent(runId, {
+      attemptId,
+      type: eventType,
+      payload: {
+        exitCode: code,
+        signal,
+        ...(code !== 0 ? { lastStderrLines: stderrTail, summary: `Process exited with code ${code}` } : {}),
+      },
+      createdAt: finishedAt,
+    });
+
+    this.onRunStatusChange?.(runId);
   }
 
   private requireAttempt(attemptId: string): BeastRunAttempt {
