@@ -80,7 +80,7 @@ describe('Error Reporting to Dashboard', () => {
       // Wire up the executor with a fresh one that has notifyRunStatusChange
       const executorWithNotify = new ProcessBeastExecutor(
         repo, logs, supervisor,
-        (runId: string) => service.notifyRunStatusChange(runId),
+        { onRunStatusChange: (runId: string) => service.notifyRunStatusChange(runId) },
       );
       (mockExecutors as Record<string, unknown>).process = executorWithNotify;
 
@@ -146,7 +146,7 @@ describe('Error Reporting to Dashboard', () => {
 
       const executorWithNotify = new ProcessBeastExecutor(
         repo, logs, supervisor,
-        (runId: string) => service.notifyRunStatusChange(runId),
+        { onRunStatusChange: (runId: string) => service.notifyRunStatusChange(runId) },
       );
 
       await executorWithNotify.start(run, martinLoopDefinition);
@@ -236,7 +236,7 @@ describe('Error Reporting to Dashboard', () => {
 
       const executorWithNotify = new ProcessBeastExecutor(
         repo, logs, supervisor,
-        (runId: string) => service.notifyRunStatusChange(runId),
+        { onRunStatusChange: (runId: string) => service.notifyRunStatusChange(runId) },
       );
 
       await executorWithNotify.start(run, martinLoopDefinition);
@@ -267,7 +267,7 @@ describe('Error Reporting to Dashboard', () => {
         kill: vi.fn(async () => {}),
       };
 
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       const run = repo.createRun({
         definitionId: 'martin-loop',
         definitionVersion: 1,

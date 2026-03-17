@@ -113,7 +113,7 @@ describe('ProcessBeastExecutor', () => {
       const supervisor = createSupervisorMock();
       const onRunStatusChange = vi.fn();
 
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       expect(executor).toBeInstanceOf(ProcessBeastExecutor);
     });
 
@@ -240,7 +240,7 @@ describe('ProcessBeastExecutor', () => {
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
       const supervisor = createSupervisorMock();
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       const run = createTestRun(repo);
 
       const attempt = await executor.start(run, martinLoopDefinition);
@@ -277,7 +277,7 @@ describe('ProcessBeastExecutor', () => {
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
       const supervisor = createSupervisorMock();
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       const run = createTestRun(repo);
 
       const attempt = await executor.start(run, martinLoopDefinition);
@@ -340,7 +340,7 @@ describe('ProcessBeastExecutor', () => {
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
       const supervisor = createSupervisorMock();
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       const run = createTestRun(repo);
 
       await executor.start(run, martinLoopDefinition);
@@ -370,7 +370,7 @@ describe('ProcessBeastExecutor', () => {
         kill: vi.fn(async () => {}),
       };
 
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor, onRunStatusChange);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { onRunStatusChange });
       const run = createTestRun(repo);
 
       const attempt = await executor.start(run, martinLoopDefinition);
