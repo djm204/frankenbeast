@@ -85,6 +85,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         payload: {
           error: errorMessage,
           ...(errorCode ? { code: errorCode } : {}),
+          command: processSpec.command,
+          args: [...processSpec.args],
         },
         createdAt: failedAt,
       });
@@ -154,6 +156,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
           await this.supervisor.kill(pid);
+        }
+
+        // If process exited naturally, handleProcessExit already updated status — don't overwrite
+        if (exited) {
+          return this.repository.getAttempt(attemptId) ?? attempt;
         }
       }
     }

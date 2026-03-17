@@ -156,7 +156,9 @@ export class BeastRunService {
       updatedAt: new Date().toISOString(),
     });
 
-    if (run.status === 'failed' || run.status === 'completed' || run.status === 'stopped') {
+    // Only append agent event if transitioning to a terminal state (avoid duplicates)
+    if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')
+      && trackedAgent.status !== status) {
       const level = run.status === 'failed' ? 'error' : 'info';
       const type = `agent.run.${run.status}`;
       const message = run.status === 'failed'
