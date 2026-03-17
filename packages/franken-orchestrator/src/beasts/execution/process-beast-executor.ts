@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
+import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
@@ -20,6 +21,11 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   return env;
 }
 
+export interface ProcessBeastExecutorOptions {
+  onRunStatusChange?: (runId: string) => void;
+  eventBus?: BeastEventBus;
+}
+
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly configFilePaths = new Map<string, string>();
@@ -28,7 +34,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     private readonly repository: SQLiteBeastRepository,
     private readonly logs: BeastLogStore,
     private readonly supervisor: ProcessSupervisorLike,
-    private readonly onRunStatusChange?: (runId: string) => void,
+    private readonly options: ProcessBeastExecutorOptions = {},
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
@@ -68,6 +74,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
         onStdout: (line) => {
           if (attemptId) {
             void this.logs.append(run.id, attemptId, 'stdout', line);
+            this.options.eventBus?.publish({
+              type: 'run.log',
+              data: { runId: run.id, attemptId, stream: 'stdout', line },
+            });
           } else {
             earlyStdoutLines.push(line);
           }
@@ -77,6 +87,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
             void this.logs.append(run.id, attemptId, 'stderr', line);
+            this.options.eventBus?.publish({
+              type: 'run.log',
+              data: { runId: run.id, attemptId, stream: 'stderr', line },
+            });
           } else {
             earlyStderrLines.push(line);
           }
@@ -111,7 +125,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         createdAt: failedAt,
       });
 
-      this.onRunStatusChange?.(run.id);
+      this.options.onRunStatusChange?.(run.id);
       throw error;
     }
 
@@ -245,7 +259,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
       this.configFilePaths.delete(runId);
     }
 
-    this.onRunStatusChange?.(runId);
+    this.options.eventBus?.publish({
+      type: 'run.status',
+      data: { runId, status, updatedAt: finishedAt },
+    });
+
+    this.options.onRunStatusChange?.(runId);
   }
 
   private requireAttempt(attemptId: string): BeastRunAttempt {

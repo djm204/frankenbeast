@@ -1,9 +1,14 @@
 import type { BeastDefinition, BeastRun } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
+import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+
+export interface BeastRunServiceOptions {
+  eventBus?: BeastEventBus;
+}
 
 export class BeastRunService {
   constructor(
@@ -12,6 +17,7 @@ export class BeastRunService {
     private readonly executors: BeastExecutors,
     private readonly metrics: BeastMetrics,
     private readonly logs: BeastLogStore,
+    private readonly serviceOptions: BeastRunServiceOptions = {},
   ) {}
 
   listRuns(): BeastRun[] {
@@ -150,10 +156,16 @@ export class BeastRunService {
           ? 'failed'
           : 'stopped';
 
+    const updatedAt = new Date().toISOString();
     this.repository.updateTrackedAgent(run.trackedAgentId, {
       status,
       ...(run.id ? { dispatchRunId: run.id } : {}),
-      updatedAt: new Date().toISOString(),
+      updatedAt,
+    });
+
+    this.serviceOptions.eventBus?.publish({
+      type: 'agent.status',
+      data: { agentId: run.trackedAgentId, status, updatedAt },
     });
 
     // Only append agent event if transitioning to a terminal state (avoid duplicates)

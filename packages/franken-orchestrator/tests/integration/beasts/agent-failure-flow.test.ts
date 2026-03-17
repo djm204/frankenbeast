@@ -88,7 +88,7 @@ describe('Agent Failure Flow (integration)', () => {
 
     const executor = new ProcessBeastExecutor(
       repo, logs, supervisor,
-      (runId: string) => service.notifyRunStatusChange(runId),
+      { onRunStatusChange: (runId: string) => service.notifyRunStatusChange(runId) },
     );
 
     // Start the process -- it will crash immediately
