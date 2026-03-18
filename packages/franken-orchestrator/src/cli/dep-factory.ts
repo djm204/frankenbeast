@@ -188,6 +188,12 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const effectiveModel = options.runConfig?.llmConfig?.default?.model;
   const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
   const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
+  const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
+  const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
+  const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
+  const effectiveSkills = options.runConfig?.skills;
+  const effectivePromptConfig = options.runConfig?.promptConfig;
+  const effectiveLlmOverrides = options.runConfig?.llmConfig?.overrides;
 
   const { paths, verbose, noPr, reset } = options;
   const baseBranch = effectiveBranch;
@@ -256,7 +262,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
     baseBranch,
-    branchPrefix: 'feat/',
+    branchPrefix: effectiveBranchPattern,
     autoCommit: true,
     workingDir: paths.root,
   });
@@ -402,7 +408,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   }
 
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
-  const prCreator = noPr ? undefined : new PrCreator(
+  const prDisabled = noPr || effectivePrCreation === 'disabled';
+  const prCreator = prDisabled ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
     undefined,
     cachedLlm,
@@ -508,9 +515,29 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
+  // Apply skills filter from RunConfig (only expose allowed skills)
+  const filteredSkills: ISkillsModule = effectiveSkills?.length
+    ? {
+        hasSkill: (id: string) => effectiveSkills.includes(id) && skills.hasSkill(id),
+        getAvailableSkills: () => skills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
+        execute: skills.execute,
+      }
+    : skills;
+
+  // Build RunConfig overrides for downstream consumption by beast loop phases
+  const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
+    (effectiveLlmOverrides || effectiveMergeStrategy || effectivePromptConfig || effectiveSkills?.length)
+      ? {
+          ...(effectiveLlmOverrides ? { llmOverrides: effectiveLlmOverrides as import('../deps.js').RunConfigOverrides['llmOverrides'] } : {}),
+          ...(effectiveMergeStrategy ? { mergeStrategy: effectiveMergeStrategy } : {}),
+          ...(effectivePromptConfig ? { promptConfig: effectivePromptConfig } : {}),
+          ...(effectiveSkills?.length ? { allowedSkills: effectiveSkills } : {}),
+        }
+      : undefined;
+
   const deps: BeastLoopDeps = {
     firewall,
-    skills,
+    skills: filteredSkills,
     memory,
     planner: stubPlanner,
     observer: observerBridge,
@@ -522,6 +549,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     cliExecutor,
     checkpoint,
     ...(prCreator ? { prCreator } : {}),
+    ...(runConfigOverrides ? { runConfigOverrides } : {}),
   };
 
   // Issue pipeline deps (only created when issueIO is provided)

@@ -102,10 +102,19 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       security: opts.beastControl.security ?? transportSecurity,
       rateLimit: opts.beastControl.rateLimit,
     }));
+    const bc = opts.beastControl;
     app.route('/', createBeastSseRoutes({
-      bus: opts.beastControl.eventBus,
-      ticketStore: opts.beastControl.ticketStore,
-      operatorToken: opts.beastControl.operatorToken,
+      bus: bc.eventBus,
+      ticketStore: bc.ticketStore,
+      operatorToken: bc.operatorToken,
+      getSnapshot: () => ({
+        agents: bc.agents.listAgents().map((a) => ({
+          id: a.id,
+          definitionId: a.definitionId,
+          status: a.status,
+          updatedAt: a.updatedAt,
+        })),
+      }),
     }));
   }
   if (opts.networkControl) {

@@ -15,6 +15,8 @@ export interface BeastSseRouteDeps {
   bus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
   operatorToken: string;
+  /** Optional callback to produce initial snapshot data on SSE connect. */
+  getSnapshot?: () => Record<string, unknown>;
 }
 
 export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
@@ -33,13 +35,22 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
 
   app.get('/v1/beasts/events/stream', (c) => {
     const ticket = c.req.query('ticket');
-    if (!ticket || !ticketStore.validate(ticket)) {
+    if (!ticket || !ticketStore.validate(ticket, operatorToken)) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
 
     const lastEventId = c.req.header('Last-Event-ID');
 
     return streamSSE(c, async (stream) => {
+      // Send initial snapshot if no Last-Event-ID (fresh connect, not reconnect)
+      if (!lastEventId && deps.getSnapshot) {
+        await stream.writeSSE({
+          id: '0',
+          event: 'snapshot',
+          data: JSON.stringify(deps.getSnapshot()),
+        });
+      }
+
       if (lastEventId) {
         const id = parseInt(lastEventId, 10);
         if (!isNaN(id)) {

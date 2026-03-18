@@ -115,8 +115,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         stopReason: 'spawn_failed',
       });
 
-      this.repository.appendEvent(run.id, {
-        type: 'run.spawn_failed',
+      const spawnFailedEvent = {
+        type: 'run.spawn_failed' as const,
         payload: {
           error: errorMessage,
           ...(errorCode ? { code: errorCode } : {}),
@@ -124,6 +124,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
           args: [...processSpec.args],
         },
         createdAt: failedAt,
+      };
+      this.repository.appendEvent(run.id, spawnFailedEvent);
+      this.options.eventBus?.publish({
+        type: 'run.event',
+        data: { runId: run.id, event: spawnFailedEvent },
       });
 
       // Clean up config file written before spawn
@@ -177,14 +182,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
     }
 
-    this.repository.appendEvent(run.id, {
+    const startedEvent = {
       attemptId: attempt.id,
-      type: 'attempt.started',
+      type: 'attempt.started' as const,
       payload: {
         pid: handle.pid,
         command: processSpec.command,
       },
       createdAt: startedAt,
+    };
+    this.repository.appendEvent(run.id, startedEvent);
+    this.options.eventBus?.publish({
+      type: 'run.event',
+      data: { runId: run.id, event: startedEvent },
     });
     await this.logs.append(run.id, attempt.id, 'stdout', `started pid=${handle.pid}`);
     return attempt;
@@ -276,15 +286,25 @@ export class ProcessBeastExecutor implements BeastExecutor {
     });
 
     const eventType = code === 0 ? 'attempt.finished' : 'attempt.failed';
-    this.repository.appendEvent(runId, {
+    const attemptRecord = this.repository.getAttempt(attemptId);
+    const durationMs = attemptRecord?.startedAt
+      ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
+      : undefined;
+    const exitEvent = {
       attemptId,
       type: eventType,
       payload: {
         exitCode: code,
         signal,
+        ...(durationMs !== undefined ? { durationMs } : {}),
         ...(code !== 0 ? { lastStderrLines: stderrTail, summary: `Process exited with code ${code}` } : {}),
       },
       createdAt: finishedAt,
+    };
+    this.repository.appendEvent(runId, exitEvent);
+    this.options.eventBus?.publish({
+      type: 'run.event',
+      data: { runId, event: exitEvent },
     });
 
     const exitEntry = this.exitPromises.get(attemptId);
@@ -333,13 +353,16 @@ export class ProcessBeastExecutor implements BeastExecutor {
       finishedAt,
       stopReason,
     });
-    this.repository.appendEvent(runId, {
+    const finishEvent = {
       attemptId: attempt.id,
-      type: status === 'stopped' ? 'attempt.stopped' : 'attempt.finished',
-      payload: {
-        stopReason,
-      },
+      type: (status === 'stopped' ? 'attempt.stopped' : 'attempt.finished') as string,
+      payload: { stopReason },
       createdAt: finishedAt,
+    };
+    this.repository.appendEvent(runId, finishEvent);
+    this.options.eventBus?.publish({
+      type: 'run.event',
+      data: { runId, event: finishEvent },
     });
     void this.logs.append(runId, attempt.id, 'stderr', stopReason);
 

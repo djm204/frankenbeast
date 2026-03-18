@@ -78,14 +78,17 @@ export class BeastDispatchService {
           dispatchRunId: createdRun.id,
           updatedAt: linkedAt,
         });
-        this.repository.appendTrackedAgentEvent(request.trackedAgentId, {
-          level: 'info',
+        const linkedEvent = {
+          level: 'info' as const,
           type: 'agent.dispatch.linked',
           message: `Linked Beast run ${createdRun.id}`,
-          payload: {
-            runId: createdRun.id,
-          },
+          payload: { runId: createdRun.id },
           createdAt: linkedAt,
+        };
+        this.repository.appendTrackedAgentEvent(request.trackedAgentId, linkedEvent);
+        this.options.eventBus?.publish({
+          type: 'agent.event',
+          data: { agentId: request.trackedAgentId, event: linkedEvent },
         });
       }
 
@@ -140,15 +143,17 @@ export class BeastDispatchService {
               type: 'agent.status',
               data: { agentId: updatedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
             });
-            this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, {
-              level: 'error',
+            const failedEvent = {
+              level: 'error' as const,
               type: 'agent.dispatch.failed',
               message: `Failed to start Beast run ${updatedRun.id}`,
-              payload: {
-                runId: updatedRun.id,
-                error: errorMessage,
-              },
+              payload: { runId: updatedRun.id, error: errorMessage },
               createdAt: failedAt,
+            };
+            this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, failedEvent);
+            this.options.eventBus?.publish({
+              type: 'agent.event',
+              data: { agentId: updatedRun.trackedAgentId, event: failedEvent },
             });
           }
           return updatedRun;

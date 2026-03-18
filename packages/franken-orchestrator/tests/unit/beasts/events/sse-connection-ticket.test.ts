@@ -12,20 +12,20 @@ describe('SseConnectionTicketStore', () => {
     store.destroy();
   });
 
-  it('issues a ticket and validates it', () => {
+  it('issues a ticket and validates it with matching operator token', () => {
     const ticket = store.issue('operator-token-123');
     expect(typeof ticket).toBe('string');
     expect(ticket.length).toBeGreaterThan(0);
 
-    const result = store.validate(ticket);
+    const result = store.validate(ticket, 'operator-token-123');
     expect(result).toBe(true);
   });
 
   it('burns ticket on first use (single-use)', () => {
     const ticket = store.issue('operator-token-123');
 
-    expect(store.validate(ticket)).toBe(true);
-    expect(store.validate(ticket)).toBe(false); // burned
+    expect(store.validate(ticket, 'operator-token-123')).toBe(true);
+    expect(store.validate(ticket, 'operator-token-123')).toBe(false); // burned
   });
 
   it('rejects expired tickets', async () => {
@@ -34,11 +34,16 @@ describe('SseConnectionTicketStore', () => {
 
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(shortStore.validate(ticket)).toBe(false);
+    expect(shortStore.validate(ticket, 'operator-token-123')).toBe(false);
     shortStore.destroy();
   });
 
   it('rejects unknown tickets', () => {
-    expect(store.validate('nonexistent-uuid')).toBe(false);
+    expect(store.validate('nonexistent-uuid', 'operator-token-123')).toBe(false);
+  });
+
+  it('rejects ticket when operator token does not match', () => {
+    const ticket = store.issue('operator-token-123');
+    expect(store.validate(ticket, 'different-token')).toBe(false);
   });
 });

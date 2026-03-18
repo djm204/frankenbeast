@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 interface TicketEntry {
   token: string;
@@ -30,7 +30,7 @@ export class SseConnectionTicketStore {
     return ticket;
   }
 
-  validate(ticket: string): boolean {
+  validate(ticket: string, operatorToken: string): boolean {
     const entry = this.tickets.get(ticket);
     if (!entry) return false;
 
@@ -38,7 +38,11 @@ export class SseConnectionTicketStore {
 
     if (Date.now() > entry.expiresAt) return false;
 
-    return true;
+    // Verify the ticket was issued for this operator token
+    const bufA = Buffer.from(entry.token);
+    const bufB = Buffer.from(operatorToken);
+    if (bufA.length !== bufB.length) return false;
+    return timingSafeEqual(bufA, bufB);
   }
 
   private cleanup(): void {

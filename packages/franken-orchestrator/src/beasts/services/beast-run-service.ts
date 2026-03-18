@@ -172,14 +172,14 @@ export class BeastRunService {
     });
 
     if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
-      const level = run.status === 'failed' ? 'error' : 'info';
+      const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';
       const type = `agent.run.${run.status}`;
       const message = run.status === 'failed'
         ? `Run ${run.id} failed with exit code ${run.latestExitCode ?? 'unknown'}`
         : run.status === 'completed'
           ? `Run ${run.id} completed successfully`
           : `Run ${run.id} stopped`;
-      this.repository.appendTrackedAgentEvent(run.trackedAgentId, {
+      const agentEvent = {
         level,
         type,
         message,
@@ -189,6 +189,11 @@ export class BeastRunService {
           ...(run.stopReason ? { stopReason: run.stopReason } : {}),
         },
         createdAt: new Date().toISOString(),
+      };
+      this.repository.appendTrackedAgentEvent(run.trackedAgentId, agentEvent);
+      this.serviceOptions.eventBus?.publish({
+        type: 'agent.event',
+        data: { agentId: run.trackedAgentId, event: agentEvent },
       });
     }
   }

@@ -192,6 +192,18 @@ export interface ICheckpointStore {
   lastCommit(taskId: string, stage: string): string | undefined;
 }
 
+/** RunConfig-derived overrides for spawned agent processes. */
+export interface RunConfigOverrides {
+  /** Per-phase LLM model overrides (e.g., { planning: { provider: 'anthropic', model: 'claude-sonnet-4-6' } }). */
+  readonly llmOverrides?: Readonly<Record<string, { provider?: string | undefined; model?: string | undefined }>> | undefined;
+  /** Git merge strategy (merge, squash, rebase). */
+  readonly mergeStrategy?: string | undefined;
+  /** Prompt text/files to frontload into agent context. */
+  readonly promptConfig?: { readonly text?: string | undefined; readonly files?: readonly string[] | undefined } | undefined;
+  /** Allowed skills filter — if set, only these skill IDs are available. */
+  readonly allowedSkills?: readonly string[] | undefined;
+}
+
 /** Full dependency bag for the Beast Loop. */
 export interface BeastLoopDeps {
   readonly firewall: IFirewallModule;
@@ -210,6 +222,7 @@ export interface BeastLoopDeps {
   readonly clock: () => Date;
   readonly checkpoint?: ICheckpointStore;
   readonly refreshPlanTasks?: () => Promise<readonly PlanTask[]>;
+  readonly runConfigOverrides?: RunConfigOverrides;
 }
 
 type _TypesAndInterfacesTest = {
