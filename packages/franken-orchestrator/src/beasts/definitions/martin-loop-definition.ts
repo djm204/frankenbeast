@@ -41,7 +41,7 @@ export const martinLoopDefinition: BeastDefinition = {
       resolveCliEntrypoint(),
       'run',
       '--provider', String(config.provider),
-      '--chunks', String(config.chunkDirectory),
+      '--plan-dir', String(config.chunkDirectory),
     ],
     env: { FRANKENBEAST_SPAWNED: '1' },
     cwd: String(config.projectRoot ?? process.cwd()),

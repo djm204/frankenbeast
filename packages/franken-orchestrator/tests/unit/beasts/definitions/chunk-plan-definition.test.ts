@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { chunkPlanDefinition } from '../../../../src/beasts/definitions/chunk-plan-definition.js';
+import { parseArgs } from '../../../../src/cli/args.js';
 
 describe('chunkPlanDefinition', () => {
   const validConfig = {
@@ -51,6 +52,19 @@ describe('chunkPlanDefinition', () => {
     it('falls back to process.cwd() when projectRoot is not provided', () => {
       const spec = chunkPlanDefinition.buildProcessSpec(validConfig);
       expect(spec.cwd).toBe(process.cwd());
+    });
+
+    it('produces args that parseArgs accepts without throwing', () => {
+      const spec = chunkPlanDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      expect(() => parseArgs(cliArgs)).not.toThrow();
+    });
+
+    it('produces args where --output-dir maps to outputDir', () => {
+      const spec = chunkPlanDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      const parsed = parseArgs(cliArgs);
+      expect(parsed.outputDir).toBe('/tmp/chunks-out');
     });
   });
 

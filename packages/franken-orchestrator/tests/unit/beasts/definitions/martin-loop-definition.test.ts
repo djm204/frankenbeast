@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { martinLoopDefinition } from '../../../../src/beasts/definitions/martin-loop-definition.js';
+import { parseArgs } from '../../../../src/cli/args.js';
 
 describe('martinLoopDefinition', () => {
   const validConfig = {
@@ -31,11 +32,11 @@ describe('martinLoopDefinition', () => {
       expect(spec.args[providerIdx + 1]).toBe('claude');
     });
 
-    it('passes --chunks flag with chunk directory', () => {
+    it('passes --plan-dir flag with chunk directory', () => {
       const spec = martinLoopDefinition.buildProcessSpec(validConfig);
-      const chunksIdx = spec.args.indexOf('--chunks');
-      expect(chunksIdx).toBeGreaterThan(-1);
-      expect(spec.args[chunksIdx + 1]).toBe('/tmp/chunks');
+      const planDirIdx = spec.args.indexOf('--plan-dir');
+      expect(planDirIdx).toBeGreaterThan(-1);
+      expect(spec.args[planDirIdx + 1]).toBe('/tmp/chunks');
     });
 
     it('sets FRANKENBEAST_SPAWNED=1 in env', () => {
@@ -52,6 +53,19 @@ describe('martinLoopDefinition', () => {
     it('falls back to process.cwd() when projectRoot is not provided', () => {
       const spec = martinLoopDefinition.buildProcessSpec(validConfig);
       expect(spec.cwd).toBe(process.cwd());
+    });
+
+    it('produces args that parseArgs accepts without throwing', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      expect(() => parseArgs(cliArgs)).not.toThrow();
+    });
+
+    it('produces args where --plan-dir maps to planDir', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      const parsed = parseArgs(cliArgs);
+      expect(parsed.planDir).toBe('/tmp/chunks');
     });
   });
 

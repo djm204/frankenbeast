@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { designInterviewDefinition } from '../../../../src/beasts/definitions/design-interview-definition.js';
+import { parseArgs } from '../../../../src/cli/args.js';
 
 describe('designInterviewDefinition', () => {
   const validConfig = {
@@ -51,6 +52,20 @@ describe('designInterviewDefinition', () => {
     it('falls back to process.cwd() when projectRoot is not provided', () => {
       const spec = designInterviewDefinition.buildProcessSpec(validConfig);
       expect(spec.cwd).toBe(process.cwd());
+    });
+
+    it('produces args that parseArgs accepts without throwing', () => {
+      const spec = designInterviewDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      expect(() => parseArgs(cliArgs)).not.toThrow();
+    });
+
+    it('produces args where --goal and --output map to CliArgs fields', () => {
+      const spec = designInterviewDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      const parsed = parseArgs(cliArgs);
+      expect(parsed.interviewGoal).toBe('design a new API layer');
+      expect(parsed.interviewOutput).toBe('/tmp/design-doc.md');
     });
   });
 

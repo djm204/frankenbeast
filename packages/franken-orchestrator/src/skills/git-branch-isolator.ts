@@ -266,10 +266,15 @@ export class GitBranchIsolator {
     }
 
     this.safeCheckout(this.config.baseBranch);
+    const strategy = this.config.mergeStrategy ?? (commitMessage ? 'squash' : 'merge');
     try {
-      if (commitMessage) {
+      if (strategy === 'squash') {
         this.git(['merge', '--squash', branch]);
-        this.git(['commit', '-m', commitMessage]);
+        if (commitMessage) {
+          this.git(['commit', '-m', commitMessage]);
+        }
+      } else if (strategy === 'rebase') {
+        this.git(['rebase', branch]);
       } else {
         this.git(['merge', branch, '--no-edit']);
       }

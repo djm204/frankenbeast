@@ -197,8 +197,6 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
   const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
   const effectiveSkills = options.runConfig?.skills;
-  const effectivePromptConfig = options.runConfig?.promptConfig;
-  const effectiveLlmOverrides = options.runConfig?.llmConfig?.overrides;
 
   const { paths, verbose, noPr, reset } = options;
   const baseBranch = effectiveBranch;
@@ -270,6 +268,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     branchPrefix: effectiveBranchPattern,
     autoCommit: true,
     workingDir: paths.root,
+    ...(effectiveMergeStrategy ? { mergeStrategy: effectiveMergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
   });
   const resolvedProvider = registry.get(effectiveProvider);
   const override = options.providersConfig?.[effectiveProvider];
@@ -530,14 +529,12 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     : skills;
 
   // Build RunConfig overrides for downstream consumption by beast loop phases
+  // Note: mergeStrategy is wired directly via GitIsolationConfig, not through runConfigOverrides.
+  // llmOverrides and promptConfig are parsed by RunConfigSchema for forward compatibility
+  // but have no downstream consumer yet (per-phase LLM routing and prompt frontloading are future features).
   const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
-    (effectiveLlmOverrides || effectiveMergeStrategy || effectivePromptConfig || effectiveSkills?.length)
-      ? {
-          ...(effectiveLlmOverrides ? { llmOverrides: effectiveLlmOverrides as import('../deps.js').RunConfigOverrides['llmOverrides'] } : {}),
-          ...(effectiveMergeStrategy ? { mergeStrategy: effectiveMergeStrategy } : {}),
-          ...(effectivePromptConfig ? { promptConfig: effectivePromptConfig } : {}),
-          ...(effectiveSkills?.length ? { allowedSkills: effectiveSkills } : {}),
-        }
+    effectiveSkills?.length
+      ? { allowedSkills: effectiveSkills }
       : undefined;
 
   const deps: BeastLoopDeps = {
