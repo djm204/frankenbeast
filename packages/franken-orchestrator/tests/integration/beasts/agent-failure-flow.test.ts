@@ -23,8 +23,8 @@ function createFailingDefinition(): BeastDefinition {
     configSchema: z.object({}).passthrough(),
     interviewPrompts: [],
     buildProcessSpec: () => ({
-      command: process.execPath,
-      args: ['-e', "console.error('boom'); console.error('stack trace here'); process.exit(1)"],
+      command: '/bin/sh',
+      args: ['-c', 'printf "boom\\nstack trace here\\n" 1>&2; exit 1'],
     }),
     telemetryLabels: { definition_id: 'test-failing-process' },
   };

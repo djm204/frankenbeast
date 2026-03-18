@@ -62,8 +62,8 @@ describe('ProcessSupervisor', () => {
     it('captures stdout lines via onStdout callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({
-        command: 'node',
-        args: ['-e', 'console.log("line1"); console.log("line2");'],
+        command: '/bin/sh',
+        args: ['-c', 'printf "line1\\nline2\\n"'],
       });
 
       await supervisor.spawn(spec, callbacks);
@@ -79,8 +79,8 @@ describe('ProcessSupervisor', () => {
     it('captures stderr lines via onStderr callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({
-        command: 'node',
-        args: ['-e', 'console.error("err1"); console.error("err2");'],
+        command: '/bin/sh',
+        args: ['-c', 'printf "err1\\nerr2\\n" 1>&2'],
       });
 
       await supervisor.spawn(spec, callbacks);
@@ -93,6 +93,34 @@ describe('ProcessSupervisor', () => {
       expect(callbacks.onStderr).toHaveBeenCalledWith('err2');
     });
 
+    it('delivers all stderr lines before onExit for an immediate failing process', async () => {
+      const observed: string[] = [];
+      const callbacks = makeCallbacks({
+        onStderr: vi.fn((line: string) => {
+          observed.push(`stderr:${line}`);
+        }),
+        onExit: vi.fn((code: number | null, signal: string | null) => {
+          observed.push(`exit:${code}:${signal}`);
+        }),
+      });
+      const spec = makeSpec({
+        command: '/bin/sh',
+        args: ['-c', 'printf "boom\\nstack trace here\\n" 1>&2; exit 1'],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalledWith(1, null);
+      }, { timeout: 5000 });
+
+      expect(observed).toEqual([
+        'stderr:boom',
+        'stderr:stack trace here',
+        'exit:1:null',
+      ]);
+    });
+
     it('strips CLAUDE env vars from spawned process environment', async () => {
       // Set some CLAUDE* env vars temporarily
       const originalEnv = { ...process.env };
@@ -102,11 +130,8 @@ describe('ProcessSupervisor', () => {
       try {
         const callbacks = makeCallbacks();
         const spec = makeSpec({
-          command: 'node',
-          args: ['-e', `
-            const claudeVars = Object.keys(process.env).filter(k => k.startsWith('CLAUDE'));
-            console.log(JSON.stringify(claudeVars));
-          `],
+          command: '/bin/sh',
+          args: ['-c', 'env | grep "^CLAUDE" || true'],
         });
 
         await supervisor.spawn(spec, callbacks);
@@ -117,8 +142,7 @@ describe('ProcessSupervisor', () => {
 
         const stdoutCalls = (callbacks.onStdout as ReturnType<typeof vi.fn>).mock.calls;
         const output = stdoutCalls.map(c => c[0]).join('');
-        const claudeVars = JSON.parse(output);
-        expect(claudeVars).toEqual([]);
+        expect(output).toBe('');
       } finally {
         // Restore env
         delete process.env['CLAUDE_CODE_ENTRYPOINT'];
