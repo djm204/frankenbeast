@@ -249,6 +249,68 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('prefers top-level runConfig.provider over the CLI provider when no llm default override is set', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        provider: 'codex',
+        objective: 'Use run config provider',
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'codex' }),
+      expect.any(Object),
+    );
+  });
+
+  it('prefers top-level runConfig.model when no llm default model override is set', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        provider: 'claude',
+        objective: 'Use run config model',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+    );
+  });
+
+  it('prefers llmConfig.default provider and model over top-level runConfig values', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        provider: 'codex',
+        objective: 'Prefer llmConfig default values',
+        model: 'top-level-model',
+        llmConfig: {
+          default: {
+            provider: 'gemini',
+            model: 'gemini-2.5-pro',
+          },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'gemini' }),
+      expect.objectContaining({ model: 'gemini-2.5-pro' }),
+    );
+  });
+
   it('applies command override from providersConfig', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({

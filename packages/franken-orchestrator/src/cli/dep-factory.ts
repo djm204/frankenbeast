@@ -184,8 +184,13 @@ function discoverWorkspacePackages(root: string): string[] {
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   // Apply RunConfig overrides (config file takes precedence for spawned agents)
-  const effectiveProvider = options.runConfig?.llmConfig?.default?.provider ?? options.provider;
-  const effectiveModel = options.runConfig?.llmConfig?.default?.model;
+  const effectiveProvider =
+    options.runConfig?.llmConfig?.default?.provider
+    ?? options.runConfig?.provider
+    ?? options.provider;
+  const effectiveModel =
+    options.runConfig?.llmConfig?.default?.model
+    ?? options.runConfig?.model;
   const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
   const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
   const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
