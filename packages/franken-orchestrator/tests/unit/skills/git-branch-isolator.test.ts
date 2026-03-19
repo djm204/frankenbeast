@@ -302,6 +302,51 @@ describe('GitBranchIsolator', () => {
       expect(result.conflictFiles).toEqual(['src/types.ts']);
     });
 
+    it('uses squash merge when config.mergeStrategy is squash', () => {
+      const squashIsolator = new GitBranchIsolator(makeConfig({ mergeStrategy: 'squash' }));
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        return '';
+      });
+
+      squashIsolator.merge('03_my_chunk');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --squash chunk/03_my_chunk',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('uses rebase when config.mergeStrategy is rebase', () => {
+      const rebaseIsolator = new GitBranchIsolator(makeConfig({ mergeStrategy: 'rebase' }));
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        return '';
+      });
+
+      rebaseIsolator.merge('03_my_chunk');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git rebase chunk/03_my_chunk',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('uses regular merge when config.mergeStrategy is merge', () => {
+      const mergeIsolator = new GitBranchIsolator(makeConfig({ mergeStrategy: 'merge' }));
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        return '';
+      });
+
+      mergeIsolator.merge('03_my_chunk');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge chunk/03_my_chunk --no-edit',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
     it('sanitizes commitMessage to prevent shell injection', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd.startsWith('git rev-list')) return '1\n';

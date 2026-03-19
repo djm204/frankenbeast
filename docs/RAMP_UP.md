@@ -106,6 +106,7 @@ packages/franken-orchestrator/src/
   - Shares the same `ChatRuntime` as the CLI REPL
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
 - Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
+- **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.frankenbeast/.build/run-configs/` and cleaned up on terminal state.
 - `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)

@@ -1,0 +1,86 @@
+import { describe, it, expect } from 'vitest';
+import { martinLoopDefinition } from '../../../../src/beasts/definitions/martin-loop-definition.js';
+import { parseArgs } from '../../../../src/cli/args.js';
+
+describe('martinLoopDefinition', () => {
+  const validConfig = {
+    provider: 'claude',
+    objective: 'implement feature X',
+    chunkDirectory: '/tmp/chunks',
+  };
+
+  describe('buildProcessSpec', () => {
+    it('uses process.execPath as the command', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      expect(spec.command).toBe(process.execPath);
+    });
+
+    it('includes resolveCliEntrypoint result as first arg', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      expect(spec.args[0]).toMatch(/cli\/run\.(js|ts)$/);
+    });
+
+    it('passes run subcommand', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      expect(spec.args[1]).toBe('run');
+    });
+
+    it('passes --provider flag with value', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const providerIdx = spec.args.indexOf('--provider');
+      expect(providerIdx).toBeGreaterThan(-1);
+      expect(spec.args[providerIdx + 1]).toBe('claude');
+    });
+
+    it('passes --plan-dir flag with chunk directory', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const planDirIdx = spec.args.indexOf('--plan-dir');
+      expect(planDirIdx).toBeGreaterThan(-1);
+      expect(spec.args[planDirIdx + 1]).toBe('/tmp/chunks');
+    });
+
+    it('sets FRANKENBEAST_SPAWNED=1 in env', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      expect(spec.env).toEqual({ FRANKENBEAST_SPAWNED: '1' });
+    });
+
+    it('uses config.projectRoot as cwd when provided', () => {
+      const config = { ...validConfig, projectRoot: '/home/user/project' };
+      const spec = martinLoopDefinition.buildProcessSpec(config);
+      expect(spec.cwd).toBe('/home/user/project');
+    });
+
+    it('falls back to process.cwd() when projectRoot is not provided', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      expect(spec.cwd).toBe(process.cwd());
+    });
+
+    it('produces args that parseArgs accepts without throwing', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      expect(() => parseArgs(cliArgs)).not.toThrow();
+    });
+
+    it('produces args where --plan-dir maps to planDir', () => {
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+      const cliArgs = spec.args.slice(1);
+      const parsed = parseArgs(cliArgs);
+      expect(parsed.planDir).toBe('/tmp/chunks');
+    });
+  });
+
+  describe('configSchema', () => {
+    it('validates a complete config', () => {
+      const result = martinLoopDefinition.configSchema.safeParse(validConfig);
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects missing provider', () => {
+      const result = martinLoopDefinition.configSchema.safeParse({
+        objective: 'test',
+        chunkDirectory: '/tmp',
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+});

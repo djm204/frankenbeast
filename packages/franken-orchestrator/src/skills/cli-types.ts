@@ -74,6 +74,7 @@ export interface GitIsolationConfig {
   readonly branchPrefix: string;
   readonly autoCommit: boolean;
   readonly workingDir: string;
+  readonly mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
 }
 
 export interface MergeResult {

@@ -924,6 +924,20 @@ The beast control surface is now agent-centric rather than run-centric.
 - chat-backed init flows (`design-interview`, `chunk-plan`) create tracked agents first, bind them to the active chat session, emit init events, then dispatch runs after init completes
 - the dashboard Beasts tab now launches tracked agents, renders typed file/directory controls, and shows tracked-agent detail with startup events plus linked run logs
 
+#### Beast Daemon Execution Pipeline
+
+When the daemon dispatches a Beast run, it spawns a subprocess managed by `ProcessBeastExecutor`:
+
+1. **Config passthrough**: `ProcessBeastExecutor.start()` serializes `configSnapshot` to `.frankenbeast/.build/run-configs/<runId>.json` and passes `FRANKENBEAST_RUN_CONFIG=<path>` to the subprocess. The spawned process loads and validates via `loadRunConfigFromEnv()`. Config file is cleaned up on run completion, stop, or spawn failure.
+
+2. **Process lifecycle**: `ProcessSupervisor` manages the child process with a three-way exit gate (`stdout closed + stderr closed + exit event`) to ensure all buffered output is captured before `onExit` fires. Early stdout/stderr arriving before attempt creation are buffered and flushed (to both logs and SSE) once the attempt ID is set.
+
+3. **SSE event bus**: `BeastEventBus` publishes real-time events (`run.status`, `run.log`, `agent.status`) to SSE subscribers. Events flow from executor → run service → SSE routes. `SseConnectionTicketStore` implements single-use connection tickets (ADR-030) for authenticating EventSource connections without exposing bearer tokens in URLs.
+
+4. **Status sync**: `BeastRunService.syncTrackedAgent()` propagates run status changes to tracked agents with full idempotency (no-op when status unchanged). `BeastDispatchService.createRun(startNow=true)` publishes initial `agent.status` events for both success and failure paths.
+
+5. **Stop/kill escalation**: `stop()` sends SIGTERM, waits up to `defaultStopTimeoutMs` (10s), then escalates to SIGKILL. A terminal-status guard in `handleProcessExit` prevents double-writes when SIGKILL fires after `finishAttempt` has already updated the attempt.
+
 Current beast-control routes:
 
 | Route | Purpose |
@@ -934,6 +948,8 @@ Current beast-control routes:
 | `GET /v1/beasts/agents/:id` | Hydrate tracked-agent detail and init events |
 | `POST /v1/beasts/runs` | Create or dispatch a Beast run, optionally linked to a tracked agent |
 | `GET /v1/beasts/runs/:id` + `/logs` | Read linked run detail and execution logs |
+| `POST /v1/beasts/events/ticket` | Issue a single-use SSE connection ticket (bearer token required) |
+| `GET /v1/beasts/events/stream` | SSE event stream (ticket-authenticated) |
 
 ## Communications Gateway (franken-comms)
 

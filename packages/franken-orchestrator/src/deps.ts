@@ -192,6 +192,12 @@ export interface ICheckpointStore {
   lastCommit(taskId: string, stage: string): string | undefined;
 }
 
+/** RunConfig-derived overrides for spawned agent processes. */
+export interface RunConfigOverrides {
+  /** Allowed skills filter — if set, only these skill IDs are available. */
+  readonly allowedSkills?: readonly string[] | undefined;
+}
+
 /** Full dependency bag for the Beast Loop. */
 export interface BeastLoopDeps {
   readonly firewall: IFirewallModule;
@@ -210,6 +216,7 @@ export interface BeastLoopDeps {
   readonly clock: () => Date;
   readonly checkpoint?: ICheckpointStore;
   readonly refreshPlanTasks?: () => Promise<readonly PlanTask[]>;
+  readonly runConfigOverrides?: RunConfigOverrides;
 }
 
 type _TypesAndInterfacesTest = {

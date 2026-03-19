@@ -1,9 +1,14 @@
 import type { BeastDefinition, BeastRun } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
+import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+
+export interface BeastRunServiceOptions {
+  eventBus?: BeastEventBus;
+}
 
 export class BeastRunService {
   constructor(
@@ -12,6 +17,7 @@ export class BeastRunService {
     private readonly executors: BeastExecutors,
     private readonly metrics: BeastMetrics,
     private readonly logs: BeastLogStore,
+    private readonly serviceOptions: BeastRunServiceOptions = {},
   ) {}
 
   listRuns(): BeastRun[] {
@@ -76,7 +82,6 @@ export class BeastRunService {
     }
     await this.executorFor(run).stop(run.id, attemptId);
     this.metrics.recordRunStopped(run.definitionId);
-    await this.logs.append(run.id, attemptId, 'stderr', 'operator_stop');
     const updated = this.requireRun(runId);
     this.syncTrackedAgent(updated);
     return updated;
@@ -89,7 +94,6 @@ export class BeastRunService {
       throw new Error(`Beast run has no active attempt: ${runId}`);
     }
     await this.executorFor(run).kill(run.id, attemptId);
-    await this.logs.append(run.id, attemptId, 'stderr', 'operator_kill');
     const updated = this.requireRun(runId);
     this.syncTrackedAgent(updated);
     return updated;
@@ -126,6 +130,13 @@ export class BeastRunService {
     return definition;
   }
 
+  notifyRunStatusChange(runId: string): void {
+    const run = this.repository.getRun(runId);
+    if (run) {
+      this.syncTrackedAgent(run);
+    }
+  }
+
   private syncTrackedAgent(run: BeastRun): void {
     if (!run.trackedAgentId) {
       return;
@@ -143,10 +154,47 @@ export class BeastRunService {
           ? 'failed'
           : 'stopped';
 
+    // Skip all writes if status hasn't changed (full idempotency — prevents duplicate SSE, DB events, AND redundant updateTrackedAgent writes)
+    if (trackedAgent.status === status) {
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
     this.repository.updateTrackedAgent(run.trackedAgentId, {
       status,
       ...(run.id ? { dispatchRunId: run.id } : {}),
-      updatedAt: new Date().toISOString(),
+      updatedAt,
     });
+
+    this.serviceOptions.eventBus?.publish({
+      type: 'agent.status',
+      data: { agentId: run.trackedAgentId, status, updatedAt },
+    });
+
+    if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
+      const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';
+      const type = `agent.run.${run.status}`;
+      const message = run.status === 'failed'
+        ? `Run ${run.id} failed with exit code ${run.latestExitCode ?? 'unknown'}`
+        : run.status === 'completed'
+          ? `Run ${run.id} completed successfully`
+          : `Run ${run.id} stopped`;
+      const agentEvent = {
+        level,
+        type,
+        message,
+        payload: {
+          runId: run.id,
+          ...(run.latestExitCode !== undefined ? { exitCode: run.latestExitCode } : {}),
+          ...(run.stopReason ? { stopReason: run.stopReason } : {}),
+        },
+        createdAt: new Date().toISOString(),
+      };
+      this.repository.appendTrackedAgentEvent(run.trackedAgentId, agentEvent);
+      this.serviceOptions.eventBus?.publish({
+        type: 'agent.event',
+        data: { agentId: run.trackedAgentId, event: agentEvent },
+      });
+    }
   }
 }

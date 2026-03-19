@@ -13,7 +13,7 @@ interface AgentSkillsListJson {
 
 function flattenListJson(json: AgentSkillsListJson): RawSkillEntry[] {
   const entries: RawSkillEntry[] = [];
-  for (const [category, skills] of Object.entries(json.skills)) {
+  for (const skills of Object.values(json.skills)) {
     for (const skill of skills) {
       entries.push({
         skill_id: skill.name,

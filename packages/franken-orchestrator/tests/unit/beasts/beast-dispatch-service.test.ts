@@ -8,6 +8,7 @@ import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -151,5 +152,92 @@ describe('BeastDispatchService', () => {
 
     expect(repo.listRuns()).toEqual([]);
     expect(metrics.render()).not.toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
+  });
+
+  it('publishes agent.status SSE event when startNow=true with tracked agent', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const publishSpy = vi.spyOn(eventBus, 'publish');
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { eventBus });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' } },
+      initConfig: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' },
+    });
+
+    await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'SSE test', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+
+    const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
+    expect(agentStatusEvents).toHaveLength(1);
+    expect(agentStatusEvents[0][0].data).toMatchObject({
+      agentId: agent.id,
+      status: 'running',
+    });
+  });
+
+  it('publishes agent.status SSE event on startNow failure with tracked agent', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const publishSpy = vi.spyOn(eventBus, 'publish');
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async () => { throw new Error('spawn failed'); }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { eventBus });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' } },
+      initConfig: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'SSE fail test', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+
+    expect(run.status).toBe('failed');
+    const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
+    expect(agentStatusEvents).toHaveLength(1);
+    expect(agentStatusEvents[0][0].data).toMatchObject({
+      agentId: agent.id,
+      status: 'failed',
+    });
   });
 });

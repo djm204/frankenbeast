@@ -1,4 +1,4 @@
-import type { BeastExecutor } from './beast-executor.js';
+import type { BeastExecutor, StopOptions } from './beast-executor.js';
 import type { BeastDefinition, BeastRun, BeastRunAttempt } from '../types.js';
 
 export class ContainerBeastExecutor implements BeastExecutor {
@@ -6,7 +6,7 @@ export class ContainerBeastExecutor implements BeastExecutor {
     throw new Error('ContainerBeastExecutor is not implemented yet');
   }
 
-  async stop(_runId: string, _attemptId: string): Promise<BeastRunAttempt> {
+  async stop(_runId: string, _attemptId: string, _options?: StopOptions): Promise<BeastRunAttempt> {
     throw new Error('ContainerBeastExecutor is not implemented yet');
   }
 

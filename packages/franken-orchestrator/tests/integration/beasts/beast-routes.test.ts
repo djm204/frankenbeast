@@ -12,6 +12,8 @@ import { BeastRunService } from '../../../src/beasts/services/beast-run-service.
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
+import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
+import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
@@ -96,6 +98,8 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }
       metrics,
       security,
       operatorToken,
+      eventBus: new BeastEventBus(),
+      ticketStore: new SseConnectionTicketStore(),
       rateLimit: {
         windowMs: 60_000,
         max: options?.rateLimitMax ?? 20,

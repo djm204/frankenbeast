@@ -51,6 +51,9 @@ export interface CliArgs {
   designDoc?: string | undefined;
   planDir?: string | undefined;
   planName?: string | undefined;
+  outputDir?: string | undefined;
+  interviewGoal?: string | undefined;
+  interviewOutput?: string | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -201,6 +204,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       'design-doc': { type: 'string' },
       'plan-dir': { type: 'string' },
       'plan-name': { type: 'string' },
+      'output-dir': { type: 'string' },
+      goal: { type: 'string' },
+      output: { type: 'string' },
       config: { type: 'string' },
       host: { type: 'string' },
       port: { type: 'string' },
@@ -323,6 +329,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],
     planName: values['plan-name'],
+    outputDir: values['output-dir'],
+    interviewGoal: values.goal,
+    interviewOutput: values.output,
     config: values.config,
     host: values.host ?? (subcommand === 'chat-server' ? '127.0.0.1' : undefined),
     port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : undefined),

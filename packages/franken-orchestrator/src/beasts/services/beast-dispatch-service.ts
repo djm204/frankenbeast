@@ -1,9 +1,14 @@
 import type { BeastDefinition, BeastDispatchSource, BeastExecutionMode, BeastRun, ModuleConfig } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
+import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+
+export interface BeastDispatchServiceOptions {
+  eventBus?: BeastEventBus;
+}
 
 export interface BeastExecutors {
   readonly process: BeastExecutor;
@@ -28,6 +33,7 @@ export class BeastDispatchService {
     private readonly executors: BeastExecutors,
     private readonly metrics: BeastMetrics,
     private readonly logs: BeastLogStore,
+    private readonly options: BeastDispatchServiceOptions = {},
   ) {}
 
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
@@ -72,14 +78,17 @@ export class BeastDispatchService {
           dispatchRunId: createdRun.id,
           updatedAt: linkedAt,
         });
-        this.repository.appendTrackedAgentEvent(request.trackedAgentId, {
-          level: 'info',
+        const linkedEvent = {
+          level: 'info' as const,
           type: 'agent.dispatch.linked',
           message: `Linked Beast run ${createdRun.id}`,
-          payload: {
-            runId: createdRun.id,
-          },
+          payload: { runId: createdRun.id },
           createdAt: linkedAt,
+        };
+        this.repository.appendTrackedAgentEvent(request.trackedAgentId, linkedEvent);
+        this.options.eventBus?.publish({
+          type: 'agent.event',
+          data: { agentId: request.trackedAgentId, event: linkedEvent },
         });
       }
 
@@ -97,9 +106,15 @@ export class BeastDispatchService {
           throw new Error(`Beast run disappeared after start: ${run.id}`);
         }
         if (updated.trackedAgentId) {
+          const agentStatus = updated.status === 'running' ? 'running' : 'dispatching';
+          const updatedAt = new Date().toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
-            status: updated.status === 'running' ? 'running' : 'dispatching',
-            updatedAt: new Date().toISOString(),
+            status: agentStatus,
+            updatedAt,
+          });
+          this.options.eventBus?.publish({
+            type: 'agent.status',
+            data: { agentId: updated.trackedAgentId, status: agentStatus, updatedAt },
           });
         }
         return updated;
@@ -124,15 +139,21 @@ export class BeastDispatchService {
               status: 'failed',
               updatedAt: failedAt,
             });
-            this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, {
-              level: 'error',
+            this.options.eventBus?.publish({
+              type: 'agent.status',
+              data: { agentId: updatedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
+            });
+            const failedEvent = {
+              level: 'error' as const,
               type: 'agent.dispatch.failed',
               message: `Failed to start Beast run ${updatedRun.id}`,
-              payload: {
-                runId: updatedRun.id,
-                error: errorMessage,
-              },
+              payload: { runId: updatedRun.id, error: errorMessage },
               createdAt: failedAt,
+            };
+            this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, failedEvent);
+            this.options.eventBus?.publish({
+              type: 'agent.event',
+              data: { agentId: updatedRun.trackedAgentId, event: failedEvent },
             });
           }
           return updatedRun;

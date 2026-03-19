@@ -1,4 +1,6 @@
+import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
+import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
 import { ContainerBeastExecutor } from './execution/container-beast-executor.js';
 import { ProcessBeastExecutor } from './execution/process-beast-executor.js';
 import { ProcessSupervisor } from './execution/process-supervisor.js';
@@ -22,6 +24,8 @@ export interface BeastServiceBundle {
   runs: BeastRunService;
   interviews: BeastInterviewService;
   metrics: PrometheusBeastMetrics;
+  eventBus: BeastEventBus;
+  ticketStore: SseConnectionTicketStore;
 }
 
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
@@ -29,17 +33,29 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const logStore = new BeastLogStore(paths.beastLogsDir);
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
+  const eventBus = new BeastEventBus();
+  const ticketStore = new SseConnectionTicketStore();
+
+  // Deferred reference to break circular dep: executor → runService → executors → executor
+  let runService: BeastRunService;
   const executors = {
-    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor()),
+    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor(), {
+      onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
+      eventBus,
+    }),
     container: new ContainerBeastExecutor(),
   };
+
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus });
 
   return {
     agents: new AgentService(repository),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
-    runs: new BeastRunService(repository, catalog, executors, metrics, logStore),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus }),
+    runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
+    eventBus,
+    ticketStore,
   };
 }

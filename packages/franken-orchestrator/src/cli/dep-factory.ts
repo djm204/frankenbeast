@@ -37,6 +37,7 @@ import type {
   IPlannerModule, ICritiqueModule, IGovernorModule,
   IHeartbeatModule,
 } from '../deps.js';
+import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
 
 export interface CliDepOptions {
@@ -78,6 +79,8 @@ export interface CliDepOptions {
   critiqueMaxIterations?: number;
   /** Consensus threshold for critique pass verdict. Default: 0.7. */
   critiqueConsensusThreshold?: number;
+  /** RunConfig loaded from config file passthrough (spawned agent). */
+  runConfig?: RunConfig | undefined;
 }
 
 export interface IssueCliDeps {
@@ -180,17 +183,35 @@ function discoverWorkspacePackages(root: string): string[] {
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
-  const { paths, baseBranch, budget, verbose, noPr, reset } = options;
+  // Apply RunConfig overrides (config file takes precedence for spawned agents)
+  const effectiveProvider =
+    options.runConfig?.llmConfig?.default?.provider
+    ?? options.runConfig?.provider
+    ?? options.provider;
+  const effectiveModel =
+    options.runConfig?.llmConfig?.default?.model
+    ?? options.runConfig?.model;
+  const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
+  const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
+  const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
+  const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
+  const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
+  const effectiveSkills = options.runConfig?.skills;
 
-  // Resolve per-agent module toggles (options > env vars > default enabled)
+  const { paths, verbose, noPr, reset } = options;
+  const baseBranch = effectiveBranch;
+  const budget = effectiveBudget;
+
+  // Resolve per-agent module toggles (runConfig > options > env vars > default enabled)
+  const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
   const modules = {
-    firewall: options.enabledModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
-    skills: options.enabledModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
-    memory: options.enabledModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
-    planner: options.enabledModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
-    critique: options.enabledModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
-    governor: options.enabledModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
-    heartbeat: options.enabledModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
+    firewall: effectiveModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
+    skills: effectiveModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
+    memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
+    planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
+    critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
+    governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+    heartbeat: effectiveModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
   };
 
   // Derive plan name for plan-specific build artifacts
@@ -244,16 +265,17 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
     baseBranch,
-    branchPrefix: 'feat/',
+    branchPrefix: effectiveBranchPattern,
     autoCommit: true,
     workingDir: paths.root,
+    ...(effectiveMergeStrategy ? { mergeStrategy: effectiveMergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
   });
-  const resolvedProvider = registry.get(options.provider);
-  const override = options.providersConfig?.[options.provider];
+  const resolvedProvider = registry.get(effectiveProvider);
+  const override = options.providersConfig?.[effectiveProvider];
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
-    ...(options.adapterModel ? { model: options.adapterModel } : {}),
+    ...((effectiveModel ?? options.adapterModel) != null ? { model: (effectiveModel ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
     ...(options.providers ? { providers: options.providers } : {}),
@@ -264,14 +286,14 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const adapterLlm = new AdapterLlmClient(
     cliLlmAdapter,
     observerBridge.observerDeps as never,
-    options.provider,
+    effectiveProvider,
   );
   const cachedLlm = new CachedCliLlmClient({
     cacheRootDir: paths.llmCacheDir,
     cliAdapter: cliLlmAdapter,
     projectId: paths.root,
-    provider: options.provider,
-    model: override?.model ?? options.adapterModel ?? options.provider,
+    provider: effectiveProvider,
+    model: override?.model ?? effectiveModel ?? options.adapterModel ?? effectiveProvider,
     operation: 'cli-session',
     workId: `session:${planName}`,
     stablePrefix: 'surface:cli',
@@ -299,11 +321,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
         runPipeline: runPipeline as unknown as FirewallPortAdapterDeps['runPipeline'],
         adapter: new ClaudeAdapter({
           apiKey: process.env.ANTHROPIC_API_KEY ?? '',
-          model: options.adapterModel ?? 'claude-sonnet-4-6',
+          model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
         }) as unknown as FirewallPortAdapterDeps['adapter'],
         config: firewallConfig,
         provider: 'anthropic',
-        model: options.adapterModel ?? 'claude-sonnet-4-6',
+        model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
       });
     } catch (error) {
       logger.warn(`Firewall module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
@@ -390,7 +412,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   }
 
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
-  const prCreator = noPr ? undefined : new PrCreator(
+  const prDisabled = noPr || effectivePrCreation === 'disabled';
+  const prCreator = prDisabled ? undefined : new PrCreator(
     { targetBranch: baseBranch, disabled: false, remote: 'origin' },
     undefined,
     cachedLlm,
@@ -409,7 +432,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     martin, gitIso, observerBridge.observerDeps,
     verifyCommand, commitMessageFn, logger,
     {
-      provider: options.provider,
+      provider: effectiveProvider,
       planName,
       sessionStore: chunkSessionStore,
       snapshotStore: chunkSessionSnapshotStore,
@@ -496,9 +519,27 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
+  // Apply skills filter from RunConfig (only expose allowed skills)
+  const filteredSkills: ISkillsModule = effectiveSkills?.length
+    ? {
+        hasSkill: (id: string) => effectiveSkills.includes(id) && skills.hasSkill(id),
+        getAvailableSkills: () => skills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
+        execute: skills.execute,
+      }
+    : skills;
+
+  // Build RunConfig overrides for downstream consumption by beast loop phases
+  // Note: mergeStrategy is wired directly via GitIsolationConfig, not through runConfigOverrides.
+  // llmOverrides and promptConfig are parsed by RunConfigSchema for forward compatibility
+  // but have no downstream consumer yet (per-phase LLM routing and prompt frontloading are future features).
+  const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
+    effectiveSkills?.length
+      ? { allowedSkills: effectiveSkills }
+      : undefined;
+
   const deps: BeastLoopDeps = {
     firewall,
-    skills,
+    skills: filteredSkills,
     memory,
     planner: stubPlanner,
     observer: observerBridge,
@@ -510,6 +551,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     cliExecutor,
     checkpoint,
     ...(prCreator ? { prCreator } : {}),
+    ...(runConfigOverrides ? { runConfigOverrides } : {}),
   };
 
   // Issue pipeline deps (only created when issueIO is provided)
