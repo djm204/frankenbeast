@@ -4,8 +4,6 @@ import type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
 
 /**
  * BeastLoopDeps — dependency injection interface for the orchestrator.
- * Follows the PulseOrchestratorDeps pattern from franken-heartbeat.
- *
  * All module ports are defined as minimal interfaces so the orchestrator
  * never depends on concrete module implementations.
  */

@@ -30,13 +30,14 @@ export const commsGatewayService: NetworkServiceDefinition = {
       slack: config.comms.slack.enabled,
       discord: config.comms.discord.enabled,
     },
+    // franken-comms absorbed into orchestrator — comms server starts in-process
+    // TODO: Phase 4.5 — wire comms startup into orchestrator's server lifecycle
     process: {
-      command: 'npm',
+      command: 'node',
       args: [
-        '--workspace',
-        'franken-comms',
-        'run',
-        'start:network',
+        '--import',
+        'tsx',
+        'packages/franken-orchestrator/src/comms/server/start-comms-server.ts',
       ],
       cwd: context.repoRoot,
     },

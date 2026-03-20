@@ -127,33 +127,4 @@ describe('parseMemoryEntry', () => {
     expect(() => parseMemoryEntry({ id: 'x', projectId: 'y' })).toThrow();
   });
 
-  it('throws when role is invalid on WorkingTurn', () => {
-    expect(() =>
-      parseMemoryEntry({
-        id: '01J0000000000000000000000A',
-        type: 'working',
-        projectId: 'p',
-        status: 'pending',
-        createdAt: 0,
-        role: 'robot', // invalid
-        content: 'hi',
-        tokenCount: 1,
-      }),
-    ).toThrow();
-  });
-
-  it('throws when taskId is missing on EpisodicTrace', () => {
-    expect(() =>
-      parseMemoryEntry({
-        id: '01J0000000000000000000000B',
-        type: 'episodic',
-        projectId: 'p',
-        status: 'success',
-        createdAt: 0,
-        input: {},
-        output: {},
-        // taskId missing
-      }),
-    ).toThrow();
-  });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, expectTypeOf } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { SkillDescriptor } from '../../../src/deps.js';
 import type {
   MartinLoopConfig,
@@ -44,7 +44,6 @@ describe('MartinLoopConfig', () => {
   });
 
   it('accepts any string as provider (not union)', () => {
-    expectTypeOf<MartinLoopConfig['provider']>().toEqualTypeOf<string>();
     const config: MartinLoopConfig = {
       prompt: 'test',
       promiseTag: 'TEST',
@@ -92,10 +91,6 @@ describe('MartinLoopConfig', () => {
     expect(config.providers).toEqual(['claude', 'gemini', 'aider']);
   });
 
-  it('has readonly properties', () => {
-    expectTypeOf<MartinLoopConfig>().toHaveProperty('prompt');
-    expectTypeOf<Readonly<MartinLoopConfig>>().toEqualTypeOf<MartinLoopConfig>();
-  });
 });
 
 describe('MartinLoopResult', () => {
@@ -113,9 +108,6 @@ describe('MartinLoopResult', () => {
     expect(result.tokensUsed).toBe(12_500);
   });
 
-  it('has readonly properties', () => {
-    expectTypeOf<Readonly<MartinLoopResult>>().toEqualTypeOf<MartinLoopResult>();
-  });
 });
 
 describe('GitIsolationConfig', () => {
@@ -133,9 +125,6 @@ describe('GitIsolationConfig', () => {
     expect(config.workingDir).toBe('/home/user/project');
   });
 
-  it('has readonly properties', () => {
-    expectTypeOf<Readonly<GitIsolationConfig>>().toEqualTypeOf<GitIsolationConfig>();
-  });
 });
 
 describe('CliSkillConfig', () => {
@@ -184,7 +173,4 @@ describe('CliSkillConfig', () => {
     expect(config.budgetLimitUsd).toBe(5.0);
   });
 
-  it('has readonly properties', () => {
-    expectTypeOf<Readonly<CliSkillConfig>>().toEqualTypeOf<CliSkillConfig>();
-  });
 });

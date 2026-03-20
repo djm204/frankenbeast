@@ -1,7 +1,0 @@
-{
-  "servers": {
-    "bad-server": {
-      "args": ["missing-command-field"]
-    }
-  }
-}

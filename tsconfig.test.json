@@ -8,11 +8,11 @@
     "packages/franken-brain/src/**/*",
     "packages/franken-critique/src/**/*",
     "packages/franken-governor/src/**/*",
-    "packages/franken-heartbeat/src/**/*",
     "packages/franken-observer/src/**/*",
+    "packages/franken-orchestrator/src/**/*",
     "packages/franken-planner/src/**/*",
-    "packages/franken-skills/src/**/*",
-    "packages/frankenfirewall/src/**/*"
+    "packages/franken-types/src/**/*",
+    "packages/franken-web/src/**/*"
   ],
   "exclude": ["node_modules", "**/dist"]
 }

@@ -93,14 +93,11 @@ describe('Turborepo configuration', () => {
       'franken-brain',
       'franken-critique',
       'franken-governor',
-      'franken-heartbeat',
-      'franken-mcp',
       'franken-observer',
       'franken-orchestrator',
       'franken-planner',
-      'franken-skills',
       'franken-types',
-      'frankenfirewall',
+      'franken-web',
     ];
 
     for (const module of allPackages) {

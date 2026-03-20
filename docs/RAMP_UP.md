@@ -4,25 +4,20 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **13 packages** live under `packages/`: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **5 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, `franken-web`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **8 packages** live under `packages/`. Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md). Architecture consolidation (ADR-031) reduced from 13 to 8 packages — firewall, skills, heartbeat, MCP deleted; comms absorbed into orchestrator.
 
 ## Modules
 
-| ID | Package | Purpose |
-|----|---------|---------|
-| MOD-01 | `packages/frankenfirewall/` | LLM proxy, injection scanning, PII masking, adapters (Claude/OpenAI/Ollama) |
-| MOD-02 | `packages/franken-skills/` | Skill registry & discovery (`ISkillRegistry`, `UnifiedSkillContract`) |
-| MOD-03 | `packages/franken-brain/` | Memory systems (working/episodic/semantic), PII guards |
-| MOD-04 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
-| MOD-05 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
-| MOD-06 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
-| MOD-07 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
-| MOD-08 | `packages/franken-heartbeat/` | Proactive reflection, morning briefs, checklists |
-| shared | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| MCP | `packages/franken-mcp/` | MCP server client & registry |
-| comms | `packages/franken-comms/` | External comms gateway — Slack, Discord, Telegram, WhatsApp adapters with signature verification |
-| web | `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics (dev tool, not published) |
-| orch | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, beast control APIs, phases, circuit breakers, skill execution, crash recovery |
+| Package | Purpose |
+|---------|---------|
+| `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
+| `packages/franken-brain/` | Memory systems (working/episodic/semantic), PII guards |
+| `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
+| `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
+| `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
+| `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
+| `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics |
+| `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, comms gateway (Slack/Discord/Telegram/WhatsApp), beast control APIs, phases, circuit breakers, skill execution, crash recovery |
 
 ## The Beast Loop (4 Phases)
 
@@ -32,17 +27,14 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
            Circuit Breakers: injection / budget / critique-spiral
 ```
 
-1. **Ingestion** — Firewall sanitization + memory hydration (project context)
+1. **Ingestion** — Input validation + memory hydration (project context)
 2. **Planning** — PlanGraph creation + critique loop (max N iterations)
 3. **Execution** — Topological task execution through skill executors + HITL gates
-4. **Closure** — Token accounting, heartbeat pulse, PR creation, result assembly
+4. **Closure** — Token accounting, PR creation, result assembly
 
 ## Key API Patterns
 
-- `IAdapter`: `transformRequest`, `execute`, `transformResponse`, `validateCapabilities`
-- `BaseAdapter`: retry, timeout, cost calculation built-in
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
-- Heartbeat `IResultLlmClient`: `complete(prompt, opts?): Promise<Result<string>>`
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)
@@ -118,7 +110,7 @@ packages/franken-orchestrator/src/
   - `--target-upstream` derive the canonical target repository from the checkout's GitHub `upstream` remote; mutually exclusive with `--repo`
   - `--dry-run` preview triage without executing
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
-- Current local CLI dep wiring is mixed: observer, CLI adapters, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and `FileCheckpointStore` are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
+- Current local CLI dep wiring is mixed: observer, CLI adapters, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and `FileCheckpointStore` are real, but `firewall`, `skills`, `memory`, `planner`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`. Critique and governor are dynamically imported when available.
 
 ## Build & Test
 
@@ -138,8 +130,8 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 
 - **TypeScript**: ES2022, Node.js native ESM, strict mode, path aliases (`@franken/types`, etc.)
 - **Test framework**: Vitest
-- **HTTP framework**: Hono (firewall, critique, governor services)
-- **Validation**: Zod (v3 most modules; heartbeat uses zod/v4)
+- **HTTP framework**: Hono (orchestrator, comms, governor services)
+- **Validation**: Zod v3
 - **Docker**: docker-compose.yml for ChromaDB, Grafana, Tempo
 
 ## Type Safety Conventions

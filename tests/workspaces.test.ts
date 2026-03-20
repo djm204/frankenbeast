@@ -23,7 +23,6 @@ describe('npm workspaces configuration', () => {
     const modulesWithFileDeps = [
       { module: 'franken-critique', dep: '@franken/types' },
       { module: 'franken-governor', dep: '@franken/types' },
-      { module: 'franken-heartbeat', dep: '@franken/types' },
       { module: 'franken-orchestrator', dep: '@franken/types' },
       { module: 'franken-planner', dep: '@franken/types' },
     ];
@@ -50,13 +49,10 @@ describe('npm workspaces configuration', () => {
       'franken-brain',
       'franken-critique',
       'franken-governor',
-      'franken-heartbeat',
       'franken-observer',
       'franken-orchestrator',
       'franken-planner',
-      'franken-skills',
       'franken-types',
-      'frankenfirewall',
     ];
 
     for (const module of allPackages) {
@@ -79,7 +75,6 @@ describe('npm workspaces configuration', () => {
     const expectedNames: Record<string, string> = {
       'franken-critique': '@franken/critique',
       'franken-governor': '@franken/governor',
-      'franken-heartbeat': 'franken-heartbeat',
       'franken-orchestrator': 'franken-orchestrator',
       'franken-planner': 'franken-planner',
     };

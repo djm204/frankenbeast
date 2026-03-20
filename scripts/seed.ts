@@ -44,8 +44,6 @@ async function main(): Promise<void> {
   await createCollection('episodic-memory', { module: 'franken-brain' });
   await createCollection('project-adrs', { module: 'franken-brain' });
   await createCollection('known-errors', { module: 'franken-brain' });
-  await createCollection('heartbeat-history', { module: 'franken-heartbeat' });
-
   console.log('Seed complete.');
 }
 
