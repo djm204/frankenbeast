@@ -41,21 +41,6 @@ services:
     volumes:
       - tempo-data:/tmp/tempo
 
-  # Frankenfirewall — guardrails-as-a-service proxy
-  firewall:
-    build:
-      context: ./frankenfirewall
-      dockerfile: Dockerfile
-    ports:
-      - '9090:9090'
-    environment:
-      - PORT=9090
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:9090/health']
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
 volumes:
   chromadb-data:
   grafana-data:

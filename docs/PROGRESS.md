@@ -167,22 +167,21 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ## Test Counts
 
-> Phase 7 baseline was 1,572 tests. Phases 8–9 added orchestrator and root integration tests.
+> Phase 7 baseline was 1,572 tests. Phases 8–11 added orchestrator, web, and root integration tests.
+> Architecture consolidation (Phase 1) removed 5 packages and ~760 tests (package deletion + audit).
 
 | Module | Tests | Files | Status |
 |--------|-------|-------|--------|
-| frankenfirewall | 163 | 21 | PASS |
-| franken-skills | 75 | 10 | PASS |
-| franken-brain | 166 | 15 | PASS |
-| franken-planner | 188 | 18 | PASS |
-| franken-observer | 373 | 27 | PASS |
-| franken-critique | 146 | 18 | PASS |
-| franken-governor | 136 | 21 | PASS |
-| franken-heartbeat | 118 | 16 | PASS |
-| franken-types | 22 | 2 | PASS |
-| franken-orchestrator | 1,018 | 78 | PASS (1 skipped) |
-| Root integration | 162 | 11 | PASS |
-| **Total** | **2,567** | **237** | **ALL PASS** |
+| franken-types | 0 | 0 | PASS (no test files) |
+| franken-brain | 123 | 13 | PASS |
+| franken-planner | 187 | 17 | PASS |
+| franken-observer | 377 | 27 | PASS |
+| franken-critique | 107 | 16 | PASS |
+| franken-governor | 111 | 17 | PASS |
+| franken-orchestrator | 1,674 | 180 | PASS (1 skipped) |
+| franken-web | 145 | 38 | PASS |
+| Root integration | 132 | 10 | PASS |
+| **Total** | **2,856** | **318** | **ALL PASS** |
 
 ## Phase 8: CLI Gap Closure
 
@@ -291,12 +290,41 @@ Six chunks implementing the beast daemon execution pipeline:
 
 ---
 
+## Architecture Consolidation — Phase 1: Remove Dead Packages
+
+> Branch: `feat/architecture-consolidation`. PR: #243.
+> Plan: `docs/plans/consolidation/phase1-remove-packages/`
+
+Reduced monorepo from 13 to 8 packages per ADR-031.
+
+**Deleted packages**: frankenfirewall (MOD-01), franken-skills (MOD-02), franken-heartbeat (MOD-08), franken-mcp, franken-comms
+
+**Key changes**:
+- Absorbed franken-comms into `packages/franken-orchestrator/src/comms/` (source + tests)
+- Rewrote ChatSocketBridge for Node 22 global WebSocket API
+- Created `comms-routes.ts` and wired into orchestrator's Hono server (no separate process)
+- Removed firewall/skills/heartbeat adapters from orchestrator
+- Stubbed firewall/skills in dep-factory.ts (Phase 4/5 replacements)
+- Removed firewall service from docker-compose.yml
+- Deleted `examples/` directory (all referenced frankenfirewall)
+- Audited and removed ~40 low-value tests (type-only, instanceof-only)
+- Updated RAMP_UP.md, tsconfig paths, vitest aliases, release-please config
+
+**Test counts** (per plan checkpoint requirements):
+- Pre-consolidation: 3,616 tests across 405 files
+- Post-deletion (before audit): ~3,200 tests (deleted package tests removed)
+- Post-audit (final): 2,856 tests across 318 files — all passing
+
+**Verification**: `npm run build` (8 packages), `npm test` (16 turbo tasks), `npm run typecheck` (12 tasks) — all pass.
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.
 2. **No `--non-interactive` flag**: Review loops require stdin. For CI/headless use, pipe `"y\n"` to stdin.
 3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
-4. **OpenClaw example uses placeholder image**: `examples/openclaw-integration/docker-compose.yml` uses `image: your-openclaw-image:latest` — user must substitute their own.
+4. **Firewall and skills are stubbed**: Phase 1 removed the packages; Phase 4 (LlmMiddleware) and Phase 5 (SkillManager) will provide replacements.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
