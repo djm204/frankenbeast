@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.22.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.21.1...franken-orchestrator-v0.22.0) (2026-03-20)
+
+
+### Features
+
+* **beasts:** add BeastEventBus with sequence IDs and replay buffer ([6851710](https://github.com/djm204/frankenbeast/commit/68517105fda4513733f40414eb0ac4fc3c19b62f))
+* **beasts:** add ProcessCallbacks to ProcessSupervisor with output capture and registry ([5d67738](https://github.com/djm204/frankenbeast/commit/5d6773817776254f7b636de2c5d68c239a9e8f54))
+* **beasts:** add resolveCliEntrypoint utility ([8c956ca](https://github.com/djm204/frankenbeast/commit/8c956ca73b0b8ada868bc6ec05a0b09fe7660e63))
+* **beasts:** add RunConfigSchema and RunConfigLoader with Zod validation ([10d0864](https://github.com/djm204/frankenbeast/commit/10d0864d502bec3b7a978e77ed36ae2b7f7372a7))
+* **beasts:** add SSE routes with connection ticket auth ([8641b32](https://github.com/djm204/frankenbeast/commit/8641b328014bb11ad601959adbff8453ede55d99))
+* **beasts:** add SseConnectionTicketStore with single-use tickets and TTL ([69c4390](https://github.com/djm204/frankenbeast/commit/69c4390ac84f6fe6d89552ca1ecd36d2c6d8fc87))
+* **beasts:** config file passthrough to spawned processes ([8fe66bb](https://github.com/djm204/frankenbeast/commit/8fe66bb537d4f31337397493a5b361eac0887d86))
+* **beasts:** error reporting to dashboard ([a6d9cea](https://github.com/djm204/frankenbeast/commit/a6d9ceac7618d560e2d3da2fb8246a6e377f1efd))
+* **beasts:** error reporting to dashboard with spawn failure handling and SIGTERM timeout ([990577c](https://github.com/djm204/frankenbeast/commit/990577c31c93fad8b45a1aa8b159849e62221399))
+* **beasts:** expose notifyRunStatusChange on BeastRunService ([daa25fa](https://github.com/djm204/frankenbeast/commit/daa25fa9ab26bd5459c5e7e88731fda690241f9c))
+* **beasts:** ProcessSupervisor exit handling + output capture ([6c2600f](https://github.com/djm204/frankenbeast/commit/6c2600fb8a92a57a02e879ce3a60d745120cc3e8))
+* **beasts:** replace chunk-plan stub with real CLI spawn ([b368ad3](https://github.com/djm204/frankenbeast/commit/b368ad3970d59d1a3d5a343a7a785d33ce381184))
+* **beasts:** replace design-interview stub with real CLI spawn ([d58f7b1](https://github.com/djm204/frankenbeast/commit/d58f7b1b1e0e661fa4b59557f5a8fec888fbe04a))
+* **beasts:** replace martin-loop stub with real CLI spawn ([12acef2](https://github.com/djm204/frankenbeast/commit/12acef26756000f81bef3851a4b46f263742762f))
+* **beasts:** replace stub buildProcessSpec with real CLI spawns ([2307c0c](https://github.com/djm204/frankenbeast/commit/2307c0cd55c6f8704b5363e76630fd9e6ec0026b))
+* **beasts:** SSE event bus + connection tickets (Chunk 06) ([436dca9](https://github.com/djm204/frankenbeast/commit/436dca9567fae9cafcc4178f54c9ab07f2149455))
+* **beasts:** wire BeastEventBus into RunService and ProcessBeastExecutor ([8b442bf](https://github.com/djm204/frankenbeast/commit/8b442bf3328ebc3002baefb45fa8beaa8b70b091))
+* **beasts:** wire ProcessCallbacks through ProcessBeastExecutor to persistence ([c902168](https://github.com/djm204/frankenbeast/commit/c902168034d659b0428920483190ed8b69d81312))
+* **beasts:** wire ProcessCallbacks through ProcessBeastExecutor to persistence ([a2ce1ba](https://github.com/djm204/frankenbeast/commit/a2ce1bacb0d769d212a7bd75321d6eb4ab21dc7e))
+* **beasts:** write configSnapshot to JSON file before spawn and clean up on exit ([a010200](https://github.com/djm204/frankenbeast/commit/a010200d5fb5e6e958e201ff4a7471e5248a6a0d))
+* **cli:** add franken and frkn as CLI aliases ([b651cd5](https://github.com/djm204/frankenbeast/commit/b651cd543408ba2e574f3da236d3c75d4354f2f5))
+* **cli:** load RunConfig from env in session startup path ([e58844f](https://github.com/djm204/frankenbeast/commit/e58844f2fdfd648a9d62c5c72ef4373a91706e91))
+* **cli:** wire RunConfig overrides into dep-factory ([a3831b8](https://github.com/djm204/frankenbeast/commit/a3831b823ab6e65dd9d8d2c5ac577d3cbd243ffd))
+* Plan 1 — Foundation Execution Pipeline ([bc4cc63](https://github.com/djm204/frankenbeast/commit/bc4cc63b958dfe1d9763056f69b5495b7272b73e))
+
+
+### Bug Fixes
+
+* **beasts:** add projectRoot to configSchema, strengthen env assertions ([8e4ba77](https://github.com/djm204/frankenbeast/commit/8e4ba7745070d2070dcc022d39754e9a7ed610c4))
+* **beasts:** address PR [#241](https://github.com/djm204/frankenbeast/issues/241) review findings ([ffa9329](https://github.com/djm204/frankenbeast/commit/ffa9329e39d3901a0110a464e2a819dc38f7820a))
+* **beasts:** buffer early exit events and handle null code/signal edge case ([dc899c1](https://github.com/djm204/frankenbeast/commit/dc899c14999b476c50e642c71b95b5b6eaead1b0))
+* **beasts:** enable auto-dispatch for design-interview definition ([6cb16e1](https://github.com/djm204/frankenbeast/commit/6cb16e11ffd7f1a34e6707ed1b5f29dda8aae48a))
+* **beasts:** fix stop() double-write, duplicate agent events, and spec compliance ([ad2c981](https://github.com/djm204/frankenbeast/commit/ad2c98199988612fe4478888a3b310e218998317))
+* **beasts:** make ProcessCallbacks required, fix readline drain race condition ([5509d06](https://github.com/djm204/frankenbeast/commit/5509d0634daba29afa91bea11878a573a98cc307))
+* **beasts:** resolve 3 high-severity discrepancies from Pass 7 audit ([bdc0f2c](https://github.com/djm204/frankenbeast/commit/bdc0f2cc4f1a85c3037c4e1b5c56143f30fd35ad))
+* **beasts:** resolve all DISCREPANCIES.md findings from Plan 1 ([5679beb](https://github.com/djm204/frankenbeast/commit/5679beb7c72fb4adad3aa946af7f4879f0eab086))
+* **beasts:** resolve all Pass 6 Deep Audit findings (R1-R8) ([a9eac61](https://github.com/djm204/frankenbeast/commit/a9eac6144d012928c013a5e4fbcb29a803fc9213))
+* **beasts:** resolve Pass 4/5 truth audit findings ([ba0908b](https://github.com/djm204/frankenbeast/commit/ba0908be6512cc0161d648cc1ed4de81823adeab))
+* **cli:** align RunConfigSchema with spec, fix module passthrough and error handling ([9873dfa](https://github.com/djm204/frankenbeast/commit/9873dfa570ef094171dcb21329b4d36efa91d38c))
+* honor run config provider and model precedence ([17d3432](https://github.com/djm204/frankenbeast/commit/17d3432f858d2590f2cb0683dbd2b661bd667fab))
+* **lint:** suppress false-positive prefer-const on deferred assignments ([df7779d](https://github.com/djm204/frankenbeast/commit/df7779d9d469ea26361da38147ba23e40321351d))
+
 ## [0.21.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.21.0...franken-orchestrator-v0.21.1) (2026-03-15)
 
 
