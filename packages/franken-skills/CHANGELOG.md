@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.4.2...franken-skills-v0.5.0) (2026-03-20)
+
+
+### Features
+
+* Plan 1 — Foundation Execution Pipeline ([bc4cc63](https://github.com/djm204/frankenbeast/commit/bc4cc63b958dfe1d9763056f69b5495b7272b73e))
+
+
+### Bug Fixes
+
+* **skills:** use Object.values to avoid unused destructured variable ([f84a15b](https://github.com/djm204/frankenbeast/commit/f84a15b41eae9edf266eab9fd2a079115abf6481))
+
 ## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-skills-v0.4.1...franken-skills-v0.4.2) (2026-03-15)
 
 
