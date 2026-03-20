@@ -37,6 +37,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const ticketStore = new SseConnectionTicketStore();
 
   // Deferred reference to break circular dep: executor → runService → executors → executor
+  // eslint-disable-next-line prefer-const
   let runService: BeastRunService;
   const executors = {
     process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor(), {

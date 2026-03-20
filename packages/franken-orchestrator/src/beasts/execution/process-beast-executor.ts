@@ -63,6 +63,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       },
     };
 
+    // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
     const earlyStdoutLines: string[] = [];
     const earlyStderrLines: string[] = [];
