@@ -16,6 +16,9 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
   "devDependencies": {
     "@types/node": "^22.15.2",
     "typescript": "^5.8.3",

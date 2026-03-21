@@ -44,3 +44,20 @@ export type { FrankenContext } from './context.js';
 
 // Comms
 export * from './comms.js';
+
+// Brain interfaces + types
+export type {
+  IBrain,
+  IWorkingMemory,
+  IEpisodicMemory,
+  IRecoveryMemory,
+  EpisodicEventType,
+  EpisodicEvent,
+  ExecutionState,
+  BrainSnapshot,
+} from './brain.js';
+export {
+  EpisodicEventSchema,
+  ExecutionStateSchema,
+  BrainSnapshotSchema,
+} from './brain.js';
