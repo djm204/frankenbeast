@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.26.0](https://github.com/djm204/frankenbeast/compare/v0.25.0...v0.26.0) (2026-03-21)
+
+
+### Features
+
+* **brain:** add SqliteBrain implementation with serialize/hydrate (Phase 2.2) ([11b7cf0](https://github.com/djm204/frankenbeast/commit/11b7cf0d97b541e0fe51cc66eb75d024259221d2))
+* **brain:** SqliteBrain implementation with serialize/hydrate (Phase 2.2) ([f933824](https://github.com/djm204/frankenbeast/commit/f93382433780009edb2d5f14eae8172769f29daa))
+* **types:** add brain interfaces and BrainSnapshot types (Phase 2.1) ([5167997](https://github.com/djm204/frankenbeast/commit/5167997c99954fd37d66822ad8efb87913f0b432))
+* **types:** brain interfaces + BrainSnapshot types (Phase 2.1) ([f2ed2fd](https://github.com/djm204/frankenbeast/commit/f2ed2fd52257c8fc44f1005bddc924af16d24177))
+
+
+### Bug Fixes
+
+* **release:** hoist changelog-sections to top level so all packages show refactor commits ([4ad202e](https://github.com/djm204/frankenbeast/commit/4ad202e6d2cb4925e5cbd59beb973ec9c05499cf))
+
+
+### Documentation
+
+* add Phase 2 (Brain Rewrite) residual issues ([5bb9786](https://github.com/djm204/frankenbeast/commit/5bb97862657e2159b2349da44c2cfd8492cd4138))
+
 ## [0.25.0](https://github.com/djm204/frankenbeast/compare/v0.24.0...v0.25.0) (2026-03-21)
 
 
