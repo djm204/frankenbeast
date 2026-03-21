@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.4.0...franken-critique-v0.5.0) (2026-03-21)
+
+
+### Features
+
+* **consolidation:** Phase 1 — remove 5 packages (13→8) ([2eac09c](https://github.com/djm204/frankenbeast/commit/2eac09c64e515d3b5007b1e39d3f73d7b3bdf12b))
+* **consolidation:** remove 5 packages, absorb comms into orchestrator (Phase 1) ([1ee949d](https://github.com/djm204/frankenbeast/commit/1ee949d761c4eaf507858f63cccb68e0522bb8b1))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.3.1...franken-critique-v0.4.0) (2026-03-10)
 
 

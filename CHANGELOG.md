@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.25.0](https://github.com/djm204/frankenbeast/compare/v0.24.0...v0.25.0) (2026-03-21)
+
+
+### Features
+
+* **consolidation:** Phase 1 — remove 5 packages (13→8) ([2eac09c](https://github.com/djm204/frankenbeast/commit/2eac09c64e515d3b5007b1e39d3f73d7b3bdf12b))
+* **consolidation:** remove 5 packages, absorb comms into orchestrator (Phase 1) ([1ee949d](https://github.com/djm204/frankenbeast/commit/1ee949d761c4eaf507858f63cccb68e0522bb8b1))
+
+
+### Bug Fixes
+
+* **consolidation:** address review findings — lockfile, comms routes, docs ([e406cc2](https://github.com/djm204/frankenbeast/commit/e406cc2b32cd977f6212b05a300a96ae78480914))
+
+
+### Documentation
+
+* add Phase 1 residual issues to minor-issues plan folder ([a64ea88](https://github.com/djm204/frankenbeast/commit/a64ea881518b65f6f2019755d59a6e842e91807a))
+
 ## [0.24.0](https://github.com/djm204/frankenbeast/compare/v0.23.0...v0.24.0) (2026-03-20)
 
 
