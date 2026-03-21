@@ -1,4 +1,8 @@
-// Public API — populated as phases complete
+// Primary API — SqliteBrain (Phase 2 rewrite)
+export { SqliteBrain } from './sqlite-brain.js';
+
+// Legacy exports — consumed by franken-orchestrator dep-factory.ts
+// TODO: Remove after Phase 8 (dep-factory-rewiring) switches to SqliteBrain
 export type {
   MemoryStatus,
   MemoryMetadata,
@@ -10,20 +14,5 @@ export type {
 
 export { TokenBudget, generateId, parseMemoryEntry, parseMemoryStatus } from './types/index.js';
 
-export { WorkingMemoryStore } from './working/index.js';
-export type { ICompressionStrategy, CompressionResult } from './working/index.js';
-
 export { EpisodicMemoryStore } from './episodic/index.js';
 export type { IEpisodicStore } from './episodic/index.js';
-
-export { SemanticMemoryStore } from './semantic/index.js';
-export type { ISemanticStore, MetadataFilter, IChromaClient, IEmbeddingProvider } from './semantic/index.js';
-
-export { TruncationStrategy, LlmSummarisationStrategy, EpisodicLessonExtractor } from './compression/index.js';
-export type { ILlmClient } from './compression/index.js';
-
-export { MemoryOrchestrator } from './orchestrator/index.js';
-export type { OrchestratorDeps, AgentContext } from './orchestrator/index.js';
-
-export { PiiGuard, PiiDetectedError, PiiGuardedEpisodicStore, PiiGuardedSemanticStore } from './pii/index.js';
-export type { IPiiScanner, ScanResult, ScanMode, PiiDetectedEvent } from './pii/index.js';

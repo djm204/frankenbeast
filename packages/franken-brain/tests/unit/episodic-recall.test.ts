@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqliteBrain } from '../../../src/new/sqlite-brain.js';
+import { SqliteBrain } from '../../src/sqlite-brain.js';
 
 describe('EpisodicMemory.recall()', () => {
   let brain: SqliteBrain;
