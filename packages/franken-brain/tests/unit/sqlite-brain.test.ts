@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type { EpisodicEvent, ExecutionState, BrainSnapshot } from '@franken/types';
-import { SqliteBrain } from '../../../src/new/sqlite-brain.js';
+import { SqliteBrain } from '../../src/sqlite-brain.js';
 
 describe('SqliteBrain', () => {
   let brain: SqliteBrain;

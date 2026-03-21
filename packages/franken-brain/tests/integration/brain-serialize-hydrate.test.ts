@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
-import { SqliteBrain } from '../../../src/new/sqlite-brain.js';
+import { SqliteBrain } from '../../src/sqlite-brain.js';
 
 describe('Brain serialize/hydrate integration', () => {
   it('full lifecycle: record events, checkpoint, serialize, hydrate, verify state', () => {
