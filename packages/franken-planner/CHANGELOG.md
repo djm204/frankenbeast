@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.0...franken-planner-v0.4.1) (2026-03-21)
+
+
+### Miscellaneous
+
+* **main:** release franken-planner 0.4.0 ([7f17b8e](https://github.com/djm204/frankenbeast/commit/7f17b8e22a28a96c642c0239461d08a06e9da2a1))
+* **main:** release franken-planner 0.4.0 ([521f2c1](https://github.com/djm204/frankenbeast/commit/521f2c128558af40065111d6ecf5e650089050b3))
+* **main:** release frankenfirewall 0.5.0 ([c9939d9](https://github.com/djm204/frankenbeast/commit/c9939d9b8011f8f7cfaa240b2f1c79fb010db1cc))
+
+
+### Documentation
+
+* update RAMP_UP files across all packages to reflect current integration status ([a6f9f62](https://github.com/djm204/frankenbeast/commit/a6f9f627373e426278eaa98471d3f78da8064d26))
+* update RAMP_UP for all packages with accurate integration status ([78220d6](https://github.com/djm204/frankenbeast/commit/78220d6ffb22720eae325f2f3f94823e6a29a463))
+
+
+### Tests
+
+* delete 26 fluff test files (~283 tests) identified by audit ([03358d4](https://github.com/djm204/frankenbeast/commit/03358d4cdc745197e48b61855ed77571a37a2939))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.3.1...franken-planner-v0.4.0) (2026-03-12)
 
 
