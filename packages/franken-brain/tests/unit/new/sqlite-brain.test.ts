@@ -126,10 +126,10 @@ describe('SqliteBrain', () => {
       expect(events[0]!.details).toEqual({ file: 'auth.ts', line: 42 });
     });
 
-    it('recall() returns results (placeholder delegates to recent)', () => {
-      brain.episodic.record(makeEvent({ summary: 'first' }));
-      brain.episodic.record(makeEvent({ summary: 'second' }));
-      const results = brain.episodic.recall('anything', 1);
+    it('recall() finds matching events by keyword', () => {
+      brain.episodic.record(makeEvent({ summary: 'first test event' }));
+      brain.episodic.record(makeEvent({ summary: 'second test event' }));
+      const results = brain.episodic.recall('test event', 1);
       expect(results).toHaveLength(1);
     });
   });

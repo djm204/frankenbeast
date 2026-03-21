@@ -101,9 +101,42 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       );
   }
 
-  recall(_query: string, _limit = 10): EpisodicEvent[] {
-    // Implemented in chunk 2.3
-    return this.recent(_limit);
+  recall(query: string, limit = 10): EpisodicEvent[] {
+    const keywords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .filter(w => !STOPWORDS.has(w));
+
+    if (keywords.length === 0) {
+      return this.recent(limit);
+    }
+
+    // Build scoring SQL: count keyword matches across summary + details
+    const scoringCases = keywords.map(() =>
+      `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+    ).join(' + ');
+
+    const whereClauses = keywords.map(() =>
+      `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\')`,
+    ).join(' OR ');
+
+    const sql = `
+      SELECT *, (${scoringCases}) AS relevance_score
+      FROM episodic_events
+      WHERE ${whereClauses}
+      ORDER BY relevance_score DESC, created_at DESC
+      LIMIT ?
+    `;
+
+    const likeParams = keywords.flatMap(k => {
+      const escaped = `%${escapeLike(k)}%`;
+      return [escaped, escaped];
+    });
+    const allParams = [...likeParams, ...likeParams, limit];
+
+    const rows = this.db.prepare(sql).all(...allParams) as (EpisodicRow & { relevance_score: number })[];
+    return rows.map(rowToEvent);
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
@@ -249,7 +282,23 @@ export class SqliteBrain implements IBrain {
   }
 }
 
+// --- Constants ---
+
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'is', 'was', 'are', 'were', 'be', 'been',
+  'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+  'would', 'could', 'should', 'may', 'might', 'can', 'shall',
+  'not', 'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
+  'in', 'on', 'at', 'to', 'of', 'by', 'with', 'from', 'as',
+  'into', 'about', 'between', 'through', 'after', 'before',
+  'this', 'that', 'these', 'those', 'it', 'its',
+]);
+
 // --- Helpers ---
+
+function escapeLike(s: string): string {
+  return s.replace(/[%_\\]/g, '\\$&');
+}
 
 function rowToEvent(row: EpisodicRow): EpisodicEvent {
   const event: EpisodicEvent = {
