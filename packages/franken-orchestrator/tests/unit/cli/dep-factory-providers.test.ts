@@ -106,25 +106,9 @@ vi.mock('../../../src/session/chunk-session-gc.js', () => ({
   }),
 }));
 
-vi.mock('../../../src/adapters/firewall-adapter.js', () => ({
-  FirewallPortAdapter: vi.fn(function () {
-    return { sanitize: vi.fn(async (input: string) => ({ sanitized: input, violations: [] })) };
-  }),
-}));
-
 vi.mock('../../../src/adapters/episodic-memory-port-adapter.js', () => ({
   EpisodicMemoryPortAdapter: vi.fn(function () {
     return { hydrate: vi.fn(async () => ({ context: '' })) };
-  }),
-}));
-
-vi.mock('../../../src/adapters/skill-registry-bridge.js', () => ({
-  SkillRegistryBridge: vi.fn(function () {}),
-}));
-
-vi.mock('../../../src/adapters/skills-adapter.js', () => ({
-  SkillsPortAdapter: vi.fn(function () {
-    return { execute: vi.fn() };
   }),
 }));
 
@@ -146,11 +130,6 @@ vi.mock('../../../src/issues/issue-review.js', () => ({
 
 vi.mock('../../../src/issues/issue-runner.js', () => ({
   IssueRunner: vi.fn(function () {}),
-}));
-
-vi.mock('@franken/firewall', () => ({
-  scanForInjection: vi.fn(() => ({ passed: true, violations: [] })),
-  maskPii: vi.fn((request: unknown) => ({ passed: true, value: request, violations: [] })),
 }));
 
 vi.mock('franken-brain', () => ({

@@ -25,14 +25,10 @@
         "packages/franken-brain",
         "packages/franken-critique",
         "packages/franken-governor",
-        "packages/franken-heartbeat",
-        "packages/franken-mcp",
         "packages/franken-observer",
         "packages/franken-orchestrator",
         "packages/franken-planner",
-        "packages/franken-skills",
-        "packages/franken-types",
-        "packages/frankenfirewall"
+        "packages/franken-types"
       ]
     },
     "packages/franken-brain": {
@@ -47,14 +43,6 @@
       "release-type": "node",
       "component": "franken-governor"
     },
-    "packages/franken-heartbeat": {
-      "release-type": "node",
-      "component": "franken-heartbeat"
-    },
-    "packages/franken-mcp": {
-      "release-type": "node",
-      "component": "franken-mcp"
-    },
     "packages/franken-observer": {
       "release-type": "node",
       "component": "franken-observer"
@@ -67,17 +55,9 @@
       "release-type": "node",
       "component": "franken-planner"
     },
-    "packages/franken-skills": {
-      "release-type": "node",
-      "component": "franken-skills"
-    },
     "packages/franken-types": {
       "release-type": "node",
       "component": "franken-types"
-    },
-    "packages/frankenfirewall": {
-      "release-type": "node",
-      "component": "frankenfirewall"
     }
   }
 }

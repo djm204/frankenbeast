@@ -21,7 +21,7 @@ export const commsGatewayService: NetworkServiceDefinition = {
   enabled: (config: OrchestratorConfig) => config.comms.enabled || hasEnabledChannels(config),
   describe: (config: OrchestratorConfig) =>
     `Enabled when comms.enabled=true or a channel is enabled; current channel flags slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled}.`,
-  buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
+  buildRuntimeConfig: (config: OrchestratorConfig) => ({
     host: config.comms.host,
     port: config.comms.port,
     url: `http://${config.comms.host}:${config.comms.port}`,
@@ -30,15 +30,8 @@ export const commsGatewayService: NetworkServiceDefinition = {
       slack: config.comms.slack.enabled,
       discord: config.comms.discord.enabled,
     },
-    process: {
-      command: 'npm',
-      args: [
-        '--workspace',
-        'franken-comms',
-        'run',
-        'start:network',
-      ],
-      cwd: context.repoRoot,
-    },
+    // Comms webhook routes are now served in-process on the orchestrator's Hono server
+    // via commsRoutes() registered in chat-app.ts — no separate process needed.
+    inProcess: true,
   }),
 };

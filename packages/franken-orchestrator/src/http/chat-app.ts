@@ -12,11 +12,13 @@ import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
+import { commsRoutes } from './routes/comms-routes.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
+import type { CommsConfig } from '../comms/config/comms-config.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -38,6 +40,7 @@ export interface ChatAppOptions {
     setConfig(config: OrchestratorConfig): void;
   };
   beastControl?: BeastRoutesDeps;
+  commsConfig?: CommsConfig;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -119,6 +122,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
+  }
+  if (opts.commsConfig) {
+    app.route('/', commsRoutes({ config: opts.commsConfig }));
   }
 
   return app;

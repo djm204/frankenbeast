@@ -52,8 +52,7 @@ function createTempPaths(): ProjectPaths {
 }
 
 // These tests call createCliDeps() which internally creates many runtime objects.
-// The dynamic imports for @franken/firewall and @franken/skills may succeed or fail
-// depending on build state. Memory (franken-brain + better-sqlite3) should always work.
+// Memory (franken-brain + better-sqlite3) should always work.
 describe('dep-factory wiring integration', () => {
   const cleanups: string[] = [];
 

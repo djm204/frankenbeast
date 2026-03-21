@@ -10,28 +10,20 @@ const ALL_MODULES = [
   'franken-brain',
   'franken-critique',
   'franken-governor',
-  'franken-heartbeat',
-  'franken-mcp',
   'franken-observer',
   'franken-orchestrator',
   'franken-planner',
-  'franken-skills',
   'franken-types',
-  'frankenfirewall',
 ] as const;
 
 const EXPECTED_ALIASES: Record<string, string> = {
-  '@franken/firewall': './packages/frankenfirewall/src/index.ts',
-  '@franken/skills': './packages/franken-skills/src/index.ts',
   'franken-brain': './packages/franken-brain/src/index.ts',
   'franken-planner': './packages/franken-planner/src/index.ts',
   '@frankenbeast/observer': './packages/franken-observer/src/index.ts',
   '@franken/critique': './packages/franken-critique/src/index.ts',
   '@franken/governor': './packages/franken-governor/src/index.ts',
-  'franken-heartbeat': './packages/franken-heartbeat/src/index.ts',
   '@franken/types': './packages/franken-types/src/index.ts',
   'franken-orchestrator': './packages/franken-orchestrator/src/index.ts',
-  '@franken/mcp': './packages/franken-mcp/src/index.ts',
 };
 
 describe('tsconfig.json path aliases', () => {
@@ -42,8 +34,8 @@ describe('tsconfig.json path aliases', () => {
     expect(paths).toBeDefined();
   });
 
-  it('has exactly 11 aliases', () => {
-    expect(Object.keys(paths)).toHaveLength(11);
+  it('has exactly 7 aliases', () => {
+    expect(Object.keys(paths)).toHaveLength(7);
   });
 
   for (const [alias, expectedPath] of Object.entries(EXPECTED_ALIASES)) {
@@ -82,11 +74,8 @@ describe('tsconfig.test.json includes', () => {
     'franken-brain',
     'franken-critique',
     'franken-governor',
-    'franken-heartbeat',
     'franken-observer',
     'franken-planner',
-    'franken-skills',
-    'frankenfirewall',
   ];
 
   for (const mod of modulesInTestConfig) {

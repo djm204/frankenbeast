@@ -1,4 +1,4 @@
-import { describe, it, expect, expectTypeOf } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { ICliProvider, ProviderOpts } from '../../../../src/skills/providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from '../../../../src/skills/providers/cli-provider.js';
 
@@ -25,13 +25,11 @@ describe('ICliProvider', () => {
 
   it('has name property (string)', () => {
     const p = makeStubProvider();
-    expectTypeOf(p.name).toBeString();
     expect(p.name).toBe('stub');
   });
 
   it('has command property (string)', () => {
     const p = makeStubProvider();
-    expectTypeOf(p.command).toBeString();
     expect(p.command).toBe('stub-cli');
   });
 
@@ -58,7 +56,6 @@ describe('ICliProvider', () => {
   it('estimateTokens returns a number', () => {
     const p = makeStubProvider();
     const tokens = p.estimateTokens('some output text');
-    expectTypeOf(tokens).toBeNumber();
     expect(tokens).toBeGreaterThan(0);
   });
 

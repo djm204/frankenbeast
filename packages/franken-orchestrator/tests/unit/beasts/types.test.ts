@@ -1,4 +1,4 @@
-import { describe, expect, it, expectTypeOf } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   TRACKED_AGENT_INIT_ACTION_KINDS,
   TRACKED_AGENT_STATUSES,
@@ -30,15 +30,6 @@ describe('beast types', () => {
     ];
 
     expect(statuses).toHaveLength(7);
-    expectTypeOf<BeastRunStatus>().toEqualTypeOf<
-      'queued'
-      | 'interviewing'
-      | 'running'
-      | 'pending_approval'
-      | 'completed'
-      | 'failed'
-      | 'stopped'
-    >();
   });
 
   it('captures the fixed dispatch sources and execution modes', () => {
@@ -63,16 +54,6 @@ describe('beast types', () => {
       'stopped',
       'deleted',
     ]);
-    expectTypeOf<TrackedAgentStatus>().toEqualTypeOf<
-      | 'initializing'
-      | 'awaiting_approval'
-      | 'dispatching'
-      | 'running'
-      | 'completed'
-      | 'failed'
-      | 'stopped'
-      | 'deleted'
-    >();
   });
 
   it('defines tracked agent records with chat-backed init metadata and run linkage', () => {

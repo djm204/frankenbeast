@@ -12,14 +12,10 @@ const PACKAGE_DIRS = [
   'franken-brain',
   'franken-critique',
   'franken-governor',
-  'franken-heartbeat',
-  'franken-mcp',
   'franken-observer',
   'franken-orchestrator',
   'franken-planner',
-  'franken-skills',
   'franken-types',
-  'frankenfirewall',
 ] as const;
 
 describe('release-please monorepo config', () => {
@@ -34,15 +30,15 @@ describe('release-please monorepo config', () => {
     expect(config.packages['.']['release-type']).toBe('node');
   });
 
-  it('config has entries for all 11 packages', () => {
+  it('config has entries for all 7 packages', () => {
     for (const dir of PACKAGE_DIRS) {
       const key = `packages/${dir}`;
       expect(config.packages[key], `missing config entry for ${key}`).toBeDefined();
     }
   });
 
-  it('config has at least 12 package entries (root + 11 modules)', () => {
-    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(12);
+  it('config has at least 8 package entries (root + 7 modules)', () => {
+    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(8);
   });
 
   it('each package entry has release-type "node"', () => {
@@ -63,15 +59,15 @@ describe('release-please monorepo config', () => {
     expect(manifest['.']).toBe(rootPackage.version);
   });
 
-  it('manifest has entries for all 11 packages', () => {
+  it('manifest has entries for all 7 packages', () => {
     for (const dir of PACKAGE_DIRS) {
       const key = `packages/${dir}`;
       expect(manifest[key], `missing manifest entry for ${key}`).toBeDefined();
     }
   });
 
-  it('manifest has at least 12 entries', () => {
-    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(12);
+  it('manifest has at least 8 entries', () => {
+    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(8);
   });
 
   it('manifest versions match actual package.json versions', () => {

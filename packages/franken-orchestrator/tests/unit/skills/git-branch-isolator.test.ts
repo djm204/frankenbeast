@@ -707,11 +707,11 @@ describe('detectAffectedPackages()', () => {
 
   it('sorts package names alphabetically', () => {
     const files = [
-      'packages/frankenfirewall/src/index.ts',
+      'packages/franken-planner/src/index.ts',
       'packages/franken-brain/src/index.ts',
-      'packages/franken-mcp/src/index.ts',
+      'packages/franken-critique/src/index.ts',
     ];
-    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-mcp', 'frankenfirewall']);
+    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-critique', 'franken-planner']);
   });
 
   it('handles mixed root and package files', () => {

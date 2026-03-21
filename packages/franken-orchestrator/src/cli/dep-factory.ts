@@ -16,14 +16,10 @@ import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
-import { FirewallPortAdapter } from '../adapters/firewall-adapter.js';
-import type { FirewallPortAdapterDeps } from '../adapters/firewall-adapter.js';
 import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
 import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
-import { SkillRegistryBridge } from '../adapters/skill-registry-bridge.js';
-import { SkillsPortAdapter } from '../adapters/skills-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
 import { IssueTriage } from '../issues/issue-triage.js';
 import { IssueGraphBuilder } from '../issues/issue-graph-builder.js';
@@ -34,8 +30,7 @@ import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
-  IPlannerModule, ICritiqueModule, IGovernorModule,
-  IHeartbeatModule,
+  IPlannerModule, ICritiqueModule, IGovernorModule, IHeartbeatModule,
 } from '../deps.js';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
@@ -205,13 +200,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   // Resolve per-agent module toggles (runConfig > options > env vars > default enabled)
   const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
   const modules = {
-    firewall: effectiveModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
-    skills: effectiveModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
     memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
     planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
     critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
     governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
-    heartbeat: effectiveModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
   };
 
   // Derive plan name for plan-specific build artifacts
@@ -301,52 +293,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     observer: observerBridge.observerDeps as never,
   });
 
-  // Firewall (dynamic import — optional module)
-  let firewall: IFirewallModule = stubFirewall;
-  if (modules.firewall) {
-    try {
-      const { runPipeline, ClaudeAdapter } = await import('@franken/firewall');
-      const firewallConfig = {
-        project_name: basename(paths.root),
-        security_tier: options.firewallSecurityTier ?? 'MODERATE',
-        schema_version: 1 as const,
-        agnostic_settings: {
-          redact_pii: false,
-          max_token_spend_per_call: budget,
-          allowed_providers: ['anthropic' as const],
-        },
-        safety_hooks: { pre_flight: [] as string[], post_flight: [] as string[] },
-      };
-      firewall = new FirewallPortAdapter({
-        runPipeline: runPipeline as unknown as FirewallPortAdapterDeps['runPipeline'],
-        adapter: new ClaudeAdapter({
-          apiKey: process.env.ANTHROPIC_API_KEY ?? '',
-          model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
-        }) as unknown as FirewallPortAdapterDeps['adapter'],
-        config: firewallConfig,
-        provider: 'anthropic',
-        model: effectiveModel ?? options.adapterModel ?? 'claude-sonnet-4-6',
-      });
-    } catch (error) {
-      logger.warn(`Firewall module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
-    }
-  }
+  // TODO: Phase 4 — LlmMiddleware replaces firewall module
+  const firewall: IFirewallModule = stubFirewall;
 
-  // Skills (dynamic import — optional module)
-  let skills: ISkillsModule = createStubSkills(options.planDirOverride ?? paths.plansDir);
-  if (modules.skills) {
-    try {
-      const { createRegistry } = await import('@franken/skills');
-      const skillsRegistry = createRegistry({
-        localSkillsDir: options.skillsDir ?? resolve(paths.root, 'skills'),
-      });
-      await skillsRegistry.sync();
-      const registryBridge = new SkillRegistryBridge(skillsRegistry);
-      skills = new SkillsPortAdapter(registryBridge, adapterLlm);
-    } catch (error) {
-      logger.warn(`Skills module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
-    }
-  }
+  // TODO: Phase 5 — SkillManager replaces static skill registry with marketplace-first MCP loading
+  const skills: ISkillsModule = createStubSkills(options.planDirOverride ?? paths.plansDir);
 
   // Memory (dynamic import — optional module)
   let memory: IMemoryModule = stubMemory;
