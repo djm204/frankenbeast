@@ -24,12 +24,13 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "better-sqlite3": "^12.6.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@franken/types": "*",
+    "better-sqlite3": "^12.6.2",
     "ulid": "^3.0.2",
     "zod": "^4.3.6"
   }
