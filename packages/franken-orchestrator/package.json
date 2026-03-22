@@ -41,14 +41,17 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "@franken/critique": "*",
     "@franken/governor": "*",
     "@franken/types": "*",
     "@frankenbeast/observer": "*",
+    "@google/genai": "^1.46.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",
     "franken-brain": "*",
     "hono": "^4.12.5",
+    "openai": "^6.32.0",
     "ws": "^8.19.0",
     "zod": "^3.24.0"
   },
