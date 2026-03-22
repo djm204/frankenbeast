@@ -5,6 +5,7 @@ import type {
   LlmStreamEvent,
 } from '@franken/types';
 import type { IBrain } from '@franken/types';
+import { TokenAggregator, type AggregatedTokenUsage } from './token-aggregator.js';
 
 export interface ProviderRegistryOptions {
   /** Maximum retries per provider before failing over */
@@ -34,6 +35,7 @@ export class ProviderRegistry {
   private brain: IBrain;
   private opts: ResolvedOptions;
   private currentProviderIndex = 0;
+  private readonly tokenAggregator = new TokenAggregator();
 
   constructor(
     providers: ILlmProvider[],
@@ -133,6 +135,9 @@ export class ProviderRegistry {
               lastError = new Error(event.error);
               throw lastError;
             }
+            if (event.type === 'done') {
+              this.tokenAggregator.record(provider.name, event.usage);
+            }
             yield event;
             if (event.type === 'done') {
               this.currentProviderIndex = providerIndex;
@@ -162,6 +167,10 @@ export class ProviderRegistry {
       `All providers exhausted. Last error: ${lastError?.message ?? 'unknown'}. ` +
         `Brain state checkpointed for recovery.`,
     );
+  }
+
+  getTokenUsage(): AggregatedTokenUsage {
+    return this.tokenAggregator.getTotalUsage();
   }
 
   setOrder(providerNames: string[]): void {

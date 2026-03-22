@@ -1,5 +1,7 @@
 export { ProviderRegistry } from './provider-registry.js';
 export type { ProviderRegistryOptions } from './provider-registry.js';
+export { TokenAggregator } from './token-aggregator.js';
+export type { AggregatedTokenUsage } from './token-aggregator.js';
 export { formatHandoff } from './format-handoff.js';
 export { ClaudeCliAdapter } from './claude-cli-adapter.js';
 export type { ClaudeCliOptions } from './claude-cli-adapter.js';
