@@ -84,6 +84,28 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 ---
 
+## I5. Recovery checkpoint does not flush working memory to SQLite
+
+**Status:** Open
+**Severity:** Informational
+**Context:** The spec states that `checkpoint()` (triggered by recovery) should flush the in-memory working memory Map to the SQLite `working_memory` table. In the implementation, `SqliteRecoveryMemory.checkpoint()` only inserts a checkpoint row — it does not call `flushToDb()` on working memory. The flush happens only in `SqliteBrain.serialize()`. If `brain.recovery.checkpoint(state)` is called without a subsequent `serialize()`, the `working_memory` table won't reflect current in-memory state.
+
+**Risk:** Low in practice — `serialize()` is the primary handoff path and always flushes. But any code path that relies on recovery checkpoints alone (without serialize) would see stale working memory in SQLite.
+
+**Fix:** Add a `flushToDb()` call inside `SqliteRecoveryMemory.checkpoint()`, or document that callers must call `serialize()` after checkpoint if SQLite consistency is needed.
+
+---
+
+## I6. PROGRESS.md missing Phase 2 Brain Rewrite entry
+
+**Status:** Open
+**Severity:** Informational
+**Context:** `docs/PROGRESS.md` has no entry for the Phase 2 Brain Rewrite under Architecture Consolidation. Only the original pre-consolidation Phase 2 (LLM-Agnostic Adapter Layer, PRs 15–23) is tracked. The Architecture Consolidation section covers Phase 1 but not Phase 2 (PRs #246–#249).
+
+**Fix:** Add Phase 2 Brain Rewrite entries to PROGRESS.md under the Architecture Consolidation section.
+
+---
+
 ## S2. No test verifying flushToDb() actually persists to SQLite
 
 **Status:** Open
@@ -104,6 +126,8 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 | I2 | Info | No | Optional config |
 | I3 | Info | No | Optional enhancement |
 | I4 | Info | No | Acceptable |
+| I5 | Info | No | Flush in checkpoint or document |
+| I6 | Info | No | Update PROGRESS.md |
 | S1 | Suggestion | No | Optional UUID field |
 | S2 | Suggestion | No | Optional test |
 

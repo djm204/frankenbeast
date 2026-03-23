@@ -61,3 +61,30 @@ export {
   ExecutionStateSchema,
   BrainSnapshotSchema,
 } from './brain.js';
+
+// Provider interfaces + types
+export type {
+  ILlmProvider,
+  ProviderCapabilities,
+  ProviderType,
+  ProviderAuthMethod,
+  LlmRequest,
+  LlmMessage,
+  LlmContentBlock,
+  ImageSource,
+  ToolDefinition,
+  LlmStreamEvent,
+  TokenUsage,
+  SkillCatalogEntry,
+  McpServerConfig,
+  AuthField,
+  CritiqueContext,
+  CritiqueResult,
+  ProviderSkillConfig,
+} from './provider.js';
+export {
+  ToolDefinitionSchema,
+  TokenUsageSchema,
+  McpServerConfigSchema,
+  SkillCatalogEntrySchema,
+} from './provider.js';
