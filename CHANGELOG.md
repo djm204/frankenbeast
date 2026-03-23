@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.27.0](https://github.com/djm204/frankenbeast/compare/v0.26.0...v0.27.0) (2026-03-23)
+
+
+### Features
+
+* **orchestrator:** add 6 provider adapters + shared handoff (Phase 3.3-3.8) ([58f5f10](https://github.com/djm204/frankenbeast/commit/58f5f1016a644160046d7cc38e3c147d2cde76a1))
+* Phase 3 — Provider Registry + Adapters ([0ceb582](https://github.com/djm204/frankenbeast/commit/0ceb582f95a7ac7cac877adeb6b08bbe4aa9efd1))
+
+
+### Bug Fixes
+
+* **orchestrator:** address Phase 3 review gaps + document residuals ([bfc84ee](https://github.com/djm204/frankenbeast/commit/bfc84ee3f4afa95957100635381a1cbc33fe16f7))
+
+
+### Documentation
+
+* add I5 and I6 residual issues for Phase 2 Brain Rewrite ([2ad7050](https://github.com/djm204/frankenbeast/commit/2ad70502db4c94d596bbfcddca766db0f1faf631))
+
 ## [0.26.0](https://github.com/djm204/frankenbeast/compare/v0.25.0...v0.26.0) (2026-03-21)
 
 

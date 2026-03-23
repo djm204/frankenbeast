@@ -1,6 +1,6 @@
 {
   "name": "franken-orchestrator",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "The Beast Loop — orchestrator wiring all Frankenbeast modules into a unified agent pipeline",
   "type": "module",
   "main": "dist/index.js",
