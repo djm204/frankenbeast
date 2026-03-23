@@ -51,11 +51,25 @@ export class DomainAllowlistMiddleware implements LlmMiddleware {
   }
 
   afterResponse(response: LlmResponse): LlmResponse {
+    // Scan text content
     for (const domain of this.extractDomains(response.content)) {
       if (!this.isDomainAllowed(domain)) {
         this.logger?.(
           `[security] Response contains blocked domain: ${domain}`,
         );
+      }
+    }
+    // Scan tool call inputs for URLs
+    if (response.toolCalls) {
+      for (const tc of response.toolCalls) {
+        const inputStr = JSON.stringify(tc.input);
+        for (const domain of this.extractDomains(inputStr)) {
+          if (!this.isDomainAllowed(domain)) {
+            this.logger?.(
+              `[security] Tool call "${tc.name}" contains blocked domain: ${domain}`,
+            );
+          }
+        }
       }
     }
     return response;

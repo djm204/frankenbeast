@@ -24,6 +24,15 @@ const PATTERNS_ALL_TIERS: RegExp[] = [
   // Context poisoning via system/tool results
   /\[system\][\s\S]{0,50}(ignore|override|forget|disregard)/i,
   /<\/?system>/i,
+
+  // Model-specific tokens and jailbreak keywords
+  /\[INST\]/i,
+  /<<SYS>>/i,
+  /\bDAN\b.*\bmode\b/i,
+  /\bjailbreak\b/i,
+
+  // Base64-encoded injection (base64 of "ignore")
+  /aWdub3Jl/,
 ];
 
 const PATTERNS_STRICT_ONLY: RegExp[] = [

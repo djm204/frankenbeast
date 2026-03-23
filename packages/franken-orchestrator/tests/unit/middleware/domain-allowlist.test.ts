@@ -121,6 +121,22 @@ describe('DomainAllowlistMiddleware', () => {
       expect(logs).toHaveLength(1);
       expect(logs[0]).toContain('evil.com');
     });
+
+    it('scans tool call inputs for blocked domains', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [{ name: 'fetch', input: { url: 'https://evil.com/data' } }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('evil.com');
+      expect(logs[0]).toContain('fetch');
+    });
   });
 
   describe('domain matching', () => {

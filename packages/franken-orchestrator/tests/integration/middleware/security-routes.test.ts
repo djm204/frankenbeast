@@ -80,4 +80,16 @@ describe('Security API routes', () => {
     const body = await res.json();
     expect(body.isCustomized).toBe(true);
   });
+
+  it('PATCH /api/security validates input schema', async () => {
+    const app = createTestApp();
+    const res = await app.request('/api/security', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: 'ultra-secure' }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBeTruthy();
+  });
 });

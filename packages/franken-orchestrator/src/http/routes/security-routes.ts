@@ -24,8 +24,22 @@ export function createSecurityRoutes(deps: {
   });
 
   app.patch('/', async (c) => {
-    const body = await c.req.json();
-    const raw = SecurityConfigSchema.partial().parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    let raw;
+    try {
+      raw = SecurityConfigSchema.partial().parse(body);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Validation failed';
+      return c.json({ error: message }, 400);
+    }
+
     // Strip undefined values so exactOptionalPropertyTypes is satisfied
     const parsed = Object.fromEntries(
       Object.entries(raw).filter(([, v]) => v !== undefined),

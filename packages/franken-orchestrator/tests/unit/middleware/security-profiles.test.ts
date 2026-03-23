@@ -69,7 +69,7 @@ describe('SecurityProfiles', () => {
   });
 
   describe('buildMiddlewareChain()', () => {
-    it('strict profile creates 3 middleware (injection, pii, output)', () => {
+    it('strict profile creates 4 middleware (injection, pii, domain-allowlist, output)', () => {
       const config = resolveSecurityConfig('strict', {
         allowedDomains: ['github.com'],
       });
@@ -77,7 +77,9 @@ describe('SecurityProfiles', () => {
       const names = chain.getMiddlewares().map((m) => m.name);
       expect(names).toContain('injection-detection');
       expect(names).toContain('pii-masking');
+      expect(names).toContain('domain-allowlist');
       expect(names).toContain('output-validation');
+      expect(names).toHaveLength(4);
     });
 
     it('permissive profile creates 1 middleware (output only)', () => {
