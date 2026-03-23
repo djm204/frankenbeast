@@ -6,6 +6,7 @@ export { PiiMaskingMiddleware } from './pii-masking.js';
 export { OutputValidationMiddleware } from './output-validation.js';
 export type { OutputValidationOptions } from './output-validation.js';
 export { CustomRuleMiddleware, CustomRuleError } from './custom-rule.js';
+export { DomainAllowlistMiddleware, DomainBlockedError } from './domain-allowlist.js';
 export {
   PROFILE_DEFAULTS,
   resolveSecurityConfig,

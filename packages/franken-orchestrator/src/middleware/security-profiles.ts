@@ -4,6 +4,7 @@ import { InjectionDetectionMiddleware } from './injection-detection.js';
 import { PiiMaskingMiddleware } from './pii-masking.js';
 import { OutputValidationMiddleware } from './output-validation.js';
 import { CustomRuleMiddleware } from './custom-rule.js';
+import { DomainAllowlistMiddleware } from './domain-allowlist.js';
 
 export type SecurityProfile = 'strict' | 'standard' | 'permissive';
 
@@ -91,6 +92,17 @@ export function buildMiddlewareChain(config: SecurityConfig): MiddlewareChain {
 
   if (config.piiMasking) {
     chain.add(new PiiMaskingMiddleware());
+  }
+
+  // Domain allowlist — required for strict, optional for standard, off for permissive
+  if (config.profile !== 'permissive') {
+    if (config.allowedDomains && config.allowedDomains.length > 0) {
+      chain.add(new DomainAllowlistMiddleware(config.allowedDomains));
+    } else if (config.profile === 'strict') {
+      throw new Error(
+        'Security profile "strict" requires allowedDomains to be configured',
+      );
+    }
   }
 
   if (config.outputValidation) {
