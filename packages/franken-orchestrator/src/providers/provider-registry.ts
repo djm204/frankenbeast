@@ -116,6 +116,7 @@ export class ProviderRegistry {
         try {
           const stream = provider.execute(effectiveRequest);
           let retried = false;
+          const buffer: LlmStreamEvent[] = [];
 
           for await (const event of stream) {
             if (
@@ -129,12 +130,19 @@ export class ProviderRegistry {
                 Math.pow(this.opts.backoffMultiplier, retry);
               await new Promise((resolve) => setTimeout(resolve, delay));
               retried = true;
-              break;
+              break; // discard buffer, retry same provider
             }
             if (event.type === 'error' && !event.retryable) {
               lastError = new Error(event.error);
-              throw lastError;
+              throw lastError; // discard buffer, failover
             }
+            buffer.push(event);
+          }
+
+          if (retried) continue;
+
+          // Attempt completed — flush buffered events
+          for (const event of buffer) {
             if (event.type === 'done') {
               this.tokenAggregator.record(provider.name, event.usage);
             }
@@ -145,7 +153,7 @@ export class ProviderRegistry {
             }
           }
 
-          if (!retried) break; // stream ended without done or retry — failover
+          break; // stream ended without done — failover
         } catch (error) {
           lastError =
             error instanceof Error ? error : new Error(String(error));

@@ -64,6 +64,52 @@ describe('OpenAiApiAdapter', () => {
       const result = adapter.translateMessages(request);
       expect(result).toHaveLength(3); // system + 2 messages
     });
+
+    it('translates image blocks to image_url format', () => {
+      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const request: LlmRequest = {
+        systemPrompt: 'sys',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is in this image?' },
+              {
+                type: 'image',
+                source: { type: 'base64', mediaType: 'image/png', data: 'abc123' },
+              },
+            ],
+          },
+        ],
+      };
+      const result = adapter.translateMessages(request);
+      const userMsg = result[1] as { content: Array<{ type: string; image_url?: { url: string } }> };
+      expect(userMsg.content[0]).toEqual({ type: 'text', text: 'What is in this image?' });
+      expect(userMsg.content[1]).toEqual({
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,abc123' },
+      });
+    });
+
+    it('translates tool_result blocks as labeled text', () => {
+      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const request: LlmRequest = {
+        systemPrompt: 'sys',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'tool_result', toolUseId: 'tu-1', content: 'file contents here' },
+            ],
+          },
+        ],
+      };
+      const result = adapter.translateMessages(request);
+      const userMsg = result[1] as { content: Array<{ type: string; text?: string }> };
+      expect(userMsg.content[0]!.type).toBe('text');
+      expect(userMsg.content[0]!.text).toContain('tu-1');
+      expect(userMsg.content[0]!.text).toContain('file contents here');
+    });
   });
 
   describe('translateTools()', () => {

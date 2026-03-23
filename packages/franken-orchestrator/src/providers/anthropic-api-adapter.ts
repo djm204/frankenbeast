@@ -60,9 +60,10 @@ export class AnthropicApiAdapter implements ILlmProvider {
         params.temperature = request.temperature;
       }
       const stream = this.client.messages.stream(params);
+      const translate = this.createEventTranslator();
 
       for await (const event of stream) {
-        const translated = this.translateEvent(event);
+        const translated = translate(event);
         if (translated) yield translated;
       }
 
@@ -136,24 +137,52 @@ export class AnthropicApiAdapter implements ILlmProvider {
     }));
   }
 
-  private translateEvent(
-    event: Anthropic.MessageStreamEvent,
-  ): LlmStreamEvent | null {
-    if (event.type === 'content_block_delta') {
-      if (event.delta.type === 'text_delta') {
-        return { type: 'text', content: event.delta.text };
+  /**
+   * Stateful event translator. Accumulates tool_use input from
+   * input_json_delta frames and emits the complete tool_use on
+   * content_block_stop — never on content_block_start.
+   */
+  createEventTranslator(): (event: Anthropic.MessageStreamEvent) => LlmStreamEvent | null {
+    let pendingToolUse: { id: string; name: string; inputJson: string } | null = null;
+
+    return (event: Anthropic.MessageStreamEvent): LlmStreamEvent | null => {
+      if (event.type === 'content_block_start') {
+        if (event.content_block.type === 'tool_use') {
+          pendingToolUse = {
+            id: event.content_block.id,
+            name: event.content_block.name,
+            inputJson: '',
+          };
+        }
+        return null;
       }
-    }
-    if (event.type === 'content_block_start') {
-      if (event.content_block.type === 'tool_use') {
-        return {
+
+      if (event.type === 'content_block_delta') {
+        if (event.delta.type === 'text_delta') {
+          return { type: 'text', content: event.delta.text };
+        }
+        if (event.delta.type === 'input_json_delta' && pendingToolUse) {
+          pendingToolUse.inputJson += (event.delta as { partial_json: string }).partial_json;
+        }
+        return null;
+      }
+
+      if (event.type === 'content_block_stop' && pendingToolUse) {
+        let input: unknown = {};
+        try {
+          input = JSON.parse(pendingToolUse.inputJson);
+        } catch { /* empty input */ }
+        const result: LlmStreamEvent = {
           type: 'tool_use',
-          id: event.content_block.id,
-          name: event.content_block.name,
-          input: event.content_block.input,
+          id: pendingToolUse.id,
+          name: pendingToolUse.name,
+          input,
         };
+        pendingToolUse = null;
+        return result;
       }
-    }
-    return null;
+
+      return null;
+    };
   }
 }

@@ -351,6 +351,56 @@ describe('ProviderRegistry', () => {
       expect(delay2).toBeGreaterThanOrEqual(80); // 100ms with some tolerance
     });
 
+    it('discards partial output from failed provider on failover', async () => {
+      // p1 streams some text then errors — those text events should NOT appear
+      const p1: ILlmProvider = {
+        ...mockProvider('p1'),
+        execute: vi.fn(async function* () {
+          yield { type: 'text' as const, content: 'Partial from p1' };
+          yield { type: 'text' as const, content: 'More partial' };
+          yield { type: 'error' as const, error: 'mid-stream crash', retryable: false };
+        }),
+      };
+      const p2 = mockProvider('p2');
+
+      const registry = new ProviderRegistry([p1, p2], mockBrain());
+      const events = await collectEvents(registry.execute(makeRequest()));
+
+      // No partial output from p1 should be present
+      expect(events.some((e) => e.type === 'text' && e.content.includes('Partial'))).toBe(false);
+      // Only p2's output
+      expect(events[0]).toEqual({ type: 'text', content: 'Hello from p2' });
+    });
+
+    it('discards partial output on retryable error before retry', async () => {
+      let attempt = 0;
+      const p1: ILlmProvider = {
+        ...mockProvider('p1'),
+        execute: vi.fn(async function* () {
+          attempt++;
+          if (attempt === 1) {
+            yield { type: 'text' as const, content: 'Abandoned text' };
+            yield { type: 'error' as const, error: 'rate limit', retryable: true };
+          } else {
+            yield { type: 'text' as const, content: 'Good text' };
+            yield {
+              type: 'done' as const,
+              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+            };
+          }
+        }),
+      };
+
+      const registry = new ProviderRegistry([p1], mockBrain(), {
+        maxRetriesPerProvider: 1,
+        retryDelayMs: 1,
+      });
+      const events = await collectEvents(registry.execute(makeRequest()));
+
+      expect(events.some((e) => e.type === 'text' && e.content === 'Abandoned text')).toBe(false);
+      expect(events[0]).toEqual({ type: 'text', content: 'Good text' });
+    });
+
     it('updates currentProviderIndex on successful execution', async () => {
       const p1 = mockProvider('down', { available: false });
       const p2 = mockProvider('up');

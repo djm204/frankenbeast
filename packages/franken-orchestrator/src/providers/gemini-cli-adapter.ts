@@ -186,13 +186,25 @@ export class GeminiCliAdapter implements ILlmProvider {
       }
     }
 
-    yield {
-      type: 'done',
-      usage: {
-        inputTokens: totalInputTokens,
-        outputTokens: totalOutputTokens,
-        totalTokens: totalInputTokens + totalOutputTokens,
-      },
-    };
+    // Stream ended without message_stop/error — check exit code
+    const exitCode = await new Promise<number | null>((resolve) => {
+      proc.on('close', resolve);
+    });
+    if (exitCode !== 0 && exitCode !== null) {
+      yield {
+        type: 'error',
+        error: `gemini process exited with code ${exitCode}`,
+        retryable: false,
+      };
+    } else {
+      yield {
+        type: 'done',
+        usage: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          totalTokens: totalInputTokens + totalOutputTokens,
+        },
+      };
+    }
   }
 }

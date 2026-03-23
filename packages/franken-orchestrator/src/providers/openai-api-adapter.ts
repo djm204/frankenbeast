@@ -167,17 +167,37 @@ export class OpenAiApiAdapter implements ILlmProvider {
       { role: 'system', content: request.systemPrompt },
     ];
     for (const m of request.messages) {
-      messages.push({
-        role: m.role,
-        content:
-          typeof m.content === 'string'
-            ? m.content
-            : m.content
-                .map((b) =>
-                  b.type === 'text' ? b.text : JSON.stringify(b),
-                )
-                .join('\n'),
-      } as OpenAI.ChatCompletionMessageParam);
+      if (typeof m.content === 'string') {
+        messages.push({
+          role: m.role,
+          content: m.content,
+        } as OpenAI.ChatCompletionMessageParam);
+      } else {
+        const parts: OpenAI.ChatCompletionContentPart[] = m.content.map(
+          (block) => {
+            if (block.type === 'text') {
+              return { type: 'text' as const, text: block.text };
+            }
+            if (block.type === 'image') {
+              return {
+                type: 'image_url' as const,
+                image_url: {
+                  url: `data:${block.source.mediaType};base64,${block.source.data}`,
+                },
+              };
+            }
+            // tool_result — send as text with context
+            return {
+              type: 'text' as const,
+              text: `[Tool result for ${block.toolUseId}]: ${block.content}`,
+            };
+          },
+        );
+        messages.push({
+          role: m.role,
+          content: parts,
+        } as OpenAI.ChatCompletionMessageParam);
+      }
     }
     return messages;
   }
