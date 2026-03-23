@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import type { BrainSnapshot, LlmRequest, ToolDefinition } from '@franken/types';
+import { describe, it, expect, vi } from 'vitest';
+import type { BrainSnapshot, LlmRequest, LlmStreamEvent, ToolDefinition } from '@franken/types';
 import { OpenAiApiAdapter } from '../../../src/providers/openai-api-adapter.js';
+
+async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
+  const events: LlmStreamEvent[] = [];
+  for await (const e of iterable) events.push(e);
+  return events;
+}
 
 describe('OpenAiApiAdapter', () => {
   describe('properties', () => {
@@ -109,6 +115,57 @@ describe('OpenAiApiAdapter', () => {
       expect(userMsg.content[0]!.type).toBe('text');
       expect(userMsg.content[0]!.text).toContain('tu-1');
       expect(userMsg.content[0]!.text).toContain('file contents here');
+    });
+  });
+
+  describe('execute()', () => {
+    it('translates text stream chunks and emits done with usage', async () => {
+      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      // Mock the internal client
+      const mockChunks = [
+        { choices: [{ delta: { content: 'Hello' }, finish_reason: null }], usage: null },
+        { choices: [{ delta: { content: ' world' }, finish_reason: 'stop' }], usage: null },
+        { choices: [], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } },
+      ];
+      (adapter as any).client = {
+        chat: {
+          completions: {
+            create: vi.fn().mockResolvedValue((async function* () {
+              for (const chunk of mockChunks) yield chunk;
+            })()),
+          },
+        },
+      };
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'Hello' });
+      expect(events[1]).toEqual({ type: 'text', content: ' world' });
+      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 } });
+    });
+
+    it('emits retryable error on rate limit', async () => {
+      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const OpenAI = (await import('openai')).default;
+      const headers = new Headers({ 'x-request-id': 'test' });
+      (adapter as any).client = {
+        chat: {
+          completions: {
+            create: vi.fn().mockRejectedValue(
+              new OpenAI.RateLimitError(429, { message: 'rate limited' }, 'rate limited', headers),
+            ),
+          },
+        },
+      };
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+      expect(events[0]).toEqual({ type: 'error', error: 'Rate limit exceeded', retryable: true });
     });
   });
 

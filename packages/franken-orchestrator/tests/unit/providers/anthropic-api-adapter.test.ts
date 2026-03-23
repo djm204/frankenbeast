@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { BrainSnapshot, LlmMessage, ToolDefinition } from '@franken/types';
+import type { BrainSnapshot, LlmMessage, LlmStreamEvent, ToolDefinition } from '@franken/types';
 import { AnthropicApiAdapter } from '../../../src/providers/anthropic-api-adapter.js';
+
+async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
+  const events: LlmStreamEvent[] = [];
+  for await (const e of iterable) events.push(e);
+  return events;
+}
 
 describe('AnthropicApiAdapter', () => {
   describe('properties', () => {
@@ -89,6 +95,67 @@ describe('AnthropicApiAdapter', () => {
           input_schema: { type: 'object' },
         },
       ]);
+    });
+  });
+
+  describe('createEventTranslator()', () => {
+    it('translates text_delta events', () => {
+      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const translate = adapter.createEventTranslator();
+      const result = translate({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: 'Hello' },
+      } as any);
+      expect(result).toEqual({ type: 'text', content: 'Hello' });
+    });
+
+    it('accumulates tool_use input and emits on content_block_stop', () => {
+      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const translate = adapter.createEventTranslator();
+
+      // Start tool_use block
+      expect(translate({
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'tu-1', name: 'read', input: {} },
+      } as any)).toBeNull();
+
+      // Accumulate input
+      expect(translate({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"path":' },
+      } as any)).toBeNull();
+
+      expect(translate({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '"test.ts"}' },
+      } as any)).toBeNull();
+
+      // Emit on stop
+      const result = translate({
+        type: 'content_block_stop',
+        index: 0,
+      } as any);
+      expect(result).toEqual({
+        type: 'tool_use',
+        id: 'tu-1',
+        name: 'read',
+        input: { path: 'test.ts' },
+      });
+    });
+
+    it('does not emit tool_use on content_block_start', () => {
+      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const translate = adapter.createEventTranslator();
+      const result = translate({
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'tu-1', name: 'read', input: {} },
+      } as any);
+      expect(result).toBeNull();
     });
   });
 

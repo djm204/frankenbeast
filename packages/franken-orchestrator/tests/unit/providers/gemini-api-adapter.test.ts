@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import type { BrainSnapshot, LlmMessage, ToolDefinition } from '@franken/types';
+import { describe, it, expect, vi } from 'vitest';
+import type { BrainSnapshot, LlmMessage, LlmStreamEvent, ToolDefinition } from '@franken/types';
 import { GeminiApiAdapter } from '../../../src/providers/gemini-api-adapter.js';
+
+async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
+  const events: LlmStreamEvent[] = [];
+  for await (const e of iterable) events.push(e);
+  return events;
+}
 
 describe('GeminiApiAdapter', () => {
   describe('properties', () => {
@@ -80,6 +86,67 @@ describe('GeminiApiAdapter', () => {
       ];
       const result = adapter.translateMessages(messages);
       expect(result[0]!.parts).toEqual([{ text: 'Look' }]);
+    });
+  });
+
+  describe('execute()', () => {
+    it('translates text and usage chunks into events', async () => {
+      const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
+      const mockChunks = [
+        { text: 'Hello from Gemini', functionCalls: null, usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 12 } },
+        { text: ' more text', functionCalls: null, usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 20 } },
+      ];
+      (adapter as any).client = {
+        models: {
+          generateContentStream: vi.fn().mockResolvedValue((async function* () {
+            for (const chunk of mockChunks) yield chunk;
+          })()),
+        },
+      };
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'Hello from Gemini' });
+      expect(events[1]).toEqual({ type: 'text', content: ' more text' });
+      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 40, outputTokens: 20, totalTokens: 60 } });
+    });
+
+    it('translates function call chunks', async () => {
+      const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
+      (adapter as any).client = {
+        models: {
+          generateContentStream: vi.fn().mockResolvedValue((async function* () {
+            yield { text: null, functionCalls: [{ name: 'search', args: { q: 'test' } }], usageMetadata: null };
+          })()),
+        },
+      };
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+
+      expect(events[0]!.type).toBe('tool_use');
+      expect((events[0] as any).name).toBe('search');
+      expect((events[0] as any).input).toEqual({ q: 'test' });
+    });
+
+    it('emits retryable error on RESOURCE_EXHAUSTED', async () => {
+      const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
+      (adapter as any).client = {
+        models: {
+          generateContentStream: vi.fn().mockRejectedValue(new Error('RESOURCE_EXHAUSTED')),
+        },
+      };
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+      expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED', retryable: true });
     });
   });
 

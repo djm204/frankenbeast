@@ -1,4 +1,59 @@
-import type { BrainSnapshot } from '@franken/types';
+import type { BrainSnapshot, EpisodicEvent } from '@franken/types';
+
+/** Rough char-to-token ratio (1 token ≈ 4 chars) */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * Truncate a BrainSnapshot to fit within a token budget.
+ * Removes episodic events (oldest first) and working memory entries
+ * (largest values first) until the rendered size fits.
+ * Returns a new snapshot — does not mutate the original.
+ */
+export function truncateSnapshot(
+  snapshot: BrainSnapshot,
+  maxTokens: number,
+): BrainSnapshot {
+  const maxChars = maxTokens * CHARS_PER_TOKEN;
+
+  // Start with full snapshot, progressively trim
+  let trimmed: BrainSnapshot = {
+    ...snapshot,
+    episodic: [...snapshot.episodic],
+    working: { ...snapshot.working },
+  };
+
+  // Phase 1: trim episodic events (oldest first, keep most recent)
+  while (
+    trimmed.episodic.length > 0 &&
+    estimateChars(trimmed) > maxChars
+  ) {
+    trimmed = {
+      ...trimmed,
+      episodic: trimmed.episodic.slice(1),
+    };
+  }
+
+  // Phase 2: trim working memory (largest values first)
+  if (estimateChars(trimmed) > maxChars) {
+    const entries = Object.entries(trimmed.working as Record<string, unknown>);
+    entries.sort(
+      (a, b) =>
+        JSON.stringify(b[1]).length - JSON.stringify(a[1]).length,
+    );
+    const working = { ...trimmed.working } as Record<string, unknown>;
+    for (const [key] of entries) {
+      if (estimateChars({ ...trimmed, working }) <= maxChars) break;
+      delete working[key];
+    }
+    trimmed = { ...trimmed, working };
+  }
+
+  return trimmed;
+}
+
+function estimateChars(snapshot: BrainSnapshot): number {
+  return formatHandoff(snapshot).length;
+}
 
 /**
  * Format a BrainSnapshot as human-readable text for provider handoff.

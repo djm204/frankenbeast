@@ -45,6 +45,8 @@ export interface ProviderCapabilities {
   maxContextTokens: number;
   mcpSupport: boolean;
   skillDiscovery: boolean;
+  /** Max tokens for handoff context. If set, snapshot is truncated to fit. */
+  maxHandoffTokens?: number;
 }
 
 export type ProviderType =

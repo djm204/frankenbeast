@@ -6,6 +6,7 @@ import type {
 } from '@franken/types';
 import type { IBrain } from '@franken/types';
 import { TokenAggregator, type AggregatedTokenUsage } from './token-aggregator.js';
+import { truncateSnapshot } from './format-handoff.js';
 
 export interface ProviderRegistryOptions {
   /** Maximum retries per provider before failing over */
@@ -101,7 +102,11 @@ export class ProviderRegistry {
           });
         }
 
-        const handoffContext = provider.formatHandoff(snapshot);
+        const effectiveSnapshot =
+          provider.capabilities.maxHandoffTokens != null
+            ? truncateSnapshot(snapshot, provider.capabilities.maxHandoffTokens)
+            : snapshot;
+        const handoffContext = provider.formatHandoff(effectiveSnapshot);
         effectiveRequest = {
           ...request,
           systemPrompt: request.systemPrompt + '\n\n' + handoffContext,

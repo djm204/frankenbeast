@@ -257,6 +257,61 @@ describe('Provider failover integration', () => {
     });
   });
 
+  describe('snapshot truncation on handoff', () => {
+    it('truncates oversized snapshot to fit maxHandoffTokens', async () => {
+      const brain = new SqliteBrain();
+      // Fill brain with enough data to exceed a small context window
+      for (let i = 0; i < 100; i++) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `Step ${i}: ${'x'.repeat(500)}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      const p1 = createFailingProvider('primary', 'error', false);
+      // Set maxHandoffTokens on provider2
+      const p2 = createSuccessProvider('secondary');
+      (p2.capabilities as { maxHandoffTokens?: number }).maxHandoffTokens = 500;
+
+      const registry = new ProviderRegistry([p1, p2], brain);
+      await collectEvents(registry.execute(request));
+
+      // Verify formatHandoff was called with a truncated snapshot
+      expect(p2.formatHandoff).toHaveBeenCalled();
+      const snapshot = (p2.formatHandoff as ReturnType<typeof vi.fn>).mock
+        .calls[0][0] as BrainSnapshot;
+      expect(snapshot.episodic.length).toBeLessThan(100);
+      // Verify core fields preserved
+      expect(snapshot.version).toBe(1);
+      expect(snapshot.metadata.lastProvider).toBe('primary');
+      brain.close();
+    });
+
+    it('does not truncate when maxHandoffTokens is not set', async () => {
+      const brain = new SqliteBrain();
+      for (let i = 0; i < 5; i++) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `Step ${i}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      const p1 = createFailingProvider('primary', 'error', false);
+      const p2 = createSuccessProvider('secondary');
+      // No maxHandoffTokens set — capabilities.maxHandoffTokens is undefined
+
+      const registry = new ProviderRegistry([p1, p2], brain);
+      await collectEvents(registry.execute(request));
+
+      const snapshot = (p2.formatHandoff as ReturnType<typeof vi.fn>).mock
+        .calls[0][0] as BrainSnapshot;
+      expect(snapshot.episodic.length).toBe(5);
+      brain.close();
+    });
+  });
+
   describe('provider reordering', () => {
     it('uses new order after setOrder()', async () => {
       const brain = new SqliteBrain();
