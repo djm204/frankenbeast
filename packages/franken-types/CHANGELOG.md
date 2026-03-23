@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.4.0...franken-types-v0.5.0) (2026-03-23)
+
+
+### Features
+
+* Phase 3 — Provider Registry + Adapters ([0ceb582](https://github.com/djm204/frankenbeast/commit/0ceb582f95a7ac7cac877adeb6b08bbe4aa9efd1))
+* **types:** add provider interfaces, types, and Zod schemas (Phase 3.1) ([7f8c728](https://github.com/djm204/frankenbeast/commit/7f8c728a4320f798a8795875a05b8a45d0d0d7d8))
+
+
+### Bug Fixes
+
+* **orchestrator:** address Phase 3 review gaps + document residuals ([bfc84ee](https://github.com/djm204/frankenbeast/commit/bfc84ee3f4afa95957100635381a1cbc33fe16f7))
+
 ## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.3.2...franken-types-v0.4.0) (2026-03-21)
 
 

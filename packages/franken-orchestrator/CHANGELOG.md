@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.24.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.23.0...franken-orchestrator-v0.24.0) (2026-03-23)
+
+
+### Features
+
+* **orchestrator:** add 6 provider adapters + shared handoff (Phase 3.3-3.8) ([58f5f10](https://github.com/djm204/frankenbeast/commit/58f5f1016a644160046d7cc38e3c147d2cde76a1))
+* **orchestrator:** add cross-provider token aggregation (Phase 3.10) ([39e2cae](https://github.com/djm204/frankenbeast/commit/39e2caef4464ee389aeafef40ca5438f5f04cbf0))
+* **orchestrator:** add ProviderRegistry with failover logic (Phase 3.2) ([3725cee](https://github.com/djm204/frankenbeast/commit/3725cee04c4445986862b0b088225243ce0e6ad3))
+* Phase 3 — Provider Registry + Adapters ([0ceb582](https://github.com/djm204/frankenbeast/commit/0ceb582f95a7ac7cac877adeb6b08bbe4aa9efd1))
+
+
+### Bug Fixes
+
+* **orchestrator:** address Phase 3 review gaps + document residuals ([bfc84ee](https://github.com/djm204/frankenbeast/commit/bfc84ee3f4afa95957100635381a1cbc33fe16f7))
+* **orchestrator:** address PR [#251](https://github.com/djm204/frankenbeast/issues/251) review comments ([0052f0a](https://github.com/djm204/frankenbeast/commit/0052f0abbced47dc37dd32467f92376a0e1ba263))
+
+
+### Tests
+
+* **orchestrator:** add provider failover integration tests (Phase 3.9) ([57d2e8f](https://github.com/djm204/frankenbeast/commit/57d2e8f9a883fd07920d4a07485189c324147352))
+
 ## [0.23.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.22.0...franken-orchestrator-v0.23.0) (2026-03-21)
 
 
