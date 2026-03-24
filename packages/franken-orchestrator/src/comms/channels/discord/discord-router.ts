@@ -8,13 +8,16 @@ export interface DiscordRouterOptions {
   gateway: ChatGateway;
   sessionMapper: SessionMapper;
   publicKey: string;
+  verifySignature?: boolean;
 }
 
 export function discordRouter(options: DiscordRouterOptions) {
   const { gateway, sessionMapper, publicKey } = options;
   const app = new Hono();
 
-  app.use('*', discordSignatureMiddleware({ publicKey }));
+  if (options.verifySignature !== false) {
+    app.use('*', discordSignatureMiddleware({ publicKey }));
+  }
 
   app.post('/interactions', async (c) => {
     const body = await c.req.json();

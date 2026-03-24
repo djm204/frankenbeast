@@ -12,9 +12,12 @@ import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.
 import type { CommsConfig } from '../../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
 
+import type { SecurityProfile } from '../../middleware/security-profiles.js';
+
 export interface CommsRoutesOptions {
   config: CommsConfig;
   runtime?: CommsRuntimePort;
+  securityProfile?: SecurityProfile;
 }
 
 export function commsRoutes(options: CommsRoutesOptions): Hono {
@@ -29,6 +32,11 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   const gateway = new ChatGateway(runtime);
+  const verifySignature = options.securityProfile !== 'permissive';
+
+  if (!verifySignature) {
+    console.warn('[comms] Webhook signature verification disabled (security profile: permissive)');
+  }
 
   const app = new Hono();
 
@@ -42,6 +50,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       signingSecret: slack.signingSecret,
+      verifySignature,
     }));
   }
 
@@ -53,6 +62,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       publicKey: discord.publicKey,
+      verifySignature,
     }));
   }
 
@@ -79,6 +89,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       sessionMapper,
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,
+      verifySignature,
     }));
   }
 

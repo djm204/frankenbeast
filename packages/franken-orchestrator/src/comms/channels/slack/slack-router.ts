@@ -8,13 +8,16 @@ export interface SlackRouterOptions {
   gateway: ChatGateway;
   sessionMapper: SessionMapper;
   signingSecret: string;
+  verifySignature?: boolean;
 }
 
 export function slackRouter(options: SlackRouterOptions) {
   const { gateway, sessionMapper, signingSecret } = options;
   const app = new Hono();
 
-  app.use('*', slackSignatureMiddleware({ signingSecret }));
+  if (options.verifySignature !== false) {
+    app.use('*', slackSignatureMiddleware({ signingSecret }));
+  }
 
   // Events API: https://api.slack.com/events-api
   app.post('/events', async (c) => {
