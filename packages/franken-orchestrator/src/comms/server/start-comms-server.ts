@@ -4,9 +4,11 @@ import { Readable } from 'node:stream';
 import type { CommsConfig } from '../config/comms-config.js';
 import { CommsConfigSchema } from '../config/comms-config.js';
 import { createCommsApp } from './app.js';
+import type { CommsRuntimePort } from '../core/comms-runtime-port.js';
 
 export interface StartCommsServerOptions {
   config: CommsConfig;
+  runtime: CommsRuntimePort;
   overrideConfig?: Partial<CommsConfig> | undefined;
   host?: string | undefined;
   port?: number | undefined;
@@ -49,7 +51,7 @@ export function resolveCommsServerConfig(
 
 export async function startCommsServer(options: StartCommsServerOptions): Promise<CommsServerHandle> {
   const config = resolveCommsServerConfig(options.config, options.overrideConfig);
-  const app = createCommsApp(config);
+  const app = createCommsApp({ config, runtime: options.runtime });
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 3200;
   const server = createServer((request, response) => {

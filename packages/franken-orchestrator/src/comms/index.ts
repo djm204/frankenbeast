@@ -1,5 +1,6 @@
 export * from './core/types.js';
-export * from './core/chat-socket-bridge.js';
+export * from './core/comms-runtime-port.js';
+export * from './core/chat-runtime-comms-adapter.js';
 export * from './core/session-mapper.js';
 export * from './gateway/chat-gateway.js';
 export * from './config/comms-config.js';
