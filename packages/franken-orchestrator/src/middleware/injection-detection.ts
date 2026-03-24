@@ -70,7 +70,11 @@ export class InjectionDetectionMiddleware implements LlmMiddleware {
         typeof message.content === 'string'
           ? message.content
           : message.content
-              .map((b) => ('text' in b ? (b as { text: string }).text : ''))
+              .map((b) => {
+                if (b.type === 'text') return (b as { text: string }).text;
+                if (b.type === 'tool_result') return (b as { content: string }).content;
+                return '';
+              })
               .join(' ');
 
       for (const pattern of this.patterns) {

@@ -47,8 +47,36 @@ export function createSecurityRoutes(deps: {
 
     if (parsed.profile) {
       const resolved = resolveSecurityConfig(parsed.profile, parsed);
+      // Reject strict profile without allowedDomains
+      if (
+        resolved.profile === 'strict' &&
+        (!resolved.allowedDomains || resolved.allowedDomains.length === 0)
+      ) {
+        return c.json(
+          {
+            error:
+              'Security profile "strict" requires allowedDomains to be configured',
+          },
+          400,
+        );
+      }
       deps.setSecurityConfig(resolved);
     } else {
+      // If switching to strict via individual override, validate
+      const current = deps.getSecurityConfig();
+      const merged = { ...current, ...parsed };
+      if (
+        merged.profile === 'strict' &&
+        (!merged.allowedDomains || merged.allowedDomains.length === 0)
+      ) {
+        return c.json(
+          {
+            error:
+              'Security profile "strict" requires allowedDomains to be configured',
+          },
+          400,
+        );
+      }
       deps.setSecurityConfig(parsed);
     }
 

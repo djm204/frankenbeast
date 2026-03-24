@@ -13,6 +13,8 @@ import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
+import { createSecurityRoutes } from './routes/security-routes.js';
+import type { SecurityConfig } from '../middleware/security-profiles.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -41,6 +43,10 @@ export interface ChatAppOptions {
   };
   beastControl?: BeastRoutesDeps;
   commsConfig?: CommsConfig;
+  securityConfig?: {
+    getSecurityConfig: () => SecurityConfig;
+    setSecurityConfig: (config: Partial<SecurityConfig>) => void;
+  };
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -125,6 +131,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.commsConfig) {
     app.route('/', commsRoutes({ config: opts.commsConfig }));
+  }
+  if (opts.securityConfig) {
+    app.route('/api/security', createSecurityRoutes(opts.securityConfig));
   }
 
   return app;
