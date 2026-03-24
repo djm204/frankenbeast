@@ -86,6 +86,16 @@ export class SlackAdapter implements ChannelAdapter {
       });
     }
 
+    if (message.provider) {
+      const providerText = message.provider.switchedFrom
+        ? `_${message.provider.switchedFrom} → ${message.provider.name}_ (${message.provider.switchReason ?? 'failover'})`
+        : `_${message.provider.name}_`;
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: providerText }],
+      });
+    }
+
     return blocks;
   }
 }

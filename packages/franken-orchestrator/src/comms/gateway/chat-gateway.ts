@@ -45,6 +45,8 @@ export class ChatGateway extends EventEmitter {
     if (result.status) outbound.status = result.status;
     if (result.actions) outbound.actions = result.actions;
     if (result.metadata) outbound.metadata = result.metadata;
+    if (result.provider) outbound.provider = result.provider;
+    if (result.phase) outbound.phase = result.phase;
     this.relayToChannel(sessionId, message.channelType, outbound);
   }
 
