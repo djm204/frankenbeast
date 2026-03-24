@@ -1,14 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../../src/comms/gateway/chat-gateway.js', () => {
-  class MockChatGateway {
-    registerAdapter = vi.fn();
-    handleInbound = vi.fn().mockResolvedValue(undefined);
-    handleAction = vi.fn().mockResolvedValue(undefined);
-  }
-  return { ChatGateway: MockChatGateway };
-});
-
 vi.mock('../../../src/comms/channels/slack/slack-adapter.js', () => ({
   SlackAdapter: vi.fn(),
 }));
@@ -24,12 +15,19 @@ vi.mock('../../../src/comms/channels/whatsapp/whatsapp-adapter.js', () => ({
 
 import { commsRoutes } from '../../../src/http/routes/comms-routes.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
+import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 
 function minimalConfig(overrides?: Partial<CommsConfig>): CommsConfig {
   return {
-    orchestrator: { wsUrl: 'ws://localhost:4040' },
+    orchestrator: {},
     channels: {},
     ...overrides,
+  } as CommsConfig;
+}
+
+function mockRuntime(): CommsRuntimePort {
+  return {
+    processInbound: vi.fn().mockResolvedValue({ text: 'ok', status: 'reply' }),
   };
 }
 
@@ -39,7 +37,7 @@ describe('commsRoutes', () => {
   });
 
   it('returns a Hono app with health endpoint', async () => {
-    const app = commsRoutes({ config: minimalConfig() });
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/comms/health');
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -47,11 +45,19 @@ describe('commsRoutes', () => {
   });
 
   it('handles POST /v1/comms/inbound', async () => {
-    const app = commsRoutes({ config: minimalConfig() });
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/v1/comms/inbound', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: 'slack', text: 'hello' }),
+      body: JSON.stringify({
+        channelType: 'slack',
+        externalUserId: 'U1',
+        externalChannelId: 'C1',
+        externalMessageId: 'M1',
+        text: 'hello',
+        receivedAt: new Date().toISOString(),
+        rawEvent: {},
+      }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -59,7 +65,7 @@ describe('commsRoutes', () => {
   });
 
   it('handles POST /v1/comms/action', async () => {
-    const app = commsRoutes({ config: minimalConfig() });
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/v1/comms/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -71,9 +77,12 @@ describe('commsRoutes', () => {
   });
 
   it('does not register channel routes when channels are disabled', async () => {
-    const app = commsRoutes({ config: minimalConfig() });
-    // No slack/discord/telegram/whatsapp routes registered
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/webhooks/slack/events', { method: 'POST' });
     expect(res.status).toBe(404);
+  });
+
+  it('throws when runtime is not provided', () => {
+    expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });
 });

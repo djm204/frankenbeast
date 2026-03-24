@@ -69,6 +69,27 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
     if (input.metadata) {
       out.metadata = input.metadata;
     }
+
+    // Provider metadata — ChatRuntimeResult gains providerContext + phase
+    // fields in Phase 8 when ProviderRegistry is wired into the runtime.
+    // Until then, these will be undefined (adapters handle this gracefully).
+    // Provider metadata — ChatRuntimeResult gains providerContext + phase
+    // in Phase 8 when ProviderRegistry is wired into the runtime.
+    const runtimeResult = result as unknown as Record<string, unknown>;
+    const providerContext = runtimeResult['providerContext'] as
+      | { provider: string; model?: string; switchedFrom?: string; switchReason?: string }
+      | undefined;
+    if (providerContext) {
+      const prov: CommsInboundResult['provider'] = { name: providerContext.provider };
+      if (providerContext.model) prov!.model = providerContext.model;
+      if (providerContext.switchedFrom) prov!.switchedFrom = providerContext.switchedFrom;
+      if (providerContext.switchReason) prov!.switchReason = providerContext.switchReason;
+      out.provider = prov;
+    }
+    if (typeof runtimeResult['phase'] === 'string') {
+      out.phase = runtimeResult['phase'];
+    }
+
     return out;
   }
 }

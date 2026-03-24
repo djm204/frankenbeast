@@ -122,4 +122,57 @@ describe('slackRouter', () => {
     expect(res.status).toBe(200);
     expect(gateway.handleAction).toHaveBeenCalledWith('slack', 'session-123', 'approve');
   });
+
+  it('verifySignature: false allows request without valid signature', async () => {
+    const permissiveGateway = {
+      handleInbound: vi.fn().mockResolvedValue(undefined),
+      handleAction: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ChatGateway;
+
+    const permissiveApp = slackRouter({
+      gateway: permissiveGateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const body = JSON.stringify({
+      type: 'event_callback',
+      event: {
+        type: 'app_mention',
+        user: 'U1',
+        channel: 'C1',
+        text: '<@U123> hello',
+        ts: '123.456',
+      },
+    });
+
+    // Send WITHOUT valid signature headers
+    const res = await permissiveApp.request('/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    expect(permissiveGateway.handleInbound).toHaveBeenCalled();
+  });
+
+  it('verifySignature: true (default) rejects invalid signature', async () => {
+    const body = JSON.stringify({
+      type: 'event_callback',
+      event: { type: 'app_mention', user: 'U1', channel: 'C1', text: 'test', ts: '123' },
+    });
+
+    const res = await app.request('/events', {
+      method: 'POST',
+      headers: {
+        'X-Slack-Request-Timestamp': '0',
+        'X-Slack-Signature': 'v0=invalid',
+      },
+      body,
+    });
+
+    expect(res.status).toBe(401);
+  });
 });
