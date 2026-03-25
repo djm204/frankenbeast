@@ -7,7 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type {
   McpConfig,
   SkillInfo,
@@ -16,6 +16,8 @@ import type {
   ToolDefinition,
 } from '@franken/types';
 import { McpConfigSchema, SkillToolManifestSchema } from '@franken/types';
+
+const SAFE_NAME = /^[a-zA-Z0-9_-]+$/;
 
 export class SkillManager {
   private readonly enabledSkills: Set<string>;
@@ -28,6 +30,23 @@ export class SkillManager {
     this.enabledSkills = enabledSkills;
   }
 
+  /**
+   * Validate a skill name to prevent path traversal.
+   * Only allows alphanumeric, underscore, and hyphen.
+   */
+  private validateName(name: string): void {
+    if (!SAFE_NAME.test(name)) {
+      throw new Error(
+        `Invalid skill name '${name}': must match ${SAFE_NAME.source}`,
+      );
+    }
+    // Belt-and-suspenders: verify resolved path is under skillsDir
+    const resolved = resolve(this.skillsDir, name);
+    if (!resolved.startsWith(resolve(this.skillsDir) + '/') && resolved !== resolve(this.skillsDir)) {
+      throw new Error(`Invalid skill name '${name}': path traversal detected`);
+    }
+  }
+
   listInstalled(): SkillInfo[] {
     const entries = readdirSync(this.skillsDir, { withFileTypes: true });
     return entries
@@ -37,6 +56,7 @@ export class SkillManager {
   }
 
   async install(catalogEntry: SkillCatalogEntry): Promise<void> {
+    this.validateName(catalogEntry.name);
     const skillDir = join(this.skillsDir, catalogEntry.name);
     mkdirSync(skillDir, { recursive: true });
 
@@ -59,6 +79,7 @@ export class SkillManager {
   }
 
   async installCustom(name: string, serverConfig: McpServerConfig): Promise<void> {
+    this.validateName(name);
     const skillDir = join(this.skillsDir, name);
     mkdirSync(skillDir, { recursive: true });
 
@@ -72,6 +93,7 @@ export class SkillManager {
   }
 
   enable(name: string): void {
+    this.validateName(name);
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
     this.enabledSkills.add(name);
@@ -82,6 +104,7 @@ export class SkillManager {
   }
 
   remove(name: string): void {
+    this.validateName(name);
     const skillDir = join(this.skillsDir, name);
     if (existsSync(skillDir)) {
       rmSync(skillDir, { recursive: true });
@@ -90,6 +113,7 @@ export class SkillManager {
   }
 
   exists(name: string): boolean {
+    if (!SAFE_NAME.test(name)) return false;
     return existsSync(join(this.skillsDir, name, 'mcp.json'));
   }
 
@@ -98,6 +122,7 @@ export class SkillManager {
   }
 
   readMcpConfig(name: string): McpConfig | null {
+    this.validateName(name);
     const configPath = join(this.skillsDir, name, 'mcp.json');
     if (!existsSync(configPath)) return null;
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -105,12 +130,14 @@ export class SkillManager {
   }
 
   readContext(name: string): string | null {
+    this.validateName(name);
     const contextPath = join(this.skillsDir, name, 'context.md');
     if (!existsSync(contextPath)) return null;
     return readFileSync(contextPath, 'utf-8');
   }
 
   readTools(name: string): ToolDefinition[] {
+    this.validateName(name);
     const toolsPath = join(this.skillsDir, name, 'tools.json');
     if (!existsSync(toolsPath)) return [];
     const raw = JSON.parse(readFileSync(toolsPath, 'utf-8'));
@@ -118,6 +145,7 @@ export class SkillManager {
   }
 
   writeContext(name: string, content: string): void {
+    this.validateName(name);
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
     writeFileSync(join(this.skillsDir, name, 'context.md'), content);

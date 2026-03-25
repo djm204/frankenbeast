@@ -56,14 +56,22 @@ export function createSkillRoutes(deps: {
     const name = c.req.param('name');
     const body = (await c.req.json()) as { enabled?: boolean };
 
-    if (body.enabled === true) {
-      deps.skillManager.enable(name);
-    } else if (body.enabled === false) {
-      deps.skillManager.disable(name);
+    try {
+      if (body.enabled === true) {
+        deps.skillManager.enable(name);
+      } else if (body.enabled === false) {
+        deps.skillManager.disable(name);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      return c.json({ error: message }, 404);
     }
 
     const skills = deps.skillManager.listInstalled();
     const skill = skills.find((s) => s.name === name);
+    if (!skill) {
+      return c.json({ error: `Skill '${name}' not found` }, 404);
+    }
     return c.json({ skill });
   });
 

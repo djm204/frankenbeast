@@ -165,6 +165,17 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.skill.enabled).toBe(false);
     });
+
+    it('returns 404 for nonexistent skill', async () => {
+      const res = await app.request('/api/skills/nonexistent', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+    });
   });
 
   describe('DELETE /api/skills/:name', () => {

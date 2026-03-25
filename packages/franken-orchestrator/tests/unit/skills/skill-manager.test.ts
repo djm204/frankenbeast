@@ -249,4 +249,27 @@ describe('SkillManager', () => {
       expect(mgr.getEnabledSkills()).toEqual([]);
     });
   });
+
+  describe('path traversal prevention', () => {
+    it('rejects names with ..', () => {
+      expect(() => manager.remove('../../tmp')).toThrow('Invalid skill name');
+    });
+
+    it('rejects names with slashes', () => {
+      expect(() => manager.enable('foo/bar')).toThrow('Invalid skill name');
+    });
+
+    it('rejects names with dots only', () => {
+      expect(() => manager.readMcpConfig('..')).toThrow('Invalid skill name');
+    });
+
+    it('allows valid names with hyphens and underscores', async () => {
+      await manager.installCustom('my-tool_v2', { command: 'node' });
+      expect(manager.exists('my-tool_v2')).toBe(true);
+    });
+
+    it('exists returns false for invalid names without throwing', () => {
+      expect(manager.exists('../etc')).toBe(false);
+    });
+  });
 });

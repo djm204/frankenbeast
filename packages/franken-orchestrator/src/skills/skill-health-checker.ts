@@ -66,9 +66,9 @@ export class SkillHealthChecker {
         });
 
         const timer = setTimeout(() => {
-          // If process is still running after 2s, it's likely connected
+          // Timeout without MCP readiness signal — cannot confirm connectivity
           proc.kill();
-          resolve('connected');
+          resolve('unknown');
         }, 2000);
 
         proc.on('error', () => {
