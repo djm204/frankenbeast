@@ -132,7 +132,14 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     app.route('/', networkRoutes(opts.networkControl));
   }
   if (opts.commsConfig && opts.commsRuntime) {
-    app.route('/', commsRoutes({ config: opts.commsConfig, runtime: opts.commsRuntime }));
+    const commsRoutesOpts: Parameters<typeof commsRoutes>[0] = {
+      config: opts.commsConfig,
+      runtime: opts.commsRuntime,
+    };
+    if (opts.securityConfig) {
+      commsRoutesOpts.securityProfile = opts.securityConfig.getSecurityConfig().profile;
+    }
+    app.route('/', commsRoutes(commsRoutesOpts));
   }
   if (opts.securityConfig) {
     app.route('/api/security', createSecurityRoutes(opts.securityConfig));

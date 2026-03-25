@@ -153,4 +153,40 @@ describe('ChatRuntimeCommsAdapter', () => {
 
     expect(result.text).toBe('');
   });
+
+  it('adds approval buttons when runtime returns pendingApproval', async () => {
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'approval', content: 'Run dangerous command?' }],
+      events: [],
+      pendingApproval: true,
+      pendingApprovalDescription: 'rm -rf /',
+      state: 'pending_approval',
+      tier: null,
+      transcript: [],
+    });
+
+    const result = await adapter.processInbound({
+      sessionId: 'sess-1',
+      channelType: 'slack',
+      text: '/run dangerous',
+      externalUserId: 'U123',
+    });
+
+    expect(result.status).toBe('approval');
+    expect(result.actions).toEqual([
+      { id: 'approve', label: 'Approve', style: 'primary' },
+      { id: 'reject', label: 'Reject', style: 'danger' },
+    ]);
+  });
+
+  it('does not add approval buttons when not pending', async () => {
+    const result = await adapter.processInbound({
+      sessionId: 'sess-1',
+      channelType: 'slack',
+      text: 'normal message',
+      externalUserId: 'U123',
+    });
+
+    expect(result.actions).toBeUndefined();
+  });
 });

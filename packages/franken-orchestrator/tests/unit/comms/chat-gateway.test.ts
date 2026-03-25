@@ -101,7 +101,7 @@ describe('ChatGateway', () => {
     }
   });
 
-  it('handleAction sends approval through runtime', async () => {
+  it('handleAction sends /approve for approve action', async () => {
     const slackAdapter = mockAdapter('slack');
     gateway.registerAdapter(slackAdapter);
 
@@ -110,7 +110,21 @@ describe('ChatGateway', () => {
     expect(runtime.processInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'sess-1',
-        text: '/approve approved',
+        text: '/approve',
+      }),
+    );
+  });
+
+  it('handleAction sends rejection text for reject action', async () => {
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleAction('slack', 'sess-1', 'reject');
+
+    expect(runtime.processInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'sess-1',
+        text: 'Action rejected by user: reject',
       }),
     );
   });

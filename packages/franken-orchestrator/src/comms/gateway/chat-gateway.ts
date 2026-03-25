@@ -55,11 +55,18 @@ export class ChatGateway extends EventEmitter {
     sessionId: string,
     actionId: string,
   ): Promise<void> {
-    const action = actionId === 'approve' ? 'approved' : 'rejected';
+    // Map action IDs to the appropriate slash command.
+    // /approve approves the pending action; rejection is a plain-text
+    // message that the runtime can interpret as declining.
+    const text =
+      actionId === 'approve'
+        ? '/approve'
+        : `Action rejected by user: ${actionId}`;
+
     const result = await this.runtime.processInbound({
       sessionId,
       channelType,
-      text: `/approve ${action}`,
+      text,
       externalUserId: 'system',
     });
 

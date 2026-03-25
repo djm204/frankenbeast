@@ -70,6 +70,15 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       out.metadata = input.metadata;
     }
 
+    // Add approval buttons when the runtime signals a pending approval
+    if (result.pendingApproval) {
+      out.status = 'approval';
+      out.actions = [
+        { id: 'approve', label: 'Approve', style: 'primary' },
+        { id: 'reject', label: 'Reject', style: 'danger' },
+      ];
+    }
+
     // Provider metadata — ChatRuntimeResult gains providerContext + phase
     // fields in Phase 8 when ProviderRegistry is wired into the runtime.
     // Until then, these will be undefined (adapters handle this gracefully).
