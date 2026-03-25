@@ -11,6 +11,7 @@ import type {
   SkillCatalogEntry,
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
+import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.js';
 
 export interface CodexCliOptions {
   binaryPath?: string;
@@ -68,26 +69,27 @@ export class CodexCliAdapter implements ILlmProvider {
 
   async discoverSkills(): Promise<SkillCatalogEntry[]> {
     try {
-      const proc = spawn(this.binaryPath, ['mcp', 'list', '--json'], {
-        timeout: 10_000,
-      });
-      const chunks: string[] = [];
-      proc.stdout!.on('data', (chunk: Buffer) =>
-        chunks.push(chunk.toString()),
+      const { stdout, exitCode } = await collectCliOutput(
+        this.binaryPath,
+        ['mcp', 'list', '--json'],
+        { ...process.env } as Record<string, string>,
       );
-      await new Promise<void>((resolve) => proc.on('close', resolve));
-      const output = chunks.join('');
-      if (!output.trim()) return [];
-      const servers = JSON.parse(output) as Array<{
-        name: string;
-        description?: string;
-      }>;
-      return servers.map((s) => ({
-        name: s.name,
-        description: s.description ?? '',
+      if (exitCode !== 0 || !stdout.trim()) return [];
+
+      const servers = JSON.parse(stdout);
+      if (!Array.isArray(servers)) return [];
+
+      return servers.map((s: Record<string, unknown>) => ({
+        name: (s['name'] as string) ?? 'unknown',
+        description: (s['description'] as string) ?? '',
         provider: 'codex-cli',
-        installConfig: { command: 'codex', args: ['mcp', 'add', s.name] },
-        authFields: [],
+        installConfig: {
+          command: (s['command'] as string) ?? 'codex',
+          args: (s['args'] as string[]) ?? ['mcp', 'add', (s['name'] as string) ?? ''],
+          env: (s['env'] as Record<string, string>) ?? {},
+        },
+        authFields: extractAuthFields(s['env'] as Record<string, string>),
+        toolDefinitions: (s['toolDefinitions'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) ?? [],
       }));
     } catch {
       return [];

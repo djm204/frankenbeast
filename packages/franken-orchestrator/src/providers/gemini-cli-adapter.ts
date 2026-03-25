@@ -11,7 +11,10 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
+import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -74,8 +77,60 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async discoverSkills(): Promise<SkillCatalogEntry[]> {
-    // Gemini extension discovery — returns empty for now
-    return [];
+    try {
+      const { stdout, exitCode } = await collectCliOutput(
+        this.binaryPath,
+        ['tool', 'list', '--json'],
+        { ...process.env } as Record<string, string>,
+      );
+      if (exitCode !== 0 || !stdout.trim()) {
+        return this.discoverFromSettingsFile();
+      }
+
+      const tools = JSON.parse(stdout);
+      if (!Array.isArray(tools)) return [];
+
+      return tools
+        .filter((t: Record<string, unknown>) => t['type'] === 'mcp' || t['mcpServer'])
+        .map((t: Record<string, unknown>) => ({
+          name: (t['name'] as string) ?? 'unknown',
+          description: (t['description'] as string) ?? '',
+          provider: 'gemini-cli',
+          installConfig: {
+            command: (t['command'] as string) ?? 'npx',
+            args: (t['args'] as string[]) ?? [],
+            env: (t['env'] as Record<string, string>) ?? {},
+          },
+          authFields: extractAuthFields(t['env'] as Record<string, string>),
+          toolDefinitions: (t['tools'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) ?? [],
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private async discoverFromSettingsFile(): Promise<SkillCatalogEntry[]> {
+    try {
+      const settingsPath = join(homedir(), '.gemini', 'settings.json');
+      if (!existsSync(settingsPath)) return [];
+      const raw = readFileSync(settingsPath, 'utf-8');
+      const settings = JSON.parse(raw) as Record<string, unknown>;
+      const mcpServers = (settings['mcpServers'] as Record<string, Record<string, unknown>>) ?? {};
+
+      return Object.entries(mcpServers).map(([name, config]) => ({
+        name,
+        description: (config['description'] as string) ?? '',
+        provider: 'gemini-cli',
+        installConfig: {
+          command: (config['command'] as string) ?? 'npx',
+          args: (config['args'] as string[]) ?? [],
+          env: (config['env'] as Record<string, string>) ?? {},
+        },
+        authFields: extractAuthFields(config['env'] as Record<string, string>),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   private get binaryPath(): string {
