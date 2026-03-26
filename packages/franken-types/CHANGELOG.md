@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.5.0...franken-types-v0.6.0) (2026-03-26)
+
+
+### Features
+
+* Phase 5 — Skill Loading ([bc99631](https://github.com/djm204/frankenbeast/commit/bc99631f27cd2ea1b4072e19998b3fc89eb389b0))
+* **types:** add skill directory schemas (Phase 5.1) ([bb55f53](https://github.com/djm204/frankenbeast/commit/bb55f532a653988122d86f00f61d0b55b2c001a4))
+
 ## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.4.0...franken-types-v0.5.0) (2026-03-23)
 
 

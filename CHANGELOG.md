@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.28.0](https://github.com/djm204/frankenbeast/compare/v0.27.0...v0.28.0) (2026-03-26)
+
+
+### Features
+
+* Phase 4 — Security Middleware ([2f4112b](https://github.com/djm204/frankenbeast/commit/2f4112bac8f0d8940ef141f64c7229c397535eea))
+* Phase 4.5 — Comms Integration ([a3e8053](https://github.com/djm204/frankenbeast/commit/a3e80537a5e1413aab5cedd976c9d6724e796266))
+* Phase 5 — Skill Loading ([bc99631](https://github.com/djm204/frankenbeast/commit/bc99631f27cd2ea1b4072e19998b3fc89eb389b0))
+* Phase 6 — Absorb Reflection into Critique ([82ac47d](https://github.com/djm204/frankenbeast/commit/82ac47d6a67763a622f2d24058e6c30dbe989c46))
+
+
+### Documentation
+
+* add Phase 4 residual issues ([7b840f9](https://github.com/djm204/frankenbeast/commit/7b840f9b7482a2ecc7b4633664e687b0b16f679c))
+* add Phase 4.5 residual issues ([2b2e003](https://github.com/djm204/frankenbeast/commit/2b2e003e48cd6a8ea148d0e7861320ddd238d2ab))
+* add Phase 5 residual issues ([b004987](https://github.com/djm204/frankenbeast/commit/b0049873525a91b38de3b13e9e3811dca6a3f0bc))
+* add Phase 6 residual issues ([03f4302](https://github.com/djm204/frankenbeast/commit/03f430209bc5171b88440a0063b24c7c9ebfdfb4))
+
 ## [0.27.0](https://github.com/djm204/frankenbeast/compare/v0.26.0...v0.27.0) (2026-03-23)
 
 

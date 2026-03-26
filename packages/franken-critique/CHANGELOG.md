@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.5.0...franken-critique-v0.6.0) (2026-03-26)
+
+
+### Features
+
+* **critique:** add ReflectionEvaluator (Phase 6.1) ([bdc4764](https://github.com/djm204/frankenbeast/commit/bdc4764992acb27fc1451ecb280d404bd1f78f8b))
+* Phase 6 — Absorb Reflection into Critique ([82ac47d](https://github.com/djm204/frankenbeast/commit/82ac47d6a67763a622f2d24058e6c30dbe989c46))
+
 ## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.4.0...franken-critique-v0.5.0) (2026-03-21)
 
 
