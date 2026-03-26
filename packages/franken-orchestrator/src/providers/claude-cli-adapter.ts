@@ -8,8 +8,10 @@ import type {
   ProviderType,
   ProviderAuthMethod,
   BrainSnapshot,
+  SkillCatalogEntry,
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
+import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.js';
 
 export interface ClaudeCliOptions {
   binaryPath?: string;
@@ -68,6 +70,35 @@ export class ClaudeCliAdapter implements ILlmProvider {
 
   formatHandoff(snapshot: BrainSnapshot): string {
     return formatHandoff(snapshot);
+  }
+
+  async discoverSkills(): Promise<SkillCatalogEntry[]> {
+    try {
+      const { stdout, exitCode } = await collectCliOutput(
+        this.binaryPath,
+        ['mcp', 'list', '--json'],
+        this.sanitizedEnv(),
+      );
+      if (exitCode !== 0 || !stdout.trim()) return [];
+
+      const servers = JSON.parse(stdout);
+      if (!Array.isArray(servers)) return [];
+
+      return servers.map((s: Record<string, unknown>) => ({
+        name: (s['name'] as string) ?? 'unknown',
+        description: (s['description'] as string) ?? '',
+        provider: 'claude-cli',
+        installConfig: {
+          command: (s['command'] as string) ?? 'npx',
+          args: (s['args'] as string[]) ?? [],
+          env: (s['env'] as Record<string, string>) ?? {},
+        },
+        authFields: extractAuthFields(s['env'] as Record<string, string>),
+        toolDefinitions: (s['tools'] as Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) ?? [],
+      }));
+    } catch {
+      return [];
+    }
   }
 
   private get binaryPath(): string {

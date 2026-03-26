@@ -88,3 +88,12 @@ export {
   McpServerConfigSchema,
   SkillCatalogEntrySchema,
 } from './provider.js';
+
+// Skill schemas
+export type { McpConfig, SkillInfo, SkillToolManifest } from './skill.js';
+export {
+  McpConfigSchema,
+  SkillInfoSchema,
+  SkillToolManifestSchema,
+  SkillsConfigSchema,
+} from './skill.js';
