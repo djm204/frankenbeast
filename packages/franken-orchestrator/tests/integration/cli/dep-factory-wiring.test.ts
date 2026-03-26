@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { createCliDeps } from '../../../src/cli/dep-factory.js';
-import { EpisodicMemoryPortAdapter } from '../../../src/adapters/episodic-memory-port-adapter.js';
+import { SqliteBrainMemoryAdapter } from '../../../src/adapters/brain-memory-adapter.js';
+import { MiddlewareChainFirewallAdapter } from '../../../src/adapters/middleware-firewall-adapter.js';
+import { SkillManagerAdapter } from '../../../src/adapters/skill-manager-adapter.js';
+import { ReflectionHeartbeatAdapter } from '../../../src/adapters/reflection-heartbeat-adapter.js';
 import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
@@ -63,7 +66,7 @@ describe('dep-factory wiring integration', () => {
     cleanups.length = 0;
   });
 
-  it('creates real EpisodicMemoryPortAdapter when modules are enabled', async () => {
+  it('creates real SqliteBrainMemoryAdapter when modules are enabled', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
@@ -77,12 +80,12 @@ describe('dep-factory wiring integration', () => {
       reset: false,
     });
 
-    // Memory should always be available (franken-brain + better-sqlite3 are direct deps)
-    expect(deps.memory).toBeInstanceOf(EpisodicMemoryPortAdapter);
+    // Memory is now provided by createBeastDeps via SqliteBrainMemoryAdapter
+    expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
     await finalize();
   });
 
-  it('uses stubs when enabledModules disables firewall and memory', async () => {
+  it('uses real adapters via createBeastDeps even when enabledModules disables flags', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
@@ -97,9 +100,11 @@ describe('dep-factory wiring integration', () => {
       enabledModules: { firewall: false, memory: false },
     });
 
-    // When disabled, should use stubs (not instanceof real adapters)
-    expect(deps.memory).not.toBeInstanceOf(EpisodicMemoryPortAdapter);
-    // Stub memory should still work
+    // createBeastDeps now always provides real adapters — module toggles
+    // only affect critique/governor dynamic imports, not firewall/memory/skills/heartbeat
+    expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
+    expect(deps.firewall).toBeInstanceOf(MiddlewareChainFirewallAdapter);
+    // Real memory adapter still returns valid context (empty from fresh db)
     const ctx = await deps.memory.getContext('test');
     expect(ctx).toEqual({ adrs: [], knownErrors: [], rules: [] });
     await finalize();
@@ -131,7 +136,7 @@ describe('dep-factory wiring integration', () => {
       verbose: false,
       reset: true,
     });
-    expect(second.deps.memory).toBeInstanceOf(EpisodicMemoryPortAdapter);
+    expect(second.deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
     await second.finalize();
   });
 
@@ -212,6 +217,31 @@ describe('dep-factory wiring integration', () => {
       taskId: 'test', summary: 'test', requiresHitl: true,
     });
     expect(result).toEqual({ decision: 'approved' });
+    await finalize();
+  });
+
+  it('creates real consolidated adapters for all module ports', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+
+    // All module ports populated with real consolidated adapters
+    expect(deps.firewall).toBeInstanceOf(MiddlewareChainFirewallAdapter);
+    expect(deps.skills).toBeInstanceOf(SkillManagerAdapter);
+    expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
+    expect(deps.heartbeat).toBeInstanceOf(ReflectionHeartbeatAdapter);
+    expect(deps.planner).toBeDefined();
+    expect(deps.critique).toBeDefined();
+    expect(deps.governor).toBeDefined();
     await finalize();
   });
 
