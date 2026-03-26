@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.30.0](https://github.com/djm204/frankenbeast/compare/v0.29.0...v0.30.0) (2026-03-26)
+
+
+### Features
+
+* Phase 8 — Wire Everything Together (Core) ([12d5293](https://github.com/djm204/frankenbeast/commit/12d52933d8ac27d5b2d46a24229fc94cf3c8c7d9))
+
+
+### Documentation
+
+* add Phase 8 residual issues ([b485954](https://github.com/djm204/frankenbeast/commit/b48595420e0ae3498adbcdba0230ab4353fba05f))
+
 ## [0.29.0](https://github.com/djm204/frankenbeast/compare/v0.28.0...v0.29.0) (2026-03-26)
 
 

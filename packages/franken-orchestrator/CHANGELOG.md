@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.27.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.26.0...franken-orchestrator-v0.27.0) (2026-03-26)
+
+
+### Features
+
+* **orchestrator:** add 6 adapter classes + createBeastDeps (Phase 8.1+8.2) ([b18d93b](https://github.com/djm204/frankenbeast/commit/b18d93be8d03b3da22a1eb86aa418d40e51775a1))
+* **orchestrator:** add E2E consolidated deps test + run-config v2 (Phase 8.5, 8.7) ([25a48ed](https://github.com/djm204/frankenbeast/commit/25a48ed4f2e731f0a3db03022fc21e17df7c69de))
+* Phase 8 — Wire Everything Together (Core) ([12d5293](https://github.com/djm204/frankenbeast/commit/12d52933d8ac27d5b2d46a24229fc94cf3c8c7d9))
+
+
+### Bug Fixes
+
+* **orchestrator:** address PR [#260](https://github.com/djm204/frankenbeast/issues/260) review comments ([75d628e](https://github.com/djm204/frankenbeast/commit/75d628e5a7affc50615e48c0b41622f95d7af1b4))
+* **orchestrator:** swallow ENOENT in BeastLogStore.append ([02d303b](https://github.com/djm204/frankenbeast/commit/02d303be59caa5ac2c17be44f3315c42f0903d8a))
+
 ## [0.26.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.25.0...franken-orchestrator-v0.26.0) (2026-03-26)
 
 
