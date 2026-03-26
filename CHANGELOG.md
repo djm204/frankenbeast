@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/djm204/frankenbeast/compare/v0.28.0...v0.29.0) (2026-03-26)
+
+
+### Features
+
+* Phase 7 — Observer Audit Trail ([ea50e97](https://github.com/djm204/frankenbeast/commit/ea50e97b7b4d88c3a0e7261be8d5b08bb630441e))
+
 ## [0.28.0](https://github.com/djm204/frankenbeast/compare/v0.27.0...v0.28.0) (2026-03-26)
 
 
