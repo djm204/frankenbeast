@@ -398,6 +398,7 @@ export async function main(): Promise<void> {
     maxDurationMs: config.maxDurationMs,
     enableTracing: config.enableTracing,
     enableHeartbeat: config.enableHeartbeat,
+    enableReflection: config.enableReflection,
     minCritiqueScore: config.minCritiqueScore,
     maxTotalTokens: config.maxTotalTokens,
   });

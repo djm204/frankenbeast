@@ -46,6 +46,7 @@ export const RunConfigSchema = z.object({
   gitConfig: GitConfigSchema.optional(),
   promptConfig: PromptConfigSchema.optional(),
   maxTotalTokens: z.number().optional(),
+  reflection: z.boolean().optional(),
 }).passthrough();
 
 export type RunConfig = z.infer<typeof RunConfigSchema>;

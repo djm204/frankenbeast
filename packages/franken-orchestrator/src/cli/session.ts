@@ -59,6 +59,8 @@ export interface SessionConfig {
   minCritiqueScore?: number | undefined;
   /** Maximum total tokens before budget breaker trips */
   maxTotalTokens?: number | undefined;
+  /** Whether to run LLM-based reflection at phase boundaries */
+  enableReflection?: boolean | undefined;
   // ── Issue-specific config ──
   issueLabel?: string[] | undefined;
   issueMilestone?: string | undefined;
@@ -377,7 +379,11 @@ export class Session {
 
     logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`, 'session');
 
-    const result = await new BeastLoop(fullDeps).run({
+    const loopConfig: Partial<import('../config/orchestrator-config.js').OrchestratorConfig> = {};
+    if (this.config.enableReflection !== undefined) {
+      loopConfig.enableReflection = this.config.enableReflection;
+    }
+    const result = await new BeastLoop(fullDeps, loopConfig).run({
       projectId,
       userInput: `Process chunks in ${chunkDir}`,
     });

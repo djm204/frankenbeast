@@ -66,6 +66,8 @@ export class BeastLoop {
       );
       logger.info('BeastLoop: phase end', { phase: 'planning' });
 
+      await this.maybeRunReflection('after-planning', ctx, logger);
+
       // Phase 3: Execution
       logger.info('BeastLoop: phase start', { phase: 'execution' });
       const outcomes = await runExecution(
@@ -81,6 +83,8 @@ export class BeastLoop {
         this.deps.refreshPlanTasks,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
+
+      await this.maybeRunReflection('after-execution', ctx, logger);
 
       // Phase 4: Closure
       logger.info('BeastLoop: phase start', { phase: 'closure' });
@@ -139,6 +143,41 @@ export class BeastLoop {
         error: err,
         durationMs: ctx.elapsedMs(),
       };
+    }
+  }
+
+  /**
+   * Run optional LLM-based reflection at phase boundaries.
+   * Advisory only — failures are logged but do not abort the run.
+   */
+  private async maybeRunReflection(
+    stage: 'after-planning' | 'after-execution',
+    ctx: { sessionId: string; phase: string },
+    logger: { info(msg: string, data?: unknown): void; warn(msg: string, data?: unknown): void },
+  ): Promise<void> {
+    if (!this.config.enableReflection) return;
+
+    try {
+      const pulse = await this.deps.heartbeat.pulse();
+      logger.info(`BeastLoop: reflection ${stage}`, {
+        stage,
+        summary: pulse.summary,
+        improvements: pulse.improvements.length,
+        techDebt: pulse.techDebt.length,
+      });
+
+      if (this.config.enableTracing) {
+        this.deps.observer.startSpan(`reflection:${stage}`).end({
+          summary: pulse.summary,
+          improvements: pulse.improvements,
+          techDebt: pulse.techDebt,
+        });
+      }
+    } catch (err) {
+      // Reflection is advisory — never fail the run
+      logger.warn(`BeastLoop: reflection ${stage} failed (non-fatal)`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

@@ -25,6 +25,9 @@ function fromEnv(): Partial<OrchestratorConfig> {
   const tracing = process.env[`${ENV_PREFIX}ENABLE_TRACING`];
   if (tracing !== undefined) env.enableTracing = tracing === 'true';
 
+  const reflection = process.env[`${ENV_PREFIX}ENABLE_REFLECTION`];
+  if (reflection !== undefined) env.enableReflection = reflection === 'true';
+
   const minScore = process.env[`${ENV_PREFIX}MIN_CRITIQUE_SCORE`];
   if (minScore) env.minCritiqueScore = Number(minScore);
 
