@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.25.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.24.0...franken-orchestrator-v0.25.0) (2026-03-26)
+
+
+### Features
+
+* **orchestrator:** add comms run-config schema (Phase 4.5.04) ([0d7cd30](https://github.com/djm204/frankenbeast/commit/0d7cd309c79f54bdb1a485f072287b4b8c50f193))
+* **orchestrator:** add credential store + health checker (Phase 5.9, 5.10) ([ac1a2bd](https://github.com/djm204/frankenbeast/commit/ac1a2bd4c6d8fe5f21081718e4f18c7112dbd571))
+* **orchestrator:** add domain allowlist middleware (Phase 4.4) ([854dce4](https://github.com/djm204/frankenbeast/commit/854dce48336c3b26bfef156a0b6b21b0fce26810))
+* **orchestrator:** add LLM middleware chain + 3 middleware (Phase 4.2) ([ba1c2a1](https://github.com/djm204/frankenbeast/commit/ba1c2a11acdd28c66146814b3db32c0185345695))
+* **orchestrator:** add provider skill translation + auth resolver (Phase 5.3, 5.4) ([f227431](https://github.com/djm204/frankenbeast/commit/f227431fcd132d00423b88a36fb169d9a0693fb4))
+* **orchestrator:** add provider-aware outbound formatting (Phase 4.5.02) ([351e060](https://github.com/djm204/frankenbeast/commit/351e0605bab988b380a9cf3c11be1c82b6beff26))
+* **orchestrator:** add reflection runtime trigger (Phase 6.2) ([8ff8933](https://github.com/djm204/frankenbeast/commit/8ff89331e14a3ea4233eb2c9037b59ef805ede80))
+* **orchestrator:** add security profiles + API routes (Phase 4.3) ([f516985](https://github.com/djm204/frankenbeast/commit/f51698522db5460f34554c27202e4196ef88817c))
+* **orchestrator:** add skill API routes + context endpoints (Phase 5.6, 5.7, 5.11) ([b2804a2](https://github.com/djm204/frankenbeast/commit/b2804a2213cdea54d3e1bfda3c222cea96fb5ff6))
+* **orchestrator:** add SkillManager core CRUD (Phase 5.2) ([992105d](https://github.com/djm204/frankenbeast/commit/992105dceec8f661b93cc2b34f1876c5198288a2))
+* **orchestrator:** replace ChatSocketBridge with direct ChatRuntime (Phase 4.5.01) ([6879e26](https://github.com/djm204/frankenbeast/commit/6879e26574e7efeb7940553c8d0c489c243382e2))
+* **orchestrator:** security profile integration for webhook verification (Phase 4.5.03) ([5c9c6ca](https://github.com/djm204/frankenbeast/commit/5c9c6caced4563e0150774a6595614c8bb41a1ac))
+* **orchestrator:** wire discoverSkills into CLI adapters (Phase 5.5) ([fb06baa](https://github.com/djm204/frankenbeast/commit/fb06baaf6f2669f105a59f0d34496d6a83a3112b))
+* Phase 4 — Security Middleware ([2f4112b](https://github.com/djm204/frankenbeast/commit/2f4112bac8f0d8940ef141f64c7229c397535eea))
+* Phase 4.5 — Comms Integration ([a3e8053](https://github.com/djm204/frankenbeast/commit/a3e80537a5e1413aab5cedd976c9d6724e796266))
+* Phase 5 — Skill Loading ([bc99631](https://github.com/djm204/frankenbeast/commit/bc99631f27cd2ea1b4072e19998b3fc89eb389b0))
+* Phase 6 — Absorb Reflection into Critique ([82ac47d](https://github.com/djm204/frankenbeast/commit/82ac47d6a67763a622f2d24058e6c30dbe989c46))
+
+
+### Bug Fixes
+
+* **orchestrator:** address Phase 4 review gaps ([8e48d85](https://github.com/djm204/frankenbeast/commit/8e48d85b9acbb01a008fd2ace05c8ef6603594c2))
+* **orchestrator:** address Phase 4.5 review gaps ([1313c58](https://github.com/djm204/frankenbeast/commit/1313c582fba6e978c22472a937679782c3de13f3))
+* **orchestrator:** address PR [#253](https://github.com/djm204/frankenbeast/issues/253) review comments ([8d467a4](https://github.com/djm204/frankenbeast/commit/8d467a40d22b33e4f698fe4fad9de1aa60ae776d))
+* **orchestrator:** address PR [#255](https://github.com/djm204/frankenbeast/issues/255) review comments ([5fdecda](https://github.com/djm204/frankenbeast/commit/5fdecda1dd552d69062feadf5e67db6a23e0a41f))
+* **orchestrator:** address PR [#256](https://github.com/djm204/frankenbeast/issues/256) review comments ([abd918c](https://github.com/djm204/frankenbeast/commit/abd918cfcb30234affb72ef17e07f062aea2974b))
+* **orchestrator:** propagate reflection flag into orchestrator config ([4db763c](https://github.com/djm204/frankenbeast/commit/4db763ce818d2be4354bcb75e3848b806f99cae5))
+
+
+### Tests
+
+* **orchestrator:** add comms round-trip integration test (Phase 4.5.05) ([b493ed3](https://github.com/djm204/frankenbeast/commit/b493ed3e3aafdab2f0e8f894c8e72c85815c9eb2))
+
 ## [0.24.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.23.0...franken-orchestrator-v0.24.0) (2026-03-23)
 
 
