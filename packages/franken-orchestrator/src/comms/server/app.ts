@@ -10,13 +10,17 @@ import { DiscordAdapter } from '../channels/discord/discord-adapter.js';
 import { TelegramAdapter } from '../channels/telegram/telegram-adapter.js';
 import { WhatsAppAdapter } from '../channels/whatsapp/whatsapp-adapter.js';
 import type { CommsConfig } from '../config/comms-config.js';
+import type { CommsRuntimePort } from '../core/comms-runtime-port.js';
 
-export function createCommsApp(config: CommsConfig): Hono {
+export interface CommsAppOptions {
+  config: CommsConfig;
+  runtime: CommsRuntimePort;
+}
+
+export function createCommsApp(options: CommsAppOptions): Hono {
+  const { config, runtime } = options;
   const sessionMapper = new SessionMapper();
-  const gateway = new ChatGateway({
-    orchestratorWsUrl: config.orchestrator.wsUrl,
-    orchestratorToken: config.orchestrator.token,
-  });
+  const gateway = new ChatGateway(runtime);
 
   const app = new Hono();
 

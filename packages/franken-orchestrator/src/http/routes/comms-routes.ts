@@ -10,18 +10,33 @@ import { DiscordAdapter } from '../../comms/channels/discord/discord-adapter.js'
 import { TelegramAdapter } from '../../comms/channels/telegram/telegram-adapter.js';
 import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.js';
 import type { CommsConfig } from '../../comms/config/comms-config.js';
+import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
+
+import type { SecurityProfile } from '../../middleware/security-profiles.js';
 
 export interface CommsRoutesOptions {
   config: CommsConfig;
+  runtime?: CommsRuntimePort;
+  securityProfile?: SecurityProfile;
 }
 
 export function commsRoutes(options: CommsRoutesOptions): Hono {
-  const { config } = options;
+  const { config, runtime } = options;
   const sessionMapper = new SessionMapper();
-  const gateway = new ChatGateway({
-    orchestratorWsUrl: config.orchestrator.wsUrl,
-    orchestratorToken: config.orchestrator.token,
-  });
+
+  if (!runtime) {
+    throw new Error(
+      'commsRoutes requires a CommsRuntimePort — the WebSocket bridge has been removed. ' +
+      'Pass a ChatRuntimeCommsAdapter instance as the runtime option.',
+    );
+  }
+
+  const gateway = new ChatGateway(runtime);
+  const verifySignature = options.securityProfile !== 'permissive';
+
+  if (!verifySignature) {
+    console.warn('[comms] Webhook signature verification disabled (security profile: permissive)');
+  }
 
   const app = new Hono();
 
@@ -35,6 +50,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       signingSecret: slack.signingSecret,
+      verifySignature,
     }));
   }
 
@@ -46,6 +62,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       publicKey: discord.publicKey,
+      verifySignature,
     }));
   }
 
@@ -72,6 +89,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       sessionMapper,
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,
+      verifySignature,
     }));
   }
 

@@ -2,9 +2,10 @@ import { z } from 'zod';
 
 export const CommsConfigSchema = z.object({
   orchestrator: z.object({
-    wsUrl: z.string().url(),
+    /** @deprecated WebSocket bridge removed in Phase 4.5.01 — field kept optional for config compat */
+    wsUrl: z.string().url().optional(),
     token: z.string().optional(),
-  }),
+  }).default({}),
   channels: z.object({
     slack: z.object({
       enabled: z.boolean().default(false),

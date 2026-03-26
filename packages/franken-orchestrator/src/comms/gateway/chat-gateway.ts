@@ -1,29 +1,21 @@
 import { EventEmitter } from 'node:events';
-import { ChatSocketBridge } from '../core/chat-socket-bridge.js';
 import { SessionMapper } from '../core/session-mapper.js';
-import type { 
-  ChannelInboundMessage, 
-  ChannelOutboundMessage, 
+import type { CommsRuntimePort } from '../core/comms-runtime-port.js';
+import type {
+  ChannelInboundMessage,
+  ChannelOutboundMessage,
   ChannelAdapter,
-  ChannelType
+  ChannelType,
 } from '../core/types.js';
 
-export interface ChatGatewayOptions {
-  orchestratorWsUrl: string;
-  orchestratorToken?: string | undefined;
-}
-
 export class ChatGateway extends EventEmitter {
-  private readonly bridges = new Map<string, ChatSocketBridge>();
   private readonly adapters = new Map<ChannelType, ChannelAdapter>();
   private readonly sessionMapper = new SessionMapper();
-  private readonly orchestratorWsUrl: string;
-  private readonly orchestratorToken?: string | undefined;
+  private readonly runtime: CommsRuntimePort;
 
-  constructor(options: ChatGatewayOptions) {
+  constructor(runtime: CommsRuntimePort) {
     super();
-    this.orchestratorWsUrl = options.orchestratorWsUrl;
-    this.orchestratorToken = options.orchestratorToken;
+    this.runtime = runtime;
   }
 
   registerAdapter(adapter: ChannelAdapter): void {
@@ -38,82 +30,70 @@ export class ChatGateway extends EventEmitter {
       externalThreadId: message.externalThreadId,
     });
 
-    let bridge = this.bridges.get(sessionId);
-    if (!bridge) {
-      bridge = new ChatSocketBridge({
-        url: this.orchestratorWsUrl,
-        sessionId,
-        token: this.orchestratorToken,
-      });
+    const result = await this.runtime.processInbound({
+      sessionId,
+      channelType: message.channelType,
+      text: message.text,
+      externalUserId: message.externalUserId,
+      metadata: {
+        externalChannelId: message.externalChannelId,
+        externalThreadId: message.externalThreadId,
+      },
+    });
 
-      bridge.on('assistant.message.delta', (event) => {
-        this.relayToChannel(sessionId, message.channelType, {
-          text: '',
-          delta: event.chunk,
-          status: 'reply',
-        });
-      });
-
-      bridge.on('assistant.message.complete', (event) => {
-        this.relayToChannel(sessionId, message.channelType, {
-          text: event.content,
-          status: 'reply',
-        });
-      });
-
-      bridge.on('turn.execution.progress', (event) => {
-        this.relayToChannel(sessionId, message.channelType, {
-          text: (event.data?.summary as string) || 'Executing...',
-          status: 'progress',
-        });
-      });
-
-      bridge.on('turn.approval.requested', (event) => {
-        this.relayToChannel(sessionId, message.channelType, {
-          text: event.description,
-          status: 'approval',
-          actions: [
-            { id: 'approve', label: 'Approve', style: 'primary' },
-            { id: 'reject', label: 'Reject', style: 'danger' },
-          ],
-        });
-      });
-
-      await bridge.connect();
-      this.bridges.set(sessionId, bridge);
-    }
-
-    await bridge.send(message.text);
+    const outbound: ChannelOutboundMessage = { text: result.text };
+    if (result.status) outbound.status = result.status;
+    if (result.actions) outbound.actions = result.actions;
+    if (result.metadata) outbound.metadata = result.metadata;
+    if (result.provider) outbound.provider = result.provider;
+    if (result.phase) outbound.phase = result.phase;
+    this.relayToChannel(sessionId, message.channelType, outbound);
   }
 
-  private relayToChannel(sessionId: string, channelType: ChannelType, outbound: ChannelOutboundMessage): void {
+  async handleAction(
+    channelType: ChannelType,
+    sessionId: string,
+    actionId: string,
+  ): Promise<void> {
+    // Map action IDs to the appropriate slash command.
+    // /approve approves the pending action; rejection is a plain-text
+    // message that the runtime can interpret as declining.
+    const text =
+      actionId === 'approve'
+        ? '/approve'
+        : `Action rejected by user: ${actionId}`;
+
+    const result = await this.runtime.processInbound({
+      sessionId,
+      channelType,
+      text,
+      externalUserId: 'system',
+    });
+
+    const outbound: ChannelOutboundMessage = { text: result.text };
+    if (result.status) outbound.status = result.status;
+    this.relayToChannel(sessionId, channelType, outbound);
+  }
+
+  private relayToChannel(
+    sessionId: string,
+    channelType: ChannelType,
+    outbound: ChannelOutboundMessage,
+  ): void {
     const adapter = this.adapters.get(channelType);
     if (adapter) {
-      adapter.send(sessionId, outbound).catch((error) => {
-        this.emit('error', new Error(`Failed to send to channel ${channelType}: ${error.message}`));
+      adapter.send(sessionId, outbound).catch((error: Error) => {
+        this.emit(
+          'error',
+          new Error(
+            `Failed to send to channel ${channelType}: ${error.message}`,
+          ),
+        );
       });
-    }
-  }
-
-  async handleAction(channelType: ChannelType, sessionId: string, actionId: string): Promise<void> {
-    const bridge = this.bridges.get(sessionId);
-    if (!bridge) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-
-    if (actionId === 'approve') {
-      await bridge.respondToApproval(true);
-    } else if (actionId === 'reject') {
-      await bridge.respondToApproval(false);
-    } else {
-      throw new Error(`Unknown action: ${actionId}`);
     }
   }
 
   close(): void {
-    for (const bridge of this.bridges.values()) {
-      bridge.close();
-    }
-    this.bridges.clear();
+    // No bridges to clean up — in-process calls are stateless
   }
 }

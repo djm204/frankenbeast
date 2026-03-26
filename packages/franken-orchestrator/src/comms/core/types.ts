@@ -19,12 +19,21 @@ export interface ChannelAction {
   style?: 'primary' | 'secondary' | 'danger';
 }
 
+export interface ProviderMetadata {
+  name: string;
+  model?: string;
+  switchedFrom?: string;
+  switchReason?: string;
+}
+
 export interface ChannelOutboundMessage {
   text: string;
   status?: OutboundMessageStatus;
   actions?: ChannelAction[];
   metadata?: Record<string, unknown>;
   delta?: string;
+  provider?: ProviderMetadata;
+  phase?: string;
 }
 
 export interface ChannelCapabilities {

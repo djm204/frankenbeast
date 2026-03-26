@@ -9,6 +9,7 @@ export interface WhatsAppRouterOptions {
   sessionMapper: SessionMapper;
   appSecret: string;
   verifyToken: string;
+  verifySignature?: boolean;
 }
 
 export function whatsappRouter(options: WhatsAppRouterOptions) {
@@ -28,7 +29,10 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
   });
 
   // Incoming messages: Meta sends a POST request with signatures
-  app.post('/webhook', whatsappSignatureMiddleware({ appSecret }), async (c) => {
+  const whatsappMiddleware = options.verifySignature !== false
+    ? whatsappSignatureMiddleware({ appSecret })
+    : async (_c: any, next: () => Promise<void>) => next();
+  app.post('/webhook', whatsappMiddleware, async (c) => {
     const body = await c.req.json();
     const parsed = WhatsAppWebhookSchema.parse(body);
 

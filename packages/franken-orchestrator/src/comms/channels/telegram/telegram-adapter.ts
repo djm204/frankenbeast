@@ -62,6 +62,13 @@ export class TelegramAdapter implements ChannelAdapter {
       };
     }
 
+    if (message.provider) {
+      const providerLine = message.provider.switchedFrom
+        ? `_${this.escapeMarkdown(message.provider.switchedFrom)} → ${this.escapeMarkdown(message.provider.name)}_ \\(${this.escapeMarkdown(message.provider.switchReason ?? 'failover')}\\)`
+        : `_${this.escapeMarkdown(message.provider.name)}_`;
+      payload['text'] = `${payload['text'] as string}\n\n${providerLine}`;
+    }
+
     return payload;
   }
 

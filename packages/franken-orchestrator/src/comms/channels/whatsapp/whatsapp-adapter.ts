@@ -48,6 +48,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
   }
 
+  private appendProviderFooter(text: string, message: ChannelOutboundMessage): string {
+    if (!message.provider) return text;
+    const providerLine = message.provider.switchedFrom
+      ? `[${message.provider.switchedFrom} → ${message.provider.name} (${message.provider.switchReason ?? 'failover'})]`
+      : `[${message.provider.name}]`;
+    return `${text}\n\n${providerLine}`;
+  }
+
   private formatPayload(to: string, message: ChannelOutboundMessage): Record<string, unknown> {
     if (message.actions && message.actions.length > 0) {
       return {
@@ -56,7 +64,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: message.text },
+          body: { text: this.appendProviderFooter(message.text, message) },
           action: {
             buttons: message.actions.map((action) => ({
               type: 'reply',
@@ -74,7 +82,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
-      text: { body: message.text },
+      text: { body: this.appendProviderFooter(message.text, message) },
     };
   }
 }

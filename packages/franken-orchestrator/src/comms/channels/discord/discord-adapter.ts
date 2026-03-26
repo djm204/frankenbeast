@@ -86,6 +86,18 @@ export class DiscordAdapter implements ChannelAdapter {
       payload.content = ''; // Use embed description instead of content
     }
 
+    if (message.provider) {
+      const footerText = message.provider.switchedFrom
+        ? `${message.provider.switchedFrom} → ${message.provider.name} (${message.provider.switchReason ?? 'failover'})`
+        : message.provider.name;
+      const embeds = (payload.embeds as Array<Record<string, unknown>>) ?? [];
+      if (embeds.length > 0) {
+        embeds[0]!['footer'] = { text: footerText };
+      } else {
+        payload.embeds = [{ footer: { text: footerText } }];
+      }
+    }
+
     return payload;
   }
 }

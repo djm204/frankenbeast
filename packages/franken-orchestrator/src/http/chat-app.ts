@@ -21,6 +21,7 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
+import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -43,6 +44,7 @@ export interface ChatAppOptions {
   };
   beastControl?: BeastRoutesDeps;
   commsConfig?: CommsConfig;
+  commsRuntime?: CommsRuntimePort;
   securityConfig?: {
     getSecurityConfig: () => SecurityConfig;
     setSecurityConfig: (config: Partial<SecurityConfig>) => void;
@@ -129,8 +131,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
   }
-  if (opts.commsConfig) {
-    app.route('/', commsRoutes({ config: opts.commsConfig }));
+  if (opts.commsConfig && opts.commsRuntime) {
+    const commsRoutesOpts: Parameters<typeof commsRoutes>[0] = {
+      config: opts.commsConfig,
+      runtime: opts.commsRuntime,
+    };
+    if (opts.securityConfig) {
+      commsRoutesOpts.securityProfile = opts.securityConfig.getSecurityConfig().profile;
+    }
+    app.route('/', commsRoutes(commsRoutesOpts));
   }
   if (opts.securityConfig) {
     app.route('/api/security', createSecurityRoutes(opts.securityConfig));
