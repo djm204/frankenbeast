@@ -11,16 +11,22 @@ export class BeastLogStore {
     message: string,
   ): Promise<void> {
     const filePath = this.resolvePath(runId, attemptId);
-    await mkdir(dirname(filePath), { recursive: true });
-    await appendFile(
-      filePath,
-      `${JSON.stringify({
-        stream,
-        message,
-        createdAt: new Date().toISOString(),
-      })}\n`,
-      'utf-8',
-    );
+    try {
+      await mkdir(dirname(filePath), { recursive: true });
+      await appendFile(
+        filePath,
+        `${JSON.stringify({
+          stream,
+          message,
+          createdAt: new Date().toISOString(),
+        })}\n`,
+        'utf-8',
+      );
+    } catch (err) {
+      // Log directory may have been removed (e.g., during test cleanup).
+      // Swallow ENOENT — logging should never crash the caller.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 
   async read(runId: string, attemptId: string): Promise<string[]> {
