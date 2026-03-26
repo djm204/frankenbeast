@@ -82,4 +82,12 @@ export type {
   OTELStatus,
 } from './export/OTELSerializer.js'
 
+// Audit trail
+export { AuditTrail, createAuditEvent, hashContent } from './audit-event.js'
+export type { AuditEvent, CreateAuditEventOptions } from './audit-event.js'
+export { ExecutionReplayer } from './execution-replayer.js'
+export type { ExecutionTimeline, PhaseTimeline, ProviderSwitchEvent, ErrorEvent } from './execution-replayer.js'
+export { AuditTrailStore } from './audit-trail-store.js'
+export type { PersistedAuditTrail } from './audit-trail-store.js'
+
 export const VERSION = '0.1.0'
