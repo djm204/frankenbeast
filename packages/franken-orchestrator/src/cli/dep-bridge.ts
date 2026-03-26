@@ -92,6 +92,7 @@ export function bridgeToBeastConfig(options: CliDepOptions): BeastDepsConfig {
       dbPath,
     },
     skillsDir: options.skillsDir ?? './skills',
+    reflection: true,
   };
 }
 
@@ -108,9 +109,11 @@ export interface BridgeComponents {
   governor: BeastLoopDeps['governor'];
   observer: IObserverModule;
   logger: BeastLoopDeps['logger'];
+  graphBuilder?: BeastLoopDeps['graphBuilder'];
   cliExecutor?: BeastLoopDeps['cliExecutor'];
   checkpoint?: BeastLoopDeps['checkpoint'];
   prCreator?: BeastLoopDeps['prCreator'];
+  refreshPlanTasks?: BeastLoopDeps['refreshPlanTasks'];
   runConfigOverrides?: BeastLoopDeps['runConfigOverrides'];
   clock?: BeastLoopDeps['clock'];
 }
@@ -126,9 +129,11 @@ export function bridgeToExistingDeps(components: BridgeComponents): ExistingDeps
     governor: components.governor,
     observer: components.observer,
     logger: components.logger,
+    ...(components.graphBuilder !== undefined ? { graphBuilder: components.graphBuilder } : {}),
     ...(components.cliExecutor !== undefined ? { cliExecutor: components.cliExecutor } : {}),
     ...(components.checkpoint !== undefined ? { checkpoint: components.checkpoint } : {}),
     ...(components.prCreator !== undefined ? { prCreator: components.prCreator } : {}),
+    ...(components.refreshPlanTasks !== undefined ? { refreshPlanTasks: components.refreshPlanTasks } : {}),
     ...(components.runConfigOverrides !== undefined ? { runConfigOverrides: components.runConfigOverrides } : {}),
     ...(components.clock !== undefined ? { clock: components.clock } : {}),
   };

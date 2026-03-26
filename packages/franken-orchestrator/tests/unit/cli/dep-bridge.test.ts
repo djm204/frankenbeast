@@ -178,6 +178,11 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.skillsDir).toBe('./skills');
     });
 
+    it('enables reflection by default', () => {
+      const config = bridgeToBeastConfig(makeOptions({}));
+      expect(config.reflection).toBe(true);
+    });
+
     it('derives brain.dbPath from paths.buildDir', () => {
       const config = bridgeToBeastConfig(makeOptions({
         paths: makePaths({ buildDir: '/my/build' }),
@@ -233,11 +238,25 @@ describe('bridgeToExistingDeps()', () => {
     expect(result.checkpoint).toBe(checkpoint);
   });
 
+  it('passes through optional graphBuilder', () => {
+    const components = makeComponents();
+    const graphBuilder = { build: vi.fn() } as never;
+    const result = bridgeToExistingDeps({ ...components, graphBuilder });
+    expect(result.graphBuilder).toBe(graphBuilder);
+  });
+
   it('passes through optional prCreator', () => {
     const components = makeComponents();
     const prCreator = { create: vi.fn() } as never;
     const result = bridgeToExistingDeps({ ...components, prCreator });
     expect(result.prCreator).toBe(prCreator);
+  });
+
+  it('passes through optional refreshPlanTasks', () => {
+    const components = makeComponents();
+    const refreshPlanTasks = vi.fn() as never;
+    const result = bridgeToExistingDeps({ ...components, refreshPlanTasks });
+    expect(result.refreshPlanTasks).toBe(refreshPlanTasks);
   });
 
   it('passes through optional runConfigOverrides', () => {
