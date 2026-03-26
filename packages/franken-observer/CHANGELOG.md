@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.3...franken-observer-v0.5.0) (2026-03-26)
+
+
+### Features
+
+* **observer:** add audit trail schema, replayer, persistence (Phase 7) ([6ffef1f](https://github.com/djm204/frankenbeast/commit/6ffef1ff67dfaa4fb6ac8f402036f1d22b871c92))
+* Phase 7 — Observer Audit Trail ([ea50e97](https://github.com/djm204/frankenbeast/commit/ea50e97b7b4d88c3a0e7261be8d5b08bb630441e))
+
+
+### Bug Fixes
+
+* **observer:** handle empty string in audit event hashing and verification ([6acda86](https://github.com/djm204/frankenbeast/commit/6acda867229e737244368cf0f07d20e59c8378b4))
+
 ## [0.4.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.2...franken-observer-v0.4.3) (2026-03-15)
 
 
