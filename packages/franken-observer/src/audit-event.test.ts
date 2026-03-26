@@ -28,6 +28,16 @@ describe('createAuditEvent', () => {
     expect(event.outputHash).toBeUndefined();
   });
 
+  it('hashes empty string input (not treated as missing)', () => {
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: '' });
+    expect(event.inputHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it('hashes empty string output (not treated as missing)', () => {
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', output: '' });
+    expect(event.outputHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
   it('sets parentEventId for nested events', () => {
     const event = createAuditEvent('test', {}, {
       phase: 'p', provider: 'pr', parentEventId: 'parent-1',
@@ -100,5 +110,21 @@ describe('AuditTrail', () => {
     const result = trail.verify(contentMap);
     expect(result.valid).toBe(false);
     expect(result.mismatches).toHaveLength(1);
+  });
+
+  it('verify() checks empty string content against hash', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: '' });
+    trail.append(event);
+
+    // Correct empty string passes
+    const correctMap = new Map<string, string>();
+    correctMap.set(`${event.eventId}:input`, '');
+    expect(trail.verify(correctMap).valid).toBe(true);
+
+    // Non-empty content fails against empty-string hash
+    const wrongMap = new Map<string, string>();
+    wrongMap.set(`${event.eventId}:input`, 'not-empty');
+    expect(trail.verify(wrongMap).valid).toBe(false);
   });
 });

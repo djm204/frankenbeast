@@ -33,10 +33,10 @@ export function createAuditEvent(
     type,
     payload,
   };
-  if (options.input) {
+  if (options.input !== undefined) {
     event.inputHash = hashContent(options.input);
   }
-  if (options.output) {
+  if (options.output !== undefined) {
     event.outputHash = hashContent(options.output);
   }
   if (options.parentEventId) {
@@ -95,13 +95,13 @@ export class AuditTrail {
     for (const event of this.events) {
       if (event.inputHash) {
         const content = contentMap.get(`${event.eventId}:input`);
-        if (content && hashContent(content) !== event.inputHash) {
+        if (content !== undefined && hashContent(content) !== event.inputHash) {
           mismatches.push(`${event.eventId}: input hash mismatch`);
         }
       }
       if (event.outputHash) {
         const content = contentMap.get(`${event.eventId}:output`);
-        if (content && hashContent(content) !== event.outputHash) {
+        if (content !== undefined && hashContent(content) !== event.outputHash) {
           mismatches.push(`${event.eventId}: output hash mismatch`);
         }
       }
