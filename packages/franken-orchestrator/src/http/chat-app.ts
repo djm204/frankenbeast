@@ -22,6 +22,9 @@ import { TransportSecurityService } from './security/transport-security.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
+import type { SkillManager } from '../skills/skill-manager.js';
+import type { ProviderRegistry } from '../providers/provider-registry.js';
+import { createSkillRoutes } from './routes/skill-routes.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -49,6 +52,8 @@ export interface ChatAppOptions {
     getSecurityConfig: () => SecurityConfig;
     setSecurityConfig: (config: Partial<SecurityConfig>) => void;
   };
+  skillManager?: SkillManager;
+  providerRegistry?: ProviderRegistry;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -143,6 +148,12 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.securityConfig) {
     app.route('/api/security', createSecurityRoutes(opts.securityConfig));
+  }
+  if (opts.skillManager && opts.providerRegistry) {
+    app.route('/api/skills', createSkillRoutes({
+      skillManager: opts.skillManager,
+      providerRegistry: opts.providerRegistry,
+    }));
   }
 
   return app;
