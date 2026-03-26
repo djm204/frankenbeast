@@ -32,6 +32,9 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Whether to emit observability spans. */
   enableTracing: z.boolean().default(true),
 
+  /** Whether to run LLM-based reflection at phase boundaries. */
+  enableReflection: z.boolean().default(false),
+
   /** Minimum critique score to pass (0-1). */
   minCritiqueScore: z.number().min(0).max(1).default(0.7),
 
