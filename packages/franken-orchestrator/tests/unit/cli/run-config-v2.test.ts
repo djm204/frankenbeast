@@ -78,4 +78,27 @@ describe('mergeCliArgs', () => {
     const merged = mergeCliArgs(fileConfig, { provider: undefined });
     expect(merged.provider).toBe('claude');
   });
+
+  it('deep merges nested config objects', () => {
+    const fileConfig = parseRunConfig({
+      security: { profile: 'strict', allowedDomains: ['github.com'] },
+    });
+    const merged = mergeCliArgs(fileConfig, {
+      security: { piiMasking: false },
+    } as Partial<typeof fileConfig>);
+    // piiMasking overridden, but profile and allowedDomains preserved
+    expect(merged.security?.piiMasking).toBe(false);
+    expect(merged.security?.profile).toBe('strict');
+    expect(merged.security?.allowedDomains).toEqual(['github.com']);
+  });
+
+  it('arrays are replaced, not merged', () => {
+    const fileConfig = parseRunConfig({
+      skills: ['github', 'linear'],
+    });
+    const merged = mergeCliArgs(fileConfig, {
+      skills: ['custom-tool'],
+    });
+    expect(merged.skills).toEqual(['custom-tool']);
+  });
 });

@@ -5,6 +5,8 @@ import type {
 } from '../deps.js';
 import type { MiddlewareChain } from '../middleware/llm-middleware.js';
 import { InjectionDetectedError } from '../middleware/injection-detection.js';
+import { DomainBlockedError } from '../middleware/domain-allowlist.js';
+import { CustomRuleError } from '../middleware/custom-rule.js';
 
 /**
  * Adapts MiddlewareChain (Phase 4) to the IFirewallModule port.
@@ -31,19 +33,35 @@ export class MiddlewareChainFirewallAdapter implements IFirewallModule {
         blocked: false,
       };
     } catch (err) {
+      // Convert all known middleware blocking errors into FirewallResult
       if (err instanceof InjectionDetectedError) {
-        const violation: FirewallViolation = {
-          rule: 'injection-detection',
-          severity: 'block',
-          detail: err.message,
-        };
         return {
           sanitizedText: input,
-          violations: [violation],
+          violations: [{ rule: 'injection-detection', severity: 'block', detail: err.message }],
           blocked: true,
         };
       }
-      throw err;
+      if (err instanceof DomainBlockedError) {
+        return {
+          sanitizedText: input,
+          violations: [{ rule: 'domain-allowlist', severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      if (err instanceof CustomRuleError) {
+        return {
+          sanitizedText: input,
+          violations: [{ rule: `custom:${err.ruleName}`, severity: 'block', detail: err.message }],
+          blocked: true,
+        };
+      }
+      // Unknown errors still become blocks with structured reporting
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        sanitizedText: input,
+        violations: [{ rule: 'middleware-error', severity: 'block', detail: message }],
+        blocked: true,
+      };
     }
   }
 }

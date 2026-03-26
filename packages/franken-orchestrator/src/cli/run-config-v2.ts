@@ -83,18 +83,31 @@ export function parseRunConfig(raw: unknown): RunConfigV2 {
 
 /**
  * Merge CLI args into a run config with correct precedence.
- * CLI args override file config.
+ * CLI args override file config. Nested objects are deep-merged
+ * so partial overrides don't drop sibling fields.
  */
 export function mergeCliArgs(
   fileConfig: RunConfigV2,
   cliArgs: Partial<RunConfigV2>,
 ): RunConfigV2 {
-  const merged = { ...fileConfig };
+  const merged = { ...fileConfig } as Record<string, unknown>;
 
-  // CLI args override at top level
   for (const [key, value] of Object.entries(cliArgs)) {
-    if (value !== undefined) {
-      (merged as Record<string, unknown>)[key] = value;
+    if (value === undefined) continue;
+
+    const existing = merged[key];
+    // Deep merge plain objects (security, critique, brain)
+    if (
+      existing !== null &&
+      typeof existing === 'object' &&
+      !Array.isArray(existing) &&
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      merged[key] = { ...existing, ...value };
+    } else {
+      merged[key] = value;
     }
   }
 

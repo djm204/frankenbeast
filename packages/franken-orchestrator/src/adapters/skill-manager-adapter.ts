@@ -13,7 +13,7 @@ export class SkillManagerAdapter implements ISkillsModule {
   constructor(private readonly manager: SkillManager) {}
 
   hasSkill(skillId: string): boolean {
-    return this.manager.exists(skillId);
+    return this.manager.getEnabledSkills().includes(skillId);
   }
 
   getAvailableSkills(): readonly SkillDescriptor[] {
