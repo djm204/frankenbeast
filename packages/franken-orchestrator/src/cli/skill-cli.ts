@@ -27,8 +27,11 @@ export async function handleSkillCommand(deps: SkillCommandDeps): Promise<void> 
     }
     case 'add': {
       if (!target) throw new Error('skill add requires a name');
-      await skillManager.installCustom(target, { command: target, args: [] });
-      print(`Installed skill '${target}'`);
+      // Create the skill directory with a placeholder mcp.json.
+      // The user must edit mcp.json to set the correct command and args.
+      await skillManager.installCustom(target, { command: 'EDIT_ME', args: [] });
+      print(`Created skill '${target}' in skills directory.`);
+      print(`Edit skills/${target}/mcp.json to configure the MCP server command.`);
       return;
     }
     case 'remove': {

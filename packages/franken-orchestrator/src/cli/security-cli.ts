@@ -27,7 +27,7 @@ export async function handleSecurityCommand(deps: SecurityCommandDeps): Promise<
       if (!valid.includes(target)) {
         throw new Error(`Invalid security profile '${target}'. Valid: ${valid.join(', ')}`);
       }
-      print(`Security profile set to '${target}'. Apply via run-config or restart.`);
+      print(`To apply the '${target}' security profile, set "security.profile": "${target}" in your run-config.yaml or .frankenbeast/config.json.`);
       return;
     }
     default:

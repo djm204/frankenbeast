@@ -41,13 +41,16 @@ describe('handleSecurityCommand()', () => {
     expect(print).toHaveBeenCalledWith('  Output Validation: on');
   });
 
-  it('sets a valid profile', async () => {
+  it('prints config instructions for set', async () => {
     const print = vi.fn();
 
     await handleSecurityCommand({ action: 'set', target: 'strict', print });
 
     expect(print).toHaveBeenCalledWith(
-      expect.stringContaining("set to 'strict'"),
+      expect.stringContaining('security.profile'),
+    );
+    expect(print).toHaveBeenCalledWith(
+      expect.stringContaining('strict'),
     );
   });
 

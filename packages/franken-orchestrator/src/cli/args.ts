@@ -215,6 +215,14 @@ Examples:
   frankenbeast network config --set chat.model=claude-sonnet-4-6
   frankenbeast issues --label critical,high # fetch filtered issues
   frankenbeast issues --dry-run             # preview issue fetch
+  frankenbeast skill list                   # list installed skills
+  frankenbeast skill add my-tool            # scaffold a new skill
+  frankenbeast skill enable my-tool         # enable a skill
+  frankenbeast skill info my-tool           # show skill details
+  frankenbeast provider list                # list configured providers
+  frankenbeast provider test                # test provider availability
+  frankenbeast security status              # show security profile
+  frankenbeast security set strict          # change security profile
 `.trim();
 
 export function printUsage(): void {
@@ -335,6 +343,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       securityAction = actionCandidate as SecurityAction;
     }
     securityTarget = positionals[1];
+    if (securityAction === 'set' && securityTarget !== undefined) {
+      const validProfiles = new Set(['strict', 'standard', 'permissive']);
+      if (!validProfiles.has(securityTarget)) {
+        throw new TypeError(`Invalid security profile '${securityTarget}'. Valid: strict, standard, permissive`);
+      }
+    }
   } else if (subcommand === 'dashboard') {
     // dashboard has no actions — just starts the server
   } else if (positionals.length > 0) {

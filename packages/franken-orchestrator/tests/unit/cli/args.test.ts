@@ -464,6 +464,17 @@ describe('parseArgs', () => {
     it('throws on unknown security action', () => {
       expect(() => parseArgs(['security', 'bogus'])).toThrow('Unknown security action: bogus');
     });
+
+    it('throws on invalid security profile at parse time', () => {
+      expect(() => parseArgs(['security', 'set', 'invalid-profile'])).toThrow(/Invalid security profile/);
+    });
+
+    it('accepts valid security profiles at parse time', () => {
+      for (const profile of ['strict', 'standard', 'permissive']) {
+        const args = parseArgs(['security', 'set', profile]);
+        expect(args.securityTarget).toBe(profile);
+      }
+    });
   });
 
   describe('dashboard subcommand', () => {

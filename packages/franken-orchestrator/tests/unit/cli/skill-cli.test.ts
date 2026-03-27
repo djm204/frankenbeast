@@ -52,8 +52,9 @@ describe('handleSkillCommand()', () => {
 
     await handleSkillCommand({ skillManager, action: 'add', target: 'my-skill', print });
 
-    expect(installCustom).toHaveBeenCalledWith('my-skill', { command: 'my-skill', args: [] });
-    expect(print).toHaveBeenCalledWith("Installed skill 'my-skill'");
+    expect(installCustom).toHaveBeenCalledWith('my-skill', { command: 'EDIT_ME', args: [] });
+    expect(print).toHaveBeenCalledWith("Created skill 'my-skill' in skills directory.");
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('Edit skills/my-skill/mcp.json'));
   });
 
   it('throws when add has no target', async () => {
