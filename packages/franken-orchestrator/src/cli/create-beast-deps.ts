@@ -6,6 +6,7 @@ import {
   type SecurityProfile,
 } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
+import { SkillConfigStore } from '../skills/skill-config-store.js';
 import { AuditTrail, createAuditEvent } from '@frankenbeast/observer';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
@@ -54,6 +55,7 @@ export interface BeastDepsConfig {
     dbPath?: string;
   };
   skillsDir?: string;
+  configDir?: string;
   reflection?: boolean;
 }
 
@@ -118,9 +120,11 @@ export function createBeastDeps(
   const middlewareChain = buildMiddlewareChain(securityConfig);
 
   // 5. Skill manager
+  const configStore = new SkillConfigStore(config.configDir ?? '.frankenbeast');
   const skillManager = new SkillManager(
     config.skillsDir ?? './skills',
     new Set(),
+    configStore,
   );
 
   // 6. Adapters

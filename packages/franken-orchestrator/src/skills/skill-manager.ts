@@ -16,6 +16,7 @@ import type {
   ToolDefinition,
 } from '@franken/types';
 import { McpConfigSchema, SkillToolManifestSchema } from '@franken/types';
+import type { SkillConfigStore } from './skill-config-store.js';
 
 const SAFE_NAME = /^[a-zA-Z0-9_-]+$/;
 
@@ -25,9 +26,15 @@ export class SkillManager {
   constructor(
     private readonly skillsDir: string,
     enabledSkills: Set<string>,
+    private readonly configStore?: SkillConfigStore,
   ) {
     mkdirSync(skillsDir, { recursive: true });
-    this.enabledSkills = enabledSkills;
+    // Merge: constructor-provided set takes precedence, then persisted defaults
+    if (configStore && enabledSkills.size === 0) {
+      this.enabledSkills = configStore.getEnabledSkills();
+    } else {
+      this.enabledSkills = enabledSkills;
+    }
   }
 
   /**
@@ -97,10 +104,12 @@ export class SkillManager {
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
     this.enabledSkills.add(name);
+    this.configStore?.save(this.enabledSkills);
   }
 
   disable(name: string): void {
     this.enabledSkills.delete(name);
+    this.configStore?.save(this.enabledSkills);
   }
 
   remove(name: string): void {
