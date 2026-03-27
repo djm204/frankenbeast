@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.28.0...franken-orchestrator-v0.29.0) (2026-03-27)
+
+
+### Features
+
+* **orchestrator:** add skill/provider/security/dashboard CLI commands ([23bcc2f](https://github.com/djm204/frankenbeast/commit/23bcc2f8a788f7acac26045108eea0f7e401de11))
+* **orchestrator:** add skill/provider/security/dashboard CLI commands ([cd1ac1b](https://github.com/djm204/frankenbeast/commit/cd1ac1b189af357f59dbdbb8e5b8dde2a90f9509))
+
+
+### Bug Fixes
+
+* **orchestrator:** address CLI command review issues ([a9bc9a6](https://github.com/djm204/frankenbeast/commit/a9bc9a6834dee58b48be6b78a6a4dd0598120af5))
+
 ## [0.28.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.27.0...franken-orchestrator-v0.28.0) (2026-03-27)
 
 
