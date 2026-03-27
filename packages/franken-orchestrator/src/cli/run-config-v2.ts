@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CommsRunConfigSchema } from '../comms/config/comms-run-config.js';
 
 /**
  * Run Config v2 — consolidated schema for all Frankenbeast configuration.
@@ -69,6 +70,9 @@ export const RunConfigV2Schema = z
 
     // Brain/Memory
     brain: BrainConfigSchema.optional(),
+
+    // Communications
+    comms: CommsRunConfigSchema.optional(),
   })
   .passthrough();
 
@@ -96,7 +100,7 @@ export function mergeCliArgs(
     if (value === undefined) continue;
 
     const existing = merged[key];
-    // Deep merge plain objects (security, critique, brain)
+    // Deep merge plain objects (security, critique, brain, comms)
     if (
       existing !== null &&
       typeof existing === 'object' &&

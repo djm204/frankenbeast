@@ -118,4 +118,19 @@ describe('createBeastDeps()', () => {
     const deps = createBeastDeps(minimalConfig, mockExistingDeps());
     expect(deps.skillManager).toBeDefined();
   });
+
+  it('exposes getTokenUsage that delegates to ProviderRegistry', () => {
+    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
+    expect(deps.getTokenUsage).toBeTypeOf('function');
+
+    const usage = deps.getTokenUsage!();
+    expect(usage).toEqual(expect.objectContaining({
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+    }));
+    // Should be the same reference as registry.getTokenUsage()
+    const registryUsage = deps.providerRegistry!.getTokenUsage();
+    expect(usage).toEqual(registryUsage);
+  });
 });

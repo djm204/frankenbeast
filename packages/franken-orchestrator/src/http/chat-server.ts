@@ -12,6 +12,10 @@ import { attachChatWebSocketServer } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { BeastRoutesDeps } from './routes/beast-routes.js';
+import type { CommsConfig } from '../comms/config/comms-config.js';
+import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
+import type { SkillManager } from '../skills/skill-manager.js';
+import type { ProviderRegistry } from '../providers/provider-registry.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -32,6 +36,10 @@ export interface StartChatServerOptions {
     setConfig(config: OrchestratorConfig): void;
   };
   beastControl?: BeastRoutesDeps;
+  commsConfig?: CommsConfig;
+  commsRuntime?: CommsRuntimePort;
+  skillManager?: SkillManager;
+  providerRegistry?: ProviderRegistry;
 }
 
 export interface ChatServerHandle {
@@ -82,6 +90,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     sessionTokenSecret: tokenSecret,
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
+    ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
+    ...(options.commsRuntime ? { commsRuntime: options.commsRuntime } : {}),
+    ...(options.skillManager ? { skillManager: options.skillManager } : {}),
+    ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
   });
   const server = createServer((request, response) => {
     void handleHttpRequest(app, request, response);

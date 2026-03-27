@@ -24,6 +24,7 @@ import { GeminiApiAdapter } from '../providers/gemini-api-adapter.js';
 
 import type { BeastLoopDeps, IObserverModule } from '../deps.js';
 import type { ILlmProvider } from '@franken/types';
+import type { AggregatedTokenUsage } from '../providers/token-aggregator.js';
 
 // --- Config types ---
 
@@ -77,6 +78,7 @@ export type ConsolidatedDeps = BeastLoopDeps & {
   auditTrail?: AuditTrail;
   middlewareChain?: ReturnType<typeof buildMiddlewareChain>;
   skillManager?: SkillManager;
+  getTokenUsage?: () => AggregatedTokenUsage;
 };
 
 /**
@@ -151,6 +153,7 @@ export function createBeastDeps(
     auditTrail,
     middlewareChain,
     skillManager,
+    getTokenUsage: () => registry.getTokenUsage(),
 
     // Optional pass-through deps (spread conditionally)
     ...(existingDeps.graphBuilder ? { graphBuilder: existingDeps.graphBuilder } : {}),

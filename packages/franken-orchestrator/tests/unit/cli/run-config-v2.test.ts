@@ -3,6 +3,7 @@ import {
   RunConfigV2Schema,
   parseRunConfig,
   mergeCliArgs,
+  type RunConfigV2,
 } from '../../../src/cli/run-config-v2.js';
 
 describe('RunConfigV2Schema', () => {
@@ -36,8 +37,22 @@ describe('RunConfigV2Schema', () => {
       brain: {
         dbPath: '/tmp/brain.db',
       },
+      comms: {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 3201,
+        channels: {
+          slack: { enabled: true },
+        },
+      },
     };
-    expect(parseRunConfig(config)).toEqual(config);
+    const parsed = parseRunConfig(config);
+    // comms has defaults applied for missing channel fields, so check known fields
+    expect(parsed.provider).toBe('claude');
+    expect(parsed.comms!.enabled).toBe(true);
+    expect(parsed.comms!.host).toBe('0.0.0.0');
+    expect(parsed.comms!.port).toBe(3201);
+    expect(parsed.comms!.channels.slack.enabled).toBe(true);
   });
 
   it('rejects invalid provider type', () => {
@@ -57,6 +72,41 @@ describe('RunConfigV2Schema', () => {
   it('allows passthrough of unknown fields', () => {
     const config = parseRunConfig({ customField: 'value' });
     expect((config as Record<string, unknown>)['customField']).toBe('value');
+  });
+
+  it('parses comms config with enabled flag', () => {
+    const config = parseRunConfig({ comms: { enabled: true } });
+    expect(config.comms).toBeDefined();
+    expect(config.comms!.enabled).toBe(true);
+  });
+
+  it('parses comms config with channels', () => {
+    const config = parseRunConfig({
+      comms: {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 3201,
+        channels: {
+          slack: { enabled: true },
+          telegram: { enabled: true, botTokenRef: 'MY_TG_TOKEN' },
+        },
+      },
+    });
+    expect(config.comms!.enabled).toBe(true);
+    expect(config.comms!.host).toBe('0.0.0.0');
+    expect(config.comms!.port).toBe(3201);
+    expect(config.comms!.channels.slack.enabled).toBe(true);
+    expect(config.comms!.channels.telegram.botTokenRef).toBe('MY_TG_TOKEN');
+    // defaults applied for disabled channels
+    expect(config.comms!.channels.discord.enabled).toBe(false);
+  });
+
+  it('applies comms defaults when empty object provided', () => {
+    const config = parseRunConfig({ comms: {} });
+    expect(config.comms!.enabled).toBe(false);
+    expect(config.comms!.host).toBe('127.0.0.1');
+    expect(config.comms!.port).toBe(3200);
+    expect(config.comms!.channels.slack.enabled).toBe(false);
   });
 });
 
@@ -100,5 +150,21 @@ describe('mergeCliArgs', () => {
       skills: ['custom-tool'],
     });
     expect(merged.skills).toEqual(['custom-tool']);
+  });
+
+  it('deep merges comms config', () => {
+    const fileConfig = parseRunConfig({
+      comms: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 3200,
+      },
+    });
+    const merged = mergeCliArgs(fileConfig, {
+      comms: { port: 4000 },
+    } as Partial<RunConfigV2>);
+    expect(merged.comms!.enabled).toBe(true);
+    expect(merged.comms!.host).toBe('127.0.0.1');
+    expect(merged.comms!.port).toBe(4000);
   });
 });

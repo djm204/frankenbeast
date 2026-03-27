@@ -106,10 +106,29 @@ vi.mock('../../../src/session/chunk-session-gc.js', () => ({
   }),
 }));
 
-vi.mock('../../../src/adapters/episodic-memory-port-adapter.js', () => ({
-  EpisodicMemoryPortAdapter: vi.fn(function () {
-    return { hydrate: vi.fn(async () => ({ context: '' })) };
-  }),
+vi.mock('../../../src/cli/dep-bridge.js', () => ({
+  bridgeToBeastConfig: vi.fn(() => ({ providers: [{ name: 'claude', type: 'claude-cli' }] })),
+  bridgeToExistingDeps: vi.fn((components: Record<string, unknown>) => components),
+}));
+
+vi.mock('../../../src/cli/create-beast-deps.js', () => ({
+  createBeastDeps: vi.fn((_config: unknown, existing: Record<string, unknown>) => ({
+    firewall: { runPipeline: vi.fn(async (input: string) => ({ sanitizedText: input, violations: [], blocked: false })) },
+    skills: { hasSkill: vi.fn(() => false), getAvailableSkills: vi.fn(() => []), execute: vi.fn() },
+    memory: { frontload: vi.fn(), getContext: vi.fn(async () => ({ adrs: [], knownErrors: [], rules: [] })), recordTrace: vi.fn() },
+    heartbeat: { pulse: vi.fn(async () => ({ improvements: [], techDebt: [], summary: '' })) },
+    observer: existing.observer,
+    planner: existing.planner,
+    critique: existing.critique,
+    governor: existing.governor,
+    logger: existing.logger,
+    clock: existing.clock ?? (() => new Date()),
+    ...(existing.cliExecutor ? { cliExecutor: existing.cliExecutor } : {}),
+    ...(existing.checkpoint ? { checkpoint: existing.checkpoint } : {}),
+    ...(existing.prCreator ? { prCreator: existing.prCreator } : {}),
+    ...(existing.runConfigOverrides ? { runConfigOverrides: existing.runConfigOverrides } : {}),
+    sqliteBrain: { close: vi.fn() },
+  })),
 }));
 
 vi.mock('../../../src/issues/issue-fetcher.js', () => ({

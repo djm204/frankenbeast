@@ -16,8 +16,9 @@ import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
-import { EpisodicMemoryPortAdapter } from '../adapters/episodic-memory-port-adapter.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
+import { bridgeToBeastConfig, bridgeToExistingDeps } from './dep-bridge.js';
+import { createBeastDeps, type ConsolidatedDeps } from './create-beast-deps.js';
 import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
 import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -29,8 +30,7 @@ import { IssueRunner, type IssueRuntimeSupport, type IssueRuntimeArtifacts } fro
 import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
-  BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
-  IPlannerModule, ICritiqueModule, IGovernorModule, IHeartbeatModule,
+  BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
 } from '../deps.js';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
@@ -102,14 +102,6 @@ export interface CliDeps {
 
 // ── Passthrough Stubs ──
 
-const stubFirewall: IFirewallModule = {
-  runPipeline: async (input) => ({ sanitizedText: input, violations: [], blocked: false }),
-};
-const stubMemory: IMemoryModule = {
-  frontload: async () => {},
-  getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }),
-  recordTrace: async () => {},
-};
 const stubPlanner: IPlannerModule = {
   createPlan: async () => { throw new Error('Planner not available in CLI mode; use graphBuilder'); },
 };
@@ -119,28 +111,6 @@ const stubCritique: ICritiqueModule = {
 const stubGovernor: IGovernorModule = {
   requestApproval: async () => ({ decision: 'approved' as const }),
 };
-const stubHeartbeat: IHeartbeatModule = {
-  pulse: async () => ({ improvements: [], techDebt: [], summary: '' }),
-};
-
-function createStubSkills(planDir: string): ISkillsModule {
-  return {
-    hasSkill: (id: string) => id.startsWith('cli:'),
-    getAvailableSkills: () => {
-      try {
-        return readdirSync(planDir)
-          .filter((f) => f.endsWith('.md') && !f.startsWith('00_') && /^\d{2}/.test(f))
-          .map((f) => ({
-            id: `cli:${f.replace('.md', '')}`,
-            name: f.replace('.md', ''),
-            executionType: 'cli' as const,
-            requiresHitl: false,
-          }));
-      } catch { return []; }
-    },
-    execute: async () => { throw new Error('No skills in CLI mode'); },
-  };
-}
 
 function issueArtifactsFor(paths: ProjectPaths, issueNumber: number): IssueRuntimeArtifacts {
   const planName = `issue-${issueNumber}`;
@@ -292,31 +262,6 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     workPrefix: `plan:${planName}`,
     observer: observerBridge.observerDeps as never,
   });
-
-  // TODO: Phase 4 — LlmMiddleware replaces firewall module
-  const firewall: IFirewallModule = stubFirewall;
-
-  // TODO: Phase 5 — SkillManager replaces static skill registry with marketplace-first MCP loading
-  const skills: ISkillsModule = createStubSkills(options.planDirOverride ?? paths.plansDir);
-
-  // Memory (dynamic import — optional module)
-  let memory: IMemoryModule = stubMemory;
-  if (modules.memory) {
-    try {
-      const { EpisodicMemoryStore } = await import('franken-brain');
-      const Database = (await import('better-sqlite3')).default;
-      const memoryDbPath = resolve(paths.buildDir, 'memory.db');
-      const memoryDb = new Database(memoryDbPath);
-      const episodicStore = new EpisodicMemoryStore(memoryDb);
-      memory = new EpisodicMemoryPortAdapter({
-        episodicStore,
-        projectId: basename(paths.root),
-        projectRoot: paths.root,
-      });
-    } catch (error) {
-      logger.warn(`Memory module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
-    }
-  }
 
   // Critique (dynamic import — optional module)
   let critique: ICritiqueModule = stubCritique;
@@ -470,15 +415,6 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     }
   }
 
-  // Apply skills filter from RunConfig (only expose allowed skills)
-  const filteredSkills: ISkillsModule = effectiveSkills?.length
-    ? {
-        hasSkill: (id: string) => effectiveSkills.includes(id) && skills.hasSkill(id),
-        getAvailableSkills: () => skills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
-        execute: skills.execute,
-      }
-    : skills;
-
   // Build RunConfig overrides for downstream consumption by beast loop phases
   // Note: mergeStrategy is wired directly via GitIsolationConfig, not through runConfigOverrides.
   // llmOverrides and promptConfig are parsed by RunConfigSchema for forward compatibility
@@ -488,21 +424,67 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       ? { allowedSkills: effectiveSkills }
       : undefined;
 
-  const deps: BeastLoopDeps = {
-    firewall,
-    skills: filteredSkills,
-    memory,
+  // Use the new consolidated component factory for module adapters
+  const beastConfig = bridgeToBeastConfig(options);
+  const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,
-    observer: observerBridge,
     critique,
     governor,
-    heartbeat: stubHeartbeat,
+    observer: observerBridge,
     logger,
-    clock: () => new Date(),
     cliExecutor,
     checkpoint,
     ...(prCreator ? { prCreator } : {}),
     ...(runConfigOverrides ? { runConfigOverrides } : {}),
+  });
+
+  let consolidated: ConsolidatedDeps;
+  try {
+    consolidated = createBeastDeps(beastConfig, existingDeps);
+  } catch (error) {
+    logger.warn(
+      `createBeastDeps failed, falling back to passthrough deps: ${error instanceof Error ? error.message : String(error)}`,
+      'dep-factory',
+    );
+    // Fallback: passthrough stubs for modules that createBeastDeps would provide
+    consolidated = {
+      firewall: { runPipeline: async (input) => ({ sanitizedText: input, violations: [], blocked: false }) },
+      skills: { hasSkill: () => false, getAvailableSkills: () => [], execute: async () => { throw new Error('Skills unavailable'); } },
+      memory: { frontload: async () => {}, getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }), recordTrace: async () => {} },
+      heartbeat: { pulse: async () => ({ improvements: [], techDebt: [], summary: '' }) },
+      planner: stubPlanner,
+      observer: observerBridge,
+      critique,
+      governor,
+      logger,
+      clock: () => new Date(),
+      ...(prCreator ? { prCreator } : {}),
+      ...(runConfigOverrides ? { runConfigOverrides } : {}),
+    } as ConsolidatedDeps;
+  }
+
+  // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']
+  // which the beast loop validates via hasSkill(). SkillManagerAdapter doesn't know about cli:*
+  // skills — they're a CLI-specific convention, not real skill directory entries.
+  const baseSkills = consolidated.skills;
+  const cliSkillCompat = (id: string) => id.startsWith('cli:');
+
+  // Apply RunConfig skills filter if present, always preserving cli:* compatibility
+  const skills = effectiveSkills?.length
+    ? {
+        hasSkill: (id: string) => cliSkillCompat(id) || (effectiveSkills.includes(id) && baseSkills.hasSkill(id)),
+        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
+        execute: baseSkills.execute,
+      }
+    : {
+        hasSkill: (id: string) => cliSkillCompat(id) || baseSkills.hasSkill(id),
+        getAvailableSkills: () => baseSkills.getAvailableSkills(),
+        execute: baseSkills.execute,
+      };
+
+  const deps: BeastLoopDeps = {
+    ...consolidated,
+    skills,
   };
 
   // Issue pipeline deps (only created when issueIO is provided)
@@ -536,6 +518,13 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       issueRuntime,
     };
   }
+
+  // Augment finalize to close SqliteBrain
+  const previousFinalizeForBrain = finalize;
+  finalize = async () => {
+    try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
+    await previousFinalizeForBrain();
+  };
 
   return { deps, cliLlmAdapter, observerBridge, logger, finalize, issueDeps };
 }
