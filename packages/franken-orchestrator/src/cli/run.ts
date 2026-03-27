@@ -8,6 +8,10 @@ import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
 import { handleInitCommand } from './init-command.js';
+import { handleSkillCommand } from './skill-cli.js';
+import { handleProviderCommand } from './provider-cli.js';
+import { handleSecurityCommand } from './security-cli.js';
+import { handleDashboardCommand } from './dashboard-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -262,6 +266,46 @@ export async function main(): Promise<void> {
       config,
       io: createStdinIO(),
       paths,
+      print: console.log,
+    });
+    return;
+  }
+
+  if (args.subcommand === 'skill') {
+    const { SkillManager } = await import('../skills/skill-manager.js');
+    const skillsDir = join(paths.frankenbeastDir, 'skills');
+    const skillManager = new SkillManager(skillsDir, new Set());
+    await handleSkillCommand({
+      skillManager,
+      action: args.skillAction,
+      target: args.skillTarget,
+      print: console.log,
+    });
+    return;
+  }
+
+  if (args.subcommand === 'provider') {
+    await handleProviderCommand({
+      registry: { getProviders: () => [] } as never,
+      action: args.providerAction,
+      target: args.providerTarget,
+      print: console.log,
+    });
+    return;
+  }
+
+  if (args.subcommand === 'security') {
+    await handleSecurityCommand({
+      action: args.securityAction,
+      target: args.securityTarget,
+      print: console.log,
+    });
+    return;
+  }
+
+  if (args.subcommand === 'dashboard') {
+    await handleDashboardCommand({
+      startServer: async () => ({ url: 'http://localhost:3838' }),
       print: console.log,
     });
     return;

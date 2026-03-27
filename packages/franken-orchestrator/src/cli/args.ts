@@ -10,6 +10,10 @@ export type Subcommand =
   | 'chat'
   | 'chat-server'
   | 'network'
+  | 'skill'
+  | 'provider'
+  | 'security'
+  | 'dashboard'
   | undefined;
 
 export type NetworkAction =
@@ -35,6 +39,10 @@ export type BeastAction =
   | 'restart'
   | undefined;
 
+export type SkillAction = 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
+export type ProviderAction = 'list' | 'add' | 'remove' | 'test' | undefined;
+export type SecurityAction = 'status' | 'set' | undefined;
+
 export interface CliArgs {
   subcommand: Subcommand;
   beastAction?: BeastAction;
@@ -43,6 +51,12 @@ export interface CliArgs {
   networkTarget?: string | undefined;
   networkDetached: boolean;
   networkSet?: string[] | undefined;
+  skillAction?: SkillAction;
+  skillTarget?: string | undefined;
+  providerAction?: ProviderAction;
+  providerTarget?: string | undefined;
+  securityAction?: SecurityAction;
+  securityTarget?: string | undefined;
   baseDir: string;
   baseBranch?: string | undefined;
   budget: number;
@@ -78,9 +92,12 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'provider', 'security', 'dashboard']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart']);
+const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
+const VALID_PROVIDER_ACTIONS = new Set(['list', 'add', 'remove', 'test']);
+const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -95,6 +112,10 @@ Subcommands:
   chat                    Interactive chat REPL with ConversationEngine
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
   network                 Manage Frankenbeast request-serving services
+  skill                   Manage MCP skill plugins
+  provider                Manage LLM providers
+  security                View or change security profile
+  dashboard               Launch the dashboard server
 
 Options:
   --base-dir <path>       Project root (default: cwd)
@@ -150,6 +171,24 @@ Beast Commands:
   beasts kill <run-id>                Force-stop a Beast
   beasts restart <run-id>             Restart a Beast with a new attempt
 
+Skill Commands:
+  skill list                          List installed skills
+  skill add <name>                    Install a custom skill
+  skill remove <name>                 Remove an installed skill
+  skill enable <name>                 Enable a skill
+  skill disable <name>                Disable a skill
+  skill info <name>                   Show skill details (MCP config, tools)
+
+Provider Commands:
+  provider list                       List configured providers
+  provider add                        Show config instructions
+  provider remove                     Show config instructions
+  provider test [name]                Test provider availability
+
+Security Commands:
+  security status                     Show current security profile settings
+  security set <profile>              Set security profile (strict|standard|permissive)
+
 Module Toggles (for beasts spawn):
   --no-firewall                       Disable firewall module
   --no-skills                         Disable skills module
@@ -188,7 +227,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network';
+    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network' | 'skill' | 'provider' | 'security' | 'dashboard';
     flagArgs = argv.slice(1);
   }
 
@@ -244,6 +283,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let networkTarget: string | undefined;
   let beastAction: BeastAction;
   let beastTarget: string | undefined;
+  let skillAction: SkillAction;
+  let skillTarget: string | undefined;
+  let providerAction: ProviderAction;
+  let providerTarget: string | undefined;
+  let securityAction: SecurityAction;
+  let securityTarget: string | undefined;
 
   if (subcommand === 'network') {
     const actionCandidate = positionals[0];
@@ -263,6 +308,35 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       beastAction = actionCandidate as BeastAction;
     }
     beastTarget = positionals[1];
+  } else if (subcommand === 'skill') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_SKILL_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown skill action: ${actionCandidate}`);
+      }
+      skillAction = actionCandidate as SkillAction;
+    }
+    skillTarget = positionals[1];
+  } else if (subcommand === 'provider') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_PROVIDER_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown provider action: ${actionCandidate}`);
+      }
+      providerAction = actionCandidate as ProviderAction;
+    }
+    providerTarget = positionals[1];
+  } else if (subcommand === 'security') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_SECURITY_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown security action: ${actionCandidate}`);
+      }
+      securityAction = actionCandidate as SecurityAction;
+    }
+    securityTarget = positionals[1];
+  } else if (subcommand === 'dashboard') {
+    // dashboard has no actions — just starts the server
   } else if (positionals.length > 0) {
     throw new TypeError(`Unexpected argument '${positionals[0]}'. This command does not take positional arguments`);
   }
@@ -321,6 +395,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     networkTarget,
     networkDetached: values.detached ?? false,
     networkSet: values.set,
+    skillAction,
+    skillTarget,
+    providerAction,
+    providerTarget,
+    securityAction,
+    securityTarget,
     baseDir: values['base-dir'] ?? process.cwd(),
     baseBranch: values['base-branch'],
     budget: values.budget ? parseFloat(values.budget) : 10,
