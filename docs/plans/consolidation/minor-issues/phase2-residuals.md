@@ -6,13 +6,11 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 ## M1. Legacy code retained in franken-brain
 
-**Status:** Open (intentional)
+**Status:** Resolved (PR #264, Chunk B)
 **Severity:** Medium
 **Context:** The Phase 2.4 spec says "src/ contains only sqlite-brain.ts and index.ts." In practice, `src/episodic/` (EpisodicMemoryStore, IEpisodicStore, migrations) and `src/types/` (memory.ts, ids.ts, token-budget.ts) were retained because `franken-orchestrator/src/dep-factory.ts` imports `EpisodicMemoryStore` at runtime.
 
-**Why kept:** Deleting these would break the orchestrator. Phase 8 (dep-factory rewiring) explicitly handles switching orchestrator imports to SqliteBrain.
-
-**Fix:** Remove in Phase 8 when dep-factory.ts is rewired to use `SqliteBrain`.
+**Resolution:** Deleted in Chunk B after Chunk A (#262) wired `createBeastDeps()` into dep-factory, replacing `EpisodicMemoryPortAdapter` with `SqliteBrainMemoryAdapter`.
 
 **Affected files:**
 - `packages/franken-brain/src/episodic/`
@@ -23,11 +21,11 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 ## M2. Extra dependencies retained (ulid, zod v4)
 
-**Status:** Open (intentional)
+**Status:** Resolved (PR #264, Chunk B)
 **Severity:** Medium
 **Context:** `ulid` and `zod@^4.3.6` remain in franken-brain's package.json solely because the legacy episodic/types code uses them. SqliteBrain itself only depends on `better-sqlite3` and `@franken/types`.
 
-**Fix:** Remove when legacy code is deleted in Phase 8.
+**Resolution:** Removed `ulid` and `zod` from package.json in Chunk B alongside legacy code deletion.
 
 **Affected files:**
 - `packages/franken-brain/package.json`
@@ -120,8 +118,8 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 | ID | Severity | Blocks Phase 2? | Resolution |
 |----|----------|-----------------|------------|
-| M1 | Medium | No | Phase 8 |
-| M2 | Medium | No | Phase 8 |
+| M1 | Medium | No | **Resolved** — PR #264 |
+| M2 | Medium | No | **Resolved** — PR #264 |
 | I1 | Info | No | By design |
 | I2 | Info | No | Optional config |
 | I3 | Info | No | Optional enhancement |
