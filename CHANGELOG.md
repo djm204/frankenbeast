@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.30.1](https://github.com/djm204/frankenbeast/compare/v0.30.0...v0.30.1) (2026-03-27)
+
+
+### Refactoring
+
+* **brain:** delete legacy episodic memory and types ([c627d6a](https://github.com/djm204/frankenbeast/commit/c627d6ae2e878f454dbbeacda32974c2d12ea393))
+* **brain:** delete legacy episodic memory and types ([e620c62](https://github.com/djm204/frankenbeast/commit/e620c622d3fb25b338e5ce7e5417f82be61163d0))
+* **orchestrator:** migrate dep-factory to consolidated components ([e432b6d](https://github.com/djm204/frankenbeast/commit/e432b6dd845a059e292df70aba3f18c47f9cafe8))
+
+
+### Documentation
+
+* add Chunk A residual issues ([51ba39e](https://github.com/djm204/frankenbeast/commit/51ba39eb81945e201bd7cb1be814ab2def6e901d))
+* add residuals master plan and chunk breakdown ([26b8d18](https://github.com/djm204/frankenbeast/commit/26b8d185ce731775280a1e8cd632622dbfc06cd2))
+* mark Phase 2 M1/M2 residuals as resolved ([b980eee](https://github.com/djm204/frankenbeast/commit/b980eeed164af2e965d84f2aad120f6788b78110))
+
 ## [0.30.0](https://github.com/djm204/frankenbeast/compare/v0.29.0...v0.30.0) (2026-03-26)
 
 
