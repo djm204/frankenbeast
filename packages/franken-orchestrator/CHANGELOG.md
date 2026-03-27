@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.28.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.27.0...franken-orchestrator-v0.28.0) (2026-03-27)
+
+
+### Features
+
+* **orchestrator:** add comms config, token aggregation, delete EpisodicMemoryPortAdapter ([5eba2a8](https://github.com/djm204/frankenbeast/commit/5eba2a8bb5a9867c10fee361dec59c6112c18bfe))
+* **orchestrator:** mount skill routes in chat-app when skillManager provided ([9ae5889](https://github.com/djm204/frankenbeast/commit/9ae58893669c4a4c837ed5aad1cd7df1a22970ce))
+* **orchestrator:** pass commsConfig through startChatServer to createChatApp ([fba06ca](https://github.com/djm204/frankenbeast/commit/fba06ca4f4b6024ec3010aeee660eb91be8de636))
+
+
+### Bug Fixes
+
+* **orchestrator:** preserve cli:* skill compatibility in consolidated deps ([b0231c5](https://github.com/djm204/frankenbeast/commit/b0231c5250ebb6bb5b97726929835ea64970d11e))
+
+
+### Refactoring
+
+* **orchestrator:** migrate dep-factory to consolidated components ([e432b6d](https://github.com/djm204/frankenbeast/commit/e432b6dd845a059e292df70aba3f18c47f9cafe8))
+* **orchestrator:** wire createBeastDeps into dep-factory replacing stubs ([50184a3](https://github.com/djm204/frankenbeast/commit/50184a309f416b49243bf4ca5ae1b133771ca5ad))
+
 ## [0.27.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.26.0...franken-orchestrator-v0.27.0) (2026-03-26)
 
 
