@@ -463,18 +463,28 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     } as ConsolidatedDeps;
   }
 
-  // The consolidated deps include real modules (firewall, memory, skills, heartbeat, observer)
-  // plus all the pass-through deps. Override with filtered skills if needed.
+  // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']
+  // which the beast loop validates via hasSkill(). SkillManagerAdapter doesn't know about cli:*
+  // skills — they're a CLI-specific convention, not real skill directory entries.
+  const baseSkills = consolidated.skills;
+  const cliSkillCompat = (id: string) => id.startsWith('cli:');
+
+  // Apply RunConfig skills filter if present, always preserving cli:* compatibility
+  const skills = effectiveSkills?.length
+    ? {
+        hasSkill: (id: string) => cliSkillCompat(id) || (effectiveSkills.includes(id) && baseSkills.hasSkill(id)),
+        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
+        execute: baseSkills.execute,
+      }
+    : {
+        hasSkill: (id: string) => cliSkillCompat(id) || baseSkills.hasSkill(id),
+        getAvailableSkills: () => baseSkills.getAvailableSkills(),
+        execute: baseSkills.execute,
+      };
+
   const deps: BeastLoopDeps = {
     ...consolidated,
-    // Apply skills filter from RunConfig if present
-    ...(effectiveSkills?.length ? {
-      skills: {
-        hasSkill: (id: string) => effectiveSkills.includes(id) && consolidated.skills.hasSkill(id),
-        getAvailableSkills: () => consolidated.skills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
-        execute: consolidated.skills.execute,
-      },
-    } : {}),
+    skills,
   };
 
   // Issue pipeline deps (only created when issueIO is provided)

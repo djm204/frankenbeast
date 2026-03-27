@@ -236,12 +236,36 @@ describe('dep-factory wiring integration', () => {
 
     // All module ports populated with real consolidated adapters
     expect(deps.firewall).toBeInstanceOf(MiddlewareChainFirewallAdapter);
-    expect(deps.skills).toBeInstanceOf(SkillManagerAdapter);
+    // Skills is wrapped for cli:* compat, but delegates to SkillManagerAdapter
+    expect(deps.skills.hasSkill).toBeTypeOf('function');
     expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
     expect(deps.heartbeat).toBeInstanceOf(ReflectionHeartbeatAdapter);
     expect(deps.planner).toBeDefined();
     expect(deps.critique).toBeDefined();
     expect(deps.governor).toBeDefined();
+    await finalize();
+  });
+
+  it('preserves cli:* skill compatibility for chunk execution', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { deps, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+    });
+
+    // ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunkId>'] and the beast loop
+    // validates via hasSkill(). The old stub returned true for cli:* prefixed IDs.
+    expect(deps.skills.hasSkill('cli:01_setup')).toBe(true);
+    expect(deps.skills.hasSkill('cli:some-chunk')).toBe(true);
+    // Non-cli skills delegate to SkillManagerAdapter (which checks the skills directory)
+    expect(deps.skills.hasSkill('nonexistent-skill')).toBe(false);
     await finalize();
   });
 
