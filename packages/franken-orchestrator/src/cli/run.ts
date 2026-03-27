@@ -8,6 +8,8 @@ import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
 import { handleInitCommand } from './init-command.js';
+import { handleSkillCommand } from './skill-cli.js';
+import { handleSecurityCommand } from './security-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -264,6 +266,50 @@ export async function main(): Promise<void> {
       paths,
       print: console.log,
     });
+    return;
+  }
+
+  if (args.subcommand === 'skill') {
+    try {
+      const { SkillManager } = await import('../skills/skill-manager.js');
+      const skillsDir = join(paths.frankenbeastDir, 'skills');
+      const skillManager = new SkillManager(skillsDir, new Set());
+      await handleSkillCommand({
+        skillManager,
+        action: args.skillAction,
+        target: args.skillTarget,
+        print: console.log,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (args.subcommand === 'provider') {
+    console.log('Provider management is not yet wired to the CLI.');
+    console.log('Configure providers in .frankenbeast/config.json or run-config.yaml.');
+    return;
+  }
+
+  if (args.subcommand === 'security') {
+    try {
+      await handleSecurityCommand({
+        action: args.securityAction,
+        target: args.securityTarget,
+        print: console.log,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (args.subcommand === 'dashboard') {
+    console.log('Dashboard is not yet available as a standalone command.');
+    console.log('Use "frankenbeast chat-server" to start the web UI.');
     return;
   }
 

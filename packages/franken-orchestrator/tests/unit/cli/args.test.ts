@@ -210,7 +210,7 @@ describe('parseArgs', () => {
     expect(args.help).toBe(true);
   });
 
-  it('prints usage text including init, network, and chat-server', () => {
+  it('prints usage text including init, network, chat-server, skill, provider, security, and dashboard', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     printUsage();
@@ -219,6 +219,10 @@ describe('parseArgs', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('init'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('network'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('beasts'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('skill'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('provider'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('security'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('dashboard'));
     logSpy.mockRestore();
   });
 
@@ -344,6 +348,139 @@ describe('parseArgs', () => {
         expect.stringContaining('--design-doc'),
       );
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('skill subcommand', () => {
+    it('parses skill list command', () => {
+      const args = parseArgs(['skill', 'list']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('list');
+    });
+
+    it('parses skill add with target', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+    });
+
+    it('parses skill remove with target', () => {
+      const args = parseArgs(['skill', 'remove', 'old-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('remove');
+      expect(args.skillTarget).toBe('old-skill');
+    });
+
+    it('parses skill enable with target', () => {
+      const args = parseArgs(['skill', 'enable', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('enable');
+      expect(args.skillTarget).toBe('my-skill');
+    });
+
+    it('parses skill disable with target', () => {
+      const args = parseArgs(['skill', 'disable', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('disable');
+      expect(args.skillTarget).toBe('my-skill');
+    });
+
+    it('parses skill info with target', () => {
+      const args = parseArgs(['skill', 'info', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('info');
+      expect(args.skillTarget).toBe('my-skill');
+    });
+
+    it('parses bare skill subcommand with no action', () => {
+      const args = parseArgs(['skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBeUndefined();
+    });
+
+    it('throws on unknown skill action', () => {
+      expect(() => parseArgs(['skill', 'bogus'])).toThrow('Unknown skill action: bogus');
+    });
+  });
+
+  describe('provider subcommand', () => {
+    it('parses provider list command', () => {
+      const args = parseArgs(['provider', 'list']);
+      expect(args.subcommand).toBe('provider');
+      expect(args.providerAction).toBe('list');
+    });
+
+    it('parses provider test with target', () => {
+      const args = parseArgs(['provider', 'test', 'claude']);
+      expect(args.subcommand).toBe('provider');
+      expect(args.providerAction).toBe('test');
+      expect(args.providerTarget).toBe('claude');
+    });
+
+    it('parses provider add', () => {
+      const args = parseArgs(['provider', 'add']);
+      expect(args.subcommand).toBe('provider');
+      expect(args.providerAction).toBe('add');
+    });
+
+    it('parses provider remove', () => {
+      const args = parseArgs(['provider', 'remove']);
+      expect(args.subcommand).toBe('provider');
+      expect(args.providerAction).toBe('remove');
+    });
+
+    it('parses bare provider subcommand with no action', () => {
+      const args = parseArgs(['provider']);
+      expect(args.subcommand).toBe('provider');
+      expect(args.providerAction).toBeUndefined();
+    });
+
+    it('throws on unknown provider action', () => {
+      expect(() => parseArgs(['provider', 'bogus'])).toThrow('Unknown provider action: bogus');
+    });
+  });
+
+  describe('security subcommand', () => {
+    it('parses security status command', () => {
+      const args = parseArgs(['security', 'status']);
+      expect(args.subcommand).toBe('security');
+      expect(args.securityAction).toBe('status');
+    });
+
+    it('parses security set with target', () => {
+      const args = parseArgs(['security', 'set', 'strict']);
+      expect(args.subcommand).toBe('security');
+      expect(args.securityAction).toBe('set');
+      expect(args.securityTarget).toBe('strict');
+    });
+
+    it('parses bare security subcommand with no action', () => {
+      const args = parseArgs(['security']);
+      expect(args.subcommand).toBe('security');
+      expect(args.securityAction).toBeUndefined();
+    });
+
+    it('throws on unknown security action', () => {
+      expect(() => parseArgs(['security', 'bogus'])).toThrow('Unknown security action: bogus');
+    });
+
+    it('throws on invalid security profile at parse time', () => {
+      expect(() => parseArgs(['security', 'set', 'invalid-profile'])).toThrow(/Invalid security profile/);
+    });
+
+    it('accepts valid security profiles at parse time', () => {
+      for (const profile of ['strict', 'standard', 'permissive']) {
+        const args = parseArgs(['security', 'set', profile]);
+        expect(args.securityTarget).toBe(profile);
+      }
+    });
+  });
+
+  describe('dashboard subcommand', () => {
+    it('parses dashboard subcommand', () => {
+      const args = parseArgs(['dashboard']);
+      expect(args.subcommand).toBe('dashboard');
     });
   });
 });
