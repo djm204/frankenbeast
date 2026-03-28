@@ -56,6 +56,13 @@ describe('SkillConfigStore', () => {
       expect(result).toEqual(new Set());
     });
 
+    it('handles non-object JSON root gracefully (e.g. null)', () => {
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(join(configDir, 'config.json'), 'null');
+      const result = store.getEnabledSkills();
+      expect(result).toEqual(new Set());
+    });
+
     it('filters out non-string values in enabled array', () => {
       mkdirSync(configDir, { recursive: true });
       writeFileSync(
@@ -104,6 +111,14 @@ describe('SkillConfigStore', () => {
       );
       expect(raw.theme).toBe('dark');
       expect(raw.version).toBe(2);
+      expect(raw.skills.enabled).toEqual(['github']);
+    });
+
+    it('recovers from non-object JSON root on save (e.g. null)', () => {
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(join(configDir, 'config.json'), 'null');
+      store.save(new Set(['github']));
+      const raw = JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf-8'));
       expect(raw.skills.enabled).toEqual(['github']);
     });
 
@@ -214,6 +229,20 @@ describe('SkillManager + SkillConfigStore integration', () => {
     manager.enable('github');
     manager.disable('github');
 
+    const persisted = store.getEnabledSkills();
+    expect(persisted).not.toContain('github');
+  });
+
+  it('remove() persists via configStore', async () => {
+    const manager = new SkillManager(skillsDir, new Set(), store);
+    await installSkill(manager, 'github');
+
+    manager.enable('github');
+    expect(store.getEnabledSkills()).toContain('github');
+
+    manager.remove('github');
+
+    // Removal should also persist — 'github' no longer in config
     const persisted = store.getEnabledSkills();
     expect(persisted).not.toContain('github');
   });

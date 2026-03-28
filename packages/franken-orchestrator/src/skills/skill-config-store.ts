@@ -45,7 +45,11 @@ export class SkillConfigStore {
     let existing: Record<string, unknown> = {};
     try {
       if (existsSync(this.configPath)) {
-        existing = JSON.parse(readFileSync(this.configPath, 'utf-8'));
+        const parsed = JSON.parse(readFileSync(this.configPath, 'utf-8'));
+        // Normalize: only use parsed value if it's a plain object
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existing = parsed as Record<string, unknown>;
+        }
       }
     } catch {
       /* start fresh if corrupt */

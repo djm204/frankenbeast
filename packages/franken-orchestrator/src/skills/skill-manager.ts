@@ -119,6 +119,7 @@ export class SkillManager {
       rmSync(skillDir, { recursive: true });
     }
     this.enabledSkills.delete(name);
+    this.configStore?.save(this.enabledSkills);
   }
 
   exists(name: string): boolean {
