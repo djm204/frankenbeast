@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "martin-loop": {
+      "command": "frankenbeast",
+      "args": ["run", "--provider", "${PROVIDER}", "--plan-dir", "${CHUNK_DIRECTORY}"],
+      "env": {
+        "FRANKENBEAST_SPAWNED": "1"
+      }
+    }
+  }
+}

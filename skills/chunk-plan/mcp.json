@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chunk-plan": {
+      "command": "frankenbeast",
+      "args": ["plan", "--design-doc", "${DESIGN_DOC_PATH}", "--output-dir", "${OUTPUT_DIR}"],
+      "env": {
+        "FRANKENBEAST_SPAWNED": "1"
+      }
+    }
+  }
+}

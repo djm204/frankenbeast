@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "design-interview": {
+      "command": "frankenbeast",
+      "args": ["interview", "--goal", "${GOAL}", "--output", "${OUTPUT_PATH}"],
+      "env": {
+        "FRANKENBEAST_SPAWNED": "1"
+      }
+    }
+  }
+}
