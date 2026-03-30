@@ -38,3 +38,32 @@ export const CommsConfigSchema = z.object({
 });
 
 export type CommsConfig = z.infer<typeof CommsConfigSchema>;
+
+// ── Config merging (moved from server/start-comms-server.ts) ──
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMerge<T extends Record<string, unknown>>(...layers: Array<Partial<T> | undefined>): Partial<T> {
+  const result: Record<string, unknown> = {};
+  for (const layer of layers) {
+    if (!layer) continue;
+    for (const [key, value] of Object.entries(layer)) {
+      const existing = result[key];
+      if (isRecord(existing) && isRecord(value)) {
+        result[key] = deepMerge(existing, value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result as Partial<T>;
+}
+
+export function resolveCommsServerConfig(
+  config: CommsConfig,
+  overrideConfig?: Partial<CommsConfig>,
+): CommsConfig {
+  return CommsConfigSchema.parse(deepMerge<CommsConfig>(config, overrideConfig));
+}
