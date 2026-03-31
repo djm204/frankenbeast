@@ -173,9 +173,13 @@ interface CheckpointRow {
 }
 
 class SqliteRecoveryMemory implements IRecoveryMemory {
-  constructor(private db: Database.Database) {}
+  constructor(
+    private db: Database.Database,
+    private flushWorkingMemory?: () => void,
+  ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
+    this.flushWorkingMemory?.();
     const result = this.db
       .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
       .run(JSON.stringify(state), state.timestamp);
@@ -217,7 +221,7 @@ export class SqliteBrain implements IBrain {
     this.initSchema();
     this.working = new SqliteWorkingMemory(this.db);
     this.episodic = new SqliteEpisodicMemory(this.db);
-    this.recovery = new SqliteRecoveryMemory(this.db);
+    this.recovery = new SqliteRecoveryMemory(this.db, () => this.working.flushToDb());
   }
 
   private initSchema(): void {

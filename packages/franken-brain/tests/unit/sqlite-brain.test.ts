@@ -150,6 +150,18 @@ describe('SqliteBrain', () => {
       expect(typeof result.id).toBe('string');
     });
 
+    it('checkpoint() flushes working memory to SQLite', () => {
+      brain.working.set('key1', 'value1');
+
+      // Before checkpoint, working memory is in-memory only
+      brain.recovery.checkpoint(makeState());
+
+      // Verify by reading directly from SQLite
+      const row = (brain as unknown as { db: { prepare: (sql: string) => { get: (key: string) => { value: string } | undefined } } })
+        .db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(row?.value).toBe('"value1"');
+    });
+
     it('lastCheckpoint() returns most recent', () => {
       brain.recovery.checkpoint(makeState({ step: 1 }));
       brain.recovery.checkpoint(makeState({ step: 2 }));
