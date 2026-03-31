@@ -55,6 +55,7 @@ export interface ChatAppOptions {
   };
   skillManager?: SkillManager;
   providerRegistry?: ProviderRegistry;
+  /** Dashboard aggregation. Requires skillManager and securityConfig for mutation endpoints. */
   dashboardDeps?: DashboardRouteDeps;
 }
 

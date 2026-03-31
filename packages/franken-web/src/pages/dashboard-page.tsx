@@ -14,10 +14,16 @@ export function DashboardPage({ client }: DashboardPageProps) {
     useDashboardStore();
 
   useEffect(() => {
-    client.fetchSnapshot().then(setSnapshot).catch(console.error);
-    const unsub = client.subscribeToDashboard(setSnapshot);
-    return unsub;
-  }, [client, setSnapshot]);
+    // Note: SSE snapshot events replace full store state. If the server pushes
+    // a snapshot while an optimistic update is in-flight, the server state wins.
+    // Currently only the initial snapshot is pushed (heartbeats carry no data).
+    let stale = false;
+    client.fetchSnapshot()
+      .then((snap) => { if (!stale) setSnapshot(snap); })
+      .catch(console.error);
+    const unsub = client.subscribeToDashboard((snap) => { if (!stale) setSnapshot(snap); });
+    return () => { stale = true; unsub(); };
+  }, [client]); // eslint-disable-line react-hooks/exhaustive-deps — setSnapshot is stable (Zustand v5)
 
   if (loading) return <div className="dashboard-loading">Loading dashboard...</div>;
 
@@ -38,6 +44,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
             injectionDetection={security.injectionDetection}
             piiMasking={security.piiMasking}
             outputValidation={security.outputValidation}
+            requireApproval={security.requireApproval}
             onProfileChange={(profile) => {
               setSecurityProfile(profile);
               client.updateSecurityProfile(profile).catch(console.error);
