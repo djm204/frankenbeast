@@ -25,6 +25,7 @@ import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
 import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import { createSkillRoutes } from './routes/skill-routes.js';
+import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -54,6 +55,7 @@ export interface ChatAppOptions {
   };
   skillManager?: SkillManager;
   providerRegistry?: ProviderRegistry;
+  dashboardDeps?: DashboardRouteDeps;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -154,6 +156,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       skillManager: opts.skillManager,
       providerRegistry: opts.providerRegistry,
     }));
+  }
+  if (opts.dashboardDeps) {
+    app.route('/api/dashboard', createDashboardRoutes(opts.dashboardDeps));
   }
 
   return app;
