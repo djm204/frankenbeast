@@ -114,6 +114,10 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
+      if (error instanceof Error && error.stack) {
+        console.error(error.stack);
+      }
       deps.agents.updateAgent(agent.id, { status: 'failed' });
       deps.agents.appendEvent(agent.id, {
         level: 'error',
