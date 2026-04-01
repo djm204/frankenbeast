@@ -16,8 +16,8 @@ function makeMockSnapshot(): DashboardSnapshot {
       outputValidation: true,
     },
     providers: [
-      { name: 'anthropic', type: 'llm' },
-      { name: 'openai', type: 'llm' },
+      { name: 'anthropic', type: 'llm', available: true, failoverOrder: 0 },
+      { name: 'openai', type: 'llm', available: false, failoverOrder: 1 },
     ],
   };
 }
