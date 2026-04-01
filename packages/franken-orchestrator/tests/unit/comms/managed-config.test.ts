@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCommsServerConfig } from '../../../src/comms/server/start-comms-server.js';
+import { resolveCommsServerConfig } from '../../../src/comms/config/comms-config.js';
 
 describe('managed comms config', () => {
   it('uses standalone config when no override is passed', () => {

@@ -319,12 +319,92 @@ Reduced monorepo from 13 to 8 packages per ADR-031.
 
 ---
 
+## Architecture Consolidation — Phase 2: Brain Rewrite
+
+> PRs: #245 (types), #247 (SqliteBrain), #248 (episodic recall), #249 (promote + delete)
+
+Rewrote franken-brain around `SqliteBrain` with unified working memory, episodic events, and recovery checkpoints in a single SQLite database. Serialize/hydrate for provider handoff.
+
+---
+
+## Architecture Consolidation — Phase 3: Provider Registry + Adapters
+
+> PR: #251
+
+Multi-LLM `ProviderRegistry` with failover, exponential backoff, token aggregation via `TokenAggregator`, brain state handoff via snapshot truncation. CLI + API adapters for Claude, Codex, Gemini, OpenAI, Anthropic.
+
+---
+
+## Architecture Consolidation — Phase 4: Security Middleware
+
+> PR: #253
+
+`MiddlewareChain` with injection detection (18 patterns), PII masking, output validation, domain allowlist. Configurable security profiles (strict/standard/permissive).
+
+---
+
+## Architecture Consolidation — Phase 4.5: Comms Integration
+
+> PR: #255
+
+Replaced WebSocket `ChatSocketBridge` with direct in-process `CommsRuntimePort`. Rewrote `ChatGateway` for in-process calls. Added `ChatRuntimeCommsAdapter` wrapping ChatRuntime behind the port.
+
+---
+
+## Architecture Consolidation — Phase 5: Skill Loading
+
+> PR: #256
+
+Directory-based `SkillManager` with CRUD, path traversal prevention, `ProviderSkillTranslator` for per-provider MCP config, `SkillCredentialStore` for env-based auth, `SkillHealthChecker` for MCP server health. HTTP routes at `/api/skills`.
+
+---
+
+## Architecture Consolidation — Phase 6: Absorb Reflection into Critique
+
+> PR: #257
+
+`ReflectionEvaluator` implementing the existing `Evaluator` interface. LLM-based severity scoring (1-10 mapped to 0.0-1.0). Phase-boundary reflection trigger via `heartbeat.pulse()`.
+
+---
+
+## Architecture Consolidation — Phase 7: Observer Audit Trail
+
+> PR: #258
+
+Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persisting to `.frankenbeast/audit/<runId>.json`, `ExecutionReplayer` for timeline reconstruction.
+
+---
+
+## Architecture Consolidation — Phase 8: Wire Everything Together
+
+> PR: #260
+
+`createBeastDeps()` factory with 6 adapters (MiddlewareChainFirewallAdapter, SqliteBrainMemoryAdapter, ReflectionHeartbeatAdapter, SkillManagerAdapter, AuditTrailObserverAdapter, McpSdkAdapter). `RunConfigV2Schema` for consolidated configuration. E2E integration test.
+
+---
+
+## Architecture Consolidation — Residual Chunks
+
+> Chunks A-F + One-Shots. PRs: #262, #264, #265, #267, #268
+
+- **Chunk A** (#262): Wired `createBeastDeps()` into `dep-factory.ts`, replacing stubs with real adapters. Added dep-bridge, comms config, token aggregation, skill route mounting, commsConfig pass-through.
+- **Chunk B** (#264): Deleted legacy episodic memory + types from franken-brain (-796 lines), removed ulid/zod deps.
+- **Chunk C** (#265): Added `skill`, `provider`, `security`, `dashboard` CLI command groups.
+- **Chunk E** (#268): Created skill directory equivalents for beast definitions.
+- **Chunk F** (#267): Added `SkillConfigStore` for persistent skill toggle state.
+- **One-Shots**: Deleted standalone comms server files, added HITL integration test, fixed checkpoint flush.
+
+**Test counts**: ~2,100 orchestrator tests passing. Typecheck clean across all 8 packages.
+
+---
+
 ## Known Limitations
 
-1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` for the CLI pipeline.
+1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` via `createBeastDeps()`.
 2. **No `--non-interactive` flag**: Review loops require stdin. For CI/headless use, pipe `"y\n"` to stdin.
 3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
-4. **Firewall and skills are stubbed**: Phase 1 removed the packages; Phase 4 (LlmMiddleware) and Phase 5 (SkillManager) will provide replacements.
+4. **Dashboard (Chunk D) not yet implemented**: SSE endpoints and React panels in franken-web are pending.
+5. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
