@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.31.0](https://github.com/djm204/frankenbeast/compare/v0.30.1...v0.31.0) (2026-04-01)
+
+
+### Features
+
+* add skill directory equivalents for beast definitions ([789b567](https://github.com/djm204/frankenbeast/commit/789b567207768e639d6f4cc9c9ef5bcf95882566))
+* add skill directory equivalents for beast definitions ([b63d31f](https://github.com/djm204/frankenbeast/commit/b63d31fbbfd5108e2c22207a62a6d46fb2160040))
+* dashboard SSE routes and web UI panels ([0c8c8e0](https://github.com/djm204/frankenbeast/commit/0c8c8e0520be173cd921edda6c424cc41e7b1292))
+* **web:** add dashboard page with skills, security, and provider panels ([d4e4bb4](https://github.com/djm204/frankenbeast/commit/d4e4bb445c20e82707279e9764723bf7af1395b0))
+
+
+### Bug Fixes
+
+* address 10 review issues on dashboard chunk ([037a57a](https://github.com/djm204/frankenbeast/commit/037a57a2538682233612143e02f289cd88a19cb2))
+* address 10 review issues on dashboard chunk ([df52d71](https://github.com/djm204/frankenbeast/commit/df52d7152350c03f741f64ee55ee802da1da81b6))
+* residual one-shots (comms cleanup, HITL test, checkpoint flush, PROGRESS.md) ([e105db3](https://github.com/djm204/frankenbeast/commit/e105db3fe067c6473d3f2a4bc43fc85756487018))
+
+
+### Documentation
+
+* update PROGRESS.md with Architecture Consolidation Phases 2-8 ([89ce9a0](https://github.com/djm204/frankenbeast/commit/89ce9a0ff075ee02cde17996b80d0d57b79057b6))
+
 ## [0.30.1](https://github.com/djm204/frankenbeast/compare/v0.30.0...v0.30.1) (2026-03-27)
 
 
