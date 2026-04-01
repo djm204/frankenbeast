@@ -38,7 +38,27 @@ export class BeastDispatchService {
 
   async createRun(request: CreateBeastRunRequest): Promise<BeastRun> {
     const definition = this.getDefinitionOrThrow(request.definitionId);
-    const config = definition.configSchema.parse(request.config);
+    // Try parsing as-is first. If it fails with unrecognized_keys (strict schema
+    // rejecting extra fields from agent init config), strip to only known keys.
+    let config: Readonly<Record<string, unknown>>;
+    const firstAttempt = definition.configSchema.safeParse(request.config);
+    if (firstAttempt.success) {
+      config = firstAttempt.data;
+    } else {
+      const hasUnrecognizedKeys = firstAttempt.error.issues.some(
+        (issue) => issue.code === 'unrecognized_keys',
+      );
+      if (!hasUnrecognizedKeys) {
+        // Real validation error — surface it
+        throw firstAttempt.error;
+      }
+      // Extract only the keys the schema knows about
+      const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
+      const stripped = shape
+        ? Object.fromEntries(Object.entries(request.config).filter(([k]) => k in shape))
+        : request.config;
+      config = definition.configSchema.parse(stripped);
+    }
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig
       ? { ...config, modules: moduleConfig }
