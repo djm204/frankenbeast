@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.29.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.28.0...franken-orchestrator-v0.29.0) (2026-04-01)
+
+
+### Features
+
+* add skill directory equivalents for beast definitions ([789b567](https://github.com/djm204/frankenbeast/commit/789b567207768e639d6f4cc9c9ef5bcf95882566))
+* add skill directory equivalents for beast definitions ([b63d31f](https://github.com/djm204/frankenbeast/commit/b63d31fbbfd5108e2c22207a62a6d46fb2160040))
+* dashboard SSE routes and web UI panels ([0c8c8e0](https://github.com/djm204/frankenbeast/commit/0c8c8e0520be173cd921edda6c424cc41e7b1292))
+* **orchestrator:** add dashboard aggregation routes with SSE stream ([f2310e7](https://github.com/djm204/frankenbeast/commit/f2310e7fa401848f84a80374e5abce72856929a8))
+* **orchestrator:** add skill/provider/security/dashboard CLI commands ([23bcc2f](https://github.com/djm204/frankenbeast/commit/23bcc2f8a788f7acac26045108eea0f7e401de11))
+* **orchestrator:** add skill/provider/security/dashboard CLI commands ([cd1ac1b](https://github.com/djm204/frankenbeast/commit/cd1ac1b189af357f59dbdbb8e5b8dde2a90f9509))
+* **orchestrator:** add SkillConfigStore for persistent skill toggle state ([4920421](https://github.com/djm204/frankenbeast/commit/492042128980080976271f5dec76d2b6908de7c6))
+* **orchestrator:** add SkillConfigStore for persistent skill toggle state ([05a5191](https://github.com/djm204/frankenbeast/commit/05a5191ab0a3f6a98cca32de5d700be727418acb))
+
+
+### Bug Fixes
+
+* address 10 review issues on dashboard chunk ([037a57a](https://github.com/djm204/frankenbeast/commit/037a57a2538682233612143e02f289cd88a19cb2))
+* address 10 review issues on dashboard chunk ([df52d71](https://github.com/djm204/frankenbeast/commit/df52d7152350c03f741f64ee55ee802da1da81b6))
+* **orchestrator:** address CLI command review issues ([a9bc9a6](https://github.com/djm204/frankenbeast/commit/a9bc9a6834dee58b48be6b78a6a4dd0598120af5))
+* **orchestrator:** normalize non-object config root, persist on remove ([7956228](https://github.com/djm204/frankenbeast/commit/7956228ea4cda037633751af88d072cbd3d82d4f))
+* residual one-shots (comms cleanup, HITL test, checkpoint flush, PROGRESS.md) ([e105db3](https://github.com/djm204/frankenbeast/commit/e105db3fe067c6473d3f2a4bc43fc85756487018))
+
+
+### Refactoring
+
+* **orchestrator:** delete standalone comms server files ([35cf137](https://github.com/djm204/frankenbeast/commit/35cf13706eb75e0ae07505fc57a766226206b3f6))
+
+
+### Tests
+
+* **orchestrator:** add HITL approval integration test via comms gateway ([0e31a39](https://github.com/djm204/frankenbeast/commit/0e31a3924134d240d7478a943b84db547a479d35))
+
 ## [0.28.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.27.0...franken-orchestrator-v0.28.0) (2026-03-27)
 
 

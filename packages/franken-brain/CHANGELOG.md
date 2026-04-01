@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.5.1...franken-brain-v0.5.2) (2026-04-01)
+
+
+### Bug Fixes
+
+* **brain:** flush working memory to SQLite on recovery checkpoint ([e4fab04](https://github.com/djm204/frankenbeast/commit/e4fab044a7ee30274c2b6287c6b83a1ebb904dfe))
+* residual one-shots (comms cleanup, HITL test, checkpoint flush, PROGRESS.md) ([e105db3](https://github.com/djm204/frankenbeast/commit/e105db3fe067c6473d3f2a4bc43fc85756487018))
+
 ## [0.5.1](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.5.0...franken-brain-v0.5.1) (2026-03-27)
 
 
