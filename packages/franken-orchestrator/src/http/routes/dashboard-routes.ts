@@ -6,7 +6,7 @@ import type { SecurityConfig } from '../../middleware/security-profiles.js';
 export interface DashboardRouteDeps {
   skillManager: SkillManager;
   getSecurityConfig: () => SecurityConfig;
-  getProviders: () => Array<{ name: string; type: string }>;
+  getProviders: () => Array<{ name: string; type: string; available: boolean; failoverOrder: number }>;
 }
 
 function buildSnapshot(deps: DashboardRouteDeps) {
@@ -52,13 +52,12 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
         }
       }, 30_000);
 
-      stream.onAbort(() => {
-        clearInterval(interval);
-      });
-
-      // Block until client disconnects
+      // Block until client disconnects (single onAbort — Hono stores one callback, not a list)
       await new Promise<void>((resolve) => {
-        stream.onAbort(resolve);
+        stream.onAbort(() => {
+          clearInterval(interval);
+          resolve();
+        });
       });
     });
   });

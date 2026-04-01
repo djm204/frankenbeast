@@ -3,11 +3,12 @@ interface SecurityPanelProps {
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
+  requireApproval?: string;
   onProfileChange: (profile: string) => void;
 }
 
 export function SecurityPanel(props: SecurityPanelProps) {
-  const { profile, injectionDetection, piiMasking, outputValidation, onProfileChange } = props;
+  const { profile, injectionDetection, piiMasking, outputValidation, requireApproval, onProfileChange } = props;
 
   return (
     <div className="security-panel rail-card">
@@ -29,6 +30,9 @@ export function SecurityPanel(props: SecurityPanelProps) {
         <li>Injection Detection: {injectionDetection ? '[on]' : '[off]'}</li>
         <li>PII Masking: {piiMasking ? '[on]' : '[off]'}</li>
         <li>Output Validation: {outputValidation ? '[on]' : '[off]'}</li>
+        {requireApproval !== undefined && (
+          <li>Approval Required: {requireApproval}</li>
+        )}
       </ul>
     </div>
   );

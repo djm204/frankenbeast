@@ -10,11 +10,14 @@ export interface DashboardSecurity {
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
+  requireApproval?: string;
 }
 
 export interface DashboardProvider {
   name: string;
   type: string;
+  available: boolean;
+  failoverOrder: number;
 }
 
 export interface DashboardSnapshot {
@@ -33,7 +36,7 @@ export class DashboardApiClient {
   }
 
   async toggleSkill(name: string, enabled: boolean): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/skills/${name}`, {
+    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(name)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),

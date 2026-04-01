@@ -30,7 +30,7 @@ function createMockDeps(): DashboardRouteDeps {
       requireApproval: 'destructive',
     }),
     getProviders: vi.fn().mockReturnValue([
-      { name: 'claude', type: 'claude-cli' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
   };
 }
