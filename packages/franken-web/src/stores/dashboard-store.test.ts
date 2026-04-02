@@ -15,7 +15,7 @@ function makeMockSnapshot(): DashboardSnapshot {
       outputValidation: true,
     },
     providers: [
-      { name: 'anthropic', type: 'llm' },
+      { name: 'anthropic', type: 'llm', available: true, failoverOrder: 0 },
     ],
   };
 }

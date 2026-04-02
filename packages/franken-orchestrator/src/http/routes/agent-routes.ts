@@ -114,6 +114,10 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
+      if (error instanceof Error && error.stack) {
+        console.error(error.stack);
+      }
       deps.agents.updateAgent(agent.id, { status: 'failed' });
       deps.agents.appendEvent(agent.id, {
         level: 'error',
@@ -328,11 +332,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     try {
       const agent = deps.agents.getAgent(agentId);
-      if (agent.status !== 'stopped') {
+      if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
         throw new HttpError(
           409,
           'TRACKED_AGENT_NOT_DELETABLE',
-          `Tracked agent '${agentId}' is not stopped`,
+          `Tracked agent '${agentId}' must be stopped, failed, or completed to delete`,
         );
       }
       deps.agents.appendEvent(agentId, {

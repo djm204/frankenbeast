@@ -73,6 +73,11 @@ export function requestSizeLimit(maxSize: number) {
 
 export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HttpError) {
+    if (err.statusCode >= 500) {
+      console.error(`[HTTP ${err.statusCode}] ${err.code}: ${err.message}`, err.details ?? '');
+    } else {
+      console.warn(`[HTTP ${err.statusCode}] ${err.code}: ${err.message}`, err.details ?? '');
+    }
     return c.json(
       {
         error: {
@@ -85,7 +90,10 @@ export const errorHandler: ErrorHandler = (err, c) => {
     );
   }
 
-  // Never expose raw stack traces
+  // Log unexpected errors to terminal — essential for debugging
+  console.error('[HTTP 500] Unhandled error:', err instanceof Error ? err.stack ?? err.message : err);
+
+  // Never expose raw stack traces to client
   return c.json(
     {
       error: {

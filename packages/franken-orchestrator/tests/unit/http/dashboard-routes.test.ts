@@ -54,7 +54,7 @@ describe('dashboard routes', () => {
         requireApproval: 'destructive',
       });
       expect(body.providers).toEqual([
-        { name: 'claude', type: 'claude-cli' },
+        { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
       ]);
     });
 
