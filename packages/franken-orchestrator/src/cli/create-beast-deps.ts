@@ -7,7 +7,7 @@ import {
 } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { SkillConfigStore } from '../skills/skill-config-store.js';
-import { AuditTrail, createAuditEvent } from '@frankenbeast/observer';
+import { AuditTrail, AuditTrailStore, createAuditEvent } from '@frankenbeast/observer';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
@@ -15,6 +15,7 @@ import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-ada
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
 import { McpSdkAdapter } from '../adapters/mcp-sdk-adapter.js';
+import { ReflectionEvaluator } from '@franken/critique';
 
 import { ClaudeCliAdapter } from '../providers/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../providers/codex-cli-adapter.js';
@@ -81,6 +82,7 @@ export type ConsolidatedDeps = BeastLoopDeps & {
   middlewareChain?: ReturnType<typeof buildMiddlewareChain>;
   skillManager?: SkillManager;
   getTokenUsage?: () => AggregatedTokenUsage;
+  persistAuditTrail?: (runId: string) => string;
 };
 
 /**
@@ -130,7 +132,38 @@ export function createBeastDeps(
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const memory = new SqliteBrainMemoryAdapter(brain);
-  const heartbeat = new ReflectionHeartbeatAdapter();
+
+  // Wire ReflectionEvaluator as heartbeat reflectionFn when reflection is enabled
+  const reflectionFn = config.reflection !== false
+    ? async () => {
+        const llmClient = {
+          async complete(prompt: string): Promise<string> {
+            const chunks: string[] = [];
+            for await (const event of registry.execute({
+              systemPrompt: '',
+              messages: [{ role: 'user', content: prompt }],
+              tools: [],
+            })) {
+              if (event.type === 'text') chunks.push(event.content);
+            }
+            return chunks.join('');
+          },
+        };
+        const evaluator = new ReflectionEvaluator({ llmClient });
+        const result = await evaluator.evaluate({
+          content: 'Current execution state',
+          metadata: { phase: 'execution', stepsCompleted: 0, objective: 'Reflect on progress' },
+        });
+        const finding = result.findings[0];
+        return {
+          summary: finding?.message ?? 'No reflection available.',
+          improvements: finding?.suggestion ? [finding.suggestion] : [],
+          techDebt: [],
+        };
+      }
+    : undefined;
+
+  const heartbeat = new ReflectionHeartbeatAdapter(reflectionFn);
   const skills = new SkillManagerAdapter(skillManager);
   const observer = new AuditTrailObserverAdapter(
     existingDeps.observer,
@@ -158,6 +191,10 @@ export function createBeastDeps(
     middlewareChain,
     skillManager,
     getTokenUsage: () => registry.getTokenUsage(),
+    persistAuditTrail: (runId: string) => {
+      const store = new AuditTrailStore(config.configDir ?? '.');
+      return store.save(runId, auditTrail);
+    },
 
     // Optional pass-through deps (spread conditionally)
     ...(existingDeps.graphBuilder ? { graphBuilder: existingDeps.graphBuilder } : {}),
