@@ -15,6 +15,8 @@ import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-ada
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
 import { McpSdkAdapter } from '../adapters/mcp-sdk-adapter.js';
+import { ProviderRegistryIAdapter } from '../adapters/provider-registry-adapter.js';
+import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ReflectionEvaluator } from '@franken/critique';
 
 import { ClaudeCliAdapter } from '../providers/claude-cli-adapter.js';
@@ -51,6 +53,8 @@ export interface BeastDepsConfig {
     piiMasking?: boolean;
     outputValidation?: boolean;
     allowedDomains?: string[];
+    maxTokenBudget?: number;
+    requireApproval?: 'all' | 'destructive' | 'none';
   };
   brain?: {
     dbPath?: string;
@@ -133,23 +137,12 @@ export function createBeastDeps(
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const memory = new SqliteBrainMemoryAdapter(brain);
 
-  // Wire ReflectionEvaluator as heartbeat reflectionFn when reflection is enabled
+  // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
+  const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
+  const registryLlmClient = new AdapterLlmClient(registryAdapter);
   const reflectionFn = config.reflection !== false
     ? async () => {
-        const llmClient = {
-          async complete(prompt: string): Promise<string> {
-            const chunks: string[] = [];
-            for await (const event of registry.execute({
-              systemPrompt: '',
-              messages: [{ role: 'user', content: prompt }],
-              tools: [],
-            })) {
-              if (event.type === 'text') chunks.push(event.content);
-            }
-            return chunks.join('');
-          },
-        };
-        const evaluator = new ReflectionEvaluator({ llmClient });
+        const evaluator = new ReflectionEvaluator({ llmClient: registryLlmClient });
         const result = await evaluator.evaluate({
           content: 'Current execution state',
           metadata: { phase: 'execution', stepsCompleted: 0, objective: 'Reflect on progress' },

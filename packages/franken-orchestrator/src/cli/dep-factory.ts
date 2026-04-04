@@ -76,6 +76,8 @@ export interface CliDepOptions {
   critiqueConsensusThreshold?: number;
   /** RunConfig loaded from config file passthrough (spawned agent). */
   runConfig?: RunConfig | undefined;
+  /** OrchestratorConfig for consolidation field overrides (security, brain, providers). */
+  orchestratorConfig?: import('../config/orchestrator-config.js').OrchestratorConfig | undefined;
 }
 
 export interface IssueCliDeps {
@@ -98,6 +100,9 @@ export interface CliDeps {
   logger: BeastLogger;
   finalize: () => Promise<void>;
   issueDeps?: IssueCliDeps | undefined;
+  skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
+  providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  middlewareChain?: ReturnType<typeof import('../middleware/security-profiles.js').buildMiddlewareChain> | undefined;
 }
 
 // ── Passthrough Stubs ──
@@ -425,7 +430,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       : undefined;
 
   // Use the new consolidated component factory for module adapters
-  const beastConfig = bridgeToBeastConfig(options);
+  const beastConfig = bridgeToBeastConfig(options, options.orchestratorConfig);
   const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,
     critique,
@@ -527,5 +532,15 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     await previousFinalizeForBrain();
   };
 
-  return { deps, cliLlmAdapter, observerBridge, logger, finalize, issueDeps };
+  return {
+    deps,
+    cliLlmAdapter,
+    observerBridge,
+    logger,
+    finalize,
+    issueDeps,
+    ...(consolidated.skillManager ? { skillManager: consolidated.skillManager } : {}),
+    ...(consolidated.providerRegistry ? { providerRegistry: consolidated.providerRegistry } : {}),
+    ...(consolidated.middlewareChain ? { middlewareChain: consolidated.middlewareChain } : {}),
+  };
 }
