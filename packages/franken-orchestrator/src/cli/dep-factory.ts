@@ -98,6 +98,9 @@ export interface CliDeps {
   logger: BeastLogger;
   finalize: () => Promise<void>;
   issueDeps?: IssueCliDeps | undefined;
+  skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
+  providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  middlewareChain?: ReturnType<typeof import('../middleware/security-profiles.js').buildMiddlewareChain> | undefined;
 }
 
 // ── Passthrough Stubs ──
@@ -526,5 +529,15 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     await previousFinalizeForBrain();
   };
 
-  return { deps, cliLlmAdapter, observerBridge, logger, finalize, issueDeps };
+  return {
+    deps,
+    cliLlmAdapter,
+    observerBridge,
+    logger,
+    finalize,
+    issueDeps,
+    ...(consolidated.skillManager ? { skillManager: consolidated.skillManager } : {}),
+    ...(consolidated.providerRegistry ? { providerRegistry: consolidated.providerRegistry } : {}),
+    ...(consolidated.middlewareChain ? { middlewareChain: consolidated.middlewareChain } : {}),
+  };
 }
