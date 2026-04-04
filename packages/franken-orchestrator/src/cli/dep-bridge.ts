@@ -14,6 +14,7 @@ import type {
 } from './create-beast-deps.js';
 import type { SecurityProfile } from '../middleware/security-profiles.js';
 import type { BeastLoopDeps, IObserverModule } from '../deps.js';
+import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 
 // ─── Provider name → type detection ───
 
@@ -41,8 +42,10 @@ const SECURITY_TIER_MAP: Record<string, SecurityProfile> = {
 
 /**
  * Maps old CliDepOptions config format to the new BeastDepsConfig shape.
+ * When `config` is provided, consolidation fields (security, brain,
+ * consolidatedProviders) take precedence over CLI-derived defaults.
  */
-export function bridgeToBeastConfig(options: CliDepOptions): BeastDepsConfig {
+export function bridgeToBeastConfig(options: CliDepOptions, config?: OrchestratorConfig): BeastDepsConfig {
   // Resolve effective primary provider (runConfig overrides take precedence)
   const effectiveProvider =
     options.runConfig?.llmConfig?.default?.provider
@@ -84,12 +87,18 @@ export function bridgeToBeastConfig(options: CliDepOptions): BeastDepsConfig {
   const dbPath = resolve(options.paths.buildDir, 'memory.db');
 
   return {
-    providers,
-    security: {
-      profile: securityProfile,
-    },
+    providers: (config?.consolidatedProviders as ProviderConfig[] | undefined) ?? providers,
+    security: config?.security
+      ? {
+          profile: (config.security.profile as SecurityProfile) ?? securityProfile,
+          ...(config.security.injectionDetection !== undefined ? { injectionDetection: config.security.injectionDetection } : {}),
+          ...(config.security.piiMasking !== undefined ? { piiMasking: config.security.piiMasking } : {}),
+          ...(config.security.outputValidation !== undefined ? { outputValidation: config.security.outputValidation } : {}),
+          ...(config.security.allowedDomains ? { allowedDomains: config.security.allowedDomains } : {}),
+        }
+      : { profile: securityProfile },
     brain: {
-      dbPath,
+      dbPath: config?.brain?.dbPath ?? dbPath,
     },
     skillsDir: options.skillsDir ?? resolve(options.paths.root, 'skills'),
     reflection: true,

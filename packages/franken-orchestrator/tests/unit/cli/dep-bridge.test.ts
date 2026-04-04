@@ -195,6 +195,39 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.brain?.dbPath).toBe('/my/build/memory.db');
     });
   });
+
+  describe('OrchestratorConfig overrides', () => {
+    it('uses config.security when provided', () => {
+      const orchestratorConfig = { security: { profile: 'strict' } } as any;
+      const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
+      expect(config.security?.profile).toBe('strict');
+    });
+
+    it('uses config.brain.dbPath when provided', () => {
+      const orchestratorConfig = { brain: { dbPath: '/custom/brain.db' } } as any;
+      const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
+      expect(config.brain?.dbPath).toBe('/custom/brain.db');
+    });
+
+    it('uses config.consolidatedProviders when provided', () => {
+      const orchestratorConfig = {
+        consolidatedProviders: [
+          { name: 'my-claude', type: 'anthropic-api', apiKey: 'sk-123' },
+        ],
+      } as any;
+      const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
+      expect(config.providers).toEqual([
+        { name: 'my-claude', type: 'anthropic-api', apiKey: 'sk-123' },
+      ]);
+    });
+
+    it('falls back to CLI-derived values when config fields are absent', () => {
+      const orchestratorConfig = {} as any;
+      const config = bridgeToBeastConfig(makeOptions({ provider: 'codex' }), orchestratorConfig);
+      expect(config.providers).toEqual([{ name: 'codex', type: 'codex-cli' }]);
+      expect(config.security?.profile).toBe('standard');
+    });
+  });
 });
 
 // ─── bridgeToExistingDeps ───
