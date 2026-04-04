@@ -110,7 +110,11 @@ packages/franken-orchestrator/src/
   - `--target-upstream` derive the canonical target repository from the checkout's GitHub `upstream` remote; mutually exclusive with `--repo`
   - `--dry-run` preview triage without executing
 - Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
-- Current local CLI dep wiring is mixed: observer, CLI adapters, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and `FileCheckpointStore` are real, but `firewall`, `skills`, `memory`, `planner`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`. Critique and governor are dynamically imported when available.
+- `dep-factory.ts` calls `createBeastDeps()` which wires real consolidated adapters for all module ports: `MiddlewareChainFirewallAdapter` (firewall), `SqliteBrainMemoryAdapter` (memory), `SkillManagerAdapter` (skills), `ReflectionHeartbeatAdapter` (heartbeat), `AuditTrailObserverAdapter` (observer). Falls back to passthrough stubs only when `createBeastDeps()` throws (e.g., no providers configured).
+- `ProviderRegistryIAdapter` bridges `ProviderRegistry.execute()` (async generator) to `IAdapter` (Promise), with `MiddlewareChain` applied on request/response. Active in the heartbeat/reflection LLM path.
+- `SkillConfigStore` persists enabled-skill state to `.frankenbeast/config.json`.
+- `OrchestratorConfigSchema` accepts `security`, `brain`, and `consolidatedProviders` fields from config files, threaded through `dep-bridge.ts` → `createBeastDeps()`.
+- `run.ts` surfaces `skillManager`, `providerRegistry`, and `dashboardDeps` from `createCliDeps()` into `startChatServer()`, activating `/api/skills` and `/api/dashboard` routes.
 
 ## Build & Test
 
@@ -143,11 +147,11 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 
 ## Known Limitations
 
-1. The local CLI path is only partially wired: observer and CLI execution are real, but several sibling module deps remain stubbed in `franken-orchestrator/src/cli/dep-factory.ts`
-2. The current CLI path is not purely ports-only: `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`
-3. There is no dedicated `--non-interactive` flag; headless usage currently relies on starting at `plan` or `run` with existing inputs
-4. `--resume` is parsed, but it is not wired as a distinct resume control path; checkpoint-based task skipping still works from existing checkpoint files
-5. CLI-created agents do not yet enter the tracked-agent model through a dedicated CLI init flow; the dashboard and chat-backed init paths are wired, but CLI parity is still a follow-up
+1. **ProviderRegistry only active in reflection path**: Task execution flows through `CliLlmAdapter → MartinLoop → spawn()`. Multi-provider failover applies to heartbeat/reflection calls only. By design — middleware applies to in-process prompt text, not subprocess stdio.
+2. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
+3. **No `--non-interactive` flag**: Headless usage relies on starting at `plan` or `run` with existing inputs.
+4. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
+5. **`--resume` parsed but not a distinct control path**: Checkpoint-based task skipping works from existing checkpoint files.
 
 ## Key Documentation
 

@@ -116,6 +116,7 @@ export class ChatRuntime {
         ], {
           events: runResult.events,
           tier: 'premium_reasoning',
+          phase: 'planning',
         });
       }
       case '/run': {
@@ -236,6 +237,7 @@ export class ChatRuntime {
           {
             outcome: result.outcome,
             tier: result.tier,
+            phase: 'planning',
           },
         );
       case 'execute':
@@ -268,6 +270,7 @@ export class ChatRuntime {
         ...(pendingApproval ? { pendingApprovalDescription: outcome.taskDescription } : {}),
         state: stateFromRunResult(runResult),
         tier,
+        phase: 'execution',
       },
     );
   }
@@ -282,6 +285,8 @@ export class ChatRuntime {
       pendingApprovalDescription?: string;
       state?: string;
       tier?: string | null;
+      providerContext?: ChatRuntimeResult['providerContext'];
+      phase?: string;
     },
   ): ChatRuntimeResult {
     return {
@@ -292,6 +297,8 @@ export class ChatRuntime {
       ...(extra?.pendingApprovalDescription !== undefined
         ? { pendingApprovalDescription: extra.pendingApprovalDescription }
         : {}),
+      ...(extra?.providerContext ? { providerContext: extra.providerContext } : {}),
+      ...(extra?.phase ? { phase: extra.phase } : {}),
       state: extra?.state ?? 'active',
       tier: extra?.tier ?? null,
       transcript: state.transcript,

@@ -398,16 +398,35 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 
 ---
 
+## Architecture Consolidation — Last-Mile Wiring
+
+> PRs: #270, #272, #274, #275
+
+- **Chunk D** (#270, #272): Dashboard SSE routes, React panels (SkillCard, CatalogBrowser, SecurityPanel, ProviderPanel), dashboard API client, Zustand store. Follow-up fixes for dispatch config stripping, error logging, agent deletion.
+- **R1-R4 Fixes** (#274): Added `providerContext`/`phase` to ChatRuntimeResult, `loadForProvider()` to SkillManager, wired ReflectionEvaluator as reflectionFn, AuditTrail persistence at closure.
+- **Last-Mile Wiring** (#275): Closed 5 critical gaps:
+  - C1: Surfaced skillManager/providerRegistry/dashboardDeps through run.ts → startChatServer() — `/api/skills` and `/api/dashboard` routes now live
+  - C2: Fixed skillsDir to resolve relative to project root
+  - C3: Created ProviderRegistryIAdapter — ProviderRegistry.execute() now active in reflection path
+  - C4: MiddlewareChain wraps ProviderRegistryIAdapter request/response
+  - C5: Extended OrchestratorConfigSchema with security/brain/consolidatedProviders, deleted dead RunConfigV2Schema
+
+**Test counts**: 2,096 orchestrator tests passing. 8/8 turbo build tasks clean.
+
+---
+
 ## Known Limitations
 
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` via `createBeastDeps()`.
 2. **No `--non-interactive` flag**: Review loops require stdin. For CI/headless use, pipe `"y\n"` to stdin.
 3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
-4. **Dashboard (Chunk D) not yet implemented**: SSE endpoints and React panels in franken-web are pending.
-5. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
+4. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
+5. **ProviderRegistry only active in reflection path**: Task execution still flows through CliLlmAdapter → MartinLoop → spawn(). Multi-provider failover applies to heartbeat/reflection LLM calls only. This is by design — middleware applies to prompt text in-process, not subprocess stdio.
+6. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
 - Phase 5 (PRs 31-35) ran in parallel with Phases 3-4
 - All phases (2–7) complete. 28 PRs implemented (PR-15 through PR-42).
+- Architecture Consolidation residuals fully addressed: Chunks A-F, One-Shots O1-O4, R1-R4, C1-C5.
 - Post-audit fixes: franken-skills vitest config (exclude dist/), critique server wired to real pipeline.
