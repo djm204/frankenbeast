@@ -46,6 +46,7 @@ import {
   stopNetworkService,
 } from '../network/network-supervisor-runtime.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -110,6 +111,8 @@ interface ChatSurfaceDeps {
   finalize: () => Promise<void>;
   projectId: string;
   sessionStoreDir: string;
+  skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
+  providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
 }
 
 export async function resolveBeastOperatorToken(
@@ -183,7 +186,7 @@ async function createChatSurfaceDeps(
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
     chatMode: true,
   };
-  const { cliLlmAdapter, finalize } = await createCliDeps(chatDepOpts);
+  const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
   const chatLlm = new AdapterLlmClient(cliLlmAdapter);
 
   const override = config.providers.overrides?.[args.provider];
@@ -199,6 +202,8 @@ async function createChatSurfaceDeps(
     finalize,
     projectId,
     sessionStoreDir,
+    ...(skillManager ? { skillManager } : {}),
+    ...(providerRegistry ? { providerRegistry } : {}),
   };
 }
 
@@ -329,7 +334,7 @@ export async function main(): Promise<void> {
       }
     }
 
-    const { chatLlm, execLlm, finalize, projectId, sessionStoreDir } = await createChatSurfaceDeps(args, config, paths);
+    const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = await createChatSurfaceDeps(args, config, paths);
 
     if (args.subcommand === 'chat-server') {
       let mutableConfig = config;
@@ -381,6 +386,20 @@ export async function main(): Promise<void> {
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
+        // Consolidated deps — skill/dashboard routes activate when providers are configured
+        ...(skillManager ? { skillManager } : {}),
+        ...(providerRegistry ? { providerRegistry } : {}),
+        ...(skillManager && providerRegistry
+          ? {
+              dashboardDeps: {
+                skillManager,
+                getSecurityConfig: () => resolveSecurityConfig('standard'),
+                getProviders: () => providerRegistry.getProviders().map((p, i) => ({
+                  name: p.name, type: p.type, available: true, failoverOrder: i,
+                })),
+              },
+            }
+          : {}),
       });
       console.log(`Chat server listening on ${server.url}`);
       return;
