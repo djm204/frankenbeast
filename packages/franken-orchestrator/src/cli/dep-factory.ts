@@ -524,9 +524,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     };
   }
 
-  // Augment finalize to close SqliteBrain
+  // Augment finalize to persist audit trail and close SqliteBrain
   const previousFinalizeForBrain = finalize;
   finalize = async () => {
+    try { consolidated.persistAuditTrail?.(`run-${Date.now()}`); } catch { /* best-effort */ }
     try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
     await previousFinalizeForBrain();
   };

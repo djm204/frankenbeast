@@ -7,7 +7,7 @@ import {
 } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { SkillConfigStore } from '../skills/skill-config-store.js';
-import { AuditTrail, createAuditEvent } from '@frankenbeast/observer';
+import { AuditTrail, AuditTrailStore, createAuditEvent } from '@frankenbeast/observer';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
@@ -86,6 +86,7 @@ export type ConsolidatedDeps = BeastLoopDeps & {
   middlewareChain?: ReturnType<typeof buildMiddlewareChain>;
   skillManager?: SkillManager;
   getTokenUsage?: () => AggregatedTokenUsage;
+  persistAuditTrail?: (runId: string) => string;
 };
 
 /**
@@ -183,6 +184,10 @@ export function createBeastDeps(
     middlewareChain,
     skillManager,
     getTokenUsage: () => registry.getTokenUsage(),
+    persistAuditTrail: (runId: string) => {
+      const store = new AuditTrailStore(config.configDir ?? '.');
+      return store.save(runId, auditTrail);
+    },
 
     // Optional pass-through deps (spread conditionally)
     ...(existingDeps.graphBuilder ? { graphBuilder: existingDeps.graphBuilder } : {}),

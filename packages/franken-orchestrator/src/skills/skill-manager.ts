@@ -14,9 +14,12 @@ import type {
   SkillCatalogEntry,
   McpServerConfig,
   ToolDefinition,
+  ILlmProvider,
+  ProviderSkillConfig,
 } from '@franken/types';
 import { McpConfigSchema, SkillToolManifestSchema } from '@franken/types';
 import type { SkillConfigStore } from './skill-config-store.js';
+import { ProviderSkillTranslator } from './provider-skill-translator.js';
 
 const SAFE_NAME = /^[a-zA-Z0-9_-]+$/;
 
@@ -159,6 +162,21 @@ export class SkillManager {
     if (!this.exists(name))
       throw new Error(`Skill '${name}' is not installed`);
     writeFileSync(join(this.skillsDir, name, 'context.md'), content);
+  }
+
+  loadForProvider(provider: ILlmProvider): ProviderSkillConfig {
+    const translator = new ProviderSkillTranslator();
+    const enabledNames = this.getEnabledSkills();
+    const inputs = enabledNames.map((name) => {
+      const context = this.readContext(name);
+      return {
+        name,
+        mcpConfig: this.readMcpConfig(name) ?? { mcpServers: {} },
+        tools: this.readTools(name),
+        ...(context !== null ? { context } : {}),
+      };
+    });
+    return translator.translate(provider, inputs);
   }
 
   private readSkillInfo(name: string): SkillInfo | null {
