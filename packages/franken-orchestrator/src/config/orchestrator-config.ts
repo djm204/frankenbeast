@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { NetworkConfigSchema } from '../network/network-config.js';
+import {
+  ProviderConfigSchema,
+  SecurityConfigInputSchema,
+  BrainConfigSchema,
+} from '../cli/run-config-v2.js';
 
 export const ProviderOverrideSchema = z.object({
   command: z.string().optional(),
@@ -40,6 +45,15 @@ const BaseOrchestratorConfigSchema = z.object({
 
   /** Provider configuration. */
   providers: ProvidersConfigSchema.default({}),
+
+  /** Consolidation: security middleware configuration. */
+  security: SecurityConfigInputSchema.optional(),
+
+  /** Consolidation: brain/memory database configuration. */
+  brain: BrainConfigSchema.optional(),
+
+  /** Consolidation: typed provider list for ProviderRegistry. */
+  consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
 
 export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(NetworkConfigSchema.shape);
