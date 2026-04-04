@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.32.0](https://github.com/djm204/frankenbeast/compare/v0.31.0...v0.32.0) (2026-04-04)
+
+
+### Features
+
+* **orchestrator:** last-mile wiring — activate consolidation components in production runtime ([#275](https://github.com/djm204/frankenbeast/issues/275)) ([d318813](https://github.com/djm204/frankenbeast/commit/d318813518c99aede74aedc3ed9c4577cec114f4))
+
+
+### Bug Fixes
+
+* dashboard review fixes, dispatch config stripping, error logging ([cdcf969](https://github.com/djm204/frankenbeast/commit/cdcf969541adfd69bca4a5ac9d4676571b639773))
+* **orchestrator:** populate phase in ChatRuntime.result(), update docs ([#277](https://github.com/djm204/frankenbeast/issues/277)) ([ec02071](https://github.com/djm204/frankenbeast/commit/ec02071c8987d8b1794784c09a9c2f8e98bb8f33))
+* **orchestrator:** resolve Chunk A residuals R1-R4 ([7572d68](https://github.com/djm204/frankenbeast/commit/7572d68b62c520e4745f9d218f4c5806af71df79))
+
+
+### Documentation
+
+* mark Chunk A residuals R1-R4 as resolved ([8758431](https://github.com/djm204/frankenbeast/commit/87584315ecd80ef623aeb9987b17f8403865c598))
+
 ## [0.31.0](https://github.com/djm204/frankenbeast/compare/v0.30.1...v0.31.0) (2026-04-01)
 
 
