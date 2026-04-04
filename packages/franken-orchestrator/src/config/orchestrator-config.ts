@@ -1,10 +1,35 @@
 import { z } from 'zod';
 import { NetworkConfigSchema } from '../network/network-config.js';
-import {
-  ProviderConfigSchema,
-  SecurityConfigInputSchema,
-  BrainConfigSchema,
-} from '../cli/run-config-v2.js';
+
+// Consolidation schemas (moved from run-config-v2.ts)
+
+export const ProviderConfigSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum([
+    'claude-cli',
+    'codex-cli',
+    'gemini-cli',
+    'anthropic-api',
+    'openai-api',
+    'gemini-api',
+  ]),
+  apiKey: z.string().optional(),
+  cliPath: z.string().optional(),
+});
+
+export const SecurityConfigInputSchema = z.object({
+  profile: z.enum(['strict', 'standard', 'permissive']).optional(),
+  injectionDetection: z.boolean().optional(),
+  piiMasking: z.boolean().optional(),
+  outputValidation: z.boolean().optional(),
+  allowedDomains: z.array(z.string()).optional(),
+  maxTokenBudget: z.number().positive().optional(),
+  requireApproval: z.enum(['all', 'destructive', 'none']).optional(),
+});
+
+export const BrainConfigSchema = z.object({
+  dbPath: z.string().optional(),
+});
 
 export const ProviderOverrideSchema = z.object({
   command: z.string().optional(),
