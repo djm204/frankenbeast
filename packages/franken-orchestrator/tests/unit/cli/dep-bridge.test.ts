@@ -173,9 +173,14 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.skillsDir).toBe('/custom/skills');
     });
 
-    it('defaults skillsDir to ./skills', () => {
+    it('defaults skillsDir to resolve(paths.root, skills)', () => {
       const config = bridgeToBeastConfig(makeOptions({}));
-      expect(config.skillsDir).toBe('./skills');
+      expect(config.skillsDir).toBe('/project/skills');
+    });
+
+    it('resolves skillsDir relative to custom project root', () => {
+      const config = bridgeToBeastConfig(makeOptions({ paths: makePaths({ root: '/tmp/myproj' }) }));
+      expect(config.skillsDir).toBe('/tmp/myproj/skills');
     });
 
     it('enables reflection by default', () => {

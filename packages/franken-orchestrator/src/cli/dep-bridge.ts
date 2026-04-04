@@ -91,7 +91,7 @@ export function bridgeToBeastConfig(options: CliDepOptions): BeastDepsConfig {
     brain: {
       dbPath,
     },
-    skillsDir: options.skillsDir ?? './skills',
+    skillsDir: options.skillsDir ?? resolve(options.paths.root, 'skills'),
     reflection: true,
   };
 }
