@@ -15,6 +15,9 @@ import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-ada
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
 import { McpSdkAdapter } from '../adapters/mcp-sdk-adapter.js';
+import { ProviderRegistryIAdapter } from '../adapters/provider-registry-adapter.js';
+import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { ReflectionEvaluator } from '@franken/critique';
 
 import { ClaudeCliAdapter } from '../providers/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../providers/codex-cli-adapter.js';
@@ -130,7 +133,27 @@ export function createBeastDeps(
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const memory = new SqliteBrainMemoryAdapter(brain);
-  const heartbeat = new ReflectionHeartbeatAdapter();
+
+  // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
+  const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
+  const registryLlmClient = new AdapterLlmClient(registryAdapter);
+  const reflectionFn = config.reflection !== false
+    ? async () => {
+        const evaluator = new ReflectionEvaluator({ llmClient: registryLlmClient });
+        const result = await evaluator.evaluate({
+          content: 'Current execution state',
+          metadata: { phase: 'execution', stepsCompleted: 0, objective: 'Reflect on progress' },
+        });
+        const finding = result.findings[0];
+        return {
+          summary: finding?.message ?? 'No reflection available.',
+          improvements: finding?.suggestion ? [finding.suggestion] : [],
+          techDebt: [],
+        };
+      }
+    : undefined;
+
+  const heartbeat = new ReflectionHeartbeatAdapter(reflectionFn);
   const skills = new SkillManagerAdapter(skillManager);
   const observer = new AuditTrailObserverAdapter(
     existingDeps.observer,
