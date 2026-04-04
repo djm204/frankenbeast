@@ -76,6 +76,8 @@ export interface CliDepOptions {
   critiqueConsensusThreshold?: number;
   /** RunConfig loaded from config file passthrough (spawned agent). */
   runConfig?: RunConfig | undefined;
+  /** OrchestratorConfig for consolidation field overrides (security, brain, providers). */
+  orchestratorConfig?: import('../config/orchestrator-config.js').OrchestratorConfig | undefined;
 }
 
 export interface IssueCliDeps {
@@ -428,7 +430,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       : undefined;
 
   // Use the new consolidated component factory for module adapters
-  const beastConfig = bridgeToBeastConfig(options);
+  const beastConfig = bridgeToBeastConfig(options, options.orchestratorConfig);
   const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,
     critique,

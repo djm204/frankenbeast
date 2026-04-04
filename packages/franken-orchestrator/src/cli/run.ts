@@ -185,6 +185,7 @@ async function createChatSurfaceDeps(
     adapterWorkingDir: tmpdir(),
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
     chatMode: true,
+    orchestratorConfig: config,
   };
   const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
   const chatLlm = new AdapterLlmClient(cliLlmAdapter);
