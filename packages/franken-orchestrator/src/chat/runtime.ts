@@ -34,6 +34,13 @@ export interface ChatRuntimeResult {
   events: TurnEvent[];
   pendingApproval: boolean;
   pendingApprovalDescription?: string;
+  providerContext?: {
+    provider: string;
+    model?: string;
+    switchedFrom?: string;
+    switchReason?: string;
+  };
+  phase?: string;
   state: string;
   tier: string | null;
   transcript: TranscriptMessage[];

@@ -7,7 +7,7 @@ Items remaining after the dep-factory migration (Chunk A).
 ## R1. ChatRuntimeResult missing providerContext and phase fields
 
 **Source:** Phase 4.5 M1
-**Status:** Open
+**Status:** Resolved
 **Severity:** Medium
 **Context:** `ChatRuntimeCommsAdapter` maps `result.providerContext` and `result.phase` from ChatRuntimeResult, but these fields don't exist on the type yet. The adapter has `as unknown as Record<string, unknown>` casts.
 
@@ -22,7 +22,7 @@ Items remaining after the dep-factory migration (Chunk A).
 ## R2. SkillManager.loadForProvider() not implemented
 
 **Source:** Phase 5 M2
-**Status:** Open
+**Status:** Resolved
 **Severity:** Medium
 **Context:** The skill loading spec calls for `loadForProvider()` that delegates to `ProviderSkillTranslator`. SkillManager has no such method. The translator exists as a standalone class.
 
@@ -33,7 +33,7 @@ Items remaining after the dep-factory migration (Chunk A).
 ## R3. ReflectionHeartbeatAdapter has no reflectionFn
 
 **Source:** Phase 6 M1
-**Status:** Open (partial)
+**Status:** Resolved
 **Severity:** Low
 **Context:** `ReflectionHeartbeatAdapter` is wired as the heartbeat port, replacing the stub. But it's constructed without a `reflectionFn`, so `pulse()` returns empty results. The actual `ReflectionEvaluator` needs to be wired as the reflectionFn.
 
@@ -44,7 +44,7 @@ Items remaining after the dep-factory migration (Chunk A).
 ## R4. AuditTrail not persisted at closure
 
 **Source:** Phase 7 M1
-**Status:** Open (partial)
+**Status:** Resolved
 **Severity:** Medium
 **Context:** `AuditTrail` is created in `createBeastDeps()` and events are appended during provider switches. But `AuditTrailStore.save()` is never called — the trail is lost when the process exits.
 
@@ -69,10 +69,10 @@ Items remaining after the dep-factory migration (Chunk A).
 
 | ID | Severity | Resolution |
 |----|----------|------------|
-| R1 | Medium | Add fields to ChatRuntimeResult |
-| R2 | Medium | Add loadForProvider to SkillManager |
-| R3 | Low | Wire ReflectionEvaluator as reflectionFn |
-| R4 | Medium | Call AuditTrailStore.save at closure |
+| R1 | Medium | ~~Add fields to ChatRuntimeResult~~ **Resolved** |
+| R2 | Medium | ~~Add loadForProvider to SkillManager~~ **Resolved** |
+| R3 | Low | ~~Wire ReflectionEvaluator as reflectionFn~~ **Resolved** |
+| R4 | Medium | ~~Call AuditTrailStore.save at closure~~ **Resolved** |
 | R5 | Info | Optional cleanup |
 
-**Verdict:** Chunk A core objective achieved — all module stubs replaced with real consolidated adapters. 5 residual items tracked for follow-up.
+**Verdict:** R1-R4 resolved. Only R5 (optional createCliDeps cleanup) remains as an informational item.

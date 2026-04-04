@@ -79,24 +79,15 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       ];
     }
 
-    // Provider metadata — ChatRuntimeResult gains providerContext + phase
-    // fields in Phase 8 when ProviderRegistry is wired into the runtime.
-    // Until then, these will be undefined (adapters handle this gracefully).
-    // Provider metadata — ChatRuntimeResult gains providerContext + phase
-    // in Phase 8 when ProviderRegistry is wired into the runtime.
-    const runtimeResult = result as unknown as Record<string, unknown>;
-    const providerContext = runtimeResult['providerContext'] as
-      | { provider: string; model?: string; switchedFrom?: string; switchReason?: string }
-      | undefined;
-    if (providerContext) {
-      const prov: CommsInboundResult['provider'] = { name: providerContext.provider };
-      if (providerContext.model) prov!.model = providerContext.model;
-      if (providerContext.switchedFrom) prov!.switchedFrom = providerContext.switchedFrom;
-      if (providerContext.switchReason) prov!.switchReason = providerContext.switchReason;
+    if (result.providerContext) {
+      const prov: CommsInboundResult['provider'] = { name: result.providerContext.provider };
+      if (result.providerContext.model) prov!.model = result.providerContext.model;
+      if (result.providerContext.switchedFrom) prov!.switchedFrom = result.providerContext.switchedFrom;
+      if (result.providerContext.switchReason) prov!.switchReason = result.providerContext.switchReason;
       out.provider = prov;
     }
-    if (typeof runtimeResult['phase'] === 'string') {
-      out.phase = runtimeResult['phase'];
+    if (result.phase) {
+      out.phase = result.phase;
     }
 
     return out;
