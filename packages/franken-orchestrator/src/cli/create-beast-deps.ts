@@ -53,6 +53,8 @@ export interface BeastDepsConfig {
     piiMasking?: boolean;
     outputValidation?: boolean;
     allowedDomains?: string[];
+    maxTokenBudget?: number;
+    requireApproval?: 'all' | 'destructive' | 'none';
   };
   brain?: {
     dbPath?: string;

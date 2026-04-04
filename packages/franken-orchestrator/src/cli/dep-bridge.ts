@@ -95,6 +95,8 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
           ...(config.security.piiMasking !== undefined ? { piiMasking: config.security.piiMasking } : {}),
           ...(config.security.outputValidation !== undefined ? { outputValidation: config.security.outputValidation } : {}),
           ...(config.security.allowedDomains ? { allowedDomains: config.security.allowedDomains } : {}),
+          ...(config.security.maxTokenBudget !== undefined ? { maxTokenBudget: config.security.maxTokenBudget } : {}),
+          ...(config.security.requireApproval ? { requireApproval: config.security.requireApproval } : {}),
         }
       : { profile: securityProfile },
     brain: {

@@ -16,6 +16,7 @@ import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
 import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
+import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -40,6 +41,7 @@ export interface StartChatServerOptions {
   commsRuntime?: CommsRuntimePort;
   skillManager?: SkillManager;
   providerRegistry?: ProviderRegistry;
+  dashboardDeps?: DashboardRouteDeps;
 }
 
 export interface ChatServerHandle {
@@ -94,6 +96,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.commsRuntime ? { commsRuntime: options.commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
+    ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
   });
   const server = createServer((request, response) => {
     void handleHttpRequest(app, request, response);
