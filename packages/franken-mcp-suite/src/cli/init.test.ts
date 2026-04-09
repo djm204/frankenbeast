@@ -89,4 +89,25 @@ describe('fbeast init', () => {
     expect(settings.mcpServers['fbeast-critique']).toBeDefined();
     expect(settings.mcpServers['fbeast-planner']).toBeUndefined();
   });
+
+  it('writes Claude hooks when hooks are enabled', () => {
+    const root = tmpDir();
+    dirs.push(root);
+
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: true });
+
+    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.hooks.preToolCall).toEqual([
+      {
+        command: 'fbeast-hook pre-tool $TOOL_NAME',
+        description: 'fbeast governance check',
+      },
+    ]);
+    expect(settings.hooks.postToolCall).toEqual([
+      {
+        command: 'fbeast-hook post-tool $TOOL_NAME $RESULT',
+        description: 'fbeast observer logging',
+      },
+    ]);
+  });
 });
