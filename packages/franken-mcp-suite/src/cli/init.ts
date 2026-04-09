@@ -19,6 +19,21 @@ const SERVER_BIN_MAP: Record<FbeastServer, string> = {
   skills: 'fbeast-skills',
 };
 
+const FBEAST_HOOKS = {
+  preToolCall: [
+    {
+      command: 'fbeast-hook pre-tool $TOOL_NAME',
+      description: 'fbeast governance check',
+    },
+  ],
+  postToolCall: [
+    {
+      command: 'fbeast-hook post-tool $TOOL_NAME $RESULT',
+      description: 'fbeast observer logging',
+    },
+  ],
+} as const;
+
 export interface InitOptions {
   root: string;
   claudeDir: string;
@@ -86,6 +101,7 @@ export function runInit(options: InitOptions): void {
   settings['mcpServers'] = mcpServers;
 
   if (hooks) {
+    settings['hooks'] = mergeHooks(settings['hooks']);
     config.hooks = true;
     config.save();
   }
@@ -106,4 +122,38 @@ if (isMain) {
   const claudeDir = join(root, '.claude');
   const hooks = process.argv.includes('--hooks');
   runInit({ root, claudeDir, hooks });
+}
+
+function mergeHooks(existing: unknown): Record<string, unknown[]> {
+  const hooks: Record<string, unknown[]> = {};
+
+  if (isObjectRecord(existing)) {
+    for (const [hookType, hookList] of Object.entries(existing)) {
+      if (Array.isArray(hookList)) {
+        hooks[hookType] = [...hookList];
+      }
+    }
+  }
+
+  for (const [hookType, newHooks] of Object.entries(FBEAST_HOOKS)) {
+    const currentHooks = Array.isArray(hooks[hookType]) ? hooks[hookType] : [];
+    const preservedHooks = currentHooks.filter((hook) => !isFbeastHook(hook));
+    hooks[hookType] = [...preservedHooks, ...newHooks];
+  }
+
+  return hooks;
+}
+
+function isFbeastHook(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  const command = typeof value.command === 'string' ? value.command : '';
+  const description = typeof value.description === 'string' ? value.description : '';
+  return command.includes('fbeast') || description.includes('fbeast');
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
