@@ -50,20 +50,21 @@ export function createMcpServer(
     })),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
     const { name: toolName, arguments: args } = request.params;
     const tool = toolMap.get(toolName);
     if (!tool) {
       return {
-        content: [{ type: 'text', text: `Unknown tool: ${toolName}` }],
+        content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }],
         isError: true,
       };
     }
     try {
-      return await tool.handler((args ?? {}) as Record<string, unknown>);
+      const result = await tool.handler((args ?? {}) as Record<string, unknown>);
+      return { ...result };
     } catch (err) {
       return {
-        content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

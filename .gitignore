@@ -6,6 +6,8 @@ node_modules
 dist
 # Frankenbeast project-local state (build logs, checkpoints, plans)
 .frankenbeast/
+# fbeast MCP suite data
+.fbeast/
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
 
