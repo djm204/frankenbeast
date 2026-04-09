@@ -1,6 +1,6 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
 
@@ -9,8 +9,8 @@ switch (command) {
     const { runInit } = await import('./init.js');
     const root = process.cwd();
     const claudeDir = join(root, '.claude');
-    const initOptions = await resolveInitOptions(process.argv);
-    runInit({ root, claudeDir, ...initOptions });
+    const hooks = process.argv.includes('--hooks');
+    runInit({ root, claudeDir, hooks });
     break;
   }
   case 'uninstall': {
