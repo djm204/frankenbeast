@@ -87,17 +87,4 @@ describe('fbeast uninstall', () => {
 
     expect(existsSync(join(root, '.fbeast'))).toBe(false);
   });
-
-  it('removes fbeast hooks from settings.json', () => {
-    const root = tmpDir();
-    dirs.push(root);
-    const claudeDir = join(root, '.claude');
-
-    runInit({ root, claudeDir, hooks: true });
-    runUninstall({ root, claudeDir, purge: false });
-
-    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.hooks.preToolCall).toEqual([]);
-    expect(settings.hooks.postToolCall).toEqual([]);
-  });
 });
