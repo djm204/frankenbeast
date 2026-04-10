@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { runInit } from './init.js';
+import { resolveClaudeConfigDir } from './claude-config-paths.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -109,5 +110,18 @@ describe('fbeast init', () => {
         description: 'fbeast observer logging',
       },
     ]);
+  });
+
+  it('falls back to home Claude config when project config is missing', () => {
+    const cwd = '/tmp/project';
+    const homeDir = '/tmp/home';
+
+    const claudeDir = resolveClaudeConfigDir({
+      cwd,
+      homeDir,
+      exists: (path) => path === join(homeDir, '.claude'),
+    });
+
+    expect(claudeDir).toBe(join(homeDir, '.claude'));
   });
 });

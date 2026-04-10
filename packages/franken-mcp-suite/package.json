@@ -1,11 +1,12 @@
 {
-  "name": "franken-mcp-suite",
+  "name": "@fbeast/mcp-suite",
   "version": "0.1.0",
   "description": "MCP server suite exposing frankenbeast capabilities as Claude Code tools",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
+    "fbeast": "./dist/cli/main.js",
     "fbeast-mcp": "./dist/beast.js",
     "fbeast-memory": "./dist/servers/memory.js",
     "fbeast-planner": "./dist/servers/planner.js",
