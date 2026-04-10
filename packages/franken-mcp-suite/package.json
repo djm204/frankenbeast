@@ -8,6 +8,7 @@
   "bin": {
     "fbeast": "./dist/cli/main.js",
     "fbeast-mcp": "./dist/beast.js",
+    "fbeast-hook": "./dist/cli/hook.js",
     "fbeast-memory": "./dist/servers/memory.js",
     "fbeast-planner": "./dist/servers/planner.js",
     "fbeast-critique": "./dist/servers/critique.js",
