@@ -1,78 +1,65 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createObserverServer } from './observer.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 describe('Observer Server', () => {
-  let store: SqliteStore;
-  let dir: string;
-
-  beforeEach(() => {
-    dir = join(tmpdir(), `fbeast-obs-${randomUUID()}`);
-    mkdirSync(dir, { recursive: true });
-    store = createSqliteStore(join(dir, 'beast.db'));
-  });
-
-  afterEach(() => {
-    store.close();
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  });
-
   it('exposes 3 tools', () => {
-    const server = createObserverServer(store);
+    const server = createObserverServer({
+      observer: {
+        log: vi.fn(),
+        cost: vi.fn(),
+        trail: vi.fn(),
+      },
+    });
+
     const names = server.tools.map((t) => t.name);
     expect(names).toEqual(['fbeast_observer_log', 'fbeast_observer_cost', 'fbeast_observer_trail']);
   });
 
-  it('log creates audit trail entry and returns id', async () => {
-    const server = createObserverServer(store);
+  it('delegates log, cost, and trail calls to the observer adapter', async () => {
+    const observer = {
+      log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      cost: vi.fn().mockResolvedValue({
+        totalPromptTokens: 3000,
+        totalCompletionTokens: 1300,
+        totalCostUsd: 0.129,
+        byModel: [
+          { model: 'claude-opus-4', promptTokens: 3000, completionTokens: 1300, costUsd: 0.129 },
+        ],
+      }),
+      trail: vi.fn().mockResolvedValue([
+        {
+          eventType: 'file_edit',
+          payload: '{"file":"src/app.ts"}',
+          hash: 'abc123',
+          createdAt: '2026-04-10T00:00:00.000Z',
+        },
+      ]),
+    };
+
+    const server = createObserverServer({ observer });
     const logTool = server.tools.find((t) => t.name === 'fbeast_observer_log')!;
-
-    const result = await logTool.handler({
-      event: 'file_edit',
-      metadata: JSON.stringify({ file: 'src/app.ts', lines: '10-20' }),
-      sessionId: 'sess-1',
-    });
-
-    expect(result.content[0]!.text).toContain('Logged event');
-  });
-
-  it('trail returns all events for session', async () => {
-    const server = createObserverServer(store);
-    const logTool = server.tools.find((t) => t.name === 'fbeast_observer_log')!;
+    const costTool = server.tools.find((t) => t.name === 'fbeast_observer_cost')!;
     const trailTool = server.tools.find((t) => t.name === 'fbeast_observer_trail')!;
 
-    await logTool.handler({ event: 'start', metadata: '{}', sessionId: 's1' });
-    await logTool.handler({ event: 'edit', metadata: '{"file":"a.ts"}', sessionId: 's1' });
-    await logTool.handler({ event: 'other', metadata: '{}', sessionId: 's2' });
+    const logResult = await logTool.handler({
+      event: 'file_edit',
+      metadata: '{"file":"src/app.ts"}',
+      sessionId: 'sess-1',
+    });
+    expect(observer.log).toHaveBeenCalledWith({
+      event: 'file_edit',
+      metadata: '{"file":"src/app.ts"}',
+      sessionId: 'sess-1',
+    });
+    expect(logResult.content[0]!.text).toContain('Logged event');
 
-    const result = await trailTool.handler({ sessionId: 's1' });
-    const text = result.content[0]!.text;
-    expect(text).toContain('start');
-    expect(text).toContain('edit');
-    expect(text).not.toContain('other');
-  });
+    const costResult = await costTool.handler({ sessionId: 'sess-1' });
+    expect(observer.cost).toHaveBeenCalledWith({ sessionId: 'sess-1' });
+    expect(costResult.content[0]!.text).toContain('3000');
+    expect(costResult.content[0]!.text).toContain('1300');
 
-  it('cost tracks token usage per session', async () => {
-    const server = createObserverServer(store);
-    const costTool = server.tools.find((t) => t.name === 'fbeast_observer_cost')!;
-
-    store.db.prepare(`
-      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('s1', 'claude-opus-4', 1000, 500, 0.045);
-
-    store.db.prepare(`
-      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('s1', 'claude-opus-4', 2000, 800, 0.084);
-
-    const result = await costTool.handler({ sessionId: 's1' });
-    const text = result.content[0]!.text;
-    expect(text).toContain('3000');
-    expect(text).toContain('1300');
+    const trailResult = await trailTool.handler({ sessionId: 'sess-1' });
+    expect(observer.trail).toHaveBeenCalledWith('sess-1');
+    expect(trailResult.content[0]!.text).toContain('file_edit');
   });
 });

@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
-import { createHash } from 'node:crypto';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
-export function createObserverServer(store: SqliteStore): FbeastMcpServer {
-  const { db } = store;
+export interface ObserverServerDeps {
+  observer: ObserverAdapter;
+}
+
+export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer {
+  const { observer } = deps;
 
   const tools: ToolDef[] = [
     {
@@ -24,23 +27,11 @@ export function createObserverServer(store: SqliteStore): FbeastMcpServer {
         const event = String(args['event']);
         const metadata = String(args['metadata']);
         const sessionId = String(args['sessionId']);
+        const result = await observer.log({ event, metadata, sessionId });
 
-        const lastRow = db.prepare(
-          `SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
-        ).get(sessionId) as { hash: string } | undefined;
-
-        const parentHash = lastRow?.hash ?? null;
-        const hash = createHash('sha256')
-          .update(`${parentHash ?? ''}:${event}:${metadata}`)
-          .digest('hex')
-          .slice(0, 16);
-
-        const result = db.prepare(`
-          INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(sessionId, event, metadata, hash, parentHash);
-
-        return { content: [{ type: 'text', text: `Logged event: ${event} (id: ${result.lastInsertRowid}, hash: ${hash})` }] };
+        return {
+          content: [{ type: 'text', text: `Logged event: ${event} (id: ${result.id}, hash: ${result.hash})` }],
+        };
       },
     },
     {
@@ -54,41 +45,19 @@ export function createObserverServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const sessionId = args['sessionId'] ? String(args['sessionId']) : undefined;
+        const summary = await observer.cost(sessionId ? { sessionId } : {});
 
-        let sql = `
-          SELECT model,
-            SUM(prompt_tokens) as total_prompt,
-            SUM(completion_tokens) as total_completion,
-            SUM(cost_usd) as total_cost
-          FROM cost_ledger
-        `;
-        const params: unknown[] = [];
-
-        if (sessionId) {
-          sql += ` WHERE session_id = ?`;
-          params.push(sessionId);
-        }
-        sql += ` GROUP BY model`;
-
-        const rows = db.prepare(sql).all(...params) as Array<{
-          model: string; total_prompt: number; total_completion: number; total_cost: number;
-        }>;
-
-        if (rows.length === 0) {
+        if (summary.byModel.length === 0) {
           return { content: [{ type: 'text', text: 'No cost data recorded.' }] };
         }
-
-        const totalPrompt = rows.reduce((s, r) => s + r.total_prompt, 0);
-        const totalCompletion = rows.reduce((s, r) => s + r.total_completion, 0);
-        const totalCost = rows.reduce((s, r) => s + r.total_cost, 0);
 
         const lines = [
           `## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`,
           '',
-          ...rows.map((r) =>
-            `- ${r.model}: ${r.total_prompt} prompt + ${r.total_completion} completion = $${r.total_cost.toFixed(4)}`),
+          ...summary.byModel.map((row) =>
+            `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}`),
           '',
-          `**Total:** ${totalPrompt} prompt + ${totalCompletion} completion = $${totalCost.toFixed(4)}`,
+          `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`,
         ];
 
         return { content: [{ type: 'text', text: lines.join('\n') }] };
@@ -106,19 +75,14 @@ export function createObserverServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const sessionId = String(args['sessionId']);
-
-        const rows = db.prepare(
-          `SELECT event_type, payload, hash, created_at FROM audit_trail WHERE session_id = ? ORDER BY id ASC`,
-        ).all(sessionId) as Array<{
-          event_type: string; payload: string; hash: string; created_at: string;
-        }>;
+        const rows = await observer.trail(sessionId);
 
         if (rows.length === 0) {
           return { content: [{ type: 'text', text: `No audit trail for session: ${sessionId}` }] };
         }
 
         const text = rows
-          .map((r, i) => `${i + 1}. [${r.created_at}] ${r.event_type} (${r.hash})\n   ${r.payload}`)
+          .map((row, index) => `${index + 1}. [${row.createdAt}] ${row.eventType} (${row.hash ?? 'no-hash'})\n   ${row.payload}`)
           .join('\n');
 
         return { content: [{ type: 'text', text: `## Audit Trail (${rows.length} events)\n\n${text}` }] };
@@ -134,8 +98,8 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createObserverServer(store);
+  const observer = createObserverAdapter(values['db']!);
+  const server = createObserverServer({ observer });
   server.start().catch((err) => {
     console.error('fbeast-observer failed to start:', err);
     process.exit(1);

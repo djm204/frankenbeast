@@ -1,36 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
+import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { parseArgs } from 'node:util';
 
-const DANGEROUS_PATTERNS = [
-  /delete/i, /drop/i, /truncate/i, /destroy/i, /remove.*all/i,
-  /force.*push/i, /reset.*hard/i, /rm\s+-rf/i,
-  /format/i, /wipe/i, /purge/i,
-];
-
-type Decision = 'approved' | 'review_recommended' | 'denied';
-
-function assessAction(action: string, context: string): { decision: Decision; reason: string } {
-  const combined = `${action} ${context}`;
-
-  for (const pattern of DANGEROUS_PATTERNS) {
-    if (pattern.test(combined)) {
-      return {
-        decision: 'review_recommended',
-        reason: `Action "${action}" matches dangerous pattern. Human review recommended before proceeding.`,
-      };
-    }
-  }
-
-  return {
-    decision: 'approved',
-    reason: `Action "${action}" does not match any dangerous patterns.`,
-  };
+export interface GovernorServerDeps {
+  governor: GovernorAdapter;
 }
 
-export function createGovernorServer(store: SqliteStore): FbeastMcpServer {
-  const { db } = store;
+export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer {
+  const { governor } = deps;
 
   const tools: ToolDef[] = [
     {
@@ -47,12 +25,7 @@ export function createGovernorServer(store: SqliteStore): FbeastMcpServer {
       async handler(args) {
         const action = String(args['action']);
         const context = String(args['context']);
-        const { decision, reason } = assessAction(action, context);
-
-        db.prepare(`
-          INSERT INTO governor_log (action, context, decision, reason)
-          VALUES (?, ?, ?, ?)
-        `).run(action, context, decision, reason);
+        const { decision, reason } = await governor.check({ action, context });
 
         return { content: [{ type: 'text', text: `**Decision:** ${decision}\n**Reason:** ${reason}` }] };
       },
@@ -65,29 +38,18 @@ export function createGovernorServer(store: SqliteStore): FbeastMcpServer {
         properties: {},
       },
       async handler(_args) {
-        const rows = db.prepare(`
-          SELECT model,
-            SUM(prompt_tokens) as total_prompt,
-            SUM(completion_tokens) as total_completion,
-            SUM(cost_usd) as total_cost
-          FROM cost_ledger
-          GROUP BY model
-        `).all() as Array<{
-          model: string; total_prompt: number; total_completion: number; total_cost: number;
-        }>;
+        const summary = await governor.budgetStatus();
 
-        if (rows.length === 0) {
+        if (summary.byModel.length === 0) {
           return { content: [{ type: 'text', text: 'No cost data recorded yet.' }] };
         }
-
-        const totalCost = rows.reduce((s, r) => s + r.total_cost, 0);
 
         const lines = [
           `## Budget Status`,
           '',
-          ...rows.map((r) => `- ${r.model}: $${r.total_cost.toFixed(4)}`),
+          ...summary.byModel.map((row) => `- ${row.model}: $${row.costUsd.toFixed(4)}`),
           '',
-          `**Total spend:** $${totalCost.toFixed(4)}`,
+          `**Total spend:** $${summary.totalSpendUsd.toFixed(4)}`,
         ];
 
         return { content: [{ type: 'text', text: lines.join('\n') }] };
@@ -103,8 +65,8 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createGovernorServer(store);
+  const governor = createGovernorAdapter(values['db']!);
+  const server = createGovernorServer({ governor });
   server.start().catch((err) => {
     console.error('fbeast-governor failed to start:', err);
     process.exit(1);

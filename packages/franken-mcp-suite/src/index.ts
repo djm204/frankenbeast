@@ -3,6 +3,11 @@ export { createSqliteStore, type SqliteStore } from './shared/sqlite-store.js';
 export { FbeastConfig, type FbeastServer } from './shared/config.js';
 export { createMcpServer, type FbeastMcpServer, type ToolDef, type ToolResult } from './shared/server-factory.js';
 
+// Adapters
+export { createBrainAdapter, type BrainAdapter } from './adapters/brain-adapter.js';
+export { createObserverAdapter, type ObserverAdapter } from './adapters/observer-adapter.js';
+export { createGovernorAdapter, type GovernorAdapter } from './adapters/governor-adapter.js';
+
 // Servers
 export { createMemoryServer } from './servers/memory.js';
 export { createObserverServer } from './servers/observer.js';
