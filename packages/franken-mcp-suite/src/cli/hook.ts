@@ -1,19 +1,59 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 
-export async function runHook(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const { positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    strict: false,
-  });
+export interface HookDeps {
+  governor: GovernorAdapter;
+  observer: ObserverAdapter;
+  sessionId(): string;
+}
 
-  const phase = positionals[0];
+export function defaultHookDeps(cwd: string = process.cwd()): HookDeps {
+  const dbPath = join(cwd, '.fbeast', 'beast.db');
+
+  return {
+    governor: createGovernorAdapter(dbPath),
+    observer: createObserverAdapter(dbPath),
+    sessionId: () =>
+      process.env['FBEAST_SESSION_ID']
+      ?? process.env['CLAUDE_SESSION_ID']
+      ?? randomUUID(),
+  };
+}
+
+export async function runHook(
+  argv: string[] = process.argv.slice(2),
+  deps: HookDeps = defaultHookDeps(),
+): Promise<void> {
+  const [phase, toolName = '', payload = ''] = argv;
+
+  if (phase === 'pre-tool') {
+    const decision = await deps.governor.check({ action: toolName, context: payload });
+    if (decision.decision !== 'approved') {
+      process.stderr.write(`${decision.reason}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    process.stdout.write(JSON.stringify({ allowed: true, decision: decision.decision }) + '\n');
+    return;
+  }
+
+  if (phase === 'post-tool') {
+    await deps.observer.log({
+      event: 'tool_call',
+      metadata: JSON.stringify({ toolName, payload, phase }),
+      sessionId: deps.sessionId(),
+    });
+    process.stdout.write(JSON.stringify({ logged: true }) + '\n');
+    return;
+  }
+
   if (phase !== 'pre-tool' && phase !== 'post-tool') {
     throw new Error('Usage: fbeast-hook <pre-tool|post-tool> ...');
   }
-
-  process.stdout.write(JSON.stringify({ phase, ok: true }) + '\n');
 }
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
