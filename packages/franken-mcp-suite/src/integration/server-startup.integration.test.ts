@@ -75,10 +75,29 @@ describe('declared MCP binaries', () => {
       const names = tools.tools.map((tool) => tool.name);
 
       expect(names).toContain('fbeast_memory_query');
+      expect(names).toContain('fbeast_firewall_scan');
+      expect(names).toContain('fbeast_governor_check');
       expect(names).toContain('fbeast_skills_list');
     } finally {
       await transport.close();
       rmSync(dbDir, { recursive: true, force: true });
     }
+  });
+
+  it('documents the shipped MCP mode and Beast mode split in the root README', () => {
+    const readme = readFileSync(join(PACKAGE_ROOT, '..', '..', 'README.md'), 'utf8');
+
+    expect(readme).toContain('## Modes');
+    expect(readme).toContain('`MCP mode`');
+    expect(readme).toContain('`Beast mode`');
+    expect(readme).toContain('Both modes share `.fbeast/beast.db`.');
+  });
+
+  it('documents the dashboard as the primary Beast operator UI', () => {
+    const readme = readFileSync(join(PACKAGE_ROOT, '..', 'franken-web', 'README.md'), 'utf8');
+
+    expect(readme).toContain('## Launch Role');
+    expect(readme).toContain('primary Beast operator UI');
+    expect(readme).toContain('CLI users can perform the same core operations through `frankenbeast beasts`.');
   });
 });

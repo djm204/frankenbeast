@@ -10,6 +10,13 @@
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
 
+## Modes
+
+- `MCP mode`: Claude Code plugin/tool-provider surface via `@fbeast/mcp-suite`
+- `Beast mode`: standalone orchestrator path with dashboard-first control and CLI parity
+
+Both modes share `.fbeast/beast.db`.
+
 ## Why This Exists
 
 LLM-based agents routinely lose safety constraints when context windows compress, hallucinate tool calls that violate architectural rules, and take destructive actions without human oversight. Frankenbeast solves this by placing safety enforcement in a deterministic pipeline that the LLM cannot bypass, forget, or summarise away.
