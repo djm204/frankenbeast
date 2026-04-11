@@ -7,6 +7,8 @@ export { createMcpServer, type FbeastMcpServer, type ToolDef, type ToolResult } 
 export { createBrainAdapter, type BrainAdapter } from './adapters/brain-adapter.js';
 export { createObserverAdapter, type ObserverAdapter } from './adapters/observer-adapter.js';
 export { createGovernorAdapter, type GovernorAdapter } from './adapters/governor-adapter.js';
+export { createPlannerAdapter, type PlannerAdapter } from './adapters/planner-adapter.js';
+export { createCritiqueAdapter, type CritiqueAdapter } from './adapters/critique-adapter.js';
 
 // Servers
 export { createMemoryServer } from './servers/memory.js';

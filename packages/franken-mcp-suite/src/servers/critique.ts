@@ -1,69 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
+import { createCritiqueAdapter, type CritiqueAdapter } from '../adapters/critique-adapter.js';
 import { parseArgs } from 'node:util';
 
-interface Finding {
-  criterion: string;
-  severity: 'info' | 'warning' | 'error';
-  message: string;
+export interface CritiqueServerDeps {
+  critique: CritiqueAdapter;
 }
 
-interface EvalResult {
-  verdict: 'pass' | 'warn' | 'fail';
-  score: number;
-  findings: Finding[];
-}
-
-function evaluateContent(content: string, criteria: string[]): EvalResult {
-  const findings: Finding[] = [];
-
-  for (const criterion of criteria) {
-    switch (criterion) {
-      case 'correctness':
-        if (/console\.log\(/g.test(content)) {
-          findings.push({ criterion, severity: 'warning', message: 'Contains console.log — remove before production' });
-        }
-        if (/TODO|FIXME|HACK/g.test(content)) {
-          findings.push({ criterion, severity: 'warning', message: 'Contains TODO/FIXME/HACK markers' });
-        }
-        break;
-      case 'readability':
-        if (content.split('\n').some((line) => line.length > 120)) {
-          findings.push({ criterion, severity: 'info', message: 'Lines exceed 120 characters' });
-        }
-        break;
-      case 'security':
-        if (/eval\(|new Function\(/g.test(content)) {
-          findings.push({ criterion, severity: 'error', message: 'Uses eval() or new Function() — potential code injection' });
-        }
-        if (/password|secret|api.?key/i.test(content) && /['"`][A-Za-z0-9]{8,}/g.test(content)) {
-          findings.push({ criterion, severity: 'error', message: 'Possible hardcoded credential detected' });
-        }
-        break;
-      case 'complexity':
-        const lines = content.split('\n').length;
-        if (lines > 300) {
-          findings.push({ criterion, severity: 'warning', message: `File is ${lines} lines — consider splitting` });
-        }
-        const nestingDepth = Math.max(...content.split('\n').map((l) => l.search(/\S/) / 2));
-        if (nestingDepth > 5) {
-          findings.push({ criterion, severity: 'warning', message: `Deep nesting detected (${Math.round(nestingDepth)} levels)` });
-        }
-        break;
-    }
-  }
-
-  const errorCount = findings.filter((f) => f.severity === 'error').length;
-  const warnCount = findings.filter((f) => f.severity === 'warning').length;
-
-  const score = Math.max(0, 1.0 - errorCount * 0.3 - warnCount * 0.1);
-  const verdict = errorCount > 0 ? 'fail' : warnCount > 0 ? 'warn' : 'pass';
-
-  return { verdict, score, findings };
-}
-
-export function createCritiqueServer(store: SqliteStore): FbeastMcpServer {
+export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer {
+  const { critique } = deps;
   const tools: ToolDef[] = [
     {
       name: 'fbeast_critique_evaluate',
@@ -73,18 +18,18 @@ export function createCritiqueServer(store: SqliteStore): FbeastMcpServer {
         properties: {
           content: { type: 'string', description: 'Code or text to evaluate' },
           criteria: { type: 'string', description: 'Comma-separated criteria: correctness, readability, security, complexity' },
+          evaluators: { type: 'string', description: 'Comma-separated evaluator names (e.g. logic-loop, complexity)' },
         },
         required: ['content'],
       },
       async handler(args) {
         const content = String(args['content']);
-        const criteriaStr = args['criteria'] ? String(args['criteria']) : 'correctness,readability,security,complexity';
-        const criteria = criteriaStr.split(',').map((c) => c.trim());
-
-        const result = evaluateContent(content, criteria);
+        const criteria = splitCsvArg(args['criteria']) ?? ['correctness', 'readability', 'security', 'complexity'];
+        const evaluators = splitCsvArg(args['evaluators']);
+        const result = await critique.evaluate(evaluators ? { content, criteria, evaluators } : { content, criteria });
 
         const findingsText = result.findings.length > 0
-          ? result.findings.map((f) => `  [${f.severity}] ${f.criterion}: ${f.message}`).join('\n')
+          ? result.findings.map((f) => `  [${f.severity}] ${f.message}`).join('\n')
           : '  None';
 
         const text = [
@@ -113,26 +58,20 @@ export function createCritiqueServer(store: SqliteStore): FbeastMcpServer {
       async handler(args) {
         const original = String(args['original']);
         const revised = String(args['revised']);
-        const defaultCriteria = ['correctness', 'readability', 'security', 'complexity'];
-
-        const origResult = evaluateContent(original, defaultCriteria);
-        const revResult = evaluateContent(revised, defaultCriteria);
-
-        const delta = revResult.score - origResult.score;
-        const direction = delta > 0 ? 'improved' : delta < 0 ? 'degraded' : 'unchanged';
+        const result = await critique.compare({ original, revised });
 
         const text = [
           `## Comparison`,
           ``,
-          `**original score:** ${origResult.score.toFixed(2)} (${origResult.verdict})`,
-          `**revised score:** ${revResult.score.toFixed(2)} (${revResult.verdict})`,
-          `**delta:** ${delta >= 0 ? '+' : ''}${delta.toFixed(2)} (${direction})`,
+          `**original score:** ${result.originalScore.toFixed(2)}`,
+          `**revised score:** ${result.revisedScore.toFixed(2)}`,
+          `**delta:** ${result.delta >= 0 ? '+' : ''}${result.delta.toFixed(2)} (${result.direction})`,
           ``,
-          `### Original findings (${origResult.findings.length})`,
-          ...origResult.findings.map((f) => `- [${f.severity}] ${f.message}`),
+          `### Original findings (${result.originalFindings.length})`,
+          ...result.originalFindings.map((f) => `- [${f.severity}] ${f.message}`),
           ``,
-          `### Revised findings (${revResult.findings.length})`,
-          ...revResult.findings.map((f) => `- [${f.severity}] ${f.message}`),
+          `### Revised findings (${result.revisedFindings.length})`,
+          ...result.revisedFindings.map((f) => `- [${f.severity}] ${f.message}`),
         ].join('\n');
 
         return { content: [{ type: 'text', text }] };
@@ -148,10 +87,23 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createCritiqueServer(store);
+  const critique = createCritiqueAdapter();
+  const server = createCritiqueServer({ critique });
   server.start().catch((err) => {
     console.error('fbeast-critique failed to start:', err);
     process.exit(1);
   });
+}
+
+function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = String(value)
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  return parsed.length > 0 ? parsed : fallback;
 }
