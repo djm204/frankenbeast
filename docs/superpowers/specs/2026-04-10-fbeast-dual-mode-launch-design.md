@@ -1,7 +1,7 @@
 # fbeast Dual-Mode Launch Design
 
 **Date:** 2026-04-10
-**Status:** Proposed
+**Status:** Approved
 **Scope:** First live release that ships both MCP mode and Beast mode, with MCP completed first.
 
 ## Goal
@@ -13,7 +13,7 @@ The release must make two things true at the same time:
 1. `MCP mode` is a credible Claude Code plugin surface backed by real frankenbeast engines rather than local stand-ins.
 2. `Beast mode` is a credible standalone runtime backed by the existing beast control plane, with both dashboard and CLI parity for core operations.
 
-Both modes must share the same `.fbeast/beast.db` state so users can move between them without losing memory, plans, traces, or budget history.
+Both modes must share the same `.fbeast/beast.db` state so users can move between them without losing shared memory, persisted planning context, traces, or budget history.
 
 ## Product Boundaries
 
@@ -67,6 +67,13 @@ That means the launch should preserve this topology:
 
 `MCP mode` remains separate from this path. It is a plugin/tool-provider surface, not a beast-control transport.
 
+For launch purposes, `beasts-daemon` refers to the existing Beast control-plane surfaces already present in `franken-orchestrator`, not to a newly introduced standalone binary. The concrete backend contract for this release is:
+
+- `franken-orchestrator` Beast services and repositories remain the single authority for beast lifecycle state
+- `/v1/beasts/*` HTTP routes are the dashboard-facing control-plane transport
+- CLI Beast operations must call the same underlying Beast services or HTTP control-plane contract rather than reimplementing lifecycle logic in `@fbeast/mcp-suite`
+- `chat-server` may act as another client when it uses those same backend surfaces
+
 ## Shared State Model
 
 Both modes share `.fbeast/beast.db`, but they do not share process ownership.
@@ -74,15 +81,26 @@ Both modes share `.fbeast/beast.db`, but they do not share process ownership.
 Shared data expectations:
 
 - memory entries written in MCP mode are visible to Beast mode
-- plans written in MCP mode are visible to Beast mode where relevant
+- planning context intentionally persisted into shared stores remains visible across mode switches
 - observer traces and cost data remain queryable across both modes
 - governor and firewall logs persist across mode switches
+
+For first launch, the shared-state promise does not require transient planner DAGs, design-doc markdown files, or chunk files to be reconstructed from `.fbeast/beast.db`. Only data intentionally persisted into shared stores is covered by the release guarantee.
 
 Isolation expectations:
 
 - enabling or disabling MCP servers must not change beast daemon behavior
 - starting or stopping Beast mode must not mutate Claude Code MCP config
 - dashboard/CLI beast operations must not depend on MCP server installation
+
+Authority model:
+
+- Claude Code settings remain the source of truth for installed MCP servers and installed hooks
+- `.fbeast/config.json` remains the source of truth for local mode selection, Beast provider selection, and persisted risk-acknowledgment fields
+- `.fbeast/beast.db` remains the source of truth for shared memory, observer/cost records, and firewall/governor logs
+- the Beast control plane remains the source of truth for tracked agents, runs, and other lifecycle state
+
+The “no config drift” release gate means operations only mutate their own authority domain unless a cross-domain write is explicitly part of the contract. Derived views may be recomputed from those sources, but no operation should create competing ownership of the same field.
 
 ## Release Sequencing
 
@@ -122,6 +140,52 @@ Required outcomes:
 - prove shared state survives switching between the two modes
 - prove no config drift between Claude Code config, `.fbeast/config.json`, and Beast control-plane state
 
+## Implementation Constraints
+
+The implementation plan must be broken into logical, PR-able chunks that are friendly to limited context windows.
+
+Each chunk should be:
+
+- small enough to reason about without loading unrelated subsystems
+- targeted to one clear behavior change or integration seam
+- independently testable with focused verification
+- safe to review on its own without needing the entire launch in context
+
+Chunk design rules:
+
+- prefer one adapter family, one CLI surface, or one verification surface per chunk
+- keep write scopes narrow and avoid cross-package edits unless the seam requires it
+- each chunk must end with a concrete proof point: passing targeted tests, a smoke check, or both
+- avoid mega-PRs that combine MCP adapters, hook runtime, Beast CLI, dashboard parity, and docs in one pass
+- sequence chunks so each one leaves the repo in a still-working state
+
+## Chunk Map
+
+This design is intentionally executed in eight ordered chunks. The first five chunks make MCP mode release-credible before Beast mode activation work begins. The last three chunks complete Beast mode and prove the dual-mode launch gate.
+
+1. **MCP contract and startup smoke harness**  
+   Align the published bin surface, combined server startup, and package-level smoke coverage so the shipped MCP package matches the install story.
+2. **Memory, observer, and governor adapters**  
+   Replace MCP-local stand-ins for memory, audit/cost, and governance with thin adapters over the existing engines.
+3. **Planner and critique adapters**  
+   Replace template planning and heuristic critique behavior with real planner and critique integrations.
+4. **Firewall, skills, and real hook runtime**  
+   Wire firewall and skills to existing orchestrator-backed surfaces and make `fbeast-hook` perform actual pre/post behavior instead of installing dead config.
+5. **MCP docs and launch proof**  
+   Align docs with the real package surface and prove the combined MCP mode is credible through final smoke assertions.
+6. **Beast CLI parity**  
+   Add the missing CLI operations against the existing beast control plane so terminal users have the same core operational coverage as dashboard users.
+7. **Beast activation and risk acknowledgment**  
+   Add `fbeast beast`, persist provider selection intentionally, and gate `claude-cli` behind a one-time risk acknowledgment.
+8. **Dual-mode release gate**  
+   Prove fresh install, Beast startup, shared-state handoff, and config isolation on the same project before calling the launch ready.
+
+Chunk sequencing invariants:
+
+- Chunks 1 through 5 must land before Beast mode can be considered launch-credible.
+- Chunks 6 and 7 complete Beast mode only after MCP mode is already real.
+- Chunk 8 is the final launch gate and must verify both modes together rather than in isolation.
+
 ## MCP Mode Design
 
 ### Server implementation rule
@@ -157,6 +221,14 @@ The `fbeast-hook` runtime should:
 
 Hooks remain opt-in because they are more invasive than plain MCP tools.
 
+Hook runtime contract:
+
+- `pre-tool` receives a tool name plus an optional serialized payload string; missing payload is treated as an empty string
+- `post-tool` receives a tool name plus an optional serialized result payload string; missing payload is treated as an empty string
+- governance denial in `pre-tool` must exit non-zero and print the denial reason to stderr
+- missing `.fbeast` runtime state, unreadable config, or observer/governor bootstrap failure must exit non-zero and print a clear `fbeast-hook` error to stderr
+- invalid hook usage must fail with a usage error rather than silently succeeding
+
 ### Verification for MCP mode
 
 Minimum proof:
@@ -185,25 +257,48 @@ It should:
 
 For `claude-cli`, the first run must warn clearly that this path may violate provider terms and risk suspension. The warning is acknowledged once and persisted in `.fbeast/config.json`.
 
+This spec intentionally distinguishes only two provider classes for launch:
+
+- `claude-cli`: CLI-automation path that requires the acknowledgment gate
+- API-backed providers: providers that call their official remote APIs and do not require this acknowledgment gate
+
 Requirements:
 
 - warning only gates `claude-cli`
-- compliant API providers do not require this acknowledgment
+- API-backed providers do not require this acknowledgment
 - acknowledgment persists and is not re-prompted every run
 - refusal aborts Beast mode launch cleanly
+
+Config contract:
+
+- Beast provider selection must be persisted in `.fbeast/config.json`
+- the persisted acknowledgment field must be specific to the CLI-risk gate and must not suppress future warnings for unrelated risks
+- launch verification must cover at least one `claude-cli` path and at least one API-backed provider path
 
 ### CLI parity
 
 Day-one CLI parity for Beast operations is:
 
-- `start/create`
-- `list/status`
+- `create`
+- `list`
 - `logs`
 - `stop`
-- `resume/restart`
+- `restart`
+- `resume`
 - `delete`
 
 The dashboard remains the primary UI, but no core beast operation should require the dashboard.
+
+Parity semantics for launch:
+
+- `create` starts a new tracked agent or run through the accepted Beast control plane
+- `list` returns current tracked agents or runs with enough status information to answer the practical “status” question
+- `logs` reads logs for a targeted Beast run or linked agent run
+- `stop` halts an active run
+- `restart` re-launches a previously started run through the same backend path as the dashboard
+- `resume` resumes a paused or stopped tracked agent or linked run where the backend supports it
+- `delete` removes or soft-deletes the tracked Beast record through the same control plane
+- `start` and `status` may exist as aliases or UX sugar, but launch acceptance is measured against the canonical actions above
 
 ### Verification for Beast mode
 
@@ -214,6 +309,13 @@ Minimum proof:
 - `claude-cli` acknowledgment gate behaves correctly
 - shared-state handoff from MCP mode to Beast mode is observable
 - CLI parity commands work against the same beast control plane used by the dashboard
+
+Minimum verification matrix:
+
+- verify one API-backed provider path that does not trigger the CLI-risk gate
+- verify one `claude-cli` path that does trigger the gate on first run and does not re-prompt after acknowledgment
+- verify `create`, `list`, `logs`, `stop`, `restart`, `resume`, and `delete` against the same backend state the dashboard reads
+- verify Beast lifecycle operations do not mutate Claude Code MCP installation state
 
 ## Documentation And Positioning
 
@@ -227,6 +329,12 @@ Required doc outcomes:
 - docs explain that dashboard is the main Beast UI while CLI has parity for core operations
 - docs explain that both modes share `.fbeast/beast.db`
 
+“Dashboard remains the main Beast UI” is a positioning and default-flow requirement, not an exclusivity requirement. Launch acceptance only requires that:
+
+- docs and examples present the dashboard as the recommended primary operator surface
+- CLI parity exists for the canonical core operations
+- no Beast operation is artificially forced through the dashboard when CLI parity is part of the launch contract
+
 ## Success Criteria
 
 The launch is ready when all of the following are true:
@@ -235,7 +343,7 @@ The launch is ready when all of the following are true:
 2. `fbeast-init --hooks` installs a working hook runtime.
 3. `fbeast beast` exists and enforces provider-risk acknowledgment for `claude-cli`.
 4. Dashboard remains the main Beast operator UI.
-5. CLI has parity for core Beast operations: start/create, list/status, logs, stop, resume/restart, delete.
+5. CLI has parity for the canonical core Beast operations: create, list, logs, stop, restart, resume, and delete. `start` and `status` may exist as aliases, but launch acceptance is measured against the canonical set.
 6. Both modes can be used in the same project without config drift or state loss.
 7. The published docs and package surfaces match what actually ships.
 
