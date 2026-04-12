@@ -8,7 +8,7 @@ export class MissingCredentialError extends Error {
   ) {
     super(
       `Missing credential: ${varName} (from ${template}). ` +
-        `Set it in .frankenbeast/.env or as an environment variable.`,
+        `Set it in .fbeast/.env or as an environment variable.`,
     );
     this.name = 'MissingCredentialError';
   }
@@ -19,7 +19,7 @@ export class SkillAuthResolver {
 
   constructor(projectRoot: string) {
     this.envOverrides = loadDotEnv(
-      join(projectRoot, '.frankenbeast', '.env'),
+      join(projectRoot, '.fbeast', '.env'),
     );
   }
 

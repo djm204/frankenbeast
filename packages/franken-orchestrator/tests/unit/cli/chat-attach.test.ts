@@ -16,7 +16,7 @@ describe('resolveManagedChatAttachment', () => {
 
   it('attaches to managed chat when the managed service is healthy', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-chat-attach-'));
-    const frankenbeastDir = join(workDir, '.frankenbeast');
+    const frankenbeastDir = join(workDir, '.fbeast');
     await mkdir(join(frankenbeastDir, 'network'), { recursive: true });
 
     await writeFile(join(frankenbeastDir, 'network', 'state.json'), JSON.stringify({
@@ -55,7 +55,7 @@ describe('resolveManagedChatAttachment', () => {
 
     const attachment = await resolveManagedChatAttachment({
       config: defaultConfig(),
-      frankenbeastDir: join(workDir, '.frankenbeast'),
+      frankenbeastDir: join(workDir, '.fbeast'),
       fetchImpl: async () => new Response('down', { status: 503 }),
     });
 
@@ -64,7 +64,7 @@ describe('resolveManagedChatAttachment', () => {
 
   it('ignores stale detached state when healthcheck fails', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-chat-attach-'));
-    const frankenbeastDir = join(workDir, '.frankenbeast');
+    const frankenbeastDir = join(workDir, '.fbeast');
     await mkdir(join(frankenbeastDir, 'network'), { recursive: true });
     await writeFile(join(frankenbeastDir, 'network', 'state.json'), JSON.stringify({
       mode: 'secure',

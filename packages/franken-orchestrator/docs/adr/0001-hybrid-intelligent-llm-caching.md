@@ -22,7 +22,7 @@ Use a hybrid cache model:
 
 1. Prefer provider-native work-session reuse when the provider advertises persistent work-session support.
 2. Fall back to a Frankenbeast-managed disk cache for exact response reuse and prefix/session metadata persistence.
-3. Persist cache artifacts under `.frankenbeast/.cache/llm`.
+3. Persist cache artifacts under `.fbeast/.cache/llm`.
 
 The implementation is centered on:
 

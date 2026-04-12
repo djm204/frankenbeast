@@ -76,7 +76,7 @@ describe('runNetworkCommand', () => {
       defaultConfig(),
       '/repo/frankenbeast',
       {
-        frankenbeastDir: '/repo/frankenbeast/.frankenbeast',
+        frankenbeastDir: '/repo/frankenbeast/.fbeast',
       },
       {
         resolveServices: vi.fn(() => services),
@@ -110,7 +110,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'up', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
       {
         resolveServices: vi.fn(() => services),
         createSupervisor: vi.fn(() => ({
@@ -145,7 +145,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'up', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
       {
         resolveServices: vi.fn(() => [makeService('chat-server')]),
         createSupervisor: vi.fn(() => ({
@@ -175,7 +175,7 @@ describe('runNetworkCommand', () => {
       defaultConfig(),
       '/repo/frankenbeast',
       {
-        frankenbeastDir: '/repo/frankenbeast/.frankenbeast',
+        frankenbeastDir: '/repo/frankenbeast/.fbeast',
       },
       {
         resolveServices: vi.fn(() => []),
@@ -209,7 +209,7 @@ describe('runNetworkCommand', () => {
       defaultConfig(),
       '/repo/frankenbeast',
       {
-        frankenbeastDir: '/repo/frankenbeast/.frankenbeast',
+        frankenbeastDir: '/repo/frankenbeast/.fbeast',
       },
       {
         resolveServices: vi.fn(() => []),
@@ -261,21 +261,21 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'start', networkTarget: 'dashboard-web', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
       deps,
     );
     await runNetworkCommand(
       makeArgs({ networkAction: 'stop', networkTarget: 'dashboard-web' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
       deps,
     );
     await runNetworkCommand(
       makeArgs({ networkAction: 'restart', networkTarget: 'all', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.frankenbeast' },
+      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
       deps,
     );
 
@@ -293,7 +293,7 @@ describe('runNetworkCommand', () => {
       defaultConfig(),
       '/repo/frankenbeast',
       {
-        frankenbeastDir: '/repo/frankenbeast/.frankenbeast',
+        frankenbeastDir: '/repo/frankenbeast/.fbeast',
       },
       {
         resolveServices: vi.fn(() => []),
@@ -323,7 +323,7 @@ describe('runNetworkCommand', () => {
       defaultConfig(),
       '/repo/frankenbeast',
       {
-        frankenbeastDir: '/repo/frankenbeast/.frankenbeast',
+        frankenbeastDir: '/repo/frankenbeast/.fbeast',
       },
       {
         resolveServices: vi.fn(() => []),

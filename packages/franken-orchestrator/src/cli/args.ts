@@ -106,7 +106,7 @@ Subcommands:
   init                    Guided setup for canonical Frankenbeast config
   interview               Gather requirements interactively, generate design doc
   plan --design-doc <f>   Decompose design doc into chunk files
-  run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
+  run                     Execute chunk files (from .fbeast/ or --plan-dir)
   beasts                  Dispatch and control Beast runs
   issues                  Fetch and filter GitHub issues
   chat                    Interactive chat REPL with ConversationEngine

@@ -67,9 +67,9 @@ describe('Config file passthrough', () => {
     const configFilePath = spec.env!['FRANKENBEAST_RUN_CONFIG']!;
     configFilePaths.push(configFilePath);
 
-    // Config file should exist under cwd/.frankenbeast/.build/run-configs/
+    // Config file should exist under cwd/.fbeast/.build/run-configs/
     expect(existsSync(configFilePath)).toBe(true);
-    expect(configFilePath).toContain('.frankenbeast');
+    expect(configFilePath).toContain('.fbeast');
     expect(configFilePath).toContain('run-configs');
 
     // Config file content should match the configSnapshot

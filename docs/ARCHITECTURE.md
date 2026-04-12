@@ -78,8 +78,8 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 | `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline and estimates context-window usage for compaction. |
 | `CliSkillExecutor` | `packages/franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs MartinLoop, manages recovery commits, and passes chunk-session services into the loop. |
 | `MartinLoop` | `packages/franken-orchestrator/src/skills/martin-loop.ts` | Core loop: load or create canonical `ChunkSession`, render the provider request, capture output, snapshot before compaction, compact at `>= 85%` usage, and continue until `<promise>TAG</promise>` or max iterations. Rate-limit cascade still rotates through fallback providers. |
-| `FileChunkSessionStore` | `packages/franken-orchestrator/src/session/chunk-session-store.ts` | Persists canonical chunk execution state under `.frankenbeast/.build/chunk-sessions/<plan>/<chunk>.json`. |
-| `FileChunkSessionSnapshotStore` | `packages/franken-orchestrator/src/session/chunk-session-snapshot-store.ts` | Writes immutable pre-compaction rollback snapshots under `.frankenbeast/.build/chunk-session-snapshots/`. |
+| `FileChunkSessionStore` | `packages/franken-orchestrator/src/session/chunk-session-store.ts` | Persists canonical chunk execution state under `.fbeast/.build/chunk-sessions/<plan>/<chunk>.json`. |
+| `FileChunkSessionSnapshotStore` | `packages/franken-orchestrator/src/session/chunk-session-snapshot-store.ts` | Writes immutable pre-compaction rollback snapshots under `.fbeast/.build/chunk-session-snapshots/`. |
 | `ChunkSessionRenderer` | `packages/franken-orchestrator/src/session/chunk-session-renderer.ts` | Converts canonical chunk-session state into provider-specific prompts and native-session flags. |
 | `ChunkSessionCompactor` | `packages/franken-orchestrator/src/session/chunk-session-compactor.ts` | Summarizes older transcript history into a compacted execution summary while preserving promise-tag and unresolved-error context. |
 | `ChunkSessionGc` | `packages/franken-orchestrator/src/session/chunk-session-gc.ts` | Removes expired chunk-session artifacts and orphaned snapshots; `--cleanup` removes them eagerly. |
@@ -177,13 +177,13 @@ flowchart TD
 
 #### Canonical Chunk Sessions
 
-Chunk execution no longer relies on provider-native history as the source of truth. The canonical state lives under `.frankenbeast/.build/chunk-sessions/` and contains normalized transcript entries, provider metadata, compaction generation, context-window usage, and recovery metadata such as `lastKnownGoodCommit`.
+Chunk execution no longer relies on provider-native history as the source of truth. The canonical state lives under `.fbeast/.build/chunk-sessions/` and contains normalized transcript entries, provider metadata, compaction generation, context-window usage, and recovery metadata such as `lastKnownGoodCommit`.
 
 Provider-native session continuation is now an optimization only:
 
 - if the active provider supports native resume and has not changed, the renderer may set `sessionContinue`
 - if the provider changes or its native state is lost, the next provider replays from the canonical chunk session
-- before compaction, MartinLoop writes a snapshot to `.frankenbeast/.build/chunk-session-snapshots/`
+- before compaction, MartinLoop writes a snapshot to `.fbeast/.build/chunk-session-snapshots/`
 - at `>= 85%` rendered context usage, the loop compacts transcript history into a `compaction_summary` and resumes from that compacted state
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
@@ -372,7 +372,7 @@ flowchart LR
     end
 ```
 
-All project state lives in `.frankenbeast/` at the project root.
+All project state lives in `.fbeast/` at the project root.
 
 **Provider selection:** `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate-limit cascading (e.g., `claude,gemini,aider`). The config file `providers` section supports `default`, `fallbackChain`, and per-provider `overrides` (command path, model, extra args). CLI args take precedence over config file values.
 
@@ -928,7 +928,7 @@ The beast control surface is now agent-centric rather than run-centric.
 
 When the daemon dispatches a Beast run, it spawns a subprocess managed by `ProcessBeastExecutor`:
 
-1. **Config passthrough**: `ProcessBeastExecutor.start()` serializes `configSnapshot` to `.frankenbeast/.build/run-configs/<runId>.json` and passes `FRANKENBEAST_RUN_CONFIG=<path>` to the subprocess. The spawned process loads and validates via `loadRunConfigFromEnv()`. Config file is cleaned up on run completion, stop, or spawn failure.
+1. **Config passthrough**: `ProcessBeastExecutor.start()` serializes `configSnapshot` to `.fbeast/.build/run-configs/<runId>.json` and passes `FRANKENBEAST_RUN_CONFIG=<path>` to the subprocess. The spawned process loads and validates via `loadRunConfigFromEnv()`. Config file is cleaned up on run completion, stop, or spawn failure.
 
 2. **Process lifecycle**: `ProcessSupervisor` manages the child process with a three-way exit gate (`stdout closed + stderr closed + exit event`) to ensure all buffered output is captured before `onExit` fires. Early stdout/stderr arriving before attempt creation are buffered and flushed (to both logs and SSE) once the attempt ID is set.
 

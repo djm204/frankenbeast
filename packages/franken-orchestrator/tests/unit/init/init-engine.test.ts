@@ -33,8 +33,8 @@ describe('runInteractiveInit', () => {
 
   it('sets top-level config flags and selected comms transport config', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const { io } = scriptedIo(
       'y', // chat
       'n', // dashboard
@@ -72,8 +72,8 @@ describe('runInteractiveInit', () => {
 
   it('skips comms transport prompts when comms is disabled', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const { io, prompts } = scriptedIo(
       'n', // chat
       'y', // dashboard
@@ -97,8 +97,8 @@ describe('runInteractiveInit', () => {
 
   it('resumes from saved init state defaults instead of starting from scratch', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     await stateStore.save({
       ...createEmptyInitState(configFile),
       selectedModules: ['chat', 'comms'],

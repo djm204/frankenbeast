@@ -18,7 +18,7 @@ export interface ChunkDefinition {
 }
 
 /**
- * Writes the design document to .frankenbeast/plans/design.md.
+ * Writes the design document to .fbeast/plans/design.md.
  * Overwrites if it already exists (revision case).
  * Returns the absolute path written.
  */
@@ -28,7 +28,7 @@ export function writeDesignDoc(paths: ProjectPaths, content: string): string {
 }
 
 /**
- * Reads the design document from .frankenbeast/plans/design.md.
+ * Reads the design document from .fbeast/plans/design.md.
  * Returns undefined if not found.
  */
 export function readDesignDoc(paths: ProjectPaths): string | undefined {

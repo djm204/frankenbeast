@@ -17,7 +17,7 @@ describe('handleInitCommand', () => {
 
   it('writes canonical config and init state using the project paths', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
-    const frankenbeastDir = join(tempDir, '.frankenbeast');
+    const frankenbeastDir = join(tempDir, '.fbeast');
     const configFile = join(frankenbeastDir, 'config.json');
     const initStateFile = join(frankenbeastDir, 'init-state.json');
 
