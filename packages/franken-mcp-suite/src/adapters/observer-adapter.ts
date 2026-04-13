@@ -61,7 +61,8 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         input: input.metadata,
       });
 
-      const hash = (auditEvent.inputHash ?? hashContent(`${input.event}:${input.metadata}`)).slice(0, 16);
+      const baseHash = auditEvent.inputHash ?? hashContent(`${input.event}:${input.metadata}`);
+      const hash = buildAuditHash(baseHash, lastRow?.hash);
       const result = store.db.prepare(`
         INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
         VALUES (?, ?, ?, ?, ?)
@@ -138,6 +139,14 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       ).all(sessionId) as ObserverTrailEntry[];
     },
   };
+}
+
+function buildAuditHash(baseHash: string, parentHash?: string): string {
+  if (!parentHash) {
+    return baseHash.slice(0, 16);
+  }
+
+  return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
 }
 
 function parseMetadata(metadata: string): unknown {

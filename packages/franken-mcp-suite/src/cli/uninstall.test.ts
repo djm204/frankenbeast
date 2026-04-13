@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { runUninstall } from './uninstall.js';
 import { runInit } from './init.js';
 import { confirmYesNo } from './prompt.js';
@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 
 function tmpDir(): string {
   const dir = join(tmpdir(), `fbeast-uninst-${randomUUID()}`);
@@ -17,6 +18,7 @@ describe('fbeast uninstall', () => {
   const dirs: string[] = [];
 
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const d of dirs) {
       if (existsSync(d)) rmSync(d, { recursive: true, force: true });
     }
@@ -121,5 +123,28 @@ describe('fbeast uninstall', () => {
     });
 
     expect(existsSync(join(root, '.fbeast'))).toBe(false);
+  });
+
+  it('treats closed stdin as a no answer when purge decision is missing', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+
+    runInit({ root, claudeDir, hooks: false });
+
+    const stdin = Object.assign(new PassThrough(), { isTTY: false });
+    const stdout = new PassThrough();
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(stdin as typeof process.stdin);
+    vi.spyOn(process, 'stdout', 'get').mockReturnValue(stdout as typeof process.stdout);
+
+    const uninstallPromise = runUninstall({ root, claudeDir });
+    stdin.end();
+
+    await expect(Promise.race([
+      uninstallPromise.then(() => 'completed'),
+      new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timed out waiting for uninstall')), 50)),
+    ])).resolves.toBe('completed');
+
+    expect(existsSync(join(root, '.fbeast'))).toBe(true);
   });
 });

@@ -85,13 +85,27 @@ if (isMain) {
 }
 
 function defaultAsk(question: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    return Promise.resolve('');
+  }
+
   return new Promise((resolve) => {
     process.stdout.write(question);
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
-    process.stdin.once('data', (data) => {
+    const finish = (answer: string) => {
+      process.stdin.off('data', onData);
+      process.stdin.off('end', onEnd);
+      process.stdin.off('error', onError);
       process.stdin.pause();
-      resolve(String(data));
-    });
+      resolve(answer);
+    };
+    const onData = (data: string | Buffer) => finish(String(data));
+    const onEnd = () => finish('');
+    const onError = () => finish('');
+
+    process.stdin.once('data', onData);
+    process.stdin.once('end', onEnd);
+    process.stdin.once('error', onError);
   });
 }
