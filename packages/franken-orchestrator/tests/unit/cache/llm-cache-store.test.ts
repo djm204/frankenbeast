@@ -15,7 +15,7 @@ describe('LlmCacheStore', () => {
 
   it('persists project-stable entries across process restarts', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
 
     const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
     await store.saveProjectEntry('frankenbeast', 'stable:skills', {
@@ -41,7 +41,7 @@ describe('LlmCacheStore', () => {
 
   it('isolates work entries by work id', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
     const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
 
     await store.saveWorkEntry('frankenbeast', 'issue:99', 'summary', {
@@ -61,7 +61,7 @@ describe('LlmCacheStore', () => {
 
   it('keeps project and work namespaces separate even when keys match', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-llm-cache-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
     const store = new LlmCacheStore(rootDir, { schemaVersion: 1 });
 
     await store.saveProjectEntry('frankenbeast', 'shared-key', {

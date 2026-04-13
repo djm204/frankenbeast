@@ -13,7 +13,7 @@ The module provides a comprehensive observability suite, including distributed t
 - **Storage Adapters**: Supports SQLite, Prometheus, and Langfuse for trace persistence.
 
 ## Key Integration
-The `franken-orchestrator` interacts with this package via the `CliObserverBridge`. Every turn in the `MartinLoop` generates a span that is recorded in the local SQLite database (`.frankenbeast/.build/observer.db`).
+The `franken-orchestrator` interacts with this package via the `CliObserverBridge`. Every turn in the `MartinLoop` generates a span that is recorded in the local SQLite database (`.fbeast/.build/observer.db`).
 
 ## Key API
 

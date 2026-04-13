@@ -78,7 +78,7 @@ packages/franken-orchestrator/src/
 - `CliLlmAdapter` implements `IAdapter` — wraps an `ICliProvider` instance for single-shot LLM completions used by interview/plan flows. Delegates env filtering and output normalization to the provider.
 - `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), budget enforcement, and context-window estimation for chunk compaction.
 - `CliSkillExecutor` spawns CLI tools via `ICliProvider` for multi-iteration task execution
-- `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. When chunk-session services are wired, it loads canonical chunk state from `.frankenbeast/.build/chunk-sessions/`, renders provider requests from normalized transcript state, snapshots before compaction, compacts at `>= 85%` context usage, and can replay that canonical state on provider switch.
+- `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. When chunk-session services are wired, it loads canonical chunk state from `.fbeast/.build/chunk-sessions/`, renders provider requests from normalized transcript state, snapshots before compaction, compacts at `>= 85%` context usage, and can replay that canonical state on provider switch.
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → optional PR
 - CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity
@@ -98,8 +98,8 @@ packages/franken-orchestrator/src/
   - Shares the same `ChatRuntime` as the CLI REPL
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
 - Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
-- **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.frankenbeast/.build/run-configs/` and cleaned up on terminal state.
-- `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.frankenbeast/.build/`
+- **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.fbeast/.build/run-configs/` and cleaned up on terminal state.
+- `--cleanup` removes build logs, checkpoints, traces, chunk sessions, and chunk-session snapshots from `.fbeast/.build/`
 - `frankenbeast issues` — fetches GitHub issues and fixes them autonomously:
   - `--label <labels>` comma-separated labels (e.g. `critical,high`)
   - `--search <query>` GitHub search syntax (e.g. `"label:bug label:high"`)
@@ -109,10 +109,10 @@ packages/franken-orchestrator/src/
   - `--repo <owner/repo>` target repository (auto-inferred from `gh repo view` if omitted)
   - `--target-upstream` derive the canonical target repository from the checkout's GitHub `upstream` remote; mutually exclusive with `--repo`
   - `--dry-run` preview triage without executing
-- Build artifacts are plan-scoped under `.frankenbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
+- Build artifacts are plan-scoped under `.fbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
 - `dep-factory.ts` calls `createBeastDeps()` which wires real consolidated adapters for all module ports: `MiddlewareChainFirewallAdapter` (firewall), `SqliteBrainMemoryAdapter` (memory), `SkillManagerAdapter` (skills), `ReflectionHeartbeatAdapter` (heartbeat), `AuditTrailObserverAdapter` (observer). Falls back to passthrough stubs only when `createBeastDeps()` throws (e.g., no providers configured).
 - `ProviderRegistryIAdapter` bridges `ProviderRegistry.execute()` (async generator) to `IAdapter` (Promise), with `MiddlewareChain` applied on request/response. Active in the heartbeat/reflection LLM path.
-- `SkillConfigStore` persists enabled-skill state to `.frankenbeast/config.json`.
+- `SkillConfigStore` persists enabled-skill state to `.fbeast/config.json`.
 - `OrchestratorConfigSchema` accepts `security`, `brain`, and `consolidatedProviders` fields from config files, threaded through `dep-bridge.ts` → `createBeastDeps()`.
 - `run.ts` surfaces `skillManager`, `providerRegistry`, and `dashboardDeps` from `createCliDeps()` into `startChatServer()`, activating `/api/skills` and `/api/dashboard` routes.
 

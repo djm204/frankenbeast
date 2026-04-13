@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
+import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseArgs } from 'node:util';
 
-export function createSkillsServer(store: SqliteStore): FbeastMcpServer {
-  const { db } = store;
+export interface SkillsServerDeps {
+  skills: SkillsAdapter;
+}
+
+export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
+  const { skills } = deps;
 
   const tools: ToolDef[] = [
     {
@@ -17,18 +21,8 @@ export function createSkillsServer(store: SqliteStore): FbeastMcpServer {
         },
       },
       async handler(args) {
-        let sql = `SELECT name, enabled, config, updated_at FROM skill_state`;
-        const params: unknown[] = [];
-
-        if (args['enabled'] !== undefined) {
-          sql += ` WHERE enabled = ?`;
-          params.push(String(args['enabled']) === 'true' ? 1 : 0);
-        }
-        sql += ` ORDER BY name`;
-
-        const rows = db.prepare(sql).all(...params) as Array<{
-          name: string; enabled: number; config: string; updated_at: string;
-        }>;
+        const enabled = args['enabled'] !== undefined ? String(args['enabled']) === 'true' : undefined;
+        const rows = await skills.list(enabled === undefined ? {} : { enabled });
 
         if (rows.length === 0) {
           return { content: [{ type: 'text', text: 'No skills registered.' }] };
@@ -36,7 +30,7 @@ export function createSkillsServer(store: SqliteStore): FbeastMcpServer {
 
         const lines = rows.map((r) => {
           const status = r.enabled ? 'enabled' : 'disabled';
-          return `- **${r.name}** [${status}] (updated: ${r.updated_at})`;
+          return `- **${r.name}** [${status}] (updated: ${r.updatedAt ?? 'unknown'})`;
         });
 
         return { content: [{ type: 'text', text: `## Skills (${rows.length})\n\n${lines.join('\n')}` }] };
@@ -53,31 +47,23 @@ export function createSkillsServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const query = args['query'] ? String(args['query']) : '';
+        const rows = await skills.list({});
+        const normalizedQuery = query.trim().toLowerCase();
+        const matches = normalizedQuery.length === 0
+          ? rows
+          : rows.filter((row) =>
+              row.name.toLowerCase().includes(normalizedQuery)
+              || row.description.toLowerCase().includes(normalizedQuery));
 
-        let sql = `SELECT name, enabled, config FROM skill_state`;
-        const params: unknown[] = [];
-
-        if (query) {
-          sql += ` WHERE name LIKE ? OR config LIKE ?`;
-          params.push(`%${query}%`, `%${query}%`);
-        }
-        sql += ` ORDER BY name`;
-
-        const rows = db.prepare(sql).all(...params) as Array<{
-          name: string; enabled: number; config: string;
-        }>;
-
-        if (rows.length === 0) {
+        if (matches.length === 0) {
           return { content: [{ type: 'text', text: query ? `No skills matching "${query}".` : 'No skills registered.' }] };
         }
 
-        const lines = rows.map((r) => {
-          const cfg = JSON.parse(r.config || '{}');
-          const desc = cfg.description || 'No description';
-          return `- **${r.name}**: ${desc}`;
+        const lines = matches.map((row) => {
+          return `- **${row.name}**: ${row.description}`;
         });
 
-        return { content: [{ type: 'text', text: `## Discovered Skills (${rows.length})\n\n${lines.join('\n')}` }] };
+        return { content: [{ type: 'text', text: `## Discovered Skills (${matches.length})\n\n${lines.join('\n')}` }] };
       },
     },
     {
@@ -92,25 +78,20 @@ export function createSkillsServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const skillId = String(args['skillId']);
-
-        const row = db.prepare(
-          `SELECT name, enabled, config, updated_at FROM skill_state WHERE name = ?`,
-        ).get(skillId) as { name: string; enabled: number; config: string; updated_at: string } | undefined;
-
-        if (!row) {
+        const info = await skills.info(skillId);
+        if (!info) {
           return { content: [{ type: 'text', text: `Skill not found: ${skillId}` }], isError: true };
         }
 
-        const cfg = JSON.parse(row.config || '{}');
         const lines = [
-          `## Skill: ${row.name}`,
+          `## Skill: ${skillId}`,
           '',
-          `**Status:** ${row.enabled ? 'enabled' : 'disabled'}`,
-          `**Updated:** ${row.updated_at}`,
+          `**Status:** ${info['enabled'] ? 'enabled' : 'disabled'}`,
+          `**Updated:** ${typeof info['updatedAt'] === 'string' ? info['updatedAt'] : 'unknown'}`,
           '',
           '**Config:**',
           '```json',
-          JSON.stringify(cfg, null, 2),
+          JSON.stringify(info, null, 2),
           '```',
         ];
 
@@ -127,8 +108,8 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createSkillsServer(store);
+  const skills = createSkillsAdapter(values['db']!);
+  const server = createSkillsServer({ skills });
   server.start().catch((err) => {
     console.error('fbeast-skills failed to start:', err);
     process.exit(1);

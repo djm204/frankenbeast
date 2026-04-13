@@ -1,71 +1,46 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createPlannerServer } from './planner.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 describe('Planner Server', () => {
-  let store: SqliteStore;
-  let dir: string;
-
-  beforeEach(() => {
-    dir = join(tmpdir(), `fbeast-plan-${randomUUID()}`);
-    mkdirSync(dir, { recursive: true });
-    store = createSqliteStore(join(dir, 'beast.db'));
-  });
-
-  afterEach(() => {
-    store.close();
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  });
-
   it('exposes 3 tools', () => {
-    const server = createPlannerServer(store);
+    const server = createPlannerServer({
+      planner: {
+        decompose: vi.fn(),
+        visualize: vi.fn(),
+        validate: vi.fn(),
+      },
+    });
+
     const names = server.tools.map((t) => t.name);
     expect(names).toEqual(['fbeast_plan_decompose', 'fbeast_plan_visualize', 'fbeast_plan_validate']);
   });
 
-  it('decompose creates a plan and returns DAG', async () => {
-    const server = createPlannerServer(store);
+  it('delegates decompose and validate to the planner adapter', async () => {
+    const planner = {
+      decompose: vi.fn().mockResolvedValue({
+        planId: 'p1',
+        objective: 'ship',
+        tasks: [{ id: 't1', title: 'wire adapter', deps: [], status: 'pending' }],
+      }),
+      visualize: vi.fn().mockResolvedValue('graph TD\n  t1["wire adapter"]'),
+      validate: vi.fn().mockResolvedValue({ verdict: 'valid', issues: [] }),
+    };
+
+    const server = createPlannerServer({ planner });
     const decomposeTool = server.tools.find((t) => t.name === 'fbeast_plan_decompose')!;
-
-    const result = await decomposeTool.handler({
-      objective: 'Add user authentication with JWT',
-      constraints: 'Must support refresh tokens',
-    });
-
-    const text = result.content[0]!.text;
-    expect(text).toContain('plan');
-
-    const row = store.db.prepare(`SELECT * FROM plans LIMIT 1`).get();
-    expect(row).toBeDefined();
-  });
-
-  it('visualize returns mermaid diagram for existing plan', async () => {
-    const server = createPlannerServer(store);
-    const decomposeTool = server.tools.find((t) => t.name === 'fbeast_plan_decompose')!;
-    const vizTool = server.tools.find((t) => t.name === 'fbeast_plan_visualize')!;
-
-    await decomposeTool.handler({ objective: 'Build API' });
-
-    const row = store.db.prepare(`SELECT id FROM plans LIMIT 1`).get() as { id: string };
-    const result = await vizTool.handler({ planId: row.id });
-
-    expect(result.content[0]!.text).toContain('graph');
-  });
-
-  it('validate detects issues in plan', async () => {
-    const server = createPlannerServer(store);
-    const decomposeTool = server.tools.find((t) => t.name === 'fbeast_plan_decompose')!;
+    const visualizeTool = server.tools.find((t) => t.name === 'fbeast_plan_visualize')!;
     const validateTool = server.tools.find((t) => t.name === 'fbeast_plan_validate')!;
 
-    await decomposeTool.handler({ objective: 'Build API' });
+    const decomposeResult = await decomposeTool.handler({ objective: 'ship', constraints: 'small PRs' });
+    expect(planner.decompose).toHaveBeenCalledWith({ objective: 'ship', constraints: 'small PRs' });
+    expect(decomposeResult.content[0]!.text).toContain('p1');
 
-    const row = store.db.prepare(`SELECT id FROM plans LIMIT 1`).get() as { id: string };
-    const result = await validateTool.handler({ planId: row.id });
+    const visualizeResult = await visualizeTool.handler({ planId: 'p1' });
+    expect(planner.visualize).toHaveBeenCalledWith('p1');
+    expect(visualizeResult.content[0]!.text).toContain('graph TD');
 
-    expect(result.content[0]!.text).toContain('valid');
+    const validateResult = await validateTool.handler({ planId: 'p1' });
+    expect(planner.validate).toHaveBeenCalledWith('p1');
+    expect(validateResult.content[0]!.text).toContain('valid');
   });
 });

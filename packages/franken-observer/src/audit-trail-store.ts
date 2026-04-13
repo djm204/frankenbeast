@@ -10,14 +10,14 @@ export interface PersistedAuditTrail {
 }
 
 /**
- * Persists audit trails as JSON files under .frankenbeast/audit/.
+ * Persists audit trails as JSON files under .fbeast/audit/.
  * One file per run: <runId>.json.
  */
 export class AuditTrailStore {
   private readonly auditDir: string;
 
   constructor(projectRoot: string) {
-    this.auditDir = join(projectRoot, '.frankenbeast', 'audit');
+    this.auditDir = join(projectRoot, '.fbeast', 'audit');
   }
 
   save(runId: string, trail: AuditTrail): string {

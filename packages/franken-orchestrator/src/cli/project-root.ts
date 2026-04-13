@@ -83,11 +83,11 @@ export function generatePlanName(designDocPath?: string): string {
 }
 
 /**
- * Returns all conventional paths within .frankenbeast/.
- * When planName is provided, plans are scoped to .frankenbeast/plans/<planName>/.
+ * Returns all conventional paths within .fbeast/.
+ * When planName is provided, plans are scoped to .fbeast/plans/<planName>/.
  */
 export function getProjectPaths(root: string, planName?: string): ProjectPaths {
-  const frankenbeastDir = resolve(root, '.frankenbeast');
+  const frankenbeastDir = resolve(root, '.fbeast');
   const llmCacheDir = resolve(frankenbeastDir, '.cache', 'llm');
   const plansBaseDir = resolve(frankenbeastDir, 'plans');
   const plansDir = planName ? resolve(plansBaseDir, planName) : plansBaseDir;
@@ -114,7 +114,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
 }
 
 /**
- * Creates .frankenbeast/ directory structure if it doesn't exist.
+ * Creates .fbeast/ directory structure if it doesn't exist.
  */
 export function scaffoldFrankenbeast(paths: ProjectPaths): void {
   mkdirSync(paths.plansDir, { recursive: true });

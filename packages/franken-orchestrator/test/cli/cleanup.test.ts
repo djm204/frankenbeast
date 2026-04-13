@@ -10,7 +10,7 @@ describe('cleanupBuild', () => {
 
   beforeEach(() => {
     tmpDir = join(tmpdir(), `franken-cleanup-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    buildDir = join(tmpDir, '.frankenbeast', '.build');
+    buildDir = join(tmpDir, '.fbeast', '.build');
     mkdirSync(buildDir, { recursive: true });
   });
 

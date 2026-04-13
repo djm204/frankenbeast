@@ -46,25 +46,25 @@ describe('project-root', () => {
     it('returns flat plans dir when no plan name provided', () => {
       const paths = getProjectPaths(testDir);
       expect(paths.root).toBe(testDir);
-      expect(paths.frankenbeastDir).toBe(resolve(testDir, '.frankenbeast'));
-      expect(paths.llmCacheDir).toBe(resolve(testDir, '.frankenbeast/.cache/llm'));
-      expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans'));
-      expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
-      expect(paths.beastsDir).toBe(resolve(testDir, '.frankenbeast/.build/beasts'));
-      expect(paths.beastLogsDir).toBe(resolve(testDir, '.frankenbeast/.build/beasts/logs'));
-      expect(paths.beastsDb).toBe(resolve(testDir, '.frankenbeast/.build/beasts.db'));
-      expect(paths.designDocFile).toBe(resolve(testDir, '.frankenbeast/plans/design.md'));
-      expect(paths.llmResponseFile).toBe(resolve(testDir, '.frankenbeast/plans/llm-response.json'));
-      expect(paths.configFile).toBe(resolve(testDir, '.frankenbeast/config.json'));
+      expect(paths.frankenbeastDir).toBe(resolve(testDir, '.fbeast'));
+      expect(paths.llmCacheDir).toBe(resolve(testDir, '.fbeast/.cache/llm'));
+      expect(paths.plansDir).toBe(resolve(testDir, '.fbeast/plans'));
+      expect(paths.buildDir).toBe(resolve(testDir, '.fbeast/.build'));
+      expect(paths.beastsDir).toBe(resolve(testDir, '.fbeast/.build/beasts'));
+      expect(paths.beastLogsDir).toBe(resolve(testDir, '.fbeast/.build/beasts/logs'));
+      expect(paths.beastsDb).toBe(resolve(testDir, '.fbeast/.build/beasts.db'));
+      expect(paths.designDocFile).toBe(resolve(testDir, '.fbeast/plans/design.md'));
+      expect(paths.llmResponseFile).toBe(resolve(testDir, '.fbeast/plans/llm-response.json'));
+      expect(paths.configFile).toBe(resolve(testDir, '.fbeast/config.json'));
     });
 
     it('scopes plans dir by plan name when provided', () => {
       const paths = getProjectPaths(testDir, 'monorepo-migration');
-      expect(paths.plansDir).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration'));
-      expect(paths.designDocFile).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration/design.md'));
-      expect(paths.llmResponseFile).toBe(resolve(testDir, '.frankenbeast/plans/monorepo-migration/llm-response.json'));
+      expect(paths.plansDir).toBe(resolve(testDir, '.fbeast/plans/monorepo-migration'));
+      expect(paths.designDocFile).toBe(resolve(testDir, '.fbeast/plans/monorepo-migration/design.md'));
+      expect(paths.llmResponseFile).toBe(resolve(testDir, '.fbeast/plans/monorepo-migration/llm-response.json'));
       // build dir is shared, not plan-scoped
-      expect(paths.buildDir).toBe(resolve(testDir, '.frankenbeast/.build'));
+      expect(paths.buildDir).toBe(resolve(testDir, '.fbeast/.build'));
     });
   });
 
@@ -91,7 +91,7 @@ describe('project-root', () => {
   });
 
   describe('scaffoldFrankenbeast', () => {
-    it('creates .frankenbeast directory structure', () => {
+    it('creates .fbeast directory structure', () => {
       const paths = getProjectPaths(testDir);
       scaffoldFrankenbeast(paths);
       expect(existsSync(paths.plansDir)).toBe(true);

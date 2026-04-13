@@ -1,24 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
-import { randomUUID } from 'node:crypto';
+import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { parseArgs } from 'node:util';
 
-interface TaskNode {
-  id: string;
-  title: string;
-  deps: string[];
-  status: 'pending' | 'done';
+export interface PlannerServerDeps {
+  planner: PlannerAdapter;
 }
 
-interface PlanDag {
-  objective: string;
-  constraints: string | null;
-  tasks: TaskNode[];
-}
-
-export function createPlannerServer(store: SqliteStore): FbeastMcpServer {
-  const { db } = store;
+export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
+  const { planner } = deps;
 
   const tools: ToolDef[] = [
     {
@@ -34,41 +24,24 @@ export function createPlannerServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const objective = String(args['objective']);
-        const constraints = args['constraints'] ? String(args['constraints']) : null;
-        const planId = randomUUID().slice(0, 8);
+        const constraints = args['constraints'] ? String(args['constraints']) : undefined;
+        const result = await planner.decompose(constraints ? { objective, constraints } : { objective });
 
-        const dag: PlanDag = {
-          objective,
-          constraints,
-          tasks: [
-            { id: 't1', title: `Analyze requirements for: ${objective}`, deps: [], status: 'pending' },
-            { id: 't2', title: 'Design solution architecture', deps: ['t1'], status: 'pending' },
-            { id: 't3', title: 'Write failing tests', deps: ['t2'], status: 'pending' },
-            { id: 't4', title: 'Implement solution', deps: ['t3'], status: 'pending' },
-            { id: 't5', title: 'Verify tests pass', deps: ['t4'], status: 'pending' },
-            { id: 't6', title: 'Review and refine', deps: ['t5'], status: 'pending' },
-          ],
-        };
-
-        db.prepare(`
-          INSERT INTO plans (id, objective, dag, status) VALUES (?, ?, ?, 'pending')
-        `).run(planId, objective, JSON.stringify(dag));
-
-        const taskList = dag.tasks
+        const taskList = result.tasks
           .map((t) => `  ${t.id}: ${t.title}${t.deps.length > 0 ? ` (after: ${t.deps.join(', ')})` : ''}`)
           .join('\n');
 
         const text = [
-          `## Plan created: ${planId}`,
+          `## Plan created: ${result.planId}`,
           ``,
-          `**Objective:** ${objective}`,
+          `**Objective:** ${result.objective}`,
           constraints ? `**Constraints:** ${constraints}` : '',
           ``,
           `**Tasks:**`,
           taskList,
           ``,
-          `Use fbeast_plan_visualize with planId "${planId}" to see the DAG.`,
-          `Use fbeast_plan_validate with planId "${planId}" to check for issues.`,
+          `Use fbeast_plan_visualize with planId "${result.planId}" to see the DAG.`,
+          `Use fbeast_plan_validate with planId "${result.planId}" to check for issues.`,
         ].filter(Boolean).join('\n');
 
         return { content: [{ type: 'text', text }] };
@@ -86,26 +59,17 @@ export function createPlannerServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const planId = String(args['planId']);
-        const row = db.prepare(`SELECT dag FROM plans WHERE id = ?`).get(planId) as { dag: string } | undefined;
+        const mermaid = await planner.visualize(planId);
 
-        if (!row) {
+        if (!mermaid) {
           return { content: [{ type: 'text', text: `Plan not found: ${planId}` }], isError: true };
-        }
-
-        const dag: PlanDag = JSON.parse(row.dag);
-        const mermaidLines = ['graph TD'];
-        for (const task of dag.tasks) {
-          mermaidLines.push(`  ${task.id}["${task.title}"]`);
-          for (const dep of task.deps) {
-            mermaidLines.push(`  ${dep} --> ${task.id}`);
-          }
         }
 
         const text = [
           `## Plan: ${planId}`,
           ``,
           '```mermaid',
-          ...mermaidLines,
+          mermaid,
           '```',
         ].join('\n');
 
@@ -124,63 +88,19 @@ export function createPlannerServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const planId = String(args['planId']);
-        const row = db.prepare(`SELECT dag FROM plans WHERE id = ?`).get(planId) as { dag: string } | undefined;
+        const validation = await planner.validate(planId);
 
-        if (!row) {
+        if (!validation) {
           return { content: [{ type: 'text', text: `Plan not found: ${planId}` }], isError: true };
         }
-
-        const dag: PlanDag = JSON.parse(row.dag);
-        const issues: string[] = [];
-        const taskIds = new Set(dag.tasks.map((t) => t.id));
-
-        for (const task of dag.tasks) {
-          for (const dep of task.deps) {
-            if (!taskIds.has(dep)) {
-              issues.push(`Task ${task.id} depends on unknown task: ${dep}`);
-            }
-          }
-        }
-
-        const visited = new Set<string>();
-        const inStack = new Set<string>();
-        const adjMap = new Map<string, string[]>();
-        for (const t of dag.tasks) {
-          adjMap.set(t.id, t.deps);
-        }
-
-        function hasCycle(node: string): boolean {
-          if (inStack.has(node)) return true;
-          if (visited.has(node)) return false;
-          visited.add(node);
-          inStack.add(node);
-          for (const dep of adjMap.get(node) ?? []) {
-            if (hasCycle(dep)) return true;
-          }
-          inStack.delete(node);
-          return false;
-        }
-
-        for (const task of dag.tasks) {
-          if (hasCycle(task.id)) {
-            issues.push('Cycle detected in task dependencies');
-            break;
-          }
-        }
-
-        if (dag.tasks.length === 0) {
-          issues.push('Plan has no tasks');
-        }
-
-        const verdict = issues.length === 0 ? 'valid' : 'invalid';
         const text = [
-          `## Validation: ${verdict}`,
+          `## Validation: ${validation.verdict}`,
           ``,
           `**Plan:** ${planId}`,
-          `**Tasks:** ${dag.tasks.length}`,
+          `**Issues:** ${validation.issues.length}`,
           '',
-          issues.length > 0
-            ? `**Issues:**\n${issues.map((i) => `- ${i}`).join('\n')}`
+          validation.issues.length > 0
+            ? validation.issues.map((i) => `- ${i}`).join('\n')
             : 'No issues found.',
         ].join('\n');
 
@@ -197,8 +117,8 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createPlannerServer(store);
+  const planner = createPlannerAdapter(values['db']!);
+  const server = createPlannerServer({ planner });
   server.start().catch((err) => {
     console.error('fbeast-planner failed to start:', err);
     process.exit(1);

@@ -18,12 +18,12 @@ describe('SkillAuthResolver', () => {
   });
 
   function createEnvFile(content: string) {
-    mkdirSync(join(tempDir, '.frankenbeast'), { recursive: true });
-    writeFileSync(join(tempDir, '.frankenbeast', '.env'), content);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', '.env'), content);
   }
 
   describe('resolve()', () => {
-    it('resolves ${VAR} from .frankenbeast/.env', () => {
+    it('resolves ${VAR} from .fbeast/.env', () => {
       createEnvFile('GITHUB_TOKEN=ghp_abc123');
       resolver = new SkillAuthResolver(tempDir);
       expect(resolver.resolve('${GITHUB_TOKEN}')).toBe('ghp_abc123');

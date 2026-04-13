@@ -28,7 +28,7 @@ describe('AuditTrailStore', () => {
     return trail;
   }
 
-  it('writes .frankenbeast/audit/<runId>.json', () => {
+  it('writes .fbeast/audit/<runId>.json', () => {
     const trail = sampleTrail();
     const path = store.save('run-123', trail);
     expect(path).toContain('run-123.json');
@@ -36,7 +36,7 @@ describe('AuditTrailStore', () => {
   });
 
   it('creates the audit directory when missing', () => {
-    const auditDir = join(tempDir, '.frankenbeast', 'audit');
+    const auditDir = join(tempDir, '.fbeast', 'audit');
     expect(existsSync(auditDir)).toBe(false);
     store.save('run-1', sampleTrail());
     expect(existsSync(auditDir)).toBe(true);
@@ -62,7 +62,7 @@ describe('AuditTrailStore', () => {
 
   it('persisted artifact has correct schema', () => {
     store.save('run-1', sampleTrail());
-    const raw = JSON.parse(readFileSync(join(tempDir, '.frankenbeast', 'audit', 'run-1.json'), 'utf-8'));
+    const raw = JSON.parse(readFileSync(join(tempDir, '.fbeast', 'audit', 'run-1.json'), 'utf-8'));
     expect(raw.version).toBe(1);
     expect(raw.runId).toBe('run-1');
     expect(raw.createdAt).toBeTruthy();

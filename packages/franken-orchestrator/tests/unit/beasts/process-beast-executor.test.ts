@@ -658,7 +658,7 @@ describe('ProcessBeastExecutor', () => {
       await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
 
       // Config file should have been cleaned up
-      const configDir = join(process.cwd(), '.frankenbeast', '.build', 'run-configs');
+      const configDir = join(process.cwd(), '.fbeast', '.build', 'run-configs');
       const configPath = join(configDir, `${run.id}.json`);
       expect(existsSync(configPath)).toBe(false);
     });

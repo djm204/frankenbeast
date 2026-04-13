@@ -54,7 +54,7 @@ export class LocalEncryptedStore implements ISecretStore {
   }
 
   private get secretsDir(): string {
-    return join(this.projectRoot, '.frankenbeast');
+    return join(this.projectRoot, '.fbeast');
   }
 
   private get encPath(): string {

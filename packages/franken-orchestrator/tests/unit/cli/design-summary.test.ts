@@ -61,12 +61,12 @@ describe('formatDesignCard', () => {
       title: 'Observer Module',
       sectionCount: 4,
       blurb: 'The observer needs validation.',
-      filePath: '.frankenbeast/plans/design.md',
+      filePath: '.fbeast/plans/design.md',
     });
 
     expect(card).toContain('Observer Module');
     expect(card).toContain('4');
-    expect(card).toContain('.frankenbeast/plans/design.md');
+    expect(card).toContain('.fbeast/plans/design.md');
     expect(card).toContain('observer needs validation');
   });
 });

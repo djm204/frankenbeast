@@ -34,10 +34,10 @@ export async function handleProviderCommand(deps: ProviderCommandDeps): Promise<
       return;
     }
     case 'add':
-      print('Provider configuration is managed via run-config. Add providers to your .frankenbeast/config.json file.');
+      print('Provider configuration is managed via run-config. Add providers to your .fbeast/config.json file.');
       return;
     case 'remove':
-      print('Provider configuration is managed via run-config. Remove providers from your .frankenbeast/config.json file.');
+      print('Provider configuration is managed via run-config. Remove providers from your .fbeast/config.json file.');
       return;
     default:
       throw new Error('Usage: frankenbeast provider <list|add|remove|test> [name]');

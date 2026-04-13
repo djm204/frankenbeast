@@ -20,7 +20,7 @@ describe('CachedLlmClient', () => {
 
   async function createHarness() {
     workDir = await mkdtemp(join(tmpdir(), 'franken-cached-llm-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
     const llm = new FakeLlmAdapter({ defaultResponse: 'LLM RESULT' });
     const metrics = new CacheMetrics();
 

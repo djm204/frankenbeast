@@ -37,7 +37,7 @@ describe('CachedCliLlmClient', () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-cached-cli-llm-'));
     const adapter = createAdapter();
     const client = new CachedCliLlmClient({
-      cacheRootDir: join(workDir, '.frankenbeast', '.cache', 'llm'),
+      cacheRootDir: join(workDir, '.fbeast', '.cache', 'llm'),
       cliAdapter: adapter as never,
       projectId: 'frankenbeast',
       provider: 'claude',
@@ -59,7 +59,7 @@ describe('CachedCliLlmClient', () => {
 
     const secondAdapter = createAdapter();
     const secondClient = new CachedCliLlmClient({
-      cacheRootDir: join(workDir!, '.frankenbeast', '.cache', 'llm'),
+      cacheRootDir: join(workDir!, '.fbeast', '.cache', 'llm'),
       cliAdapter: secondAdapter as never,
       projectId: 'frankenbeast',
       provider: 'claude',
@@ -80,7 +80,7 @@ describe('CachedCliLlmClient', () => {
 
     const issue110Adapter = createAdapter();
     const issue110 = new CachedCliLlmClient({
-      cacheRootDir: join(workDir!, '.frankenbeast', '.cache', 'llm'),
+      cacheRootDir: join(workDir!, '.fbeast', '.cache', 'llm'),
       cliAdapter: issue110Adapter as never,
       projectId: 'frankenbeast',
       provider: 'claude',

@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 /**
- * Manages credential storage in .frankenbeast/.env.
+ * Manages credential storage in .fbeast/.env.
  * Credentials are stored as KEY=VALUE lines, never in mcp.json.
  */
 export class SkillCredentialStore {
   private readonly envPath: string;
 
   constructor(projectRoot: string) {
-    this.envPath = join(projectRoot, '.frankenbeast', '.env');
+    this.envPath = join(projectRoot, '.fbeast', '.env');
   }
 
   /** Read all stored credentials */

@@ -21,7 +21,7 @@ function createTempPaths(): ProjectPaths {
   execSync('git init', { cwd: root, stdio: 'ignore' });
   execSync('git commit --allow-empty -m "init"', { cwd: root, stdio: 'ignore' });
 
-  const fbDir = join(root, '.frankenbeast');
+  const fbDir = join(root, '.fbeast');
   mkdirSync(fbDir, { recursive: true });
   const buildDir = join(root, '.build');
   mkdirSync(buildDir, { recursive: true });

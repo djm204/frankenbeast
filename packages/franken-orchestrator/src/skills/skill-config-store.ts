@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 /**
  * Persistent store for skill toggle state.
  *
- * Reads/writes `.frankenbeast/config.json` (or a custom config directory).
+ * Reads/writes `.fbeast/config.json` (or a custom config directory).
  * The config file may contain other fields besides `skills` — those are
  * preserved across saves.
  *

@@ -40,7 +40,7 @@ describe('file-writer (design doc)', () => {
 
     it('returns the absolute path', () => {
       const result = writeDesignDoc(paths, 'content');
-      expect(result).toContain('.frankenbeast/plans/design.md');
+      expect(result).toContain('.fbeast/plans/design.md');
     });
   });
 

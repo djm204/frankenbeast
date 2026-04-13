@@ -51,10 +51,10 @@ flowchart TD
     ProcessExec["ProcessBeastExecutor"]
     Subprocess["Managed beast subprocess"]
 
-    ChatStore[(".frankenbeast/chat/*.json")]
-    BeastDb[(".frankenbeast/.build/beasts.db")]
-    BeastLogs[(".frankenbeast/.build/beasts/logs")]
-    BuildArtifacts[(".frankenbeast/.build/*")]
+    ChatStore[(".fbeast/chat/*.json")]
+    BeastDb[(".fbeast/.build/beasts.db")]
+    BeastLogs[(".fbeast/.build/beasts/logs")]
+    BuildArtifacts[(".fbeast/.build/*")]
 
     User --> CLI
     User --> Dashboard
@@ -232,7 +232,7 @@ Resolution order in `createCliDeps()` is:
 
 ### Current Dashboard Chat Flow
 
-The dashboard chat path is a combined HTTP bootstrap plus websocket streaming flow. Session state is persisted on disk as JSON under `.frankenbeast/chat/`.
+The dashboard chat path is a combined HTTP bootstrap plus websocket streaming flow. Session state is persisted on disk as JSON under `.fbeast/chat/`.
 
 ```mermaid
 sequenceDiagram
@@ -343,10 +343,10 @@ flowchart TD
     Triage["IssueTriage"]
     Review["IssueReview"]
     Build["IssueGraphBuilder"]
-    Write["ChunkFileWriter -> .frankenbeast/plans/issue-N/"]
+    Write["ChunkFileWriter -> .fbeast/plans/issue-N/"]
     Graph["ChunkFileGraphBuilder"]
     Loop["BeastLoop"]
-    Runtime[(".frankenbeast/.build/issues/issue-N/*")]
+    Runtime[(".fbeast/.build/issues/issue-N/*")]
     PR["PrCreator with issueNumber"]
 
     CLI --> Fetch --> Triage --> Review
@@ -357,9 +357,9 @@ flowchart TD
 
 Issue-specific state fans out into:
 
-- issue plan directory under `.frankenbeast/plans/issue-<n>/`
-- issue checkpoint file under `.frankenbeast/.build/issues/issue-<n>/`
-- issue build log under `.frankenbeast/.build/issues/issue-<n>/`
+- issue plan directory under `.fbeast/plans/issue-<n>/`
+- issue checkpoint file under `.fbeast/.build/issues/issue-<n>/`
+- issue build log under `.fbeast/.build/issues/issue-<n>/`
 - normal chunk sessions and snapshots under the shared chunk-session roots
 
 ### Current Network Operator Flow
@@ -373,8 +373,8 @@ flowchart LR
     Config["config.json"]
     Registry["resolveNetworkServices()"]
     Supervisor["NetworkSupervisor"]
-    State[(".frankenbeast/network/state.json")]
-    Logs[(".frankenbeast/network/logs/*")]
+    State[(".fbeast/network/state.json")]
+    Logs[(".fbeast/network/logs/*")]
     Services["chat-server / dashboard-web / future comms"]
 
     UI --> Routes
@@ -389,7 +389,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph Root["project/.frankenbeast"]
+    subgraph Root["project/.fbeast"]
         Config["config.json"]
         Chat["chat/*.json"]
         Plans["plans/<plan>/..."]
@@ -412,15 +412,15 @@ flowchart TD
 
 | Store | Primary writers | Primary readers | What flows through it |
 |---|---|---|---|
-| `.frankenbeast/chat/*.json` | chat routes, websocket controller | dashboard chat UI, chat runtime | transcript, beastContext, approval state, token totals |
-| `.frankenbeast/.build/beasts.db` | agent, dispatch, run, interview services | dashboard Beast pages, process executor | tracked agents, runs, attempts, events, interview sessions |
-| `.frankenbeast/.build/beasts/logs/*` | process executor, run service | dashboard logs panel | per-attempt structured log lines |
-| `.frankenbeast/.build/build-traces.db` | observer bridge / trace viewer | trace viewer | spans, token usage, cost telemetry |
-| `.frankenbeast/.build/memory.db` | episodic memory adapter | hydration and trace recording | episodic execution memory |
-| `.frankenbeast/.build/*.checkpoint` | execution phase, issue runner | resume logic | task completion markers and recovery checkpoints |
-| `.frankenbeast/.build/chunk-sessions/*` | MartinLoop | MartinLoop, renderer, compactor | canonical chunk conversation state |
-| `.frankenbeast/.build/chunk-session-snapshots/*` | MartinLoop | recovery and rollback | pre-compaction rollback points |
-| `.frankenbeast/plans/*` | design-doc decomposition, issue writer, operator flows | graph builders, humans | design docs, chunk markdown, cached LLM outputs |
+| `.fbeast/chat/*.json` | chat routes, websocket controller | dashboard chat UI, chat runtime | transcript, beastContext, approval state, token totals |
+| `.fbeast/.build/beasts.db` | agent, dispatch, run, interview services | dashboard Beast pages, process executor | tracked agents, runs, attempts, events, interview sessions |
+| `.fbeast/.build/beasts/logs/*` | process executor, run service | dashboard logs panel | per-attempt structured log lines |
+| `.fbeast/.build/build-traces.db` | observer bridge / trace viewer | trace viewer | spans, token usage, cost telemetry |
+| `.fbeast/.build/memory.db` | episodic memory adapter | hydration and trace recording | episodic execution memory |
+| `.fbeast/.build/*.checkpoint` | execution phase, issue runner | resume logic | task completion markers and recovery checkpoints |
+| `.fbeast/.build/chunk-sessions/*` | MartinLoop | MartinLoop, renderer, compactor | canonical chunk conversation state |
+| `.fbeast/.build/chunk-session-snapshots/*` | MartinLoop | recovery and rollback | pre-compaction rollback points |
+| `.fbeast/plans/*` | design-doc decomposition, issue writer, operator flows | graph builders, humans | design docs, chunk markdown, cached LLM outputs |
 
 ## Target Data Flows
 

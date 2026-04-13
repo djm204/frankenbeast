@@ -86,7 +86,7 @@ describe('LocalEncryptedStore', () => {
     it('persists secrets encrypted on disk', async () => {
       await store.store('key', 'sensitive-value');
       const { readFile } = await import('node:fs/promises');
-      const encPath = join(tempDir, '.frankenbeast', 'secrets.enc');
+      const encPath = join(tempDir, '.fbeast', 'secrets.enc');
       const raw = await readFile(encPath, 'utf-8');
       expect(raw).not.toContain('sensitive-value');
     });

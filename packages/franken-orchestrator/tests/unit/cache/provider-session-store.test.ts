@@ -15,7 +15,7 @@ describe('ProviderSessionStore', () => {
 
   it('persists provider session metadata across process restarts for one work scope', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
 
     const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
     await store.save({
@@ -45,7 +45,7 @@ describe('ProviderSessionStore', () => {
 
   it('does not expose one work scope session metadata to another work scope', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
     const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
 
     await store.save({
@@ -70,7 +70,7 @@ describe('ProviderSessionStore', () => {
 
   it('invalidates stored session metadata when schema version changes', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
 
     const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
     await store.save({
@@ -96,7 +96,7 @@ describe('ProviderSessionStore', () => {
 
   it('invalidates stored session metadata when provider, model, or fingerprint changes', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-provider-session-'));
-    const rootDir = join(workDir, '.frankenbeast', '.cache', 'llm');
+    const rootDir = join(workDir, '.fbeast', '.cache', 'llm');
     const store = new ProviderSessionStore(rootDir, { schemaVersion: 3 });
 
     await store.save({

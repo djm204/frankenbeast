@@ -2,8 +2,10 @@
 import { FbeastConfig, type FbeastServer } from '../shared/config.js';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveClaudeConfigDir } from './claude-config-paths.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -119,7 +121,11 @@ export function runInit(options: InitOptions): void {
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (isMain) {
   const root = process.cwd();
-  const claudeDir = join(root, '.claude');
+  const claudeDir = resolveClaudeConfigDir({
+    cwd: root,
+    homeDir: homedir(),
+    exists: existsSync,
+  });
   const hooks = process.argv.includes('--hooks');
   runInit({ root, claudeDir, hooks });
 }

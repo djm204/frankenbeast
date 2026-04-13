@@ -33,7 +33,7 @@ Current work ids include:
 Disk layout is:
 
 ```text
-.frankenbeast/
+.fbeast/
   .cache/
     llm/
       project/<project>/stable/<key>.json

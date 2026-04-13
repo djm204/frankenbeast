@@ -1,57 +1,54 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createCritiqueServer } from './critique.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
 
 describe('Critique Server', () => {
-  let store: SqliteStore;
-  let dir: string;
-
-  beforeEach(() => {
-    dir = join(tmpdir(), `fbeast-crit-${randomUUID()}`);
-    mkdirSync(dir, { recursive: true });
-    store = createSqliteStore(join(dir, 'beast.db'));
-  });
-
-  afterEach(() => {
-    store.close();
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  });
-
   it('exposes 2 tools', () => {
-    const server = createCritiqueServer(store);
+    const server = createCritiqueServer({
+      critique: {
+        evaluate: vi.fn(),
+        compare: vi.fn(),
+      },
+    });
+
     const names = server.tools.map((t) => t.name);
     expect(names).toEqual(['fbeast_critique_evaluate', 'fbeast_critique_compare']);
   });
 
-  it('evaluate returns verdict and score', async () => {
-    const server = createCritiqueServer(store);
-    const evalTool = server.tools.find((t) => t.name === 'fbeast_critique_evaluate')!;
+  it('delegates evaluate to the critique adapter with evaluator selection', async () => {
+    const critique = {
+      evaluate: vi.fn().mockResolvedValue({
+        verdict: 'warn',
+        score: 0.72,
+        findings: [{ severity: 'warning', message: 'deep nesting' }],
+      }),
+      compare: vi.fn().mockResolvedValue({
+        originalScore: 0.5,
+        revisedScore: 0.8,
+        delta: 0.3,
+        direction: 'improved',
+        originalFindings: [],
+        revisedFindings: [],
+      }),
+    };
 
-    const result = await evalTool.handler({
-      content: 'function add(a, b) { return a + b; }',
-      criteria: 'correctness,readability',
-    });
-
-    const text = result.content[0]!.text;
-    expect(text).toContain('verdict');
-    expect(text).toContain('score');
-  });
-
-  it('compare returns improvement delta', async () => {
-    const server = createCritiqueServer(store);
+    const server = createCritiqueServer({ critique });
+    const evaluateTool = server.tools.find((t) => t.name === 'fbeast_critique_evaluate')!;
     const compareTool = server.tools.find((t) => t.name === 'fbeast_critique_compare')!;
 
-    const result = await compareTool.handler({
-      original: 'var x = 1; var y = 2;',
-      revised: 'const x = 1;\nconst y = 2;',
+    const evaluateResult = await evaluateTool.handler({
+      content: 'x',
+      criteria: 'correctness',
+      evaluators: 'logic-loop,complexity',
     });
+    expect(critique.evaluate).toHaveBeenCalledWith({
+      content: 'x',
+      criteria: ['correctness'],
+      evaluators: ['logic-loop', 'complexity'],
+    });
+    expect(evaluateResult.content[0]!.text).toContain('0.72');
 
-    const text = result.content[0]!.text;
-    expect(text).toContain('original');
-    expect(text).toContain('revised');
+    const compareResult = await compareTool.handler({ original: 'var x = 1', revised: 'const x = 1' });
+    expect(critique.compare).toHaveBeenCalledWith({ original: 'var x = 1', revised: 'const x = 1' });
+    expect(compareResult.content[0]!.text).toContain('improved');
   });
 });
