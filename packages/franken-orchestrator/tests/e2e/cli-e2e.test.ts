@@ -32,7 +32,7 @@ describeE2E('CLI E2E', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('creates .frankenbeast directory structure', () => {
+  it('creates .fbeast directory structure', () => {
     const paths = getProjectPaths(testDir);
     scaffoldFrankenbeast(paths);
     expect(existsSync(paths.plansDir)).toBe(true);
@@ -68,8 +68,8 @@ describeE2E('CLI E2E', () => {
 
   it('project paths are correctly derived', () => {
     const paths = getProjectPaths(testDir);
-    expect(paths.checkpointFile).toContain('.frankenbeast/.build/.checkpoint');
-    expect(paths.tracesDb).toContain('.frankenbeast/.build/build-traces.db');
-    expect(paths.designDocFile).toContain('.frankenbeast/plans/design.md');
+    expect(paths.checkpointFile).toContain('.fbeast/.build/.checkpoint');
+    expect(paths.tracesDb).toContain('.fbeast/.build/build-traces.db');
+    expect(paths.designDocFile).toContain('.fbeast/plans/design.md');
   });
 });

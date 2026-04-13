@@ -19,7 +19,7 @@ describe('SkillConfigStore', () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'skill-config-test-'));
-    configDir = join(tempDir, '.frankenbeast');
+    configDir = join(tempDir, '.fbeast');
     store = new SkillConfigStore(configDir);
   });
 
@@ -164,7 +164,7 @@ describe('SkillManager + SkillConfigStore integration', () => {
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'skill-mgr-config-test-'));
     skillsDir = join(tempDir, 'skills');
-    configDir = join(tempDir, '.frankenbeast');
+    configDir = join(tempDir, '.fbeast');
     store = new SkillConfigStore(configDir);
   });
 

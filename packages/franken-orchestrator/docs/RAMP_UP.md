@@ -92,7 +92,7 @@ LLM caching now lives under `src/cache/*`.
 Cache root:
 
 ```text
-.frankenbeast/.cache/llm
+.fbeast/.cache/llm
 ```
 
 Scope rules:
@@ -118,12 +118,12 @@ Reason:
 
 The current chat/runtime path does not yet propagate a safe conversation work id through `ILlmClient.complete(prompt)`.
 
-## `.frankenbeast/` Filesystem Contract
+## `.fbeast/` Filesystem Contract
 
 Important locations:
 
 ```text
-.frankenbeast/
+.fbeast/
   config.json
   plans/
     <plan>/
@@ -163,7 +163,7 @@ Read in this order if you need fast orientation:
 ## Current Behavioral Notes
 
 - `--resume` is still not a full CLI session resume path; actual recovery comes from checkpoints and chunk-session persistence.
-- `ProjectPaths.llmResponseFile` still exists, but intelligent caching now lives in `.frankenbeast/.cache/llm`.
+- `ProjectPaths.llmResponseFile` still exists, but intelligent caching now lives in `.fbeast/.cache/llm`.
 - CLI mode still uses stubbed module ports for parts of the original eight-module loop and relies on graph builders plus CLI skill execution for most real work.
 - `compose-infra` exists in the network registry model but remains hard-disabled.
 - Both `tests/` and `test/` are active in this package; do not assume one canonical test root.

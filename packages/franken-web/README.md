@@ -2,6 +2,10 @@
 
 Web dashboard for Frankenbeast — provides a browser-based operator console with chat, tracked-agent launch/detail flows, and network management.
 
+## Launch Role
+
+The dashboard is the primary Beast operator UI. CLI users can perform the same core operations through `frankenbeast beasts`.
+
 ## Quick Start
 
 ```bash

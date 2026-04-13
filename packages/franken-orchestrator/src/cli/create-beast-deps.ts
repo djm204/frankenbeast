@@ -126,7 +126,7 @@ export function createBeastDeps(
   const middlewareChain = buildMiddlewareChain(securityConfig);
 
   // 5. Skill manager
-  const configStore = new SkillConfigStore(config.configDir ?? '.frankenbeast');
+  const configStore = new SkillConfigStore(config.configDir ?? '.fbeast');
   const skillManager = new SkillManager(
     config.skillsDir ?? './skills',
     new Set(),

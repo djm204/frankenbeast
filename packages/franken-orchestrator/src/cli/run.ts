@@ -295,7 +295,7 @@ export async function main(): Promise<void> {
 
   if (args.subcommand === 'provider') {
     console.log('Provider management is not yet wired to the CLI.');
-    console.log('Configure providers in .frankenbeast/config.json or run-config.yaml.');
+    console.log('Configure providers in .fbeast/config.json or run-config.yaml.');
     return;
   }
 

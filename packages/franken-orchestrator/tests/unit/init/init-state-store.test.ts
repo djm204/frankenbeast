@@ -19,9 +19,9 @@ describe('FileInitStateStore', () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
     const store = new FileInitStateStore(join(tempDir, 'init-state.json'));
 
-    const state = await store.load('/tmp/project/.frankenbeast/config.json');
+    const state = await store.load('/tmp/project/.fbeast/config.json');
 
-    expect(state).toEqual(createEmptyInitState('/tmp/project/.frankenbeast/config.json'));
+    expect(state).toEqual(createEmptyInitState('/tmp/project/.fbeast/config.json'));
   });
 
   it('saves and reloads prior init state', async () => {
@@ -29,14 +29,14 @@ describe('FileInitStateStore', () => {
     const store = new FileInitStateStore(join(tempDir, 'init-state.json'));
 
     const saved = await store.save({
-      ...createEmptyInitState('/tmp/project/.frankenbeast/config.json'),
+      ...createEmptyInitState('/tmp/project/.fbeast/config.json'),
       selectedModules: ['chat', 'comms'],
       selectedCommsTransports: ['slack'],
       completedSteps: ['module-selection', 'comms-transport-selection'],
       answers: { 'chat.model': 'claude-sonnet-4-6' },
     });
 
-    const loaded = await store.load('/tmp/project/.frankenbeast/config.json');
+    const loaded = await store.load('/tmp/project/.fbeast/config.json');
 
     expect(loaded).toEqual(saved);
   });

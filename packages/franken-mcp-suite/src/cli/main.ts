@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveClaudeConfigDir } from './claude-config-paths.js';
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
@@ -8,7 +11,11 @@ switch (command) {
   case 'init': {
     const { runInit } = await import('./init.js');
     const root = process.cwd();
-    const claudeDir = join(root, '.claude');
+    const claudeDir = resolveClaudeConfigDir({
+      cwd: root,
+      homeDir: homedir(),
+      exists: existsSync,
+    });
     const initOptions = await resolveInitOptions(process.argv);
     runInit({ root, claudeDir, ...initOptions });
     break;
@@ -16,13 +23,17 @@ switch (command) {
   case 'uninstall': {
     const { runUninstall } = await import('./uninstall.js');
     const root = process.cwd();
-    const claudeDir = join(root, '.claude');
-    const purge = process.argv.includes('--purge');
-    runUninstall({ root, claudeDir, purge });
+    const claudeDir = resolveClaudeConfigDir({
+      cwd: root,
+      homeDir: homedir(),
+      exists: existsSync,
+    });
+    const purge = process.argv.includes('--purge') ? true : undefined;
+    await runUninstall({ root, claudeDir, purge });
     break;
   }
   default:
-    console.log('Usage: fbeast-mcp-suite <command>');
+    console.log('Usage: fbeast <command>');
     console.log('');
     console.log('Commands:');
     console.log('  init          Set up fbeast MCP servers for Claude Code');

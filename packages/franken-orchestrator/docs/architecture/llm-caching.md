@@ -40,7 +40,7 @@ Managed response reuse is exact-prompt keyed. Native-session reuse is keyed by t
 ## Filesystem Contract
 
 ```text
-.frankenbeast/
+.fbeast/
   .cache/
     llm/
       project/<project>/stable/<key>.json
@@ -67,6 +67,6 @@ Chat and chat-server are not yet using persistent work-session caching. The curr
 
 ## Operational Notes
 
-- `ProjectPaths.llmResponseFile` still exists for backward compatibility, but the real cache now lives under `.frankenbeast/.cache/llm`.
+- `ProjectPaths.llmResponseFile` still exists for backward compatibility, but the real cache now lives under `.fbeast/.cache/llm`.
 - Exact-response reuse works across process restarts.
 - Native-session reuse only activates when the provider advertises persistent work-session support.

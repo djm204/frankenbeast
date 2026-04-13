@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
-import { createSqliteStore, type SqliteStore } from '../shared/sqlite-store.js';
+import { createBrainAdapter, type BrainAdapter } from '../adapters/brain-adapter.js';
 import { parseArgs } from 'node:util';
 
-export function createMemoryServer(store: SqliteStore): FbeastMcpServer {
-  const { db } = store;
+export interface MemoryServerDeps {
+  brain: BrainAdapter;
+}
+
+export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
+  const { brain } = deps;
 
   const tools: ToolDef[] = [
     {
@@ -23,27 +27,14 @@ export function createMemoryServer(store: SqliteStore): FbeastMcpServer {
         const query = String(args['query']);
         const type = args['type'] ? String(args['type']) : undefined;
         const limit = args['limit'] ? Number(args['limit']) : 20;
-
-        let sql = `SELECT key, value, type, created_at FROM memory WHERE (key LIKE ? OR value LIKE ?)`;
-        const params: unknown[] = [`%${query}%`, `%${query}%`];
-
-        if (type) {
-          sql += ` AND type = ?`;
-          params.push(type);
-        }
-        sql += ` ORDER BY updated_at DESC LIMIT ?`;
-        params.push(limit);
-
-        const rows = db.prepare(sql).all(...params) as Array<{
-          key: string; value: string; type: string; created_at: string;
-        }>;
+        const rows = await brain.query(type ? { query, type, limit } : { query, limit });
 
         if (rows.length === 0) {
           return { content: [{ type: 'text', text: `No memory entries found for query: "${query}"` }] };
         }
 
         const text = rows
-          .map((r) => `[${r.type}] ${r.key}: ${r.value} (${r.created_at})`)
+          .map((row) => formatMemoryEntry(row))
           .join('\n');
         return { content: [{ type: 'text', text }] };
       },
@@ -64,13 +55,7 @@ export function createMemoryServer(store: SqliteStore): FbeastMcpServer {
         const key = String(args['key']);
         const value = String(args['value']);
         const type = String(args['type']);
-
-        db.prepare(`
-          INSERT INTO memory (key, value, type)
-          VALUES (?, ?, ?)
-          ON CONFLICT(key) DO UPDATE SET value = excluded.value, type = excluded.type, updated_at = datetime('now')
-        `).run(key, value, type);
-
+        await brain.store({ key, value, type });
         return { content: [{ type: 'text', text: `Stored memory: ${key}` }] };
       },
     },
@@ -84,27 +69,19 @@ export function createMemoryServer(store: SqliteStore): FbeastMcpServer {
         },
         required: ['projectId'],
       },
-      async handler(_args) {
-        const rows = db.prepare(
-          `SELECT key, value, type FROM memory ORDER BY type, key`,
-        ).all() as Array<{ key: string; value: string; type: string }>;
+      async handler(args) {
+        const projectId = String(args['projectId']);
+        const sections = await brain.frontload(projectId);
 
-        if (rows.length === 0) {
+        if (sections.length === 0) {
           return { content: [{ type: 'text', text: 'No memory entries stored yet.' }] };
         }
 
-        const grouped = new Map<string, string[]>();
-        for (const r of rows) {
-          const list = grouped.get(r.type) ?? [];
-          list.push(`  ${r.key}: ${r.value}`);
-          grouped.set(r.type, list);
-        }
-
-        const sections = [...grouped.entries()]
-          .map(([type, entries]) => `## ${type}\n${entries.join('\n')}`)
+        const text = sections
+          .map((section) => `## ${section.type}\n${section.entries.map((entry) => `  ${entry}`).join('\n')}`)
           .join('\n\n');
 
-        return { content: [{ type: 'text', text: sections }] };
+        return { content: [{ type: 'text', text }] };
       },
     },
     {
@@ -119,8 +96,8 @@ export function createMemoryServer(store: SqliteStore): FbeastMcpServer {
       },
       async handler(args) {
         const key = String(args['key']);
-        const result = db.prepare(`DELETE FROM memory WHERE key = ?`).run(key);
-        if (result.changes === 0) {
+        const removed = await brain.forget(key);
+        if (!removed) {
           return { content: [{ type: 'text', text: `No memory entry found with key: ${key}` }] };
         }
         return { content: [{ type: 'text', text: `Removed memory: ${key}` }] };
@@ -137,10 +114,17 @@ if (isMain) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const store = createSqliteStore(values['db']!);
-  const server = createMemoryServer(store);
+  const brain = createBrainAdapter(values['db']!);
+  const server = createMemoryServer({ brain });
   server.start().catch((err) => {
     console.error('fbeast-memory failed to start:', err);
     process.exit(1);
   });
+}
+
+function formatMemoryEntry(row: { key: string; value: string; type: string; createdAt?: string }): string {
+  if (row.createdAt) {
+    return `[${row.type}] ${row.key}: ${row.value} (${row.createdAt})`;
+  }
+  return `[${row.type}] ${row.key}: ${row.value}`;
 }

@@ -21,8 +21,8 @@ describe('chunk-session', () => {
 
   it('adds build paths for chunk sessions and snapshots', () => {
     const paths = getProjectPaths('/tmp/project', 'demo-plan');
-    expect(paths.chunkSessionsDir.endsWith('.frankenbeast/.build/chunk-sessions')).toBe(true);
-    expect(paths.chunkSessionSnapshotsDir.endsWith('.frankenbeast/.build/chunk-session-snapshots')).toBe(true);
+    expect(paths.chunkSessionsDir.endsWith('.fbeast/.build/chunk-sessions')).toBe(true);
+    expect(paths.chunkSessionSnapshotsDir.endsWith('.fbeast/.build/chunk-session-snapshots')).toBe(true);
   });
 
   it('creates normalized transcript entries with timestamps', () => {

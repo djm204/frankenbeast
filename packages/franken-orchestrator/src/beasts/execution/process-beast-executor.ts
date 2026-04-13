@@ -45,7 +45,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     // Write configSnapshot to a JSON file for the spawned process to load
     const configDir = join(
       process.cwd(),
-      '.frankenbeast',
+      '.fbeast',
       '.build',
       'run-configs',
     );

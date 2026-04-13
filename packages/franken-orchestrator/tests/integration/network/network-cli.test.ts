@@ -20,7 +20,7 @@ describe('network CLI integration', () => {
 
   it('up status logs and down work together in detached mode', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-cli-'));
-    const frankenbeastDir = join(workDir, '.frankenbeast');
+    const frankenbeastDir = join(workDir, '.fbeast');
     const stateStore = new NetworkStateStore(join(frankenbeastDir, 'network', 'state.json'));
     const logStore = new NetworkLogStore(join(frankenbeastDir, 'network', 'logs'));
     const services = resolveNetworkServices(defaultConfig(), { repoRoot: workDir });

@@ -35,8 +35,8 @@ describe('verifyInit', () => {
 
   it('reports missing config and init state clearly', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
 
     const result = await verifyInit({
       configFile,
@@ -50,14 +50,14 @@ describe('verifyInit', () => {
 
   it('checks only enabled comms transports', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const config = defaultConfig();
     config.comms.enabled = true;
     config.comms.slack.enabled = true;
     config.comms.discord.enabled = false;
     config.comms.slack.appId = 'workspace-app';
-    await mkdir(join(tempDir, '.frankenbeast'), { recursive: true });
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     await stateStore.save({
       ...createEmptyInitState(configFile),
@@ -77,15 +77,15 @@ describe('verifyInit', () => {
 
   it('repair revisits only failing sections and preserves valid answers', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
-    const configFile = join(tempDir, '.frankenbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.frankenbeast', 'init-state.json'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const config = defaultConfig();
     config.providers.default = 'codex';
     config.chat.enabled = true;
     config.comms.enabled = true;
     config.comms.slack.enabled = true;
     config.comms.slack.appId = 'existing-app';
-    await mkdir(join(tempDir, '.frankenbeast'), { recursive: true });
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     await stateStore.save({
       ...createEmptyInitState(configFile),

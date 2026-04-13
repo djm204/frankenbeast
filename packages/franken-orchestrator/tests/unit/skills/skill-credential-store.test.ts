@@ -21,10 +21,10 @@ describe('SkillCredentialStore', () => {
     expect(store.readAll()).toEqual({});
   });
 
-  it('setMany creates .frankenbeast/.env with credentials', () => {
+  it('setMany creates .fbeast/.env with credentials', () => {
     store.setMany({ GITHUB_TOKEN: 'ghp_abc', LINEAR_KEY: 'lin_xyz' });
     const content = readFileSync(
-      join(tempDir, '.frankenbeast', '.env'),
+      join(tempDir, '.fbeast', '.env'),
       'utf-8',
     );
     expect(content).toContain('GITHUB_TOKEN=ghp_abc');
