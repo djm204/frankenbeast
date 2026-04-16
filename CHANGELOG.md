@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/djm204/frankenbeast/compare/v0.32.0...v0.32.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **ci:** sync package-lock.json with @fbeast/mcp-suite workspace ([#280](https://github.com/djm204/frankenbeast/issues/280)) ([dd7356e](https://github.com/djm204/frankenbeast/commit/dd7356e58cb5fc52c46b3d0cd17d0c3cc7a691ec))
+
 ## [0.32.0](https://github.com/djm204/frankenbeast/compare/v0.31.0...v0.32.0) (2026-04-10)
 
 
