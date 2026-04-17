@@ -32,6 +32,29 @@ switch (command) {
     await runUninstall({ root, claudeDir, purge });
     break;
   }
+  case 'beast': {
+    const { runBeastMode } = await import('./beast-mode.js');
+    const { createInterface } = await import('node:readline');
+    const { spawnSync } = await import('node:child_process');
+    const root = process.cwd();
+    await runBeastMode(process.argv.slice(3), {
+      root,
+      confirm: (msg) => {
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        return new Promise<boolean>((resolve) => {
+          rl.question(msg + ' ', (answer) => {
+            rl.close();
+            resolve(answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes');
+          });
+        });
+      },
+      exec: async (cmd, args) => {
+        const result = spawnSync(cmd, args, { stdio: 'inherit' });
+        if (result.status !== 0) throw new Error(`${cmd} exited with ${result.status}`);
+      },
+    });
+    break;
+  }
   default:
     console.log('Usage: fbeast <command>');
     console.log('');
@@ -41,5 +64,7 @@ switch (command) {
     console.log('  init --hooks  Also add Claude Code hooks');
     console.log('  uninstall     Remove fbeast from Claude Code config');
     console.log('  uninstall --purge  Also remove stored data');
+    console.log('  beast              Activate Beast mode');
+    console.log('  beast --provider=<name>  Specify LLM provider (default: anthropic-api)');
     process.exit(command ? 1 : 0);
 }
