@@ -1,5 +1,9 @@
+import { SkillTrigger, TriggerRegistry } from '@franken/governor';
+import type { TriggerResult, TriggerSeverity } from '@franken/governor';
+
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
+/** Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover. */
 const DANGEROUS_PATTERNS = [
   /delete/i,
   /drop/i,
@@ -29,6 +33,44 @@ export interface GovernorAdapter {
   budgetStatus(): Promise<GovernorBudgetStatus>;
 }
 
+const skillTrigger = new SkillTrigger();
+const triggerRegistry = new TriggerRegistry([skillTrigger]);
+
+function mapSeverityToDecision(
+  severity: TriggerSeverity | undefined,
+): GovernorCheckResult['decision'] {
+  if (severity === 'critical') return 'denied';
+  return 'review_recommended';
+}
+
+function matchesDangerousPattern(text: string): boolean {
+  return DANGEROUS_PATTERNS.some((p) => p.test(text));
+}
+
+function assessAction(action: string, context: string): GovernorCheckResult {
+  const combined = `${action} ${context}`;
+  const isDestructive = matchesDangerousPattern(combined);
+
+  // Evaluate via governor SkillTrigger with pattern-derived destructiveness
+  const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
+    skillId: action,
+    requiresHitl: false,
+    isDestructive,
+  });
+
+  if (triggerResult.triggered) {
+    return {
+      decision: mapSeverityToDecision(triggerResult.severity),
+      reason: triggerResult.reason ?? `Trigger '${triggerResult.triggerId}' fired for action "${action}".`,
+    };
+  }
+
+  return {
+    decision: 'approved',
+    reason: `Action "${action}" does not match any dangerous patterns.`,
+  };
+}
+
 export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
 
@@ -56,23 +98,5 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
         byModel: rows.map((row) => ({ model: row.model, costUsd: row.total_cost })),
       };
     },
-  };
-}
-
-function assessAction(action: string, context: string): GovernorCheckResult {
-  const combined = `${action} ${context}`;
-
-  for (const pattern of DANGEROUS_PATTERNS) {
-    if (pattern.test(combined)) {
-      return {
-        decision: 'review_recommended',
-        reason: `Action "${action}" matches dangerous pattern. Human review recommended before proceeding.`,
-      };
-    }
-  }
-
-  return {
-    decision: 'approved',
-    reason: `Action "${action}" does not match any dangerous patterns.`,
   };
 }
