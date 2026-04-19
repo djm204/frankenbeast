@@ -75,9 +75,13 @@ export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (isMain) {
   const { values } = parseArgs({
-    options: { db: { type: 'string', default: '.fbeast/beast.db' } },
+    options: {
+      db: { type: 'string', default: '.fbeast/beast.db' },
+      tier: { type: 'string', default: 'standard' },
+    },
   });
-  const firewall = createFirewallAdapter(values['db']!);
+  const tier = values['tier'] === 'strict' ? 'strict' : 'standard';
+  const firewall = createFirewallAdapter(values['db']!, tier);
   const server = createFirewallServer({ firewall });
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);

@@ -1,5 +1,5 @@
 import { SqliteBrain } from 'franken-brain';
-import { createSqliteStore } from '../shared/sqlite-store.js';
+import Database from 'better-sqlite3';
 
 export interface BrainQueryInput {
   query: string;
@@ -27,37 +27,60 @@ export interface BrainAdapter {
 }
 
 export function createBrainAdapter(dbPath: string): BrainAdapter {
-  const store = createSqliteStore(dbPath);
   const brain = new SqliteBrain(dbPath);
 
-  hydrateWorkingMemoryFromLegacyTable();
+  // Rehydrate working memory from SQLite so entries survive process restarts.
+  // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
+  // to the working_memory table but construction doesn't read it back.
+  const readDb = new Database(dbPath, { readonly: true });
+  try {
+    const rows = readDb.prepare('SELECT key, value FROM working_memory').all() as Array<{ key: string; value: string }>;
+    const snap: Record<string, unknown> = {};
+    for (const row of rows) {
+      try { snap[row.key] = JSON.parse(row.value); } catch { snap[row.key] = row.value; }
+    }
+    if (Object.keys(snap).length > 0) {
+      brain.working.restore(snap);
+    }
+  } catch {
+    // Table may not exist yet on first run — that's fine
+  } finally {
+    readDb.close();
+  }
 
   return {
     async query(input) {
-      let sql = 'SELECT key, value, type, created_at AS createdAt FROM memory WHERE (key LIKE ? OR value LIKE ?)';
-      const params: unknown[] = [`%${input.query}%`, `%${input.query}%`];
+      const results: BrainMemoryEntry[] = [];
 
-      if (input.type) {
-        sql += ' AND type = ?';
-        params.push(input.type);
+      // Search episodic memory
+      if (!input.type || input.type === 'episodic') {
+        const events = brain.episodic.recall(input.query, input.limit ?? 20);
+        for (const event of events) {
+          results.push({
+            key: String(event.id ?? event.summary),
+            value: event.summary,
+            type: 'episodic',
+            createdAt: event.createdAt,
+          });
+        }
       }
 
-      sql += ' ORDER BY updated_at DESC LIMIT ?';
-      params.push(input.limit ?? 20);
+      // Search working memory
+      if (!input.type || input.type !== 'episodic') {
+        const snapshot = brain.working.snapshot();
+        const query = input.query.toLowerCase();
+        for (const [key, value] of Object.entries(snapshot)) {
+          const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+          if (key.toLowerCase().includes(query) || strValue.toLowerCase().includes(query)) {
+            results.push({ key, value: strValue, type: 'working' });
+          }
+        }
+      }
 
-      return store.db.prepare(sql).all(...params) as BrainMemoryEntry[];
+      return results.slice(0, input.limit ?? 20);
     },
 
     async store(input) {
-      store.db.prepare(`
-        INSERT INTO memory (key, value, type)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-          value = excluded.value,
-          type = excluded.type,
-          updated_at = datetime('now')
-      `).run(input.key, input.value, input.type);
-
       if (input.type === 'episodic') {
         brain.episodic.record({
           type: 'success',
@@ -72,36 +95,34 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     },
 
     async frontload(_projectId) {
-      const rows = store.db.prepare(
-        'SELECT key, value, type FROM memory ORDER BY type, key',
-      ).all() as Array<{ key: string; value: string; type: string }>;
+      const sections: BrainFrontloadSection[] = [];
 
-      const grouped = new Map<string, string[]>();
-      for (const row of rows) {
-        const entries = grouped.get(row.type) ?? [];
-        entries.push(`${row.key}: ${row.value}`);
-        grouped.set(row.type, entries);
+      // Working memory
+      const snapshot = brain.working.snapshot();
+      const workingEntries = Object.entries(snapshot).map(
+        ([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`,
+      );
+      if (workingEntries.length > 0) {
+        sections.push({ type: 'working', entries: workingEntries });
       }
 
-      return [...grouped.entries()].map(([type, entries]) => ({ type, entries }));
+      // Recent episodic events
+      const events = brain.episodic.recent(100);
+      const episodicEntries = events.map((e) => `${e.id ?? '-'}: ${e.summary}`);
+      if (episodicEntries.length > 0) {
+        sections.push({ type: 'episodic', entries: episodicEntries });
+      }
+
+      return sections;
     },
 
     async forget(key) {
-      const result = store.db.prepare('DELETE FROM memory WHERE key = ?').run(key);
-      brain.working.delete(key);
-      brain.flush();
-      return result.changes > 0;
+      if (brain.working.has(key)) {
+        brain.working.delete(key);
+        brain.flush();
+        return true;
+      }
+      return false;
     },
   };
-
-  function hydrateWorkingMemoryFromLegacyTable(): void {
-    const rows = store.db.prepare(
-      "SELECT key, value FROM memory WHERE type != 'episodic' ORDER BY key",
-    ).all() as Array<{ key: string; value: string }>;
-
-    for (const row of rows) {
-      brain.working.set(row.key, row.value);
-    }
-    brain.flush();
-  }
 }

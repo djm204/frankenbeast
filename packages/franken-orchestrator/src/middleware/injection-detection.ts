@@ -6,7 +6,7 @@ import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
  * ALL_TIERS: active in both standard and strict profiles.
  * STRICT_ONLY: softer manipulation patterns, active only in strict.
  */
-const PATTERNS_ALL_TIERS: RegExp[] = [
+export const PATTERNS_ALL_TIERS: RegExp[] = [
   // Explicit overrides
   /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context|commands?)/i,
   /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/i,
@@ -35,7 +35,7 @@ const PATTERNS_ALL_TIERS: RegExp[] = [
   /aWdub3Jl/,
 ];
 
-const PATTERNS_STRICT_ONLY: RegExp[] = [
+export const PATTERNS_STRICT_ONLY: RegExp[] = [
   /pretend\s+(that\s+)?(you|your)\s+(are|have\s+no|lack|don't\s+have)\s+(restrictions?|guidelines?|rules?|limits?)/i,
   /hypothetically,?\s+(if\s+you\s+(were|had\s+no)|speaking\s+as)/i,
   /in\s+(this\s+)?(scenario|roleplay|game|story|fiction),?\s+(you\s+are|your\s+rules?\s+are|ignore)/i,

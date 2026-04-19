@@ -33,6 +33,7 @@
     "@franken/critique": "*",
     "@franken/governor": "*",
     "@frankenbeast/observer": "*",
+    "franken-orchestrator": "*",
     "franken-planner": "*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2"

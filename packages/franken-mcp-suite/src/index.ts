@@ -25,3 +25,4 @@ export { createSkillsServer } from './servers/skills.js';
 export { runInit, type InitOptions } from './cli/init.js';
 export { runUninstall, type UninstallOptions } from './cli/uninstall.js';
 export { defaultHookDeps, runHook, type HookDeps } from './cli/hook.js';
+export { runBeastMode, type BeastModeDeps } from './cli/beast-mode.js';

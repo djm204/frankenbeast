@@ -1,24 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createSqliteStore } from '../shared/sqlite-store.js';
-
-const ORCHESTRATOR_INJECTION_PATTERNS: RegExp[] = [
-  /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context|commands?)/i,
-  /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/i,
-  /forget\s+(everything|all)\s+(you('ve|\s+have)\s+been\s+told|above|before)/i,
-  /your\s+(real|true|actual|new|primary)\s+(role|purpose|goal|task|job|objective)\s+is/i,
-  /you\s+are\s+(now|actually|really)\s+(a|an)\s+\w+/i,
-  /act\s+as\s+(if\s+you\s+(are|were)|a|an)\s+\w+\s+(without|that\s+ignores)/i,
-  /as\s+a\s+reminder,?\s+(your\s+)?(real|actual|true|primary)\s+task/i,
-  /the\s+(real|actual|true)\s+instructions?\s+(are|is|follow)/i,
-  /\[system\][\s\S]{0,50}(ignore|override|forget|disregard)/i,
-  /<\/?system>/i,
-  /\[INST\]/i,
-  /<<SYS>>/i,
-  /\bDAN\b.*\bmode\b/i,
-  /\bjailbreak\b/i,
-  /aWdub3Jl/,
-];
+import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from 'franken-orchestrator';
+import type { InjectionTier } from 'franken-orchestrator';
 
 export interface FirewallScanResult {
   verdict: 'clean' | 'flagged';
@@ -35,23 +19,29 @@ interface FirewallAdapterDeps {
   scanFile(path: string): Promise<FirewallScanResult>;
 }
 
-export function createFirewallAdapter(dbPathOrDeps: string | FirewallAdapterDeps): FirewallAdapter {
+export function createFirewallAdapter(
+  dbPathOrDeps: string | FirewallAdapterDeps,
+  tier: InjectionTier = 'standard',
+): FirewallAdapter {
   if (typeof dbPathOrDeps !== 'string') {
     return dbPathOrDeps;
   }
 
   const store = createSqliteStore(dbPathOrDeps);
+  const patterns = tier === 'strict'
+    ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
+    : PATTERNS_ALL_TIERS;
 
   return {
     async scanText(input) {
-      const result = scanWithOrchestratorPatterns(input);
+      const result = scanWithPatterns(input, patterns);
       logScan(input, result);
       return result;
     },
 
     async scanFile(path) {
       const content = readFileSync(path, 'utf8');
-      const result = scanWithOrchestratorPatterns(content);
+      const result = scanWithPatterns(content, patterns);
       logScan(content, result);
       return result;
     },
@@ -66,8 +56,8 @@ export function createFirewallAdapter(dbPathOrDeps: string | FirewallAdapterDeps
   }
 }
 
-function scanWithOrchestratorPatterns(input: string): FirewallScanResult {
-  const matchedPatterns = ORCHESTRATOR_INJECTION_PATTERNS
+function scanWithPatterns(input: string, patterns: RegExp[]): FirewallScanResult {
+  const matchedPatterns = patterns
     .filter((pattern) => pattern.test(input))
     .map((pattern) => pattern.source);
 
