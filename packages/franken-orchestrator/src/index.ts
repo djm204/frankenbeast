@@ -65,6 +65,10 @@ export { runExecution, HitlRejectedError } from './phases/execution.js';
 export { runClosure } from './phases/closure.js';
 export { PrCreator } from './closure/pr-creator.js';
 
+// Injection detection patterns
+export { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from './middleware/index.js';
+export type { InjectionTier } from './middleware/index.js';
+
 // Circuit breakers
 export { checkInjection } from './breakers/injection-breaker.js';
 export { checkBudget, BudgetExceededError } from './breakers/budget-breaker.js';
