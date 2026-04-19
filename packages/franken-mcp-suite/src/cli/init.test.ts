@@ -98,15 +98,16 @@ describe('fbeast init', () => {
     runInit({ root, claudeDir: join(root, '.claude'), hooks: true });
 
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    const dbPath = join(root, '.fbeast', 'beast.db');
     expect(settings.hooks.preToolCall).toEqual([
       {
-        command: 'fbeast-hook pre-tool $TOOL_NAME',
+        command: `fbeast-hook pre-tool --db "${dbPath}" $TOOL_NAME`,
         description: 'fbeast governance check',
       },
     ]);
     expect(settings.hooks.postToolCall).toEqual([
       {
-        command: 'fbeast-hook post-tool $TOOL_NAME $RESULT',
+        command: `fbeast-hook post-tool --db "${dbPath}" $TOOL_NAME $RESULT`,
         description: 'fbeast observer logging',
       },
     ]);

@@ -114,7 +114,7 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     buildDir: `${root}/.fbeast/.build`,
     beastsDir: `${root}/.fbeast/.build/beasts`,
     beastLogsDir: `${root}/.fbeast/.build/beasts/logs`,
-    beastsDb: `${root}/.fbeast/.build/beasts.db`,
+    beastsDb: `${root}/.fbeast/beast.db`,
     checkpointFile: `${root}/.fbeast/.build/.checkpoint`,
     tracesDb: `${root}/.fbeast/.build/build-traces.db`,
     logFile: `${root}/.fbeast/.build/build.log`,

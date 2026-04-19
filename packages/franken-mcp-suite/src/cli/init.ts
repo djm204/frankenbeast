@@ -21,20 +21,23 @@ const SERVER_BIN_MAP: Record<FbeastServer, string> = {
   skills: 'fbeast-skills',
 };
 
-const FBEAST_HOOKS = {
-  preToolCall: [
-    {
-      command: 'fbeast-hook pre-tool $TOOL_NAME',
-      description: 'fbeast governance check',
-    },
-  ],
-  postToolCall: [
-    {
-      command: 'fbeast-hook post-tool $TOOL_NAME $RESULT',
-      description: 'fbeast observer logging',
-    },
-  ],
-} as const;
+function buildHookCommands(root: string) {
+  const dbPath = join(root, '.fbeast', 'beast.db');
+  return {
+    preToolCall: [
+      {
+        command: `fbeast-hook pre-tool --db "${dbPath}" $TOOL_NAME`,
+        description: 'fbeast governance check',
+      },
+    ],
+    postToolCall: [
+      {
+        command: `fbeast-hook post-tool --db "${dbPath}" $TOOL_NAME $RESULT`,
+        description: 'fbeast observer logging',
+      },
+    ],
+  };
+}
 
 export interface InitOptions {
   root: string;
@@ -103,7 +106,7 @@ export function runInit(options: InitOptions): void {
   settings['mcpServers'] = mcpServers;
 
   if (hooks) {
-    settings['hooks'] = mergeHooks(settings['hooks']);
+    settings['hooks'] = mergeHooks(settings['hooks'], buildHookCommands(root));
     config.hooks = true;
     config.save();
   }
@@ -130,7 +133,7 @@ if (isMain) {
   runInit({ root, claudeDir, hooks });
 }
 
-function mergeHooks(existing: unknown): Record<string, unknown[]> {
+function mergeHooks(existing: unknown, fbeastHooks: Record<string, readonly { command: string; description: string }[]>): Record<string, unknown[]> {
   const hooks: Record<string, unknown[]> = {};
 
   if (isObjectRecord(existing)) {
@@ -141,7 +144,7 @@ function mergeHooks(existing: unknown): Record<string, unknown[]> {
     }
   }
 
-  for (const [hookType, newHooks] of Object.entries(FBEAST_HOOKS)) {
+  for (const [hookType, newHooks] of Object.entries(fbeastHooks)) {
     const currentHooks = Array.isArray(hooks[hookType]) ? hooks[hookType] : [];
     const preservedHooks = currentHooks.filter((hook) => !isFbeastHook(hook));
     hooks[hookType] = [...preservedHooks, ...newHooks];

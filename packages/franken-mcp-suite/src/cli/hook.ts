@@ -10,12 +10,12 @@ export interface HookDeps {
   sessionId(): string;
 }
 
-export function defaultHookDeps(cwd: string = process.cwd()): HookDeps {
-  const dbPath = join(cwd, '.fbeast', 'beast.db');
+export function defaultHookDeps(dbPath?: string): HookDeps {
+  const resolved = dbPath ?? join(process.cwd(), '.fbeast', 'beast.db');
 
   return {
-    governor: createGovernorAdapter(dbPath),
-    observer: createObserverAdapter(dbPath),
+    governor: createGovernorAdapter(resolved),
+    observer: createObserverAdapter(resolved),
     sessionId: () =>
       process.env['FBEAST_SESSION_ID']
       ?? process.env['CLAUDE_SESSION_ID']
@@ -25,12 +25,26 @@ export function defaultHookDeps(cwd: string = process.cwd()): HookDeps {
 
 export async function runHook(
   argv: string[] = process.argv.slice(2),
-  deps: HookDeps = defaultHookDeps(),
+  deps?: HookDeps,
 ): Promise<void> {
-  const [phase, toolName = '', payload = ''] = argv;
+  // Extract --db flag before parsing positional args
+  let dbPath: string | undefined;
+  const positionals: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--db' && i + 1 < argv.length) {
+      dbPath = argv[++i];
+    } else if (argv[i]?.startsWith('--db=')) {
+      dbPath = argv[i]!.slice(5);
+    } else {
+      positionals.push(argv[i]!);
+    }
+  }
+
+  const resolvedDeps = deps ?? defaultHookDeps(dbPath);
+  const [phase, toolName = '', payload = ''] = positionals;
 
   if (phase === 'pre-tool') {
-    const decision = await deps.governor.check({ action: toolName, context: payload });
+    const decision = await resolvedDeps.governor.check({ action: toolName, context: payload });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);
       process.exitCode = 1;
@@ -42,10 +56,10 @@ export async function runHook(
   }
 
   if (phase === 'post-tool') {
-    await deps.observer.log({
+    await resolvedDeps.observer.log({
       event: 'tool_call',
       metadata: JSON.stringify({ toolName, payload, phase }),
-      sessionId: deps.sessionId(),
+      sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');
     return;

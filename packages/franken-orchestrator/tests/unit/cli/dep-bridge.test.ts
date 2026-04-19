@@ -188,11 +188,11 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.reflection).toBe(true);
     });
 
-    it('derives brain.dbPath from paths.buildDir', () => {
+    it('derives brain.dbPath from paths.frankenbeastDir', () => {
       const config = bridgeToBeastConfig(makeOptions({
-        paths: makePaths({ buildDir: '/my/build' }),
+        paths: makePaths({ frankenbeastDir: '/project/.fbeast' }),
       }));
-      expect(config.brain?.dbPath).toBe('/my/build/memory.db');
+      expect(config.brain?.dbPath).toBe('/project/.fbeast/beast.db');
     });
   });
 

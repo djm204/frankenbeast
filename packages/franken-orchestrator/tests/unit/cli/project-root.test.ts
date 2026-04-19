@@ -52,7 +52,7 @@ describe('project-root', () => {
       expect(paths.buildDir).toBe(resolve(testDir, '.fbeast/.build'));
       expect(paths.beastsDir).toBe(resolve(testDir, '.fbeast/.build/beasts'));
       expect(paths.beastLogsDir).toBe(resolve(testDir, '.fbeast/.build/beasts/logs'));
-      expect(paths.beastsDb).toBe(resolve(testDir, '.fbeast/.build/beasts.db'));
+      expect(paths.beastsDb).toBe(resolve(testDir, '.fbeast/beast.db'));
       expect(paths.designDocFile).toBe(resolve(testDir, '.fbeast/plans/design.md'));
       expect(paths.llmResponseFile).toBe(resolve(testDir, '.fbeast/plans/llm-response.json'));
       expect(paths.configFile).toBe(resolve(testDir, '.fbeast/config.json'));

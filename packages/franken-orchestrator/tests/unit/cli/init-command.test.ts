@@ -89,7 +89,7 @@ describe('handleInitCommand', () => {
         buildDir: join(frankenbeastDir, '.build'),
         beastsDir: join(frankenbeastDir, '.build', 'beasts'),
         beastLogsDir: join(frankenbeastDir, '.build', 'beasts', 'logs'),
-        beastsDb: join(frankenbeastDir, '.build', 'beasts.db'),
+        beastsDb: join(frankenbeastDir, 'beast.db'),
         chunkSessionsDir: join(frankenbeastDir, '.build', 'chunk-sessions'),
         chunkSessionSnapshotsDir: join(frankenbeastDir, '.build', 'chunk-session-snapshots'),
         checkpointFile: join(frankenbeastDir, '.build', '.checkpoint'),

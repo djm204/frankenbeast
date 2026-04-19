@@ -101,7 +101,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
     buildDir,
     beastsDir,
     beastLogsDir: resolve(beastsDir, 'logs'),
-    beastsDb: resolve(buildDir, 'beasts.db'),
+    beastsDb: resolve(frankenbeastDir, 'beast.db'),
     chunkSessionsDir: resolve(buildDir, 'chunk-sessions'),
     chunkSessionSnapshotsDir: resolve(buildDir, 'chunk-session-snapshots'),
     checkpointFile: resolve(buildDir, '.checkpoint'),
