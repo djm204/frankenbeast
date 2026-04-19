@@ -3,17 +3,20 @@ import type { InterviewIO } from '../planning/interview-loop.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
+import { createBeastControlClient } from './beast-control-client.js';
 
 interface BeastCommandDeps {
   args: CliArgs;
   io: InterviewIO;
   paths: ProjectPaths;
   print(message: string): void;
+  control?: ReturnType<typeof createBeastControlClient>;
 }
 
 export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> {
   const { args, io, paths, print } = deps;
   const services = createBeastServices(paths);
+  const control = deps.control ?? createBeastControlClient(paths);
   const actor = process.env.USER ?? 'operator';
 
   switch (args.beastAction) {
@@ -87,6 +90,18 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       }
       const run = await services.runs.restart(args.beastTarget, actor);
       print(`Restarted ${run.id}`);
+      return;
+    }
+    case 'resume': {
+      if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
+      const run = await control.resumeAgent(args.beastTarget, actor);
+      print(`Resumed ${run.id}`);
+      return;
+    }
+    case 'delete': {
+      if (!args.beastTarget) throw new Error('beasts delete requires an agent id');
+      await control.deleteAgent(args.beastTarget);
+      print(`Deleted ${args.beastTarget}`);
       return;
     }
     default:

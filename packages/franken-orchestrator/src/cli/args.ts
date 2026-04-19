@@ -37,6 +37,8 @@ export type BeastAction =
   | 'stop'
   | 'kill'
   | 'restart'
+  | 'resume'
+  | 'delete'
   | undefined;
 
 export type SkillAction = 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
@@ -94,7 +96,7 @@ export interface CliArgs {
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'provider', 'security', 'dashboard']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
-const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart']);
+const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
 const VALID_PROVIDER_ACTIONS = new Set(['list', 'add', 'remove', 'test']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -170,6 +172,8 @@ Beast Commands:
   beasts stop <run-id>                Stop a running Beast
   beasts kill <run-id>                Force-stop a Beast
   beasts restart <run-id>             Restart a Beast with a new attempt
+  beasts resume <agent-id>            Resume a tracked agent's linked run
+  beasts delete <agent-id>            Soft-delete a tracked agent
 
 Skill Commands:
   skill list                          List installed skills

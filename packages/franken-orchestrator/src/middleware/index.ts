@@ -1,6 +1,6 @@
 export { MiddlewareChain } from './llm-middleware.js';
 export type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
-export { InjectionDetectionMiddleware, InjectionDetectedError } from './injection-detection.js';
+export { InjectionDetectionMiddleware, InjectionDetectedError, PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from './injection-detection.js';
 export type { InjectionTier } from './injection-detection.js';
 export { PiiMaskingMiddleware } from './pii-masking.js';
 export { OutputValidationMiddleware } from './output-validation.js';
