@@ -1,4 +1,5 @@
 import { SqliteBrain } from 'franken-brain';
+import Database from 'better-sqlite3';
 
 export interface BrainQueryInput {
   query: string;
@@ -27,6 +28,25 @@ export interface BrainAdapter {
 
 export function createBrainAdapter(dbPath: string): BrainAdapter {
   const brain = new SqliteBrain(dbPath);
+
+  // Rehydrate working memory from SQLite so entries survive process restarts.
+  // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
+  // to the working_memory table but construction doesn't read it back.
+  const readDb = new Database(dbPath, { readonly: true });
+  try {
+    const rows = readDb.prepare('SELECT key, value FROM working_memory').all() as Array<{ key: string; value: string }>;
+    const snap: Record<string, unknown> = {};
+    for (const row of rows) {
+      try { snap[row.key] = JSON.parse(row.value); } catch { snap[row.key] = row.value; }
+    }
+    if (Object.keys(snap).length > 0) {
+      brain.working.restore(snap);
+    }
+  } catch {
+    // Table may not exist yet on first run — that's fine
+  } finally {
+    readDb.close();
+  }
 
   return {
     async query(input) {
