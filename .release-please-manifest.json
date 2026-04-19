@@ -1,10 +1,10 @@
 {
-  ".": "0.32.1",
+  ".": "0.33.0",
   "packages/franken-brain": "0.5.2",
   "packages/franken-critique": "0.6.0",
   "packages/franken-governor": "0.5.0",
   "packages/franken-observer": "0.5.0",
-  "packages/franken-orchestrator": "0.30.0",
+  "packages/franken-orchestrator": "0.31.0",
   "packages/franken-planner": "0.4.1",
   "packages/franken-types": "0.6.0"
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.30.0...franken-orchestrator-v0.31.0) (2026-04-19)
+
+
+### Features
+
+* complete dual-mode launch chunks 6-8 and fix adapter wrapping ([#282](https://github.com/djm204/frankenbeast/issues/282)) ([100dd1f](https://github.com/djm204/frankenbeast/commit/100dd1f9b0bec44419e7412541e522f3785df472))
+
 ## [0.30.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.29.0...franken-orchestrator-v0.30.0) (2026-04-10)
 
 
