@@ -204,7 +204,7 @@ Allowed in `@fbeast/mcp-suite`:
 Not allowed in `@fbeast/mcp-suite`:
 
 - alternate memory engine behavior
-- template planner logic standing in for real planner output
+- template planner logic standing in for real planner output (exception: `decompose` returns a scaffold DAG because `franken-planner` is a graph library, not a planning engine — real decomposition requires an LLM, and injecting one into an MCP tool called by an LLM is circular; the caller refines the scaffold)
 - ad hoc critique heuristics replacing critique engine behavior
 - regex-only governance or skills logic where existing modules already define the behavior
 
