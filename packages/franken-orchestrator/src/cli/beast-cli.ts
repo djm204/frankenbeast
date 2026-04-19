@@ -27,6 +27,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       print(catalog);
       return;
     }
+    case 'create':
     case 'spawn': {
       if (!args.beastTarget) {
         throw new Error('beasts spawn requires a definition id');

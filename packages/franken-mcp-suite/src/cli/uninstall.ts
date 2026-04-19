@@ -22,25 +22,17 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
   const settingsPath = join(claudeDir, 'settings.json');
   if (existsSync(settingsPath)) {
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
 
+    // Remove fbeast MCP servers
+    const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
     for (const key of Object.keys(mcpServers)) {
       if (key.startsWith('fbeast-')) {
         delete mcpServers[key];
       }
     }
-
     settings['mcpServers'] = mcpServers;
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-  }
 
-  const instrPath = join(claudeDir, 'fbeast-instructions.md');
-  if (existsSync(instrPath)) {
-    unlinkSync(instrPath);
-  }
-
-  if (existsSync(settingsPath)) {
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    // Remove fbeast hooks
     const hooks = settings['hooks'] as Record<string, unknown[]> | undefined;
     if (hooks) {
       for (const [hookType, hookList] of Object.entries(hooks)) {
@@ -51,8 +43,14 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
         }
       }
       settings['hooks'] = hooks;
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
     }
+
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  }
+
+  const instrPath = join(claudeDir, 'fbeast-instructions.md');
+  if (existsSync(instrPath)) {
+    unlinkSync(instrPath);
   }
 
   const fbeastDir = join(root, '.fbeast');

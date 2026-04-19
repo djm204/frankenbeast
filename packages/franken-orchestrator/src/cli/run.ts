@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
+import { createBeastControlClient } from './beast-control-client.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
@@ -260,6 +261,7 @@ export async function main(): Promise<void> {
       io: createStdinIO(),
       paths,
       print: console.log,
+      control: createBeastControlClient(paths),
     });
     return;
   }

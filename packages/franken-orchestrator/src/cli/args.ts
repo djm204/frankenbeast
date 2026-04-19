@@ -30,6 +30,7 @@ export type NetworkAction =
 
 export type BeastAction =
   | 'catalog'
+  | 'create'
   | 'spawn'
   | 'list'
   | 'status'
@@ -96,7 +97,7 @@ export interface CliArgs {
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'provider', 'security', 'dashboard']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
-const VALID_BEAST_ACTIONS = new Set(['catalog', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
+const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
 const VALID_PROVIDER_ACTIONS = new Set(['list', 'add', 'remove', 'test']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -165,6 +166,7 @@ Network Commands:
 
 Beast Commands:
   beasts catalog                      List fixed Beast definitions
+  beasts create <definition-id>       Create a Beast run (alias for spawn)
   beasts spawn <definition-id>        Spawn a Beast run via interactive prompts
   beasts list                         List Beast runs
   beasts status <run-id>              Show one Beast run
