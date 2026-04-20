@@ -125,6 +125,52 @@ describe('fbeast uninstall', () => {
     expect(existsSync(join(root, '.fbeast'))).toBe(false);
   });
 
+  it('removes Gemini BeforeTool/AfterTool fbeast entries on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const before = (settings.hooks?.BeforeTool ?? []) as unknown[];
+    const after = (settings.hooks?.AfterTool ?? []) as unknown[];
+    const hasFbeast = (list: unknown[]) =>
+      list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
+    expect(hasFbeast(before)).toBe(false);
+    expect(hasFbeast(after)).toBe(false);
+  });
+
+  it('removes Codex MCP servers and hooks.json entries on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+    spawnCalls.length = 0; // reset after init
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    // Each server gets a remove call
+    expect(spawnCalls.length).toBe(7);
+    expect(spawnCalls.every((c) => c.args[1] === 'remove')).toBe(true);
+
+    // hooks.json has no fbeast entries left
+    const hooksPath = join(root, '.codex', 'hooks.json');
+    const hooks = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    const preToolUse = (hooks.hooks?.PreToolUse ?? []) as unknown[];
+    const postToolUse = (hooks.hooks?.PostToolUse ?? []) as unknown[];
+    const hasFbeast = (list: unknown[]) =>
+      list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
+    expect(hasFbeast(preToolUse)).toBe(false);
+    expect(hasFbeast(postToolUse)).toBe(false);
+  });
+
   it('treats closed stdin as a no answer when purge decision is missing', async () => {
     const root = tmpDir();
     dirs.push(root);

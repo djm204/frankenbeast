@@ -140,4 +140,111 @@ describe('fbeast init', () => {
 
     expect(geminiDir).toBe(join(homeDir, '.gemini'));
   });
+
+  it('writes Gemini hooks and shell scripts when --client=gemini --hooks', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    // Shell scripts created and executable
+    const preScript = join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+    const preContent = readFileSync(preScript, 'utf-8');
+    expect(preContent).toContain('fbeast-hook pre-tool');
+    expect(preContent).toContain('decision":"deny"');
+
+    // settings.json has BeforeTool / AfterTool entries
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const beforeHooks = settings.hooks?.BeforeTool as unknown[];
+    const afterHooks = settings.hooks?.AfterTool as unknown[];
+    expect(Array.isArray(beforeHooks)).toBe(true);
+    expect(Array.isArray(afterHooks)).toBe(true);
+    const beforeCmd = (beforeHooks[0] as any).hooks[0].command as string;
+    const afterCmd = (afterHooks[0] as any).hooks[0].command as string;
+    expect(beforeCmd).toContain('gemini-before-tool.sh');
+    expect(afterCmd).toContain('gemini-after-tool.sh');
+  });
+
+  it('merges Gemini hooks without clobbering existing BeforeTool entries', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    const existing = {
+      hooks: {
+        BeforeTool: [{ hooks: [{ type: 'command', command: '/usr/local/bin/my-pre-hook' }] }],
+      },
+    };
+    writeFileSync(join(geminiDir, 'settings.json'), JSON.stringify(existing));
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const beforeHooks = settings.hooks.BeforeTool as unknown[];
+    // Original entry preserved
+    expect(beforeHooks.some((e: any) => e.hooks?.[0]?.command === '/usr/local/bin/my-pre-hook')).toBe(true);
+    // fbeast entry added
+    expect(beforeHooks.some((e: any) => (e.hooks?.[0]?.command as string)?.includes('fbeast'))).toBe(true);
+  });
+
+  it('registers Codex MCP servers via spawn when --client=codex', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+
+    // One spawn call per server
+    expect(spawnCalls.length).toBe(7);
+    expect(spawnCalls.every((c) => c.cmd === 'codex')).toBe(true);
+    expect(spawnCalls.every((c) => c.args[0] === 'mcp' && c.args[1] === 'add')).toBe(true);
+    const names = spawnCalls.map((c) => c.args[2]);
+    expect(names).toContain('fbeast-memory');
+    expect(names).toContain('fbeast-governor');
+  });
+
+  it('throws when codex mcp add fails for any server', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = (_cmd: string, args: string[]) => ({
+      status: args[2] === 'fbeast-memory' ? 1 : 0,
+      stderr: Buffer.from('command not found'),
+    });
+
+    expect(() =>
+      runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn }),
+    ).toThrow('failed to register 1 server');
+  });
+
+  it('writes Codex hooks.json when --client=codex --hooks', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+
+    // Shell scripts created
+    const preScript = join(root, '.fbeast', 'hooks', 'codex-pre-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'codex-post-tool.sh');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
+    // hooks.json written
+    const hooksPath = join(root, '.codex', 'hooks.json');
+    expect(existsSync(hooksPath)).toBe(true);
+    const hooks = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    expect(Array.isArray(hooks.hooks?.PreToolUse)).toBe(true);
+    expect(Array.isArray(hooks.hooks?.PostToolUse)).toBe(true);
+    const preEntry = hooks.hooks.PreToolUse[0];
+    expect(preEntry.matcher).toBe('*');
+    expect((preEntry.hooks[0].command as string)).toContain('codex-pre-tool.sh');
+  });
 });

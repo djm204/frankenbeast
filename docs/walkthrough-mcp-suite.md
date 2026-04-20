@@ -5,7 +5,8 @@ fbeast works with any MCP-compatible AI assistant client. Currently supported:
 | Client | Config dir | Hooks |
 |--------|-----------|-------|
 | Claude Code | `.claude/` | ✅ preToolCall / postToolCall |
-| Gemini CLI | `.gemini/` | ❌ (not supported by Gemini) |
+| Gemini CLI | `.gemini/` | ✅ BeforeTool / AfterTool (shell scripts) |
+| Codex CLI | `codex mcp add` | ✅ PreToolUse / PostToolUse (shell scripts) |
 
 Beast mode (`fbeast beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
 
@@ -150,18 +151,19 @@ This creates:
     └── fbeast-instructions.md
 ```
 
-#### Install with hooks (Claude Code only)
+#### Install with hooks
 
 Hooks fire `fbeast-hook` on every tool call for live governance and audit logging.
-Only supported by Claude Code — passing `--hooks` with `--client=gemini` is a no-op.
+All three clients support hooks.
 
 ```sh
-fbeast init --hooks
-# or explicitly:
-fbeast init --client=claude --hooks
+fbeast init --hooks                      # auto-detect client
+fbeast init --client=claude --hooks      # Claude Code
+fbeast init --client=gemini --hooks      # Gemini CLI
+fbeast init --client=codex --hooks       # Codex CLI
 ```
 
-Adds to `settings.json`:
+**Claude Code** — inline command strings in `settings.json`:
 
 ```json
 "hooks": {
@@ -173,6 +175,30 @@ Adds to `settings.json`:
   ]
 }
 ```
+
+**Gemini CLI** — shell scripts written to `.fbeast/hooks/`, referenced in `.gemini/settings.json`:
+
+```json
+"hooks": {
+  "BeforeTool": [{ "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/gemini-before-tool.sh" }] }],
+  "AfterTool":  [{ "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/gemini-after-tool.sh" }] }]
+}
+```
+
+The scripts read JSON from stdin, extract `tool_name`, call `fbeast-hook`, and deny with the correct Gemini format (exit 2 + `{"decision":"deny",...}`).
+
+**Codex CLI** — shell scripts written to `.fbeast/hooks/`, registered in `.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse":  [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/codex-pre-tool.sh" }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/codex-post-tool.sh" }] }]
+  }
+}
+```
+
+The scripts read JSON from stdin and deny with the Codex format (exit 2 + `{"hookSpecificOutput":{"permissionDecision":"deny",...}}`).
 
 #### Install a subset of servers
 
@@ -246,15 +272,19 @@ All adapters continue reading from the same `beast.db`.
 ## Uninstalling
 
 ```sh
-# Remove MCP servers and hooks from settings.json, keep .fbeast/ data
+# Remove MCP servers and hooks, keep .fbeast/ data (auto-detects client)
 fbeast uninstall
 
 # Target a specific client
+fbeast uninstall --client=claude
 fbeast uninstall --client=gemini
+fbeast uninstall --client=codex
 
 # Remove everything including stored data
 fbeast uninstall --purge
 ```
+
+Codex: runs `codex mcp remove` for each server and clears fbeast entries from `.codex/hooks.json`.
 
 ---
 
