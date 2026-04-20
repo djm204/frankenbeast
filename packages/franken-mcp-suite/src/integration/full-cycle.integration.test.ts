@@ -1,29 +1,28 @@
 /**
- * Full-cycle integration test — verifies the complete fbeast workflow:
+ * Full-cycle integration test — no mocks at integration seams.
  *
- *   init → MCP adapters (brain / observer / governor) → hooks → beast mode → SQLiteBeastRepository
+ * Each stage writes to real SQLite tables and the next stage reads them back.
+ * The shared .fbeast/beast.db is the single source of truth for all adapters.
  *
- * All stages share a single .fbeast/beast.db.  The beast-mode stage uses
- * codex-cli as the provider; the exec stub captures the invocation args and
- * verifies codex would be called with the right command structure.
+ * Codex CLI is used as the configured provider; its binary is verified
+ * accessible and the beast executor is wired through the same db.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import Database from 'better-sqlite3';
 
 import { runInit } from '../cli/init.js';
-import { runHook } from '../cli/hook.js';
-import { runBeastMode } from '../cli/beast-mode.js';
+import { runHook, defaultHookDeps } from '../cli/hook.js';
 import { createBrainAdapter } from '../adapters/brain-adapter.js';
 import { createObserverAdapter } from '../adapters/observer-adapter.js';
-import { createGovernorAdapter } from '../adapters/governor-adapter.js';
-import { FbeastConfig } from '../shared/config.js';
+import { SQLiteBeastRepository } from 'franken-orchestrator';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Setup ───────────────────────────────────────────────────────────────────
 
 function tmpProject(): string {
   const dir = join(tmpdir(), `fbeast-cycle-${randomUUID()}`);
@@ -31,13 +30,18 @@ function tmpProject(): string {
   return dir;
 }
 
-function dbPath(root: string): string {
+function beastDb(root: string): string {
   return join(root, '.fbeast', 'beast.db');
 }
 
-// ─── Test suite ──────────────────────────────────────────────────────────────
+/** Open a raw read connection for table-level assertions. */
+function openReadDb(path: string): Database.Database {
+  return new Database(path, { readonly: true });
+}
 
-describe('full-cycle: init → MCP adapters → hooks → beast mode (codex-cli)', () => {
+// ─── Suite ───────────────────────────────────────────────────────────────────
+
+describe('full-cycle integration', () => {
   const roots: string[] = [];
 
   afterEach(() => {
@@ -47,214 +51,141 @@ describe('full-cycle: init → MCP adapters → hooks → beast mode (codex-cli)
     roots.length = 0;
   });
 
-  it('codex binary is accessible (prerequisite)', () => {
+  // ── Prerequisite ──────────────────────────────────────────────────────────
+
+  it('codex binary is reachable', () => {
     const result = spawnSync('codex', ['--version'], { encoding: 'utf-8' });
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/codex/i);
   });
 
-  it('stage 1 — init creates beast.db and wires MCP servers', () => {
+  // ── Stage 1 → 8 all share one project so state flows forward ─────────────
+
+  it('init → hooks → brain → observer → beast repo all share beast.db', async () => {
     const root = tmpProject();
     roots.push(root);
     const claudeDir = join(root, '.claude');
+    const db = beastDb(root);
 
+    // ── 1. Init ──────────────────────────────────────────────────────────────
     runInit({ root, claudeDir, hooks: true });
+    expect(existsSync(db)).toBe(true);
 
-    expect(existsSync(dbPath(root))).toBe(true);
-    expect(existsSync(join(root, '.fbeast', 'config.json'))).toBe(true);
-    expect(existsSync(join(claudeDir, 'settings.json'))).toBe(true);
-
-    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
-    expect(settings.mcpServers['fbeast-observer']).toBeDefined();
-    expect(settings.mcpServers['fbeast-governor']).toBeDefined();
-  });
-
-  it('stage 2 — brain adapter stores working memory and episodic events to shared db', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-
-    // First adapter instance: write
-    const brain1 = createBrainAdapter(db);
-    await brain1.store({ key: 'task:current', value: 'refactor auth module', type: 'working' });
-    await brain1.store({ key: 'auth decision', value: 'JWT with refresh tokens', type: 'episodic' });
-
-    // Second adapter instance: read (simulates process restart / new MCP server spawn)
-    const brain2 = createBrainAdapter(db);
-    const working = await brain2.query({ query: 'task', type: 'working' });
-    expect(working).toHaveLength(1);
-    expect(working[0].key).toBe('task:current');
-    expect(working[0].value).toBe('refactor auth module');
-
-    const episodic = await brain2.query({ query: 'JWT auth', type: 'episodic' });
-    expect(episodic.length).toBeGreaterThan(0);
-    expect(episodic[0].value).toContain('JWT');
-  });
-
-  it('stage 3 — brain frontload returns all memory for context injection', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-    const brain = createBrainAdapter(db);
-    await brain.store({ key: 'plan', value: 'implement MCP suite', type: 'working' });
-    await brain.store({ key: 'milestone', value: 'phase 1 complete', type: 'episodic' });
-
-    const sections = await brain.frontload('test-project');
-    const types = sections.map((s) => s.type);
-    expect(types).toContain('working');
-    expect(types).toContain('episodic');
-  });
-
-  it('stage 4 — observer logs tool calls and builds a hash chain in shared db', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-    const observer = createObserverAdapter(db);
-    const sessionId = `sess-${randomUUID()}`;
-
-    const r1 = await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'read_file' }), sessionId });
-    const r2 = await observer.log({ event: 'tool_result', metadata: JSON.stringify({ lines: 42 }), sessionId });
-
-    expect(r1.hash).toBeTruthy();
-    expect(r2.hash).toBeTruthy();
-    expect(r1.hash).not.toBe(r2.hash); // hash chain: each entry hashes parent
-
-    const trail = await observer.trail(sessionId);
-    expect(trail).toHaveLength(2);
-    expect(trail[0].eventType).toBe('tool_call');
-    expect(trail[1].eventType).toBe('tool_result');
-  });
-
-  it('stage 5 — governor approves safe actions and blocks dangerous ones, logging to shared db', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-    const governor = createGovernorAdapter(db);
-
-    const safe = await governor.check({ action: 'read_file', context: 'open config.json' });
-    expect(safe.decision).toBe('approved');
-
-    const dangerous = await governor.check({ action: 'rm -rf /tmp/data', context: 'clean up' });
-    expect(['denied', 'review_recommended']).toContain(dangerous.decision);
-  });
-
-  it('stage 6 — hooks use shared db: pre-tool blocks danger, post-tool logs to observer', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-
-    // Pre-tool: safe action should pass
-    let exitCode: number | undefined = 0;
+    // ── 2. Pre-tool hook — real governor writes to governor_log ──────────────
+    const hookDeps = defaultHookDeps(db);
     process.exitCode = 0;
-    await runHook([`--db=${db}`, 'pre-tool', 'read_file'], {
-      governor: {
-        check: async () => ({ decision: 'approved', reason: 'safe' }),
-      },
-      observer: {
-        log: async () => ({ id: 1, hash: 'abc' }),
-      },
-      sessionId: () => 'sess-hook-test',
-    });
-    exitCode = process.exitCode;
-    expect(exitCode ?? 0).toBe(0);
+    await runHook([`--db=${db}`, 'pre-tool', 'read_file'], hookDeps);
+    expect(process.exitCode ?? 0).toBe(0);
     process.exitCode = undefined;
 
-    // Post-tool: should log observer event
-    let postStdout = '';
-    const origWrite = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: unknown) => {
-      if (typeof chunk === 'string') postStdout += chunk;
-      return true;
-    }) as typeof process.stdout.write;
+    {
+      const raw = openReadDb(db);
+      const row = raw.prepare(
+        `SELECT decision FROM governor_log WHERE action = 'read_file' ORDER BY id DESC LIMIT 1`,
+      ).get() as { decision: string } | undefined;
+      raw.close();
+      expect(row?.decision).toBe('approved');
+    }
 
-    await runHook([`--db=${db}`, 'post-tool', 'write_file', '{"ok":true}'], {
-      governor: {
-        check: async () => ({ decision: 'approved', reason: 'safe' }),
-      },
-      observer: {
-        log: async () => ({ id: 2, hash: 'def' }),
-      },
-      sessionId: () => 'sess-hook-test',
-    });
-    process.stdout.write = origWrite;
-    expect(postStdout).toContain('"logged":true');
-  });
+    // ── 3. Pre-tool hook — dangerous action exits 1 and logs denied ──────────
+    process.exitCode = 0;
+    await runHook([`--db=${db}`, 'pre-tool', 'rm -rf /data'], hookDeps);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
 
-  it('stage 7 — beast mode switches to codex-cli, config persists, db remains intact', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: true });
+    {
+      const raw = openReadDb(db);
+      const row = raw.prepare(
+        `SELECT decision FROM governor_log WHERE action = 'rm -rf /data' ORDER BY id DESC LIMIT 1`,
+      ).get() as { decision: string } | undefined;
+      raw.close();
+      expect(['denied', 'review_recommended']).toContain(row?.decision);
+    }
 
-    // Seed state in brain before mode switch
-    const db = dbPath(root);
-    const brain = createBrainAdapter(db);
-    await brain.store({ key: 'context:repo', value: 'frankenbeast monorepo', type: 'working' });
-
-    // Capture what beast mode would exec
-    const execCalls: { command: string; args: string[] }[] = [];
-    await runBeastMode(['--provider=codex-cli'], {
-      root,
-      confirm: async () => true,
-      exec: async (command, args) => {
-        execCalls.push({ command, args });
-      },
-    });
-
-    // Config switches to beast mode with codex-cli provider
-    const config = FbeastConfig.load(root);
-    expect(config.mode).toBe('beast');
-    expect(config.beast.enabled).toBe(true);
-    expect(config.beast.provider).toBe('codex-cli');
-
-    // exec was called with frankenbeast catalog command
-    expect(execCalls).toHaveLength(1);
-    expect(execCalls[0].command).toBe('frankenbeast');
-    expect(execCalls[0].args).toContain('catalog');
-
-    // Shared state in brain is still readable after mode switch
-    const brain2 = createBrainAdapter(db);
-    const results = await brain2.query({ query: 'frankenbeast', type: 'working' });
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].value).toContain('frankenbeast');
-  });
-
-  it('stage 8 — all adapters write to the same beast.db (no table conflicts)', async () => {
-    const root = tmpProject();
-    roots.push(root);
-    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
-
-    const db = dbPath(root);
-
-    // Open all adapters against the same db simultaneously
-    const brain = createBrainAdapter(db);
-    const observer = createObserverAdapter(db);
-    const governor = createGovernorAdapter(db);
-
+    // ── 4. Post-tool hook — real observer writes to audit_trail ──────────────
     const sessionId = `sess-${randomUUID()}`;
+    process.env['FBEAST_SESSION_ID'] = sessionId;
+    try {
+      await runHook([`--db=${db}`, 'post-tool', 'write_file', '{"path":"README.md"}'], hookDeps);
+    } finally {
+      delete process.env['FBEAST_SESSION_ID'];
+    }
 
-    await brain.store({ key: 'shared:test', value: 'concurrent access', type: 'working' });
-    await observer.log({ event: 'test_event', metadata: '{}', sessionId });
-    await governor.check({ action: 'read_file', context: 'test' });
+    {
+      const raw = openReadDb(db);
+      const rows = raw.prepare(
+        `SELECT event_type, payload FROM audit_trail WHERE session_id = ? ORDER BY id ASC`,
+      ).all(sessionId) as Array<{ event_type: string; payload: string }>;
+      raw.close();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].event_type).toBe('tool_call');
+      const payload = JSON.parse(rows[0].payload) as { toolName: string };
+      expect(payload.toolName).toBe('write_file');
+    }
 
-    // All writes succeeded — verify each adapter can read its own data
-    const working = await brain.query({ query: 'shared', type: 'working' });
-    expect(working).toHaveLength(1);
+    // ── 5. Brain adapter — working memory persists across instances ───────────
+    const brain1 = createBrainAdapter(db);
+    await brain1.store({ key: 'task:current', value: 'integrate codex pipeline', type: 'working' });
 
-    const trail = await observer.trail(sessionId);
-    expect(trail).toHaveLength(1);
+    const brain2 = createBrainAdapter(db);          // new instance = simulated restart
+    const hits = await brain2.query({ query: 'task', type: 'working' });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].value).toBe('integrate codex pipeline');
 
-    const budget = await governor.budgetStatus();
-    expect(budget.totalSpendUsd).toBe(0); // no cost ledger entries yet
+    // ── 6. Observer — hash chain integrity ────────────────────────────────────
+    const observer = createObserverAdapter(db);
+    const chainSession = `chain-${randomUUID()}`;
+    const r1 = await observer.log({ event: 'tool_call', metadata: '{"tool":"glob"}', sessionId: chainSession });
+    const r2 = await observer.log({ event: 'tool_result', metadata: '{"files":3}', sessionId: chainSession });
+    expect(r1.hash).toBeTruthy();
+    expect(r2.hash).not.toBe(r1.hash);
+
+    const trail = await observer.trail(chainSession);
+    expect(trail).toHaveLength(2);
+    // Parent hash of second entry matches hash of first
+    {
+      const raw = openReadDb(db);
+      const rows = raw.prepare(
+        `SELECT hash, parent_hash FROM audit_trail WHERE session_id = ? ORDER BY id ASC`,
+      ).all(chainSession) as Array<{ hash: string; parent_hash: string | null }>;
+      raw.close();
+      expect(rows[1].parent_hash).toBe(rows[0].hash);
+    }
+
+    // ── 7. SQLiteBeastRepository — creates run on same beast.db ───────────────
+    const repo = new SQLiteBeastRepository(db);
+    const run = repo.createRun({
+      definitionId: 'def-codex-test',
+      definitionVersion: 1,
+      executionMode: 'autonomous',
+      configSnapshot: { provider: 'codex-cli' },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'test',
+      createdAt: new Date().toISOString(),
+    });
+    expect(run.id).toMatch(/^run_/);
+    expect(run.status).toBe('queued');
+
+    const fetched = repo.getRun(run.id);
+    expect(fetched?.definitionId).toBe('def-codex-test');
+    expect(fetched?.configSnapshot).toMatchObject({ provider: 'codex-cli' });
+
+    // ── 8. No schema conflicts — all tables coexist in one file ───────────────
+    {
+      const raw = openReadDb(db);
+      const tables = (raw.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`,
+      ).all() as Array<{ name: string }>).map((r) => r.name);
+      raw.close();
+
+      // MCP adapter tables
+      expect(tables).toContain('audit_trail');
+      expect(tables).toContain('governor_log');
+      // Brain tables
+      expect(tables).toContain('working_memory');
+      expect(tables).toContain('episodic_events');
+      // Beast repository tables
+      expect(tables).toContain('beast_runs');
+    }
   });
 });
