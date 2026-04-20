@@ -19,13 +19,14 @@ npx fbeast init --hooks
 npx fbeast init --pick=memory,firewall,governor
 ```
 
-`fbeast init` registers MCP servers in your Claude Code `settings.json` and creates a `.fbeast/` directory with shared state.
+`fbeast init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
 
 ```bash
-npx fbeast uninstall           # remove from Claude Code config
-npx fbeast uninstall --purge   # also delete .fbeast/ data
+npx fbeast uninstall                    # remove from detected client config
+npx fbeast uninstall --client=gemini    # target specific client
+npx fbeast uninstall --purge            # also delete .fbeast/ data
 ```
 
 ## Beast mode
@@ -57,10 +58,18 @@ All servers share `.fbeast/beast.db` (SQLite, WAL mode).
 
 ## Hooks
 
-When installed with `--hooks`, `fbeast-hook` provides:
+When installed with `--hooks`, `fbeast-hook` provides governance and audit on every tool call:
 
-- **pre-tool**: governor safety check before each tool call (exits non-zero to deny)
-- **post-tool**: observer audit logging after each tool call
+- **pre-tool**: governor safety check — exits non-zero to deny the action
+- **post-tool**: observer audit logging
+
+All three clients are supported:
+
+| Client | Hook mechanism |
+|--------|---------------|
+| Claude Code | `preToolCall` / `postToolCall` command strings in `settings.json` |
+| Gemini CLI | `BeforeTool` / `AfterTool` shell scripts in `.fbeast/hooks/` |
+| Codex CLI | `PreToolUse` / `PostToolUse` shell scripts via `.codex/hooks.json` |
 
 ## Programmatic usage
 
