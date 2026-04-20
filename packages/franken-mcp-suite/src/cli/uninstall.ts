@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { resolveClaudeConfigDir } from './claude-config-paths.js';
+import { resolveClientConfigDir, detectMcpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 
 export interface UninstallOptions {
@@ -70,11 +70,8 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (isMain) {
   const root = process.cwd();
-  const claudeDir = resolveClaudeConfigDir({
-    cwd: root,
-    homeDir: homedir(),
-    exists: existsSync,
-  });
+  const client = detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
+  const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
   runUninstall({ root, claudeDir, purge }).catch((err) => {
     console.error('fbeast-uninstall failed:', err);

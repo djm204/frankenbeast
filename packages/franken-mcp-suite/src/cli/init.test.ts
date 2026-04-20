@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { runInit } from './init.js';
-import { resolveClaudeConfigDir } from './claude-config-paths.js';
+import { resolveClientConfigDir } from './mcp-client-paths.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -113,16 +113,31 @@ describe('fbeast init', () => {
     ]);
   });
 
-  it('falls back to home Claude config when project config is missing', () => {
+  it('falls back to home config dir when no project-level dir exists', () => {
     const cwd = '/tmp/project';
     const homeDir = '/tmp/home';
 
-    const claudeDir = resolveClaudeConfigDir({
+    const claudeDir = resolveClientConfigDir({
+      client: 'claude',
       cwd,
       homeDir,
       exists: (path) => path === join(homeDir, '.claude'),
     });
 
     expect(claudeDir).toBe(join(homeDir, '.claude'));
+  });
+
+  it('resolves gemini client to .gemini dir', () => {
+    const cwd = '/tmp/project';
+    const homeDir = '/tmp/home';
+
+    const geminiDir = resolveClientConfigDir({
+      client: 'gemini',
+      cwd,
+      homeDir,
+      exists: (path) => path === join(homeDir, '.gemini'),
+    });
+
+    expect(geminiDir).toBe(join(homeDir, '.gemini'));
   });
 });

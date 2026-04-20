@@ -1,11 +1,22 @@
 # fbeast MCP Suite — Setup & Test Walkthrough
 
+fbeast works with any MCP-compatible AI assistant client. Currently supported:
+
+| Client | Config dir | Hooks |
+|--------|-----------|-------|
+| Claude Code | `.claude/` | ✅ preToolCall / postToolCall |
+| Gemini CLI | `.gemini/` | ❌ (not supported by Gemini) |
+
+Beast mode (`fbeast beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
+
+---
+
 ## Prerequisites
 
 - Node.js 20+
 - npm workspaces (installed at repo root)
-- Claude Code CLI
-- Codex CLI (`codex --version` should work) — required for full-cycle integration tests
+- At least one of: Claude Code CLI, Gemini CLI
+- Codex CLI (`codex --version`) — required for full-cycle integration tests
 
 ---
 
@@ -119,6 +130,14 @@ cd /your/project
 fbeast init
 ```
 
+`fbeast init` auto-detects your client by looking for `.claude/` or `.gemini/` dirs
+(project-level first, then home dir). Override with `--client`:
+
+```sh
+fbeast init --client=claude    # Claude Code
+fbeast init --client=gemini    # Gemini CLI
+```
+
 This creates:
 
 ```
@@ -126,17 +145,20 @@ This creates:
 ├── .fbeast/
 │   ├── config.json       # fbeast config (mode, servers, db path)
 │   └── beast.db          # shared SQLite database (WAL mode)
-└── .claude/              # or ~/.claude/ if no project-level .claude/
+└── .claude/  (or .gemini/)
     ├── settings.json     # MCP server entries added/merged
     └── fbeast-instructions.md
 ```
 
-#### Install with Claude Code hooks
+#### Install with hooks (Claude Code only)
 
-Hooks fire `fbeast-hook` on every tool call for live governance and audit logging:
+Hooks fire `fbeast-hook` on every tool call for live governance and audit logging.
+Only supported by Claude Code — passing `--hooks` with `--client=gemini` is a no-op.
 
 ```sh
 fbeast init --hooks
+# or explicitly:
+fbeast init --client=claude --hooks
 ```
 
 Adds to `settings.json`:
@@ -166,12 +188,12 @@ fbeast init --pick
 
 Available servers: `memory`, `planner`, `critique`, `firewall`, `observer`, `governor`, `skills`
 
-### 4. Restart Claude Code
+### 4. Restart your AI client
 
-After init, restart Claude Code (or reload the MCP server list) so it picks up the
-new entries in `settings.json`.
+After init, restart Claude Code or Gemini CLI so it picks up the new `settings.json`.
 
-You can verify servers are active with `/mcp` in the Claude Code terminal.
+- **Claude Code**: `/mcp` in the terminal to verify active servers
+- **Gemini CLI**: restart the session; use `\mcp` or check session startup logs
 
 ---
 
@@ -226,6 +248,9 @@ All adapters continue reading from the same `beast.db`.
 ```sh
 # Remove MCP servers and hooks from settings.json, keep .fbeast/ data
 fbeast uninstall
+
+# Target a specific client
+fbeast uninstall --client=gemini
 
 # Remove everything including stored data
 fbeast uninstall --purge

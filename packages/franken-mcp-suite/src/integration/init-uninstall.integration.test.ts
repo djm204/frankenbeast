@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { runInit } from '../cli/init.js';
 import { runUninstall } from '../cli/uninstall.js';
-import { resolveClaudeConfigDir } from '../cli/claude-config-paths.js';
+import { resolveClientConfigDir } from '../cli/mcp-client-paths.js';
 
 function tmpDir(prefix: string): string {
   const dir = join(tmpdir(), `${prefix}-${randomUUID()}`);
@@ -30,7 +30,8 @@ describe('init/uninstall integration', () => {
     const homeDir = tmpDir('fbeast-home');
     dirs.push(root, homeDir);
 
-    const claudeDir = resolveClaudeConfigDir({
+    const claudeDir = resolveClientConfigDir({
+      client: 'claude',
       cwd: root,
       homeDir,
       exists: (path) => path === join(homeDir, '.claude'),

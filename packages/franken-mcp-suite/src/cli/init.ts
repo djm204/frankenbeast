@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveClaudeConfigDir } from './claude-config-paths.js';
+import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -44,10 +44,12 @@ export interface InitOptions {
   claudeDir: string;
   hooks: boolean;
   servers?: FbeastServer[];
+  /** Which MCP client is being configured. Hooks are only written for 'claude'. */
+  client?: McpClient;
 }
 
 export function runInit(options: InitOptions): void {
-  const { root, claudeDir, hooks, servers = ALL_SERVERS } = options;
+  const { root, claudeDir, hooks, servers = ALL_SERVERS, client = 'claude' } = options;
 
   const config = FbeastConfig.init(root, servers);
 
@@ -105,10 +107,14 @@ export function runInit(options: InitOptions): void {
   }
   settings['mcpServers'] = mcpServers;
 
-  if (hooks) {
+  // Hooks are a Claude Code-specific feature; other clients don't support the
+  // preToolCall/postToolCall format.
+  if (hooks && client === 'claude') {
     settings['hooks'] = mergeHooks(settings['hooks'], buildHookCommands(root));
     config.hooks = true;
     config.save();
+  } else if (hooks && client !== 'claude') {
+    console.warn(`  Note: --hooks is only supported with the claude client. Skipping hooks for ${client}.`);
   }
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
@@ -124,13 +130,11 @@ export function runInit(options: InitOptions): void {
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (isMain) {
   const root = process.cwd();
-  const claudeDir = resolveClaudeConfigDir({
-    cwd: root,
-    homeDir: homedir(),
-    exists: existsSync,
-  });
+  const clientArg = process.argv.find((a) => a.startsWith('--client='))?.split('=')[1] as McpClient | undefined;
+  const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
+  const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const hooks = process.argv.includes('--hooks');
-  runInit({ root, claudeDir, hooks });
+  runInit({ root, claudeDir, hooks, client });
 }
 
 function mergeHooks(existing: unknown, fbeastHooks: Record<string, readonly { command: string; description: string }[]>): Record<string, unknown[]> {
