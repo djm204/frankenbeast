@@ -13,6 +13,15 @@ function resolveClient(): McpClient {
 
 switch (command) {
   case 'init': {
+    const KNOWN_INIT_FLAGS = ['--hooks', '--pick', '--client'];
+    const unknownFlags = process.argv.slice(3).filter(
+      (a) => a.startsWith('--') && !KNOWN_INIT_FLAGS.some((k) => a === k || a.startsWith(k + '=')),
+    );
+    if (unknownFlags.length > 0) {
+      console.error(`fbeast init: unknown flag(s): ${unknownFlags.join(', ')}`);
+      console.error('  Known flags: --hooks  --pick[=<servers>]  --client=claude|gemini|codex');
+      process.exit(1);
+    }
     const { runInit } = await import('./init.js');
     const root = process.cwd();
     const client = resolveClient();
