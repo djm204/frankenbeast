@@ -191,6 +191,49 @@ describe('fbeast init', () => {
     expect(beforeHooks.some((e: any) => (e.hooks?.[0]?.command as string)?.includes('fbeast'))).toBe(true);
   });
 
+  it('writes AGENTS.md with fbeast loop instructions when --client=codex', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+
+    const agentsPath = join(root, 'AGENTS.md');
+    expect(existsSync(agentsPath)).toBe(true);
+    const content = readFileSync(agentsPath, 'utf-8');
+    expect(content).toContain('fbeast_memory_frontload');
+    expect(content).toContain('fbeast_governor_check');
+    expect(content).toContain('<!-- fbeast-start -->');
+    expect(content).toContain('<!-- fbeast-end -->');
+  });
+
+  it('merges fbeast section into existing AGENTS.md without clobbering it', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    writeFileSync(join(root, 'AGENTS.md'), '# My Project Rules\n\nAlways write tests.\n');
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+
+    const content = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain('# My Project Rules');
+    expect(content).toContain('Always write tests.');
+    expect(content).toContain('fbeast_memory_frontload');
+  });
+
+  it('replaces existing fbeast section on re-init', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+
+    const content = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+    // Should not have duplicate sections
+    expect(content.split('<!-- fbeast-start -->').length).toBe(2); // exactly one
+  });
+
   it('registers Codex MCP servers via spawn when --client=codex', () => {
     const root = tmpDir();
     dirs.push(root);

@@ -107,6 +107,9 @@ const ALL_SERVER_NAMES = [
   'fbeast-observer', 'fbeast-governor', 'fbeast-skills',
 ];
 
+const AGENTS_MD_START = '<!-- fbeast-start -->';
+const AGENTS_MD_END = '<!-- fbeast-end -->';
+
 function uninstallCodex(options: {
   root: string;
   spawnFn: (cmd: string, args: string[]) => { status: number | null };
@@ -116,6 +119,23 @@ function uninstallCodex(options: {
   // Remove MCP servers via codex mcp remove
   for (const name of ALL_SERVER_NAMES) {
     spawnFn('codex', ['mcp', 'remove', name]);
+  }
+
+  // Remove fbeast section from AGENTS.md
+  const agentsPath = join(root, 'AGENTS.md');
+  if (existsSync(agentsPath)) {
+    let content = readFileSync(agentsPath, 'utf-8');
+    const startIdx = content.indexOf(AGENTS_MD_START);
+    const endIdx = content.indexOf(AGENTS_MD_END);
+    if (startIdx !== -1 && endIdx !== -1) {
+      content = content.slice(0, startIdx).trimEnd() + content.slice(endIdx + AGENTS_MD_END.length);
+      const trimmed = content.trimEnd();
+      if (trimmed.length === 0) {
+        unlinkSync(agentsPath);
+      } else {
+        writeFileSync(agentsPath, trimmed + '\n');
+      }
+    }
   }
 
   // Remove fbeast entries from .codex/hooks.json

@@ -145,6 +145,9 @@ function initCodex(options: {
     throw new Error(`fbeast init: failed to register ${failed.length} server(s) with codex: ${failed.join(', ')}`);
   }
 
+  // Drop instructions into AGENTS.md
+  writeAgentsMd(root);
+
   // Hooks: write shell scripts + codex hooks.json
   if (hooks) {
     const scripts = writeHookScripts(root, 'codex');
@@ -156,6 +159,7 @@ function initCodex(options: {
   console.log(`fbeast initialized in ${root}`);
   console.log(`  Config:   ${config.configPath}`);
   console.log(`  Database: ${config.dbPath}`);
+  console.log(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
   console.log(`  Servers:  ${servers.join(', ')} (registered via codex mcp add)`);
   if (hooks) console.log(`  Hooks:    enabled (codex hooks.json)`);
 }
@@ -273,6 +277,56 @@ function writeCodexHooks(root: string, scripts: { preTool: string; postTool: str
   };
 
   writeFileSync(hooksPath, JSON.stringify(existing, null, 2) + '\n');
+}
+
+const AGENTS_MD_START = '<!-- fbeast-start -->';
+const AGENTS_MD_END = '<!-- fbeast-end -->';
+
+/**
+ * Writes (or merges) fbeast agent instructions into <root>/AGENTS.md.
+ * Uses HTML comment markers so uninstall can strip the section cleanly.
+ */
+function writeAgentsMd(root: string): void {
+  const agentsPath = join(root, 'AGENTS.md');
+  const section = [
+    AGENTS_MD_START,
+    '# fbeast Agent Instructions',
+    '',
+    'You have access to fbeast MCP tools. Follow this loop on every task:',
+    '',
+    '## On task start',
+    '1. Call fbeast_memory_frontload to load project context',
+    '2. Call fbeast_firewall_scan on user input before acting',
+    '3. Call fbeast_plan_decompose for multi-step tasks',
+    '',
+    '## During execution',
+    '- Call fbeast_governor_check before destructive/expensive operations',
+    '- Call fbeast_observer_log for significant actions',
+    '- Call fbeast_observer_cost periodically to track spend',
+    '',
+    '## Before claiming done',
+    '- Call fbeast_critique_evaluate on your output',
+    '- If score < 0.7, revise and re-critique',
+    '- Call fbeast_observer_trail to finalize audit',
+    '',
+    '## Memory',
+    '- fbeast_memory_store for learnings worth preserving',
+    '- fbeast_memory_query before making assumptions',
+    AGENTS_MD_END,
+  ].join('\n');
+
+  if (existsSync(agentsPath)) {
+    let content = readFileSync(agentsPath, 'utf-8');
+    // Remove existing fbeast section if present
+    const startIdx = content.indexOf(AGENTS_MD_START);
+    const endIdx = content.indexOf(AGENTS_MD_END);
+    if (startIdx !== -1 && endIdx !== -1) {
+      content = content.slice(0, startIdx).trimEnd() + content.slice(endIdx + AGENTS_MD_END.length);
+    }
+    writeFileSync(agentsPath, content.trimEnd() + '\n\n' + section + '\n');
+  } else {
+    writeFileSync(agentsPath, section + '\n');
+  }
 }
 
 function isFbeastCodexEntry(entry: unknown): boolean {

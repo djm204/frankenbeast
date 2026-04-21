@@ -142,6 +142,31 @@ describe('fbeast uninstall', () => {
     expect(hasFbeast(after)).toBe(false);
   });
 
+  it('removes fbeast section from AGENTS.md on codex uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    writeFileSync(join(root, 'AGENTS.md'), '# My Rules\n\nAlways write tests.\n');
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const content = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain('# My Rules');
+    expect(content).not.toContain('fbeast');
+  });
+
+  it('deletes AGENTS.md entirely if fbeast was the only content', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    expect(existsSync(join(root, 'AGENTS.md'))).toBe(false);
+  });
+
   it('removes Codex MCP servers and hooks.json entries on uninstall', async () => {
     const root = tmpDir();
     dirs.push(root);
