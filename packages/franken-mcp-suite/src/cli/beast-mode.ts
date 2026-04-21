@@ -30,5 +30,18 @@ export async function runBeastMode(argv: string[], deps: BeastModeDeps): Promise
   config.beast.provider = provider;
   config.save();
 
-  await deps.exec('frankenbeast', ['beasts', 'catalog']);
+  console.log(`Beast mode activated (provider: ${provider}).`);
+
+  try {
+    await deps.exec('frankenbeast', ['beasts', 'catalog']);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('binary not found') || msg.includes('ENOENT')) {
+      console.log('\nTo launch the orchestrator, install the frankenbeast CLI:');
+      console.log('  npm link --workspace=franken-orchestrator');
+      console.log('  frankenbeast beasts catalog');
+    } else {
+      throw err;
+    }
+  }
 }

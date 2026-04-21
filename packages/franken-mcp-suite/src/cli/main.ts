@@ -48,7 +48,21 @@ switch (command) {
       },
       exec: async (cmd, args) => {
         const result = spawnSync(cmd, args, { stdio: 'inherit' });
-        if (result.status !== 0) throw new Error(`${cmd} exited with ${result.status}`);
+        if (result.error) {
+          const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
+          throw new Error(
+            isNotFound
+              ? `${cmd}: binary not found — install @fbeast/orchestrator or run 'npm link --workspace=franken-orchestrator'`
+              : `${cmd} failed: ${result.error.message}`,
+          );
+        }
+        if (result.status !== 0) {
+          throw new Error(
+            result.signal
+              ? `${cmd} killed by signal ${result.signal}`
+              : `${cmd} exited with ${result.status}`,
+          );
+        }
       },
     });
     break;
