@@ -36,6 +36,32 @@ export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer 
       },
     },
     {
+      name: 'fbeast_observer_log_cost',
+      description: 'Record token usage and cost for an LLM call. Call this after each significant model invocation you make.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Session identifier' },
+          model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)' },
+          promptTokens: { type: 'number', description: 'Input/prompt token count' },
+          completionTokens: { type: 'number', description: 'Output/completion token count' },
+          costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table' },
+        },
+        required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
+      },
+      async handler(args) {
+        const sessionId = String(args['sessionId']);
+        const model = String(args['model']);
+        const promptTokens = Number(args['promptTokens']);
+        const completionTokens = Number(args['completionTokens']);
+        const costUsdArg = args['costUsd'] != null ? Number(args['costUsd']) : undefined;
+        await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
+        return {
+          content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model}` }],
+        };
+      },
+    },
+    {
       name: 'fbeast_observer_cost',
       description: 'Get token usage and cost summary for a session or all sessions.',
       inputSchema: {

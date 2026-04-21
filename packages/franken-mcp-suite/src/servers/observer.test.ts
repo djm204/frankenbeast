@@ -2,22 +2,29 @@ import { describe, it, expect, vi } from 'vitest';
 import { createObserverServer } from './observer.js';
 
 describe('Observer Server', () => {
-  it('exposes 3 tools', () => {
+  it('exposes 4 tools', () => {
     const server = createObserverServer({
       observer: {
         log: vi.fn(),
+        logCost: vi.fn(),
         cost: vi.fn(),
         trail: vi.fn(),
       },
     });
 
     const names = server.tools.map((t) => t.name);
-    expect(names).toEqual(['fbeast_observer_log', 'fbeast_observer_cost', 'fbeast_observer_trail']);
+    expect(names).toEqual([
+      'fbeast_observer_log',
+      'fbeast_observer_log_cost',
+      'fbeast_observer_cost',
+      'fbeast_observer_trail',
+    ]);
   });
 
-  it('delegates log, cost, and trail calls to the observer adapter', async () => {
+  it('delegates log, logCost, cost, and trail calls to the observer adapter', async () => {
     const observer = {
       log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      logCost: vi.fn().mockResolvedValue(undefined),
       cost: vi.fn().mockResolvedValue({
         totalPromptTokens: 3000,
         totalCompletionTokens: 1300,
@@ -38,6 +45,7 @@ describe('Observer Server', () => {
 
     const server = createObserverServer({ observer });
     const logTool = server.tools.find((t) => t.name === 'fbeast_observer_log')!;
+    const logCostTool = server.tools.find((t) => t.name === 'fbeast_observer_log_cost')!;
     const costTool = server.tools.find((t) => t.name === 'fbeast_observer_cost')!;
     const trailTool = server.tools.find((t) => t.name === 'fbeast_observer_trail')!;
 
@@ -52,6 +60,14 @@ describe('Observer Server', () => {
       sessionId: 'sess-1',
     });
     expect(logResult.content[0]!.text).toContain('Logged event');
+
+    const logCostResult = await logCostTool.handler({
+      sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+    });
+    expect(observer.logCost).toHaveBeenCalledWith({
+      sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+    });
+    expect(logCostResult.content[0]!.text).toContain('1000');
 
     const costResult = await costTool.handler({ sessionId: 'sess-1' });
     expect(observer.cost).toHaveBeenCalledWith({ sessionId: 'sess-1' });
