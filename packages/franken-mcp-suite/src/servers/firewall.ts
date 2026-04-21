@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -72,8 +73,7 @@ export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer 
   return createMcpServer('fbeast-firewall', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: {
       db: { type: 'string', default: '.fbeast/beast.db' },

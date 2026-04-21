@@ -286,7 +286,7 @@ function isFbeastCodexEntry(entry: unknown): boolean {
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
   const { resolveInitOptions } = await import('./init-options.js');

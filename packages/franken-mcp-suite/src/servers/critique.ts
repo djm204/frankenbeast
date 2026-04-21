@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createCritiqueAdapter, type CritiqueAdapter } from '../adapters/critique-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -82,8 +83,7 @@ export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer 
   return createMcpServer('fbeast-critique', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });

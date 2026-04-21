@@ -70,7 +70,7 @@ export async function runHook(
   }
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   runHook().catch((error) => {
     console.error('fbeast-hook failed:', error);
