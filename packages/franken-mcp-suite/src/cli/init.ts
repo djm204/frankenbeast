@@ -30,7 +30,7 @@ export interface InitOptions {
   servers?: FbeastServer[];
   client?: McpClient;
   /** Inject spawn for testing the codex path. */
-  spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer };
+  spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
 }
 
 export function runInit(options: InitOptions): void {
@@ -125,7 +125,7 @@ function initCodex(options: {
   servers: FbeastServer[];
   hooks: boolean;
   config: FbeastConfig;
-  spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer };
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
 }): void {
   const { root, servers, hooks, config, spawnFn } = options;
   const dbPath = join(root, '.fbeast', 'beast.db');
