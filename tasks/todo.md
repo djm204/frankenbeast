@@ -38,20 +38,43 @@
 - [x] Re-run focused `franken-mcp-suite` tests and record the verification results.
 - [x] Repair the local repo hook state if the code fix confirms the current `.codex/hooks.json` wiring is stale.
 
+## Current Batch: Codex Hook Protocol Failures
+
+- [x] Reproduce the live `PreToolUse` and `PostToolUse` failures from the current repo hook scripts instead of guessing from the UI.
+- [x] Add focused `franken-mcp-suite` regression tests that prove denied Codex pre-hooks return Codex-formatted deny JSON with exit `2`, and Codex post-hooks stay silent on stdout.
+- [x] Implement the minimal hook-script fix in the generator and repair the local generated Codex scripts.
+- [x] Re-run focused `franken-mcp-suite` tests plus live shell-script replays and record the verification results.
+
+## Current Batch: Codex Hook PR Publish
+
+- [ ] Create a clean branch from `main` for the hook protocol fix instead of stacking on `fix/launch-parity-gaps`.
+- [ ] Apply only the hook protocol source/test changes in the clean branch and re-run focused verification there.
+- [ ] Commit the isolated patch atomically, push it, and open a draft PR.
+
 ## Current Batch: Beast Mode Hardening
 
-- [ ] Write and approve the beast-mode hardening design spec covering the full live `franken-orchestrator` surface.
-- [ ] Write a concrete implementation plan for in-place beast hardening with TDD-first execution chunks.
+- [x] Write and approve the beast-mode hardening design spec covering the full live `franken-orchestrator` surface.
+- [x] Write a concrete implementation plan for in-place beast hardening with TDD-first execution chunks.
 - [ ] Close config and flag no-op gaps on the live beast CLI surface.
 - [ ] Replace permissive module fallback behavior on required beast paths with real implementations or hard failures.
 - [ ] Implement explicit, tested resume semantics for the main beast `run` path.
 - [ ] Harden command-family execution paths for `run`, `issues`, `chat`, `chat-server`, `skill`, `security`, `network`, and `beasts`.
 - [ ] Make the beast verification matrix authoritative with passing focused integration and E2E coverage.
 
+## Current Batch: Live CLI Benchmark Pipeline Design
+
+- [x] Explore the current `franken-mcp-suite`, observer, and orchestrator surfaces for cost, trace, and eval primitives relevant to benchmarking.
+- [x] Define the live-client scope as real `Codex CLI` and real `Gemini CLI`, excluding simulated or provider-only runs from the benchmark dataset.
+- [x] Approve the A/B benchmark matrix: baseline client runs with no Frankenbeast versus the same client and task with Frankenbeast installed.
+- [x] Approve the recurring benchmark design for corpus tiers, deterministic-first scoring, benchmark storage, trend reporting, and release gates.
+- [x] Write and self-review the benchmark design spec in `docs/superpowers/specs/2026-04-26-live-cli-benchmark-pipeline-design.md`.
+- [ ] User review the written benchmark design spec before implementation planning begins.
+
 ## References
 
 - Approved spec: `docs/superpowers/specs/2026-04-10-fbeast-dual-mode-launch-design.md`
 - Approved spec: `docs/superpowers/specs/2026-04-24-beast-mode-hardening-design.md`
+- Approved spec: `docs/superpowers/specs/2026-04-26-live-cli-benchmark-pipeline-design.md`
 - Chunked execution plan: `docs/superpowers/plans/2026-04-10-fbeast-dual-mode-launch-plan.md`
 
 ## Notes
@@ -90,3 +113,12 @@
   `npm run typecheck`
 - 2026-04-24: Built `packages/franken-mcp-suite` and verified the compiled `dist/cli/init.js` path by running `runInit({ client: 'codex', hooks: true })` in a temp directory. The generated `.codex/hooks.json` pointed to `.codex/hooks/fbeast-codex-pre-tool.sh` and `.codex/hooks/fbeast-codex-post-tool.sh`, and both files were created.
 - 2026-04-24: Repaired the local repo hook state by updating `.codex/hooks.json` to point at `.codex/hooks/fbeast-codex-*.sh`, writing those scripts against `packages/franken-mcp-suite/dist/cli/hook.js`, and marking them executable.
+- 2026-04-25: Reproduced the current live Codex hook failures directly from the repo scripts. `printf '%s' '{"tool_name":"rm -rf /tmp/nope"}' | ./.codex/hooks/fbeast-codex-pre-tool.sh` exited `1` with no Codex deny payload because `set -e` aborted on the nonzero hook command substitution before the script could format the denial. `printf '%s' '{"tool_name":"exec_command","tool_response":{"ok":true}}' | ./.codex/hooks/fbeast-codex-post-tool.sh` printed `{"logged":true}` to stdout, which is extraneous hook output and a likely `PostToolUse` protocol violation.
+- 2026-04-25: Added `packages/franken-mcp-suite/src/cli/hook-scripts.test.ts` to execute the generated Codex shell scripts with a fake `fbeast-hook` binary. The red phase reproduced both protocol bugs: denied pre-hooks returned exit `1` instead of Codex deny exit `2`, and post-hooks leaked `{"logged":true}` to stdout.
+- 2026-04-25: Hook protocol fixes verified via:
+  `cd packages/franken-mcp-suite && npm test -- --run src/cli/hook-scripts.test.ts src/cli/init.test.ts src/integration/hook.integration.test.ts`
+  `cd packages/franken-mcp-suite && npm run typecheck`
+  `printf '%s' '{"tool_name":"rm -rf /tmp/nope","tool_input":{},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-pre-tool.sh; printf 'status=%s\n' $?`
+  `printf '%s' '{"tool_name":"exec_command","tool_response":{"ok":true},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-post-tool.sh; printf 'status=%s\n' $?`
+- 2026-04-26: Approved the live benchmark boundary for real `Codex CLI` and real `Gemini CLI` only, with recurring A/B runs that compare pure baseline client behavior against the same task with Frankenbeast installed.
+- 2026-04-26: Wrote the benchmark design spec at `docs/superpowers/specs/2026-04-26-live-cli-benchmark-pipeline-design.md`, covering the benchmark matrix, corpus tiers, deterministic-first scoring, evidence capture, dedicated benchmark-history storage, trend reporting, and release-gate policy. User spec review remains the next gate before implementation planning.
