@@ -63,6 +63,7 @@ export interface CliArgs {
   baseBranch?: string | undefined;
   budget: number;
   provider: string;
+  providerSpecified?: boolean | undefined;
   providers?: string[] | undefined;
   designDoc?: string | undefined;
   planDir?: string | undefined;
@@ -423,6 +424,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     baseBranch: values['base-branch'],
     budget: values.budget ? parseFloat(values.budget) : 10,
     provider,
+    providerSpecified: values.provider !== undefined,
     providers,
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],

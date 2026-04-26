@@ -9,6 +9,13 @@ import { runPlanning, CritiqueSpiralError } from './phases/planning.js';
 import { runExecution } from './phases/execution.js';
 import { runClosure } from './phases/closure.js';
 
+class RuntimeLimitExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeLimitExceededError';
+  }
+}
+
 /**
  * The Beast Loop — main orchestrator that wires all 8 modules.
  *
@@ -53,6 +60,7 @@ export class BeastLoop {
       logger.info('BeastLoop: phase start', { phase: 'hydration' });
       await runHydration(ctx, this.deps.memory, logger);
       logger.info('BeastLoop: phase end', { phase: 'hydration' });
+      await this.enforceRuntimeLimits(ctx);
 
       // Phase 2: Planning + Critique
       logger.info('BeastLoop: phase start', { phase: 'planning' });
@@ -65,6 +73,7 @@ export class BeastLoop {
         this.deps.graphBuilder,
       );
       logger.info('BeastLoop: phase end', { phase: 'planning' });
+      await this.enforceRuntimeLimits(ctx);
 
       await this.maybeRunReflection('after-planning', ctx, logger);
 
@@ -83,6 +92,7 @@ export class BeastLoop {
         this.deps.refreshPlanTasks,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
+      await this.enforceRuntimeLimits(ctx);
 
       await this.maybeRunReflection('after-execution', ctx, logger);
 
@@ -119,6 +129,20 @@ export class BeastLoop {
       }
 
       if (error instanceof CritiqueSpiralError) {
+        logger.error('BeastLoop: error', { error: error.message });
+        return {
+          sessionId: ctx.sessionId,
+          projectId: ctx.projectId,
+          phase: ctx.phase,
+          status: 'aborted',
+          tokenSpend: ctx.tokenSpend,
+          abortReason: error.message,
+          error,
+          durationMs: ctx.elapsedMs(),
+        };
+      }
+
+      if (error instanceof RuntimeLimitExceededError) {
         logger.error('BeastLoop: error', { error: error.message });
         return {
           sessionId: ctx.sessionId,
@@ -178,6 +202,30 @@ export class BeastLoop {
       logger.warn(`BeastLoop: reflection ${stage} failed (non-fatal)`, {
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  private async enforceRuntimeLimits(
+    ctx: {
+      sessionId: string;
+      elapsedMs(): number;
+      tokenSpend: BeastResult['tokenSpend'];
+    },
+  ): Promise<void> {
+    if (this.config.maxDurationMs !== undefined && ctx.elapsedMs() > this.config.maxDurationMs) {
+      throw new RuntimeLimitExceededError(
+        `Execution duration exceeded: ${ctx.elapsedMs()}/${this.config.maxDurationMs}ms`,
+      );
+    }
+
+    if (this.config.maxTotalTokens !== undefined) {
+      const spend = await this.deps.observer.getTokenSpend(ctx.sessionId);
+      ctx.tokenSpend = spend;
+      if (spend.totalTokens > this.config.maxTotalTokens) {
+        throw new RuntimeLimitExceededError(
+          `Token budget exceeded: ${spend.totalTokens}/${this.config.maxTotalTokens}`,
+        );
+      }
     }
   }
 }

@@ -45,6 +45,7 @@ const {
     baseBranch: undefined,
     budget: 10,
     provider: 'claude',
+    providerSpecified: false,
     providers: undefined,
     designDoc: undefined,
     planDir: undefined,
@@ -185,7 +186,7 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     enableHeartbeat: false,
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
-    providers: { fallbackChain: [], overrides: {} },
+    providers: { default: 'gemini', fallbackChain: [], overrides: {} },
   })),
 }));
 
@@ -324,6 +325,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,
@@ -366,6 +368,54 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
+  it('uses config.providers.default when --provider is omitted', async () => {
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'gemini',
+    }));
+  });
+
+  it('preserves the explicit CLI provider over config.providers.default', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: true,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'claude',
+    }));
+  });
+
   it('dispatches chat-server without creating a Session or REPL', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockParseArgs.mockReturnValue({
@@ -378,6 +428,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: ['codex'],
       designDoc: undefined,
       planDir: undefined,
@@ -402,7 +453,7 @@ describe('main() execution', () => {
     await main();
 
     expect(mockCreateCliDeps).toHaveBeenCalledWith(expect.objectContaining({
-      provider: 'claude',
+      provider: 'gemini',
       providers: ['codex'],
       chatMode: true,
     }));
@@ -447,6 +498,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,
@@ -503,6 +555,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,
@@ -546,6 +599,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,
@@ -582,6 +636,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,
@@ -624,6 +679,7 @@ describe('main() execution', () => {
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
+      providerSpecified: false,
       providers: undefined,
       designDoc: undefined,
       planDir: undefined,

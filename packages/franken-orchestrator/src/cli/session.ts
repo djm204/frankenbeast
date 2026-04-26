@@ -25,6 +25,7 @@ import { writeDesignDoc, readDesignDoc } from './file-writer.js';
 import { resolveUpstreamRepo } from './upstream-repo.js';
 import type { ChunkDefinition } from './file-writer.js';
 import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
+import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
 
@@ -61,6 +62,10 @@ export interface SessionConfig {
   maxTotalTokens?: number | undefined;
   /** Whether to run LLM-based reflection at phase boundaries */
   enableReflection?: boolean | undefined;
+  /** Whether to resume from an existing checkpoint instead of starting cold */
+  resume?: boolean | undefined;
+  /** Full orchestrator config for downstream consolidated dep wiring */
+  orchestratorConfig?: OrchestratorConfig | undefined;
   // ── Issue-specific config ──
   issueLabel?: string[] | undefined;
   issueMilestone?: string | undefined;
@@ -350,6 +355,24 @@ export class Session {
     const chunkDir = planDirOverride ?? paths.plansDir;
 
     const { deps, logger, finalize } = await createCliDeps(this.buildDepOptions());
+    const checkpointEntries = deps.checkpoint?.readAll() ?? new Set<string>();
+
+    if (this.config.resume) {
+      if (!deps.checkpoint || checkpointEntries.size === 0) {
+        await finalize();
+        throw new Error(`No checkpoint data found for --resume at ${paths.checkpointFile}`);
+      }
+      logger.info('Session: resuming from checkpoint', {
+        checkpointFile: paths.checkpointFile,
+        entries: checkpointEntries.size,
+      });
+    } else if (deps.checkpoint && checkpointEntries.size > 0) {
+      logger.info('Session: starting cold run, clearing checkpoint', {
+        checkpointFile: paths.checkpointFile,
+        entries: checkpointEntries.size,
+      });
+      deps.checkpoint.clear();
+    }
 
     const graphBuilder = new ChunkFileGraphBuilder(chunkDir);
     const refreshPlanTasks = async () => {
@@ -379,18 +402,41 @@ export class Session {
 
     logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`, 'session');
 
-    const loopConfig: Partial<import('../config/orchestrator-config.js').OrchestratorConfig> = {};
+    const loopConfig: Partial<OrchestratorConfig> = {};
+    if (this.config.maxCritiqueIterations !== undefined) {
+      loopConfig.maxCritiqueIterations = this.config.maxCritiqueIterations;
+    }
+    if (this.config.maxDurationMs !== undefined) {
+      loopConfig.maxDurationMs = this.config.maxDurationMs;
+    }
+    if (this.config.enableTracing !== undefined) {
+      loopConfig.enableTracing = this.config.enableTracing;
+    }
+    if (this.config.enableHeartbeat !== undefined) {
+      loopConfig.enableHeartbeat = this.config.enableHeartbeat;
+    }
     if (this.config.enableReflection !== undefined) {
       loopConfig.enableReflection = this.config.enableReflection;
     }
-    const result = await new BeastLoop(fullDeps, loopConfig).run({
-      projectId,
-      userInput: `Process chunks in ${chunkDir}`,
-    });
+    if (this.config.minCritiqueScore !== undefined) {
+      loopConfig.minCritiqueScore = this.config.minCritiqueScore;
+    }
+    if (this.config.maxTotalTokens !== undefined) {
+      loopConfig.maxTotalTokens = this.config.maxTotalTokens;
+    }
 
-    await finalize();
-    this.displaySummary(result);
-    return result;
+    try {
+      const result = await new BeastLoop(fullDeps, loopConfig).run({
+        projectId,
+        userInput: `Process chunks in ${chunkDir}`,
+      });
+
+      this.displaySummary(result);
+      return result;
+    } finally {
+      process.off('SIGINT', sigintHandler);
+      await finalize();
+    }
   }
 
   private extractChunkDefinitions(planGraph: {
@@ -486,6 +532,7 @@ export class Session {
       reset: this.config.reset,
       planDirOverride: this.config.planDirOverride,
       runConfig: loadRunConfigFromEnv(),
+      orchestratorConfig: this.config.orchestratorConfig,
     };
   }
 }

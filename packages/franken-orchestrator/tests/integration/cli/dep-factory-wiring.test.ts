@@ -19,6 +19,8 @@ function createTempPaths(): ProjectPaths {
 
   // GitBranchIsolator needs a real git repo
   execSync('git init', { cwd: root, stdio: 'ignore' });
+  execSync('git config user.name "David Mendez"', { cwd: root, stdio: 'ignore' });
+  execSync('git config user.email "me@davidmendez.dev"', { cwd: root, stdio: 'ignore' });
   execSync('git commit --allow-empty -m "init"', { cwd: root, stdio: 'ignore' });
 
   const fbDir = join(root, '.fbeast');
@@ -269,12 +271,11 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
-  it('falls back gracefully when modules fail to construct', async () => {
+  it('fails clearly when consolidated deps cannot be constructed', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
-    // All modules enabled — if any fail to construct, they fall back to stubs
-    const { deps, finalize } = await createCliDeps({
+    await expect(createCliDeps({
       paths,
       baseBranch: 'main',
       budget: 1.0,
@@ -282,17 +283,10 @@ describe('dep-factory wiring integration', () => {
       noPr: true,
       verbose: false,
       reset: false,
-    });
-
-    // deps should always have all modules populated (real or stub)
-    expect(deps.firewall).toBeDefined();
-    expect(deps.skills).toBeDefined();
-    expect(deps.memory).toBeDefined();
-    expect(deps.planner).toBeDefined();
-    expect(deps.critique).toBeDefined();
-    expect(deps.governor).toBeDefined();
-    expect(deps.heartbeat).toBeDefined();
-    await finalize();
+      orchestratorConfig: {
+        consolidatedProviders: [],
+      } as never,
+    })).rejects.toThrow(/No providers configured|createBeastDeps failed/);
   });
 
   describe('RunConfig field wiring', () => {

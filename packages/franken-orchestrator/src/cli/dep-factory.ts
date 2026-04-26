@@ -162,7 +162,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     options.runConfig?.llmConfig?.default?.model
     ?? options.runConfig?.model;
   const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
-  const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
+  const effectiveBudget = options.budget;
   const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
   const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
   const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
@@ -447,25 +447,9 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   try {
     consolidated = createBeastDeps(beastConfig, existingDeps);
   } catch (error) {
-    logger.warn(
-      `createBeastDeps failed, falling back to passthrough deps: ${error instanceof Error ? error.message : String(error)}`,
-      'dep-factory',
-    );
-    // Fallback: passthrough stubs for modules that createBeastDeps would provide
-    consolidated = {
-      firewall: { runPipeline: async (input) => ({ sanitizedText: input, violations: [], blocked: false }) },
-      skills: { hasSkill: () => false, getAvailableSkills: () => [], execute: async () => { throw new Error('Skills unavailable'); } },
-      memory: { frontload: async () => {}, getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }), recordTrace: async () => {} },
-      heartbeat: { pulse: async () => ({ improvements: [], techDebt: [], summary: '' }) },
-      planner: stubPlanner,
-      observer: observerBridge,
-      critique,
-      governor,
-      logger,
-      clock: () => new Date(),
-      ...(prCreator ? { prCreator } : {}),
-      ...(runConfigOverrides ? { runConfigOverrides } : {}),
-    } as ConsolidatedDeps;
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn(`createBeastDeps failed: ${reason}`, 'dep-factory');
+    throw new Error(`createBeastDeps failed: ${reason}`);
   }
 
   // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']

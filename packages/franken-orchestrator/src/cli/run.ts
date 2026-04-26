@@ -115,6 +115,10 @@ interface ChatSurfaceDeps {
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
 }
 
+function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
+  return args.providerSpecified ? args.provider : config.providers.default;
+}
+
 export async function resolveBeastOperatorToken(
   root: string,
   options?: { secretStore?: ISecretStore | undefined; config?: OrchestratorConfig | undefined } | undefined,
@@ -168,15 +172,16 @@ async function createChatSurfaceDeps(
   config: OrchestratorConfig,
   paths: ReturnType<typeof getProjectPaths>,
 ): Promise<ChatSurfaceDeps> {
+  const provider = resolveSelectedProvider(args, config);
   const sessionStoreDir = join(paths.frankenbeastDir, 'chat');
   const projectId = paths.root.split('/').pop() ?? 'unknown';
   const registry = createDefaultRegistry();
-  const resolvedProvider = registry.get(args.provider);
+  const resolvedProvider = registry.get(provider);
   const chatDepOpts = {
     paths,
     baseBranch: 'main',
     budget: args.budget,
-    provider: args.provider,
+    provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
     noPr: true,
@@ -190,7 +195,7 @@ async function createChatSurfaceDeps(
   const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
   const chatLlm = new AdapterLlmClient(cliLlmAdapter);
 
-  const override = config.providers.overrides?.[args.provider];
+  const override = config.providers.overrides?.[provider];
   const execAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
@@ -433,6 +438,7 @@ export async function main(): Promise<void> {
 
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
+  const provider = resolveSelectedProvider(args, config);
 
   // Create and run session
   // Precedence: CLI args > config file > defaults
@@ -440,7 +446,7 @@ export async function main(): Promise<void> {
     paths,
     baseBranch,
     budget: args.budget,
-    provider: args.provider,
+    provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
     noPr: args.noPr,
@@ -467,6 +473,8 @@ export async function main(): Promise<void> {
     enableReflection: config.enableReflection,
     minCritiqueScore: config.minCritiqueScore,
     maxTotalTokens: config.maxTotalTokens,
+    resume: args.resume,
+    orchestratorConfig: config,
   });
 
   // Issues subcommand dispatches to a separate flow

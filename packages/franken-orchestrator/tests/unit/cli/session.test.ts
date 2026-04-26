@@ -28,6 +28,14 @@ const mockDeps = {
     getLogEntries: vi.fn(() => []),
   },
   clock: () => new Date(),
+  checkpoint: {
+    has: vi.fn(() => false),
+    write: vi.fn(),
+    readAll: vi.fn(() => new Set<string>()),
+    clear: vi.fn(),
+    recordCommit: vi.fn(),
+    lastCommit: vi.fn(() => undefined),
+  },
   cliExecutor: {
     transformRequest: vi.fn((r: unknown) => r),
     execute: vi.fn(async () => ({})),
@@ -192,6 +200,7 @@ function makeConfig(overrides: Partial<import('../../../src/cli/session.js').Ses
     baseBranch: 'main',
     budget: 5,
     provider: 'claude',
+    resume: false,
     noPr: true,
     verbose: false,
     reset: false,
@@ -426,6 +435,66 @@ describe('Session', () => {
       await new Session(config).start();
 
       expect(mockFinalize).toHaveBeenCalled();
+    });
+
+    it('passes runtime config through to BeastLoop', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const { BeastLoop } = await import('../../../src/beast-loop.js');
+      const config = makeConfig({
+        entryPhase: 'execute',
+        enableTracing: false,
+        enableHeartbeat: false,
+        enableReflection: true,
+        minCritiqueScore: 0.9,
+        maxCritiqueIterations: 7,
+        maxDurationMs: 123_000,
+        maxTotalTokens: 45_000,
+      });
+
+      await new Session(config).start();
+
+      expect(BeastLoop).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          enableTracing: false,
+          enableHeartbeat: false,
+          enableReflection: true,
+          minCritiqueScore: 0.9,
+          maxCritiqueIterations: 7,
+          maxDurationMs: 123_000,
+          maxTotalTokens: 45_000,
+        }),
+      );
+    });
+
+    it('clears an existing checkpoint on a cold run', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockDeps.checkpoint.readAll.mockReturnValueOnce(new Set(['task-1:done']));
+      const config = makeConfig({ entryPhase: 'execute', resume: false });
+
+      await new Session(config).start();
+
+      expect(mockDeps.checkpoint.clear).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails clearly when --resume is requested without checkpoint data', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockDeps.checkpoint.readAll.mockReturnValueOnce(new Set());
+      const config = makeConfig({ entryPhase: 'execute', resume: true });
+
+      await expect(new Session(config).start()).rejects.toThrow(/No checkpoint data found/);
+      expect(mockBeastRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves checkpoint state when resuming an existing run', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockDeps.checkpoint.readAll.mockReturnValueOnce(new Set(['task-1:done']));
+      const config = makeConfig({ entryPhase: 'execute', resume: true });
+
+      await new Session(config).start();
+
+      expect(mockDeps.checkpoint.clear).not.toHaveBeenCalled();
+      expect(mockBeastRun).toHaveBeenCalled();
     });
   });
 
