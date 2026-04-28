@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.5.0...franken-observer-v0.6.0) (2026-04-28)
+
+
+### Features
+
+* complete MCP launch chunks 1-5 and canonicalize .fbeast storage ([#279](https://github.com/djm204/frankenbeast/issues/279)) ([22c8ac3](https://github.com/djm204/frankenbeast/commit/22c8ac3ffea24c5a252ab466277ec63261d1ed2d))
+
 ## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.4.3...franken-observer-v0.5.0) (2026-03-26)
 
 
