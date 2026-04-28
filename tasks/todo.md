@@ -7,6 +7,24 @@
 - [x] Prepare a Conventional Commit for the analytics dashboard update.
 - [x] Record final commit and verification evidence.
 
+## Current Batch: MCP Dashboard README Clarity
+
+- [x] Add a root README section that shows how to run the dashboard after MCP init.
+- [x] Add MCP-suite README dashboard instructions near Beast mode.
+- [x] Add web README dashboard-with-MCP instructions near package quick start.
+- [x] Fix the web analytics test matcher type issue reported by CI.
+- [x] Re-run focused web build/tests and review the docs diff.
+- [x] Commit and push the PR update with a Conventional Commit.
+
+## Review
+
+- Added clear dashboard-with-MCP run paths to the root README, MCP suite README, and web README.
+- Clarified that the dashboard backend must point at the same project root as MCP mode via `--base-dir` when the MCP project is outside this repo.
+- Fixed the CI-reported web build failure by replacing jest-dom-only matchers in `analytics-page.test.tsx` with existing Vitest-safe assertions.
+- Verification passed:
+  - `npm run build` in `packages/franken-web`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+
 ## Review
 
 - Prepared commit subject `feat(web): add observer analytics dashboard`; `feat` is a release-please changelog/bump type and will be evaluated when this branch lands on `main`.

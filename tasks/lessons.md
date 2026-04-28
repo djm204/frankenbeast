@@ -11,3 +11,4 @@
 - When a user corrects the suspected subsystem during debugging, treat that as a concrete signal update and re-check the live failure path before continuing with prior assumptions.
 - For Codex hook protocol work, verify the success path as well as the deny path. `PreToolUse` allow responses must match Codex’s real protocol, not just "look symmetric" with deny responses, and generated repo-local hook scripts may still need regeneration even when MCP server code is updated.
 - When adding new dashboard API routes, update the Vite same-origin proxy for every backend route prefix the frontend calls. Otherwise Vite can return `index.html`, leading frontend clients to report JSON parse errors instead of backend failures.
+- In `packages/franken-web` tests, use existing Vitest-safe assertions such as `toBeTruthy()` unless jest-dom matcher types are configured in the package `tsconfig`; otherwise `npm run build` fails because `tsc` includes test files.

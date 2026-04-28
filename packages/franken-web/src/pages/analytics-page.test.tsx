@@ -1,4 +1,3 @@
-import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AnalyticsPage } from './analytics-page';
@@ -78,12 +77,12 @@ describe('AnalyticsPage', () => {
 
     render(<AnalyticsPage client={client} />);
 
-    expect(await screen.findByText('Total Events')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('Activity')).toBeInTheDocument();
-    expect(screen.getByText('Decisions & Failures')).toBeInTheDocument();
-    expect(screen.getByText('fbeast_observer_log')).toBeInTheDocument();
-    expect(screen.getByText('Denied destructive command')).toBeInTheDocument();
+    expect(await screen.findByText('Total Events')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(screen.getByText('Activity')).toBeTruthy();
+    expect(screen.getByText('Decisions & Failures')).toBeTruthy();
+    expect(screen.getByText('fbeast_observer_log')).toBeTruthy();
+    expect(screen.getByText('Denied destructive command')).toBeTruthy();
   });
 
   it('refetches when session filter changes', async () => {
@@ -106,8 +105,8 @@ describe('AnalyticsPage', () => {
     render(<AnalyticsPage client={client} />);
     fireEvent.click(await screen.findByText('Denied destructive command'));
 
-    expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeInTheDocument();
-    expect(screen.getByText('"decision": "denied"')).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeTruthy();
+    expect(screen.getByText('"decision": "denied"')).toBeTruthy();
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
   });
 });
