@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -67,8 +68,8 @@ export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
       },
     },
     {
-      name: 'fbeast_skills_info',
-      description: 'Get detailed information about a specific skill.',
+      name: 'fbeast_skills_load',
+      description: 'Load full skill content by name.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -103,8 +104,7 @@ export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
   return createMcpServer('fbeast-skills', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });

@@ -182,6 +182,8 @@ export class SQLiteBeastRepository {
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
 
     for (const statement of BEAST_SQLITE_SCHEMA_STATEMENTS) {
       this.db.prepare(statement).run();

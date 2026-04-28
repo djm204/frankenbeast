@@ -4,8 +4,7 @@
   <img src="/assets/img/frankenbeast-github-logo.png" alt="Frankenbeast" width="200"/>
 </p>
 
-![Prototype](https://img.shields.io/badge/status-prototype-orange)
-###### Not fully functioning end-to-end yet.
+![Status](https://img.shields.io/badge/status-beta-blue)
 **Deterministic guardrails for AI agents.**
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.

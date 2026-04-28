@@ -218,6 +218,7 @@ export class SqliteBrain implements IBrain {
   constructor(dbPath: string = ':memory:') {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
     this.initSchema();
     this.working = new SqliteWorkingMemory(this.db);
     this.episodic = new SqliteEpisodicMemory(this.db);

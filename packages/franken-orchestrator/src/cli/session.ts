@@ -38,6 +38,7 @@ export interface SessionConfig {
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
+  resume?: boolean | undefined;
   io: InterviewIO;
   /** Entry phase — determined by CLI args */
   entryPhase: SessionPhase;
@@ -484,6 +485,7 @@ export class Session {
       noPr: this.config.noPr,
       verbose: this.config.verbose,
       reset: this.config.reset,
+      resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,
       runConfig: loadRunConfigFromEnv(),
     };

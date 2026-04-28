@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -31,6 +32,32 @@ export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer 
 
         return {
           content: [{ type: 'text', text: `Logged event: ${event} (id: ${result.id}, hash: ${result.hash})` }],
+        };
+      },
+    },
+    {
+      name: 'fbeast_observer_log_cost',
+      description: 'Record token usage and cost for an LLM call. Call this after each significant model invocation you make.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Session identifier' },
+          model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)' },
+          promptTokens: { type: 'number', description: 'Input/prompt token count' },
+          completionTokens: { type: 'number', description: 'Output/completion token count' },
+          costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table' },
+        },
+        required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
+      },
+      async handler(args) {
+        const sessionId = String(args['sessionId']);
+        const model = String(args['model']);
+        const promptTokens = Number(args['promptTokens']);
+        const completionTokens = Number(args['completionTokens']);
+        const costUsdArg = args['costUsd'] != null ? Number(args['costUsd']) : undefined;
+        await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
+        return {
+          content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model}` }],
         };
       },
     },
@@ -93,8 +120,7 @@ export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer 
   return createMcpServer('fbeast-observer', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });

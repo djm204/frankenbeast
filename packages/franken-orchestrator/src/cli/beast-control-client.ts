@@ -23,13 +23,14 @@ export function createBeastControlClient(paths: ProjectPaths) {
       return services.runs.start(agent.dispatchRunId, actor);
     },
     deleteAgent: async (agentId: string) => {
+      const result = services.agents.softDeleteAgent(agentId);
       services.agents.appendEvent(agentId, {
         level: 'info',
         type: 'agent.delete.requested',
         message: 'Soft-deleted tracked agent from the CLI',
         payload: {},
       });
-      return services.agents.softDeleteAgent(agentId);
+      return result;
     },
     createRun: (input: Parameters<typeof services.dispatch.createRun>[0]) =>
       services.dispatch.createRun(input),

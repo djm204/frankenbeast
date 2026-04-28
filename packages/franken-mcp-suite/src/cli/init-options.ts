@@ -8,6 +8,7 @@ const ALL_SERVERS: FbeastServer[] = [
 export interface ResolvedInitOptions {
   hooks: boolean;
   servers?: FbeastServer[];
+  mode: 'standard' | 'proxy';
 }
 
 type PromptForServers = () => Promise<FbeastServer[]>;
@@ -18,22 +19,31 @@ export async function resolveInitOptions(
 ): Promise<ResolvedInitOptions> {
   const hooks = argv.includes('--hooks');
   const pickArg = argv.find((arg) => arg === '--pick' || arg.startsWith('--pick='));
+  const modeArg = argv.find((a) => a.startsWith('--mode='));
+  const mode = modeArg ? parseModeArg(modeArg.slice('--mode='.length)) : 'standard';
 
   if (!pickArg) {
-    return { hooks };
+    return { hooks, mode };
   }
 
   if (pickArg === '--pick') {
     return {
       hooks,
+      mode,
       servers: await promptForServers(),
     };
   }
 
   return {
     hooks,
+    mode,
     servers: parseServerSelection(pickArg.slice('--pick='.length)),
   };
+}
+
+function parseModeArg(value: string): 'standard' | 'proxy' {
+  if (value === 'standard' || value === 'proxy') return value;
+  throw new Error(`Unknown --mode value: ${value}. Expected 'standard' or 'proxy'.`);
 }
 
 export function parseServerSelection(value: string): FbeastServer[] {

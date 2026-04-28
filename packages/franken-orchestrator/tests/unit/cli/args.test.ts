@@ -210,7 +210,7 @@ describe('parseArgs', () => {
     expect(args.help).toBe(true);
   });
 
-  it('prints usage text including init, network, chat-server, skill, provider, security, and dashboard', () => {
+  it('prints usage text including init, network, chat-server, skill, security', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     printUsage();
@@ -220,9 +220,7 @@ describe('parseArgs', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('network'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('beasts'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('skill'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('provider'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('security'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('dashboard'));
     logSpy.mockRestore();
   });
 
@@ -404,43 +402,6 @@ describe('parseArgs', () => {
     });
   });
 
-  describe('provider subcommand', () => {
-    it('parses provider list command', () => {
-      const args = parseArgs(['provider', 'list']);
-      expect(args.subcommand).toBe('provider');
-      expect(args.providerAction).toBe('list');
-    });
-
-    it('parses provider test with target', () => {
-      const args = parseArgs(['provider', 'test', 'claude']);
-      expect(args.subcommand).toBe('provider');
-      expect(args.providerAction).toBe('test');
-      expect(args.providerTarget).toBe('claude');
-    });
-
-    it('parses provider add', () => {
-      const args = parseArgs(['provider', 'add']);
-      expect(args.subcommand).toBe('provider');
-      expect(args.providerAction).toBe('add');
-    });
-
-    it('parses provider remove', () => {
-      const args = parseArgs(['provider', 'remove']);
-      expect(args.subcommand).toBe('provider');
-      expect(args.providerAction).toBe('remove');
-    });
-
-    it('parses bare provider subcommand with no action', () => {
-      const args = parseArgs(['provider']);
-      expect(args.subcommand).toBe('provider');
-      expect(args.providerAction).toBeUndefined();
-    });
-
-    it('throws on unknown provider action', () => {
-      expect(() => parseArgs(['provider', 'bogus'])).toThrow('Unknown provider action: bogus');
-    });
-  });
-
   describe('security subcommand', () => {
     it('parses security status command', () => {
       const args = parseArgs(['security', 'status']);
@@ -477,10 +438,4 @@ describe('parseArgs', () => {
     });
   });
 
-  describe('dashboard subcommand', () => {
-    it('parses dashboard subcommand', () => {
-      const args = parseArgs(['dashboard']);
-      expect(args.subcommand).toBe('dashboard');
-    });
-  });
 });

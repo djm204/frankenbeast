@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -48,8 +49,8 @@ export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
       },
     },
     {
-      name: 'fbeast_plan_visualize',
-      description: 'Generate a mermaid diagram of an existing plan DAG.',
+      name: 'fbeast_plan_status',
+      description: 'Get status of all steps in current plan.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -112,8 +113,7 @@ export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
   return createMcpServer('fbeast-planner', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });

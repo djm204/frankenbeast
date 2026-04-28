@@ -11,6 +11,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastInterviewService } from '../../../src/beasts/services/beast-interview-service.js';
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
@@ -171,6 +172,7 @@ describe('Chat HTTP Routes', () => {
     const logStore = new BeastLogStore(join(TMP, 'beast-logs'));
     const catalog = new BeastCatalogService();
     const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repository);
     const executors = {
       process: {
         start: vi.fn(async (run, _definition) => {
@@ -207,6 +209,7 @@ describe('Chat HTTP Routes', () => {
         dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore),
         runs: new BeastRunService(repository, catalog, executors, metrics, logStore),
         interviews: new BeastInterviewService(repository, catalog),
+        agents,
         metrics,
         security: new TransportSecurityService(),
         operatorToken: 'operator-token',
@@ -244,10 +247,18 @@ describe('Chat HTTP Routes', () => {
     const promptTwo = await promptTwoRes.json();
     expect(promptTwo.data.outcome.content).toContain('What should the martin loop accomplish?');
 
-    const dispatchRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+    const promptThreeRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: 'Ship Beast monitoring' }),
+    });
+    const promptThree = await promptThreeRes.json();
+    expect(promptThree.data.outcome.content).toContain('Which chunk directory should MartinLoop execute from?');
+
+    const dispatchRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'docs/chunks' }),
     });
     const dispatchBody = await dispatchRes.json();
     expect(dispatchBody.data.outcome.kind).toBe('reply');

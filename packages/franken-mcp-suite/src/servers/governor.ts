@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { isMain } from '../shared/is-main.js';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { parseArgs } from 'node:util';
 
@@ -31,8 +32,8 @@ export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer 
       },
     },
     {
-      name: 'fbeast_governor_budget_status',
-      description: 'Get current spend vs budget. Reads from cost_ledger table.',
+      name: 'fbeast_governor_budget',
+      description: 'Get current spend vs budget status.',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -60,8 +61,7 @@ export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer 
   return createMcpServer('fbeast-governor', '0.1.0', tools);
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isMain) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });

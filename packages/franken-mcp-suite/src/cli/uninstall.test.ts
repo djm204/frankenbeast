@@ -125,6 +125,94 @@ describe('fbeast uninstall', () => {
     expect(existsSync(join(root, '.fbeast'))).toBe(false);
   });
 
+  it('removes Gemini BeforeTool/AfterTool fbeast entries on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const before = (settings.hooks?.BeforeTool ?? []) as unknown[];
+    const after = (settings.hooks?.AfterTool ?? []) as unknown[];
+    const hasFbeast = (list: unknown[]) =>
+      list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
+    expect(hasFbeast(before)).toBe(false);
+    expect(hasFbeast(after)).toBe(false);
+  });
+
+  it('removes fbeast section from AGENTS.md on codex uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    writeFileSync(join(root, 'AGENTS.md'), '# My Rules\n\nAlways write tests.\n');
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const content = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain('# My Rules');
+    expect(content).not.toContain('fbeast');
+  });
+
+  it('deletes AGENTS.md entirely if fbeast was the only content', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    expect(existsSync(join(root, 'AGENTS.md'))).toBe(false);
+  });
+
+  it('removes Codex MCP servers and hooks.json entries on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+    spawnCalls.length = 0; // reset after init
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    // Each server gets a remove call (7 individual + fbeast-proxy = 8)
+    expect(spawnCalls.length).toBe(8);
+    expect(spawnCalls.every((c) => c.args[1] === 'remove')).toBe(true);
+
+    // hooks.json has no fbeast entries left
+    const hooksPath = join(root, '.codex', 'hooks.json');
+    const hooks = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    const preToolUse = (hooks.hooks?.PreToolUse ?? []) as unknown[];
+    const postToolUse = (hooks.hooks?.PostToolUse ?? []) as unknown[];
+    const hasFbeast = (list: unknown[]) =>
+      list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
+    expect(hasFbeast(preToolUse)).toBe(false);
+    expect(hasFbeast(postToolUse)).toBe(false);
+  });
+
+  it('codex uninstall runs codex mcp remove fbeast-proxy', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    expect(removedNames).toContain('fbeast-proxy');
+  });
+
   it('treats closed stdin as a no answer when purge decision is missing', async () => {
     const root = tmpDir();
     dirs.push(root);

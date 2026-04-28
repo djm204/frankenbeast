@@ -1,6 +1,8 @@
 node_modules
 .claude
+.codex
 .agents
+.superpowers
 .worktrees
 .turbo
 dist

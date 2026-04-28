@@ -84,7 +84,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
     SECURITY_TIER_MAP[options.firewallSecurityTier ?? ''] ?? 'standard';
 
   // Brain
-  const dbPath = resolve(options.paths.buildDir, 'memory.db');
+  const dbPath = resolve(options.paths.frankenbeastDir, 'beast.db');
 
   return {
     providers: (config?.consolidatedProviders as ProviderConfig[] | undefined) ?? providers,

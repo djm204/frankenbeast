@@ -36,8 +36,17 @@ export interface ObserverTrailEntry {
   createdAt: string;
 }
 
+export interface ObserverCostInput {
+  sessionId: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  costUsd?: number;
+}
+
 export interface ObserverAdapter {
   log(input: ObserverLogInput): Promise<ObserverLogResult>;
+  logCost(input: ObserverCostInput): Promise<void>;
   cost(input: { sessionId?: string }): Promise<ObserverCostSummary>;
   trail(sessionId: string): Promise<ObserverTrailEntry[]>;
 }
@@ -75,6 +84,18 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       );
 
       return { id: Number(result.lastInsertRowid), hash };
+    },
+
+    async logCost(input) {
+      const costUsd = input.costUsd ?? costCalculator.calculate({
+        model: input.model,
+        promptTokens: input.promptTokens,
+        completionTokens: input.completionTokens,
+      });
+      store.db.prepare(`
+        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd);
     },
 
     async cost(input) {

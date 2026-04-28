@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
@@ -19,6 +19,8 @@ function createTempPaths(): ProjectPaths {
 
   // GitBranchIsolator needs a real git repo
   execSync('git init', { cwd: root, stdio: 'ignore' });
+  execSync('git config user.email "test@example.com"', { cwd: root, stdio: 'ignore' });
+  execSync('git config user.name "Test User"', { cwd: root, stdio: 'ignore' });
   execSync('git commit --allow-empty -m "init"', { cwd: root, stdio: 'ignore' });
 
   const fbDir = join(root, '.fbeast');
@@ -138,6 +140,52 @@ describe('dep-factory wiring integration', () => {
     });
     expect(second.deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
     await second.finalize();
+  });
+
+  it('clears checkpoint and chunk session artifacts for a cold run when resume is false', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+    writeFileSync(join(paths.buildDir, 'session.checkpoint'), 'task-1:done\n');
+    mkdirSync(paths.chunkSessionsDir, { recursive: true });
+    writeFileSync(join(paths.chunkSessionsDir, 'old-session.json'), '{}');
+
+    const { finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+      resume: false,
+    });
+
+    expect(existsSync(join(paths.buildDir, 'session.checkpoint'))).toBe(false);
+    expect(existsSync(join(paths.chunkSessionsDir, 'old-session.json'))).toBe(false);
+    await finalize();
+  });
+
+  it('preserves checkpoint and chunk session artifacts when resume is true', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+    writeFileSync(join(paths.buildDir, 'session.checkpoint'), 'task-1:done\n');
+    mkdirSync(paths.chunkSessionsDir, { recursive: true });
+    writeFileSync(join(paths.chunkSessionsDir, 'old-session.json'), '{}');
+
+    const { finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+      resume: true,
+    });
+
+    expect(existsSync(join(paths.buildDir, 'session.checkpoint'))).toBe(true);
+    expect(existsSync(join(paths.chunkSessionsDir, 'old-session.json'))).toBe(true);
+    await finalize();
   });
 
   it('creates real CritiquePortAdapter when modules are enabled', async () => {
@@ -269,12 +317,11 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
-  it('falls back gracefully when modules fail to construct', async () => {
+  it('fails explicitly when required consolidated deps cannot be constructed', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
-    // All modules enabled — if any fail to construct, they fall back to stubs
-    const { deps, finalize } = await createCliDeps({
+    await expect(createCliDeps({
       paths,
       baseBranch: 'main',
       budget: 1.0,
@@ -282,17 +329,23 @@ describe('dep-factory wiring integration', () => {
       noPr: true,
       verbose: false,
       reset: false,
-    });
-
-    // deps should always have all modules populated (real or stub)
-    expect(deps.firewall).toBeDefined();
-    expect(deps.skills).toBeDefined();
-    expect(deps.memory).toBeDefined();
-    expect(deps.planner).toBeDefined();
-    expect(deps.critique).toBeDefined();
-    expect(deps.governor).toBeDefined();
-    expect(deps.heartbeat).toBeDefined();
-    await finalize();
+      orchestratorConfig: {
+        providers: { default: 'claude', fallbackChain: [], overrides: {} },
+        network: {
+          services: [],
+          chat: { enabled: false },
+          dashboard: { enabled: false },
+        },
+        maxCritiqueIterations: 3,
+        maxTotalTokens: 100_000,
+        maxDurationMs: 300_000,
+        enableHeartbeat: true,
+        enableTracing: true,
+        enableReflection: false,
+        minCritiqueScore: 0.7,
+        consolidatedProviders: [],
+      } as never,
+    })).rejects.toThrow("No providers configured");
   });
 
   describe('RunConfig field wiring', () => {

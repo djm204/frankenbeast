@@ -16,6 +16,7 @@
     "fbeast-observer": "./dist/servers/observer.js",
     "fbeast-governor": "./dist/servers/governor.js",
     "fbeast-skills": "./dist/servers/skills.js",
+    "fbeast-proxy": "./dist/servers/proxy.js",
     "fbeast-init": "./dist/cli/init.js",
     "fbeast-uninstall": "./dist/cli/uninstall.js"
   },

@@ -183,7 +183,7 @@ describe('agent routes', () => {
     });
   });
 
-  it('creates and lists tracked agents for authorized operators', async () => {
+  it('creates, dispatches, and lists tracked agents for authorized operators', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
@@ -198,17 +198,23 @@ describe('agent routes', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Design the init workflow' },
+          config: {
+            goal: 'Design the init workflow',
+            outputPath: 'docs/design.md',
+          },
           chatSessionId: 'sess-1',
         },
-        initConfig: { goal: 'Design the init workflow' },
+        initConfig: {
+          goal: 'Design the init workflow',
+          outputPath: 'docs/design.md',
+        },
         chatSessionId: 'sess-1',
       }),
     });
 
     expect(createResponse.status).toBe(201);
     const created = await createResponse.json() as { data: { id: string; status: string } };
-    expect(created.data.status).toBe('initializing');
+    expect(created.data.status).toBe('running');
 
     const listResponse = await app.request('/v1/beasts/agents', {
       headers: {
@@ -439,7 +445,8 @@ describe('agent routes', () => {
   });
 
   it('stops initializing tracked agents without a linked run', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app } = createStandaloneAgentApp();
+    const operatorToken = 'super-secret-operator-token';
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
