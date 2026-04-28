@@ -26,6 +26,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import { createSkillRoutes } from './routes/skill-routes.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
+import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -57,6 +58,8 @@ export interface ChatAppOptions {
   providerRegistry?: ProviderRegistry;
   /** Dashboard aggregation. Requires skillManager and securityConfig for mutation endpoints. */
   dashboardDeps?: DashboardRouteDeps;
+  /** Read-only observer/governor/cost analytics aggregation. */
+  analyticsDeps?: AnalyticsRouteDeps;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -160,6 +163,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.dashboardDeps) {
     app.route('/api/dashboard', createDashboardRoutes(opts.dashboardDeps));
+  }
+  if (opts.analyticsDeps) {
+    app.route('/api/analytics', createAnalyticsRoutes(opts.analyticsDeps));
   }
 
   return app;

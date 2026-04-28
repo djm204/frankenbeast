@@ -1,5 +1,66 @@
 # fbeast dual-mode launch
 
+## Current Batch: Analytics Dashboard Release Commit
+
+- [x] Confirm the analytics dashboard implementation worktree and release-please trigger requirements.
+- [x] Re-run focused backend/frontend verification for the files being committed.
+- [x] Prepare a Conventional Commit for the analytics dashboard update.
+- [x] Record final commit and verification evidence.
+
+## Review
+
+- Prepared commit subject `feat(web): add observer analytics dashboard`; `feat` is a release-please changelog/bump type and will be evaluated when this branch lands on `main`.
+- Fresh verification passed on 2026-04-28:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in both touched packages
+  - `npm run build` in both touched packages
+  - `npm run test:root -- tests/unit/release-please-config.test.ts`
+
+## Current Batch: Analytics JSON Parse Fix
+
+- [x] Identify why analytics API responses are not JSON in the dashboard.
+- [x] Add a regression test for Vite `/api` proxying.
+- [x] Patch the Vite dev proxy configuration.
+- [x] Run targeted tests/typecheck/build.
+- [x] Update progress notes with verification evidence.
+
+## Review
+
+- Fixed the analytics JSON parse error root cause: Vite was not proxying `/api` to the backend in same-origin mode.
+- Added `packages/franken-web/tests/vite-config.test.ts` so `/api` proxy coverage stays explicit.
+- Restarted the web dev server at `http://127.0.0.1:5175/`.
+- 2026-04-28 release-commit verification rerun passed:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+
+## Current Batch: Observer Analytics Dashboard Implementation
+
+- [x] Confirm scope from existing progress note and approved dashboard spec.
+- [x] Add backend analytics API tests for summary, sessions, filtered events, and event details.
+- [x] Add frontend analytics client/page tests for live route, summary rendering, filters, and drawer.
+- [x] Implement normalized read-only analytics service and `/api/analytics/*` routes.
+- [x] Wire analytics routes into the chat server/dashboard backend startup.
+- [x] Implement the web analytics client, page, shell route, and styles.
+- [x] Run targeted backend/frontend tests and typechecks.
+- [x] Review diff for scope, update progress notes, and capture final verification.
+
+## Review
+
+- Implemented a read-only observer analytics dashboard under the live Analytics route.
+- Verification passed:
+  - `npm test -- tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts`
+  - `npm test -- src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+- Local web dev server started at `http://127.0.0.1:5174/`.
+
 ## Current Batch: Agent Systems Audit
 
 - [x] Check for a matching progress document and create it if missing.
