@@ -36,7 +36,7 @@ switch (command) {
     const client = resolveClient();
     const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
     const purge = process.argv.includes('--purge') ? true : undefined;
-    await runUninstall({ root, claudeDir, purge });
+    await runUninstall({ root, claudeDir, client, purge });
     break;
   }
   case 'beast': {

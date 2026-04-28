@@ -170,7 +170,7 @@ if (isMain) {
   const client = detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
   const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
-  runUninstall({ root, claudeDir, purge }).catch((err) => {
+  runUninstall({ root, claudeDir, client, purge }).catch((err) => {
     console.error('fbeast-uninstall failed:', err);
     process.exit(1);
   });
