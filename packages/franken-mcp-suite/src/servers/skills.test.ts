@@ -11,7 +11,7 @@ describe('Skills Server', () => {
     });
 
     const names = server.tools.map((t) => t.name);
-    expect(names).toEqual(['fbeast_skills_list', 'fbeast_skills_discover', 'fbeast_skills_info']);
+    expect(names).toEqual(['fbeast_skills_list', 'fbeast_skills_discover', 'fbeast_skills_load']);
   });
 
   it('delegates list, discover, and info calls to the skills adapter', async () => {
@@ -51,7 +51,7 @@ describe('Skills Server', () => {
     const server = createSkillsServer({ skills });
     const listTool = server.tools.find((t) => t.name === 'fbeast_skills_list')!;
     const discoverTool = server.tools.find((t) => t.name === 'fbeast_skills_discover')!;
-    const infoTool = server.tools.find((t) => t.name === 'fbeast_skills_info')!;
+    const loadTool = server.tools.find((t) => t.name === 'fbeast_skills_load')!;
 
     const listResult = await listTool.handler({ enabled: 'true' });
     expect(skills.list).toHaveBeenCalledWith({ enabled: true });
@@ -62,7 +62,7 @@ describe('Skills Server', () => {
     expect(discoverResult.content[0]!.text).toContain('github');
     expect(discoverResult.content[0]!.text).not.toContain('slack');
 
-    const infoResult = await infoTool.handler({ skillId: 'github' });
+    const infoResult = await loadTool.handler({ skillId: 'github' });
     expect(skills.info).toHaveBeenCalledWith('github');
     expect(infoResult.content[0]!.text).toContain('GitHub workflow automation');
   });

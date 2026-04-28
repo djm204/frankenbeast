@@ -11,7 +11,7 @@ describe('Governor Server', () => {
     });
 
     const names = server.tools.map((t) => t.name);
-    expect(names).toEqual(['fbeast_governor_check', 'fbeast_governor_budget_status']);
+    expect(names).toEqual(['fbeast_governor_check', 'fbeast_governor_budget']);
   });
 
   it('uses the governor adapter for approvals', async () => {
@@ -25,7 +25,7 @@ describe('Governor Server', () => {
 
     const server = createGovernorServer({ governor });
     const checkTool = server.tools.find((t) => t.name === 'fbeast_governor_check')!;
-    const budgetTool = server.tools.find((t) => t.name === 'fbeast_governor_budget_status')!;
+    const budgetTool = server.tools.find((t) => t.name === 'fbeast_governor_budget')!;
 
     const checkResult = await checkTool.handler({
       action: 'edit_file',

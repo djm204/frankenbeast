@@ -12,11 +12,13 @@ export interface HookScriptPaths {
 }
 
 /**
- * Writes hook scripts for the given client into <root>/.fbeast/hooks/.
+ * Writes hook scripts for the given client into a client-owned hooks directory.
  * Returns the paths to the generated scripts.
  */
 export function writeHookScripts(root: string, client: 'gemini' | 'codex'): HookScriptPaths {
-  const hooksDir = join(root, '.fbeast', 'hooks');
+  const hooksDir = client === 'codex'
+    ? join(root, '.codex', 'hooks')
+    : join(root, '.fbeast', 'hooks');
   mkdirSync(hooksDir, { recursive: true });
 
   const dbPath = join(root, '.fbeast', 'beast.db');
@@ -50,10 +52,7 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
-EXIT_CODE=$?
-
-if [ "$EXIT_CODE" -ne 0 ]; then
+if ! RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1); then
   SAFE_RESULT=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"decision":"deny","reason":%s}\\n' "$SAFE_RESULT" >&1
   exit 2
@@ -73,7 +72,7 @@ INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 TOOL_RESPONSE=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_response',{})))" 2>/dev/null || echo "{}")
 
-fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" 2>/dev/null || true
+fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
 exit 0
 `);
 
@@ -88,8 +87,8 @@ exit 0
 // PostToolUse: stdin JSON { tool_name, tool_response, ... }
 
 function writeCodexScripts(hooksDir: string, dbPath: string): HookScriptPaths {
-  const preTool = join(hooksDir, 'codex-pre-tool.sh');
-  const postTool = join(hooksDir, 'codex-post-tool.sh');
+  const preTool = join(hooksDir, 'fbeast-codex-pre-tool.sh');
+  const postTool = join(hooksDir, 'fbeast-codex-post-tool.sh');
 
   writeFileSync(preTool, `#!/usr/bin/env bash
 # fbeast PreToolUse hook for Codex CLI
@@ -102,20 +101,15 @@ INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 
 if [ -z "$TOOL_NAME" ]; then
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}\\n'
   exit 0
 fi
 
-RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
-EXIT_CODE=$?
-
-if [ "$EXIT_CODE" -ne 0 ]; then
+if ! RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1); then
   SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$SAFE_REASON" >&1
   exit 2
 fi
 
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}\\n'
 exit 0
 `);
 
@@ -130,7 +124,7 @@ INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 TOOL_RESPONSE=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_response',{})))" 2>/dev/null || echo "{}")
 
-fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" 2>/dev/null || true
+fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
 exit 0
 `);
 

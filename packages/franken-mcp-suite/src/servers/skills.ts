@@ -68,8 +68,8 @@ export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
       },
     },
     {
-      name: 'fbeast_skills_info',
-      description: 'Get detailed information about a specific skill.',
+      name: 'fbeast_skills_load',
+      description: 'Load full skill content by name.',
       inputSchema: {
         type: 'object',
         properties: {

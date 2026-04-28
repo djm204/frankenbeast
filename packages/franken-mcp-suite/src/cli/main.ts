@@ -13,13 +13,13 @@ function resolveClient(): McpClient {
 
 switch (command) {
   case 'init': {
-    const KNOWN_INIT_FLAGS = ['--hooks', '--pick', '--client'];
+    const KNOWN_INIT_FLAGS = ['--hooks', '--pick', '--client', '--mode'];
     const unknownFlags = process.argv.slice(3).filter(
       (a) => a.startsWith('--') && !KNOWN_INIT_FLAGS.some((k) => a === k || a.startsWith(k + '=')),
     );
     if (unknownFlags.length > 0) {
       console.error(`fbeast init: unknown flag(s): ${unknownFlags.join(', ')}`);
-      console.error('  Known flags: --hooks  --pick[=<servers>]  --client=claude|gemini|codex');
+      console.error('  Known flags: --hooks  --pick[=<servers>]  --mode=standard|proxy  --client=claude|gemini|codex');
       process.exit(1);
     }
     const { runInit } = await import('./init.js');
@@ -81,9 +81,10 @@ switch (command) {
     console.log('');
     console.log('Commands:');
     console.log('  init                        Set up fbeast MCP servers');
-    console.log('  init --client=<name>        Target client: claude (default), gemini');
+    console.log('  init --client=<name>        Target client: claude (default), gemini, codex');
     console.log('  init --pick                 Choose which servers to install');
-    console.log('  init --hooks                Add pre/post-tool hooks (claude only)');
+    console.log('  init --mode=proxy           Register one proxy MCP server instead of individual servers');
+    console.log('  init --hooks                Add pre/post-tool hooks');
     console.log('  uninstall                   Remove fbeast MCP config');
     console.log('  uninstall --client=<name>   Target a specific client');
     console.log('  uninstall --purge           Also remove stored data');

@@ -104,7 +104,7 @@ function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'g
 
 const ALL_SERVER_NAMES = [
   'fbeast-memory', 'fbeast-planner', 'fbeast-critique', 'fbeast-firewall',
-  'fbeast-observer', 'fbeast-governor', 'fbeast-skills',
+  'fbeast-observer', 'fbeast-governor', 'fbeast-skills', 'fbeast-proxy',
 ];
 
 const AGENTS_MD_START = '<!-- fbeast-start -->';

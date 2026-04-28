@@ -16,7 +16,7 @@ Beast mode (`fbeast beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, 
 
 - Node.js 20+
 - npm workspaces (installed at repo root)
-- At least one of: Claude Code CLI, Gemini CLI
+- At least one of: Claude Code CLI, Gemini CLI, or Codex CLI
 - Codex CLI (`codex --version`) — required for full-cycle integration tests
 
 ---
@@ -187,13 +187,13 @@ fbeast init --client=codex --hooks       # Codex CLI
 
 The scripts read JSON from stdin, extract `tool_name`, call `fbeast-hook`, and deny with the correct Gemini format (exit 2 + `{"decision":"deny",...}`).
 
-**Codex CLI** — shell scripts written to `.fbeast/hooks/`, registered in `.codex/hooks.json`:
+**Codex CLI** — shell scripts written to `.codex/hooks/`, registered in `.codex/hooks.json`:
 
 ```json
 {
   "hooks": {
-    "PreToolUse":  [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/codex-pre-tool.sh" }] }],
-    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.fbeast/hooks/codex-post-tool.sh" }] }]
+    "PreToolUse":  [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.codex/hooks/fbeast-codex-pre-tool.sh" }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/your/project/.codex/hooks/fbeast-codex-post-tool.sh" }] }]
   }
 }
 ```
@@ -216,10 +216,47 @@ Available servers: `memory`, `planner`, `critique`, `firewall`, `observer`, `gov
 
 ### 4. Restart your AI client
 
-After init, restart Claude Code or Gemini CLI so it picks up the new `settings.json`.
+After init, restart your AI client so it picks up the new MCP registration.
 
 - **Claude Code**: `/mcp` in the terminal to verify active servers
 - **Gemini CLI**: restart the session; use `\mcp` or check session startup logs
+- **Codex CLI**: `codex mcp list` to verify active servers
+
+---
+
+## Proxy Mode
+
+### What it is
+
+Proxy mode registers a single MCP server that exposes 2 meta-tools (`search_tools` and `execute_tool`) instead of 7 individual servers with 20+ full tool schemas upfront.
+
+### When to use it
+
+Proxy mode is ideal for large projects or agents with tight context budgets. It reduces the initial context window cost by approximately 90% because the agent only sees the two meta-tools until it actively searches for and executes a specific capability.
+
+### How to install
+
+```sh
+fbeast init --mode=proxy
+```
+
+### What the agent sees
+
+Only two tools in its tool list:
+
+- `search_tools` — find tools by name or keyword
+- `execute_tool` — run a tool by name with arguments
+
+### Usage pattern
+
+1. Agent calls `search_tools` to find a tool by name (e.g., "tools for memory")
+2. Returns matching lightweight tool metadata (name and short description)
+3. Agent calls `execute_tool` with the tool name and arguments
+4. Proxy server dispatches to the appropriate handler and returns the result
+
+### Default behavior
+
+By default, `fbeast init` installs 7 individual servers with all tools visible upfront. Proxy mode is opt-in via the `--mode=proxy` flag.
 
 ---
 

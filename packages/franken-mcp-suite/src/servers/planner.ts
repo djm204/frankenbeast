@@ -49,8 +49,8 @@ export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
       },
     },
     {
-      name: 'fbeast_plan_visualize',
-      description: 'Generate a mermaid diagram of an existing plan DAG.',
+      name: 'fbeast_plan_status',
+      description: 'Get status of all steps in current plan.',
       inputSchema: {
         type: 'object',
         properties: {

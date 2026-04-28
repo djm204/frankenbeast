@@ -181,8 +181,8 @@ describe('fbeast uninstall', () => {
 
     await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
 
-    // Each server gets a remove call
-    expect(spawnCalls.length).toBe(7);
+    // Each server gets a remove call (7 individual + fbeast-proxy = 8)
+    expect(spawnCalls.length).toBe(8);
     expect(spawnCalls.every((c) => c.args[1] === 'remove')).toBe(true);
 
     // hooks.json has no fbeast entries left
@@ -194,6 +194,23 @@ describe('fbeast uninstall', () => {
       list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
     expect(hasFbeast(preToolUse)).toBe(false);
     expect(hasFbeast(postToolUse)).toBe(false);
+  });
+
+  it('codex uninstall runs codex mcp remove fbeast-proxy', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    expect(removedNames).toContain('fbeast-proxy');
   });
 
   it('treats closed stdin as a no answer when purge decision is missing', async () => {

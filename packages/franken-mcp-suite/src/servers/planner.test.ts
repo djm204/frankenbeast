@@ -12,7 +12,7 @@ describe('Planner Server', () => {
     });
 
     const names = server.tools.map((t) => t.name);
-    expect(names).toEqual(['fbeast_plan_decompose', 'fbeast_plan_visualize', 'fbeast_plan_validate']);
+    expect(names).toEqual(['fbeast_plan_decompose', 'fbeast_plan_status', 'fbeast_plan_validate']);
   });
 
   it('delegates decompose and validate to the planner adapter', async () => {
@@ -28,7 +28,7 @@ describe('Planner Server', () => {
 
     const server = createPlannerServer({ planner });
     const decomposeTool = server.tools.find((t) => t.name === 'fbeast_plan_decompose')!;
-    const visualizeTool = server.tools.find((t) => t.name === 'fbeast_plan_visualize')!;
+    const visualizeTool = server.tools.find((t) => t.name === 'fbeast_plan_status')!;
     const validateTool = server.tools.find((t) => t.name === 'fbeast_plan_validate')!;
 
     const decomposeResult = await decomposeTool.handler({ objective: 'ship', constraints: 'small PRs' });

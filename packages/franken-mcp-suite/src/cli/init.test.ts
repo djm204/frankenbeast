@@ -267,6 +267,73 @@ describe('fbeast init', () => {
     ).toThrow('failed to register 1 server');
   });
 
+  it('proxy mode writes single fbeast-proxy entry (not 7) for claude client', () => {
+    const root = tmpDir();
+    dirs.push(root);
+
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'proxy' });
+
+    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    const keys = Object.keys(settings.mcpServers);
+    expect(keys).toEqual(['fbeast-proxy']);
+    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join(root, '.fbeast', 'beast.db')] });
+    expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
+  });
+
+  it('proxy mode writes single fbeast-proxy entry for gemini client', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini', mode: 'proxy' });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const keys = Object.keys(settings.mcpServers);
+    expect(keys).toEqual(['fbeast-proxy']);
+    expect(settings.mcpServers['fbeast-proxy']).toBeDefined();
+    expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
+  });
+
+  it('standard mode (default) still writes 7 individual entries', () => {
+    const root = tmpDir();
+    dirs.push(root);
+
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'standard' });
+
+    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    expect(Object.keys(settings.mcpServers).length).toBe(7);
+    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
+    expect(settings.mcpServers['fbeast-proxy']).toBeUndefined();
+  });
+
+  it('proxy mode for codex calls spawnFn once with fbeast-proxy (not 7 times)', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' });
+
+    expect(spawnCalls.length).toBe(1);
+    expect(spawnCalls[0].cmd).toBe('codex');
+    expect(spawnCalls[0].args[0]).toBe('mcp');
+    expect(spawnCalls[0].args[1]).toBe('add');
+    expect(spawnCalls[0].args[2]).toBe('fbeast-proxy');
+  });
+
+  it('proxy mode for codex throws when fbeast-proxy registration fails', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 1, stderr: Buffer.from('command not found') });
+
+    expect(() =>
+      runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' }),
+    ).toThrow('failed to register fbeast-proxy with codex');
+  });
+
   it('writes Codex hooks.json when --client=codex --hooks', () => {
     const root = tmpDir();
     dirs.push(root);
@@ -275,8 +342,8 @@ describe('fbeast init', () => {
     runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
 
     // Shell scripts created
-    const preScript = join(root, '.fbeast', 'hooks', 'codex-pre-tool.sh');
-    const postScript = join(root, '.fbeast', 'hooks', 'codex-post-tool.sh');
+    const preScript = join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh');
+    const postScript = join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh');
     expect(existsSync(preScript)).toBe(true);
     expect(existsSync(postScript)).toBe(true);
 
@@ -288,6 +355,7 @@ describe('fbeast init', () => {
     expect(Array.isArray(hooks.hooks?.PostToolUse)).toBe(true);
     const preEntry = hooks.hooks.PreToolUse[0];
     expect(preEntry.matcher).toBe('*');
-    expect((preEntry.hooks[0].command as string)).toContain('codex-pre-tool.sh');
+    expect(preEntry.hooks[0].command).toBe(preScript);
+    expect(readFileSync(preScript, 'utf-8')).toContain('fbeast-hook pre-tool');
   });
 });

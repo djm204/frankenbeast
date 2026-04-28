@@ -33,6 +33,7 @@ describe('declared MCP binaries', () => {
     };
 
     expect(pkg.bin['fbeast-hook']).toBe('./dist/cli/hook.js');
+    expect(pkg.bin['fbeast-proxy']).toBe('./dist/servers/proxy.js');
   });
 
   for (const [name, relPath, expectedTool] of SERVER_BINS) {
@@ -78,6 +79,29 @@ describe('declared MCP binaries', () => {
       expect(names).toContain('fbeast_firewall_scan');
       expect(names).toContain('fbeast_governor_check');
       expect(names).toContain('fbeast_skills_list');
+    } finally {
+      await transport.close();
+      rmSync(dbDir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts the proxy server and exposes only proxy meta-tools', async () => {
+    const dbDir = mkdtempSync(join(tmpdir(), 'fbeast-proxy-'));
+    const dbPath = join(dbDir, 'beast.db');
+    const transport = new StdioClientTransport({
+      command: 'node',
+      args: [join(DIST_ROOT, 'servers/proxy.js'), '--db', dbPath],
+      cwd: PACKAGE_ROOT,
+      stderr: 'pipe',
+    });
+    const client = new Client({ name: 'fbeast-smoke', version: '0.0.0' });
+
+    try {
+      await client.connect(transport);
+      const tools = await client.listTools();
+      const names = tools.tools.map((tool) => tool.name);
+
+      expect(names).toEqual(['search_tools', 'execute_tool']);
     } finally {
       await transport.close();
       rmSync(dbDir, { recursive: true, force: true });

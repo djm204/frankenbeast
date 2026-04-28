@@ -17,6 +17,9 @@ npx fbeast init --hooks
 
 # Choose specific servers
 npx fbeast init --pick=memory,firewall,governor
+
+# Proxy mode: single server, 2 tools, ~90% lower context cost
+npx fbeast init --mode=proxy
 ```
 
 `fbeast init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
@@ -54,7 +57,7 @@ All servers share `.fbeast/beast.db` (SQLite, WAL mode).
 
 ## Combined server
 
-`fbeast-mcp` runs all 19 tools in a single MCP server process.
+`fbeast-mcp` runs all 20 tools in a single MCP server process.
 
 ## Hooks
 
@@ -69,7 +72,7 @@ All three clients are supported:
 |--------|---------------|
 | Claude Code | `preToolCall` / `postToolCall` command strings in `settings.json` |
 | Gemini CLI | `BeforeTool` / `AfterTool` shell scripts in `.fbeast/hooks/` |
-| Codex CLI | `PreToolUse` / `PostToolUse` shell scripts via `.codex/hooks.json` |
+| Codex CLI | `PreToolUse` / `PostToolUse` shell scripts in `.codex/hooks/`, referenced by `.codex/hooks.json` |
 
 ## Programmatic usage
 

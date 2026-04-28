@@ -32,8 +32,8 @@ export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer 
       },
     },
     {
-      name: 'fbeast_governor_budget_status',
-      description: 'Get current spend vs budget. Reads from cost_ledger table.',
+      name: 'fbeast_governor_budget',
+      description: 'Get current spend vs budget status.',
       inputSchema: {
         type: 'object',
         properties: {},

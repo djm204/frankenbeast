@@ -29,6 +29,7 @@ export interface InitOptions {
   hooks: boolean;
   servers?: FbeastServer[];
   client?: McpClient;
+  mode?: 'standard' | 'proxy';
   /** Inject spawn for testing the codex path. */
   spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
 }
@@ -40,6 +41,7 @@ export function runInit(options: InitOptions): void {
     hooks,
     servers = ALL_SERVERS,
     client = 'claude',
+    mode = 'standard',
     spawn: spawnFn = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf-8' }),
   } = options;
 
@@ -48,11 +50,11 @@ export function runInit(options: InitOptions): void {
   store.close();
 
   if (client === 'codex') {
-    initCodex({ root, servers, hooks, config, spawnFn });
+    initCodex({ root, servers, hooks, config, spawnFn, mode });
     return;
   }
 
-  initJsonClient({ root, claudeDir, hooks, servers, client, config });
+  initJsonClient({ root, claudeDir, hooks, servers, client, config, mode });
 }
 
 // ─── Claude / Gemini (settings.json-based clients) ───────────────────────────
@@ -64,8 +66,9 @@ function initJsonClient(options: {
   servers: FbeastServer[];
   client: 'claude' | 'gemini';
   config: FbeastConfig;
+  mode: 'standard' | 'proxy';
 }): void {
-  const { root, claudeDir, hooks, servers, client, config } = options;
+  const { root, claudeDir, hooks, servers, client, config, mode } = options;
 
   mkdirSync(claudeDir, { recursive: true });
 
@@ -88,8 +91,12 @@ function initJsonClient(options: {
   // Add MCP server entries
   const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = join(root, '.fbeast', 'beast.db');
-  for (const srv of servers) {
-    mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
+  if (mode === 'proxy') {
+    mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: ['--db', dbPath] };
+  } else {
+    for (const srv of servers) {
+      mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
+    }
   }
   settings['mcpServers'] = mcpServers;
 
@@ -114,7 +121,7 @@ function initJsonClient(options: {
   console.log(`  Config:     ${config.configPath}`);
   console.log(`  Database:   ${config.dbPath}`);
   console.log(`  MCP config: ${settingsPath}`);
-  console.log(`  Servers:    ${servers.join(', ')}`);
+  console.log(`  Servers:    ${mode === 'proxy' ? 'fbeast-proxy (proxy mode)' : servers.join(', ')}`);
   if (hooks) console.log(`  Hooks:      enabled (${client})`);
 }
 
@@ -126,23 +133,31 @@ function initCodex(options: {
   hooks: boolean;
   config: FbeastConfig;
   spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
+  mode: 'standard' | 'proxy';
 }): void {
-  const { root, servers, hooks, config, spawnFn } = options;
+  const { root, servers, hooks, config, spawnFn, mode } = options;
   const dbPath = join(root, '.fbeast', 'beast.db');
 
   // Register MCP servers via codex mcp add
-  const failed: string[] = [];
-  for (const srv of servers) {
-    const name = `fbeast-${srv}`;
-    const result = spawnFn('codex', ['mcp', 'add', name, '--', SERVER_BIN_MAP[srv], '--db', dbPath]);
+  if (mode === 'proxy') {
+    const result = spawnFn('codex', ['mcp', 'add', 'fbeast-proxy', '--', 'fbeast-proxy', '--db', dbPath]);
     if (result.status !== 0) {
-      failed.push(name);
-      console.error(`  ✗ Failed to register ${name}: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
+      throw new Error(`fbeast init: failed to register fbeast-proxy with codex: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
     }
-  }
+  } else {
+    const failed: string[] = [];
+    for (const srv of servers) {
+      const name = `fbeast-${srv}`;
+      const result = spawnFn('codex', ['mcp', 'add', name, '--', SERVER_BIN_MAP[srv], '--db', dbPath]);
+      if (result.status !== 0) {
+        failed.push(name);
+        console.error(`  ✗ Failed to register ${name}: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
+      }
+    }
 
-  if (failed.length > 0) {
-    throw new Error(`fbeast init: failed to register ${failed.length} server(s) with codex: ${failed.join(', ')}`);
+    if (failed.length > 0) {
+      throw new Error(`fbeast init: failed to register ${failed.length} server(s) with codex: ${failed.join(', ')}`);
+    }
   }
 
   // Drop instructions into AGENTS.md
@@ -160,7 +175,7 @@ function initCodex(options: {
   console.log(`  Config:   ${config.configPath}`);
   console.log(`  Database: ${config.dbPath}`);
   console.log(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
-  console.log(`  Servers:  ${servers.join(', ')} (registered via codex mcp add)`);
+  console.log(`  Servers:  ${mode === 'proxy' ? 'fbeast-proxy (proxy mode, registered via codex mcp add)' : `${servers.join(', ')} (registered via codex mcp add)`}`);
   if (hooks) console.log(`  Hooks:    enabled (codex hooks.json)`);
 }
 
