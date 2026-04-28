@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -20,11 +20,14 @@ const SERVER_BINS = [
 ] as const;
 
 beforeAll(() => {
+  if (process.env['CI'] === 'true' && existsSync(join(DIST_ROOT, 'beast.js'))) {
+    return;
+  }
   execFileSync('npm', ['run', 'build'], {
     cwd: PACKAGE_ROOT,
     stdio: 'pipe',
   });
-});
+}, 60_000);
 
 describe('declared MCP binaries', () => {
   it('declares a real fbeast-hook binary', () => {

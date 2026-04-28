@@ -39,6 +39,11 @@ function openReadDb(path: string): Database.Database {
   return new Database(path, { readonly: true });
 }
 
+function isCodexBinaryReachable(): boolean {
+  const result = spawnSync('codex', ['--version'], { encoding: 'utf-8' });
+  return result.status === 0 && /codex/i.test(result.stdout);
+}
+
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
 describe('full-cycle integration', () => {
@@ -53,7 +58,9 @@ describe('full-cycle integration', () => {
 
   // ── Prerequisite ──────────────────────────────────────────────────────────
 
-  it('codex binary is reachable', () => {
+  const codexIt = isCodexBinaryReachable() ? it : it.skip;
+
+  codexIt('codex binary is reachable', () => {
     const result = spawnSync('codex', ['--version'], { encoding: 'utf-8' });
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/codex/i);
