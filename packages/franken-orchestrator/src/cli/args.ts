@@ -11,9 +11,7 @@ export type Subcommand =
   | 'chat-server'
   | 'network'
   | 'skill'
-  | 'provider'
   | 'security'
-  | 'dashboard'
   | undefined;
 
 export type NetworkAction =
@@ -43,7 +41,6 @@ export type BeastAction =
   | undefined;
 
 export type SkillAction = 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
-export type ProviderAction = 'list' | 'add' | 'remove' | 'test' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 
 export interface CliArgs {
@@ -56,8 +53,6 @@ export interface CliArgs {
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
   skillTarget?: string | undefined;
-  providerAction?: ProviderAction;
-  providerTarget?: string | undefined;
   securityAction?: SecurityAction;
   securityTarget?: string | undefined;
   baseDir: string;
@@ -95,11 +90,10 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'provider', 'security', 'dashboard']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
-const VALID_PROVIDER_ACTIONS = new Set(['list', 'add', 'remove', 'test']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
 
 const USAGE = `
@@ -116,9 +110,7 @@ Subcommands:
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
   network                 Manage Frankenbeast request-serving services
   skill                   Manage MCP skill plugins
-  provider                Manage LLM providers
   security                View or change security profile
-  dashboard               Launch the dashboard server
 
 Options:
   --base-dir <path>       Project root (default: cwd)
@@ -185,12 +177,6 @@ Skill Commands:
   skill disable <name>                Disable a skill
   skill info <name>                   Show skill details (MCP config, tools)
 
-Provider Commands:
-  provider list                       List configured providers
-  provider add                        Show config instructions
-  provider remove                     Show config instructions
-  provider test [name]                Test provider availability
-
 Security Commands:
   security status                     Show current security profile settings
   security set <profile>              Set security profile (strict|standard|permissive)
@@ -225,8 +211,6 @@ Examples:
   frankenbeast skill add my-tool            # scaffold a new skill
   frankenbeast skill enable my-tool         # enable a skill
   frankenbeast skill info my-tool           # show skill details
-  frankenbeast provider list                # list configured providers
-  frankenbeast provider test                # test provider availability
   frankenbeast security status              # show security profile
   frankenbeast security set strict          # change security profile
 `.trim();
@@ -241,7 +225,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network' | 'skill' | 'provider' | 'security' | 'dashboard';
+    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network' | 'skill' | 'security';
     flagArgs = argv.slice(1);
   }
 
@@ -299,8 +283,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let beastTarget: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
-  let providerAction: ProviderAction;
-  let providerTarget: string | undefined;
   let securityAction: SecurityAction;
   let securityTarget: string | undefined;
 
@@ -331,15 +313,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       skillAction = actionCandidate as SkillAction;
     }
     skillTarget = positionals[1];
-  } else if (subcommand === 'provider') {
-    const actionCandidate = positionals[0];
-    if (actionCandidate !== undefined) {
-      if (!VALID_PROVIDER_ACTIONS.has(actionCandidate)) {
-        throw new TypeError(`Unknown provider action: ${actionCandidate}`);
-      }
-      providerAction = actionCandidate as ProviderAction;
-    }
-    providerTarget = positionals[1];
   } else if (subcommand === 'security') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
@@ -355,8 +328,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
         throw new TypeError(`Invalid security profile '${securityTarget}'. Valid: strict, standard, permissive`);
       }
     }
-  } else if (subcommand === 'dashboard') {
-    // dashboard has no actions — just starts the server
   } else if (positionals.length > 0) {
     throw new TypeError(`Unexpected argument '${positionals[0]}'. This command does not take positional arguments`);
   }
@@ -417,8 +388,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     networkSet: values.set,
     skillAction,
     skillTarget,
-    providerAction,
-    providerTarget,
     securityAction,
     securityTarget,
     baseDir: values['base-dir'] ?? process.cwd(),

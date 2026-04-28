@@ -295,12 +295,6 @@ export async function main(): Promise<void> {
     return;
   }
 
-  if (args.subcommand === 'provider') {
-    console.log('Provider management is not yet wired to the CLI.');
-    console.log('Configure providers in .fbeast/config.json or run-config.yaml.');
-    return;
-  }
-
   if (args.subcommand === 'security') {
     try {
       await handleSecurityCommand({
@@ -312,12 +306,6 @@ export async function main(): Promise<void> {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;
     }
-    return;
-  }
-
-  if (args.subcommand === 'dashboard') {
-    console.log('Dashboard is not yet available as a standalone command.');
-    console.log('Use "frankenbeast chat-server" to start the web UI.');
     return;
   }
 
@@ -448,6 +436,7 @@ export async function main(): Promise<void> {
     noPr: args.noPr,
     verbose: args.verbose,
     reset: args.reset,
+    resume: args.resume,
     io,
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),

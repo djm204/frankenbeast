@@ -366,6 +366,46 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
+  it('passes the run --resume flag into Session config', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'run',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: true,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      entryPhase: 'execute',
+      resume: true,
+    }));
+  });
+
   it('dispatches chat-server without creating a Session or REPL', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockParseArgs.mockReturnValue({

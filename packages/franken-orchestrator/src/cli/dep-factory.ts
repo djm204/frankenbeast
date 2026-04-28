@@ -45,6 +45,7 @@ export interface CliDepOptions {
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
+  resume?: boolean | undefined;
   planDirOverride?: string | undefined;
   /** When provided, issue-specific deps will be created. */
   issueIO?: ReviewIO | undefined;
@@ -194,6 +195,13 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
     }
     for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
+      try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  } else if (!options.resume) {
+    for (const f of [checkpointFile]) {
+      try { if (existsSync(f)) unlinkSync(f); } catch {}
+    }
+    for (const dir of [paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
       try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   }
@@ -443,30 +451,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...(runConfigOverrides ? { runConfigOverrides } : {}),
   });
 
-  let consolidated: ConsolidatedDeps;
-  try {
-    consolidated = createBeastDeps(beastConfig, existingDeps);
-  } catch (error) {
-    logger.warn(
-      `createBeastDeps failed, falling back to passthrough deps: ${error instanceof Error ? error.message : String(error)}`,
-      'dep-factory',
-    );
-    // Fallback: passthrough stubs for modules that createBeastDeps would provide
-    consolidated = {
-      firewall: { runPipeline: async (input) => ({ sanitizedText: input, violations: [], blocked: false }) },
-      skills: { hasSkill: () => false, getAvailableSkills: () => [], execute: async () => { throw new Error('Skills unavailable'); } },
-      memory: { frontload: async () => {}, getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }), recordTrace: async () => {} },
-      heartbeat: { pulse: async () => ({ improvements: [], techDebt: [], summary: '' }) },
-      planner: stubPlanner,
-      observer: observerBridge,
-      critique,
-      governor,
-      logger,
-      clock: () => new Date(),
-      ...(prCreator ? { prCreator } : {}),
-      ...(runConfigOverrides ? { runConfigOverrides } : {}),
-    } as ConsolidatedDeps;
-  }
+  const consolidated = createBeastDeps(beastConfig, existingDeps);
 
   // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']
   // which the beast loop validates via hasSkill(). SkillManagerAdapter doesn't know about cli:*
