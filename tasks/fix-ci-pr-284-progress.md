@@ -7,7 +7,7 @@
 - [x] Reproduce the failing test locally.
 - [x] Apply the minimal fix without touching unrelated audit work.
 - [x] Run focused verification.
-- [ ] Commit and push the CI fix to `fix/launch-parity-gaps`.
+- [x] Commit and push the CI fix to `fix/launch-parity-gaps`.
 
 ## Notes
 
@@ -23,3 +23,7 @@
 - CI-shaped local reproduction with `CI=true` and `codex` absent from `PATH`: same two integration files passed, with the Codex prerequisite test skipped.
 - `cd packages/franken-mcp-suite && npm test`
 - `npx turbo run build test lint --filter=@fbeast/mcp-suite`
+
+## Review
+
+- 2026-04-28: Pushed `fix(mcp-suite): make integration tests ci-safe` to PR 284.
