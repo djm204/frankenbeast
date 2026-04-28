@@ -1,5 +1,34 @@
 # fbeast dual-mode launch
 
+## Current Batch: Agent Systems Audit
+
+- [x] Check for a matching progress document and create it if missing.
+- [ ] Verify secure code execution from source and tests, not docs.
+- [ ] Verify deterministic state, checkpointing, replay, and memory from source and tests.
+- [ ] Verify identity boundaries, scoped permissions, and HITL enforcement from source and tests.
+- [ ] Verify observer/monitor pattern behavior from source and tests.
+- [ ] Document legitimate capabilities, gaps, and verification evidence.
+
+## Current Batch: Context Remaining Question
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Inspect the local Codex CLI/docs for any built-in context-remaining indicator.
+- [x] Answer with the supported way to check context remaining, or state clearly if there is no exposed indicator.
+
+## Current Batch: Todo Crash Investigation
+
+- [x] Check for an existing task-specific progress document and create one if missing.
+- [x] Inspect `tasks/todo.md`, active progress docs, and current worktree state for signs of dropped work.
+- [x] Correlate unchecked todo items with actual code/doc changes to identify which task was left half-baked.
+- [x] Record the conclusion and evidence in the progress doc and review notes.
+
+## Current Batch: Progress Doc Rule
+
+- [x] Check the repo for an existing progress-doc convention and create a task-specific progress file for this work.
+- [x] Update persistent agent guidance so every assigned task requires a matching `tasks/<name-of-task>-progress.md` checklist.
+- [x] Record the new rule in `tasks/lessons.md`.
+- [x] Re-read the changed files, update the new progress doc with final status, and record review notes.
+
 - [x] Chunk 1: MCP contract and startup smoke harness
 - [x] Chunk 2: memory/observer/governor adapters
 - [x] Chunk 3: planner/critique adapters
@@ -44,6 +73,8 @@
 - [x] Add focused `franken-mcp-suite` regression tests that prove denied Codex pre-hooks return Codex-formatted deny JSON with exit `2`, and Codex post-hooks stay silent on stdout.
 - [x] Implement the minimal hook-script fix in the generator and repair the local generated Codex scripts.
 - [x] Re-run focused `franken-mcp-suite` tests plus live shell-script replays and record the verification results.
+- [x] Add the missing allow-path regression proving successful Codex `PreToolUse` hooks stay silent.
+- [x] Remove unsupported Codex allow output from the generated and live repo-local pre-tool scripts, then re-verify allow/deny/post behavior.
 
 ## Current Batch: Codex Hook PR Publish
 
@@ -51,15 +82,23 @@
 - [ ] Apply only the hook protocol source/test changes in the clean branch and re-run focused verification there.
 - [ ] Commit the isolated patch atomically, push it, and open a draft PR.
 
+## Current Batch: MCP Suite Proxy Recovery
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Read the dropped-task forensics and proxy MCP implementation plan.
+- [x] Verify the interrupted proxy MCP implementation state with focused tests.
+- [x] Complete missing proxy MCP source, CLI, uninstall, and docs work.
+- [x] Re-run focused `franken-mcp-suite` tests plus typecheck and record evidence.
+
 ## Current Batch: Beast Mode Hardening
 
 - [x] Write and approve the beast-mode hardening design spec covering the full live `franken-orchestrator` surface.
 - [x] Write a concrete implementation plan for in-place beast hardening with TDD-first execution chunks.
-- [ ] Close config and flag no-op gaps on the live beast CLI surface.
-- [ ] Replace permissive module fallback behavior on required beast paths with real implementations or hard failures.
-- [ ] Implement explicit, tested resume semantics for the main beast `run` path.
-- [ ] Harden command-family execution paths for `run`, `issues`, `chat`, `chat-server`, `skill`, `security`, `network`, and `beasts`.
-- [ ] Make the beast verification matrix authoritative with passing focused integration and E2E coverage.
+- [x] Close config and flag no-op gaps on the live beast CLI surface.
+- [x] Replace permissive module fallback behavior on required beast paths with real implementations or hard failures.
+- [x] Implement explicit, tested resume semantics for the main beast `run` path.
+- [x] Harden command-family execution paths for `run`, `issues`, `chat`, `chat-server`, `skill`, `security`, `network`, and `beasts`.
+- [x] Make the beast verification matrix authoritative with passing focused integration and E2E coverage.
 
 ## Current Batch: Live CLI Benchmark Pipeline Design
 
@@ -85,6 +124,10 @@
 
 ## Review
 
+- 2026-04-27: Crash-forensics review found two half-baked threads. First, a proxy-mode implementation was left mid-flight in `packages/franken-mcp-suite` and matches `docs/superpowers/plans/2026-04-21-fbeast-proxy-mcp-server.md` almost one-for-one: new `fbeast-proxy` server/registry files, `init --mode=proxy`, uninstall cleanup, tests, package bin wiring, and docs updates are all dirty, but no current batch in `tasks/todo.md` tracks them. Second, the unchecked Beast Mode Hardening batch has already started: `packages/franken-orchestrator/src/cli/args.ts`, `run.ts`, and the deleted `provider`/`dashboard` CLI files/tests show the "close config and flag no-op gaps" subtask in progress, with `docs/guides/run-cli-beast.md` likely belonging to the same interrupted hardening/docs thread.
+- 2026-04-27: Added a non-negotiable progress-document workflow rule. Future tasks must immediately check for `tasks/<name-of-task>-progress.md`, create it if missing, and keep it updated as the persistent acceptance-criteria checklist.
+- 2026-04-27: MCP Suite Proxy Recovery completed from the dropped-task forensics. Proxy mode is implemented in `packages/franken-mcp-suite`, documented, and covered by startup smoke verification that `fbeast-proxy` exposes only `search_tools` and `execute_tool`. Verified via `cd packages/franken-mcp-suite && npm test -- --run src/shared/tool-registry.test.ts src/servers/proxy.test.ts src/cli/init.test.ts src/cli/uninstall.test.ts`, `cd packages/franken-mcp-suite && npm test -- --run src/integration/server-startup.integration.test.ts src/shared/tool-registry.test.ts src/servers/proxy.test.ts src/cli/init.test.ts src/cli/uninstall.test.ts`, `cd packages/franken-mcp-suite && npm run typecheck`, and `cd packages/franken-mcp-suite && npm test` (23 files, 106 tests).
+- 2026-04-27: Beast Mode Hardening recovery completed in `packages/franken-orchestrator`. The recovered work removes advertised but non-functional `provider`/`dashboard` top-level CLI commands from the live parser/help surface, adds Beast CLI `resume`/`delete` parity, makes consolidated dependency construction fail explicitly instead of falling back to permissive stubs, gives `frankenbeast run --resume` tested semantics distinct from cold runs, repairs chat-to-Beast tracked-agent wiring tests, and documents the authoritative Beast verification matrix in `docs/guides/run-cli-beast.md`. Verified via `cd packages/franken-orchestrator && npm test -- tests/unit/cli/args.test.ts tests/unit/cli/run.test.ts tests/integration/cli/dep-factory-wiring.test.ts tests/unit/cli/beast-cli.test.ts tests/integration/beasts/agent-routes.test.ts tests/unit/cli/skill-cli.test.ts tests/unit/cli/security-cli.test.ts tests/unit/cli/network-run.test.ts tests/unit/cli/session-issues.test.ts tests/integration/chat/chat-routes.test.ts tests/integration/chat/ws-chat-server.test.ts tests/integration/network/network-cli.test.ts tests/integration/issues/issues-e2e.test.ts tests/e2e/smoke.test.ts` (14 files, 194 tests), `cd packages/franken-orchestrator && npm run typecheck`, and `cd packages/franken-orchestrator && npm test` (213 files passed, 1 skipped; 2085 tests passed, 1 skipped).
 - 2026-04-12: Identified two unresolved actionable PR 279 review threads via GitHub connector plus thread-aware `fetch_comments.py`: re-chain `observer-adapter` audit hashes with `parent_hash`, and prevent `fbeast uninstall` from hanging on EOF / non-interactive stdin.
 - 2026-04-12: TDD red phase for PR 279 review comments reproduced both issues in `packages/franken-mcp-suite` via `npm test -- --run src/adapters/observer-adapter.test.ts src/cli/uninstall.test.ts`; failures showed unchanged second-entry audit hashes after history mutation and uninstall timing out on closed stdin.
 - 2026-04-12: PR 279 review comment fixes verified in `packages/franken-mcp-suite` via:
@@ -118,6 +161,13 @@
 - 2026-04-25: Hook protocol fixes verified via:
   `cd packages/franken-mcp-suite && npm test -- --run src/cli/hook-scripts.test.ts src/cli/init.test.ts src/integration/hook.integration.test.ts`
   `cd packages/franken-mcp-suite && npm run typecheck`
+  `printf '%s' '{"tool_name":"rm -rf /tmp/nope","tool_input":{},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-pre-tool.sh; printf 'status=%s\n' $?`
+  `printf '%s' '{"tool_name":"exec_command","tool_response":{"ok":true},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-post-tool.sh; printf 'status=%s\n' $?`
+- 2026-04-26: Fresh live failure showed this was not an MCP server reload problem. Codex rejected the successful `PreToolUse` response itself: `error: PreToolUse hook returned unsupported permissionDecision:allow`. The generated and local repo pre-tool scripts were still printing `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}` on success.
+- 2026-04-26: Added a red-phase regression in `packages/franken-mcp-suite/src/cli/hook-scripts.test.ts` proving allowed Codex pre-tool hooks must exit `0` with no stdout. The test failed exactly because the script emitted the unsupported allow payload.
+- 2026-04-26: Allow-path fix verified via:
+  `cd packages/franken-mcp-suite && npm test -- --run src/cli/hook-scripts.test.ts src/cli/init.test.ts src/integration/hook.integration.test.ts`
+  `printf '%s' '{"tool_name":"exec_command","tool_input":{"cmd":"sed -n 1,10p file"},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-pre-tool.sh; printf 'status=%s\n' $?`
   `printf '%s' '{"tool_name":"rm -rf /tmp/nope","tool_input":{},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-pre-tool.sh; printf 'status=%s\n' $?`
   `printf '%s' '{"tool_name":"exec_command","tool_response":{"ok":true},"session_id":"sess-1"}' | ./.codex/hooks/fbeast-codex-post-tool.sh; printf 'status=%s\n' $?`
 - 2026-04-26: Approved the live benchmark boundary for real `Codex CLI` and real `Gemini CLI` only, with recurring A/B runs that compare pure baseline client behavior against the same task with Frankenbeast installed.
