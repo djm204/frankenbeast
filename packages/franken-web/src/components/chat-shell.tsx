@@ -18,6 +18,8 @@ import {
 import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import { BeastsPage } from '../pages/beasts-page';
+import { AnalyticsApiClient } from '../lib/analytics-api';
+import { AnalyticsPage } from '../pages/analytics-page';
 
 export interface ChatShellProps {
   baseUrl: string;
@@ -34,7 +36,7 @@ const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean
   { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
   { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
   { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands', live: false },
-  { id: 'analytics', label: 'Analytics', summary: 'Usage and routing breakdowns are staged next', live: false },
+  { id: 'analytics', label: 'Analytics', summary: 'Observer, governor, security, and cost telemetry', live: true },
   { id: 'costs', label: 'Costs', summary: 'Token and provider reporting will live here', live: false },
   { id: 'safety', label: 'Safety', summary: 'Approvals, policy, and injection telemetry', live: false },
   { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
@@ -132,6 +134,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   });
 
   const chatClient = useMemo(() => new ChatApiClient(baseUrl), [baseUrl]);
+  const analyticsClient = useMemo(() => new AnalyticsApiClient(baseUrl), [baseUrl]);
   const beastClient = useMemo(
     () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),
     [baseUrl, beastOperatorToken],
@@ -538,6 +541,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             services={networkStatus.services}
             status={networkStatus}
           />
+        ) : route === 'analytics' ? (
+          <AnalyticsPage client={analyticsClient} />
         ) : (
           <main className="chat-page">
             <PlaceholderPage routeId={route} />
