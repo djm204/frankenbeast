@@ -6,8 +6,8 @@
 - [x] Implement the minimal fixes for the actionable review threads.
 - [x] Run targeted backend/frontend verification and review the diff.
 - [x] Record final results and remaining review-thread status.
-- [ ] Commit and push the review-fix update to PR #286.
-- [ ] Reply to and resolve the addressed GitHub review threads.
+- [x] Commit and push the review-fix update to PR #286.
+- [x] Reply to and resolve the addressed GitHub review threads.
 
 ## Review
 
@@ -24,3 +24,5 @@
   - `npm run build` in `packages/franken-orchestrator`
   - `npm run build` in `packages/franken-web`
 - 2026-04-29: Re-ran the same focused backend/frontend tests, typechecks, and builds before publishing; all passed.
+- 2026-04-29: Committed and pushed `52dff7f` (`fix(web): address analytics review feedback`) to `origin/fbeast/obs-dashboard`.
+- 2026-04-29: Replied to and resolved all three PR #286 review threads. Follow-up fetch confirmed all three threads have `isResolved: true` and no pending review replies remain.
