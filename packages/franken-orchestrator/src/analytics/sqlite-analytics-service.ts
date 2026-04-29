@@ -111,13 +111,13 @@ class SqliteAnalyticsService implements AnalyticsService {
       if (isAbnormal(event.outcome)) {
         current.failureCount += 1;
       }
-      if (event.timestamp > current.lastActivityAt) {
+      if (compareTimestampsDesc(event.timestamp, current.lastActivityAt) < 0) {
         current.lastActivityAt = event.timestamp;
       }
       sessions.set(event.sessionId, current);
     }
 
-    return [...sessions.values()].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+    return [...sessions.values()].sort((a, b) => compareTimestampsDesc(a.lastActivityAt, b.lastActivityAt));
   }
 
   async listEvents(request: AnalyticsPageRequest): Promise<AnalyticsEventPage> {
@@ -141,7 +141,7 @@ class SqliteAnalyticsService implements AnalyticsService {
   private filteredEvents(filters: AnalyticsFilters): AnalyticsEvent[] {
     return this.allEvents()
       .filter((event) => matchesFilters(event, filters))
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      .sort((a, b) => compareTimestampsDesc(a.timestamp, b.timestamp));
   }
 
   private allEvents(): AnalyticsEvent[] {
@@ -153,7 +153,7 @@ class SqliteAnalyticsService implements AnalyticsService {
       ...this.readBeastEvents(),
     ];
 
-    return events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return events.sort((a, b) => compareTimestampsDesc(a.timestamp, b.timestamp));
   }
 
   private readAuditRows(): AuditRow[] {
@@ -389,10 +389,22 @@ function matchesFilters(event: AnalyticsEvent, filters: AnalyticsFilters): boole
     }
   }
   const cutoff = cutoffFor(filters.timeWindow);
-  if (cutoff && Date.parse(event.timestamp) < cutoff.getTime()) {
+  if (cutoff && parseAnalyticsTimestamp(event.timestamp) < cutoff.getTime()) {
     return false;
   }
   return true;
+}
+
+function compareTimestampsDesc(left: string, right: string): number {
+  const delta = parseAnalyticsTimestamp(right) - parseAnalyticsTimestamp(left);
+  return delta === 0 ? right.localeCompare(left) : delta;
+}
+
+function parseAnalyticsTimestamp(timestamp: string): number {
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(timestamp)
+    ? `${timestamp.replace(' ', 'T')}Z`
+    : timestamp;
+  return Date.parse(normalized);
 }
 
 function cutoffFor(timeWindow: string | undefined): Date | null {

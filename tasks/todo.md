@@ -1,5 +1,28 @@
 # fbeast dual-mode launch
 
+## Current Batch: PR 286 Review Comments
+
+- [x] Fetch thread-aware review comments for PR #286 and identify unresolved actionable feedback.
+- [x] Add backend regression tests for cross-format timestamp ordering and UTC SQLite cutoff filtering.
+- [x] Add frontend regression test for partial analytics endpoint failures.
+- [x] Implement the minimal fixes for the actionable review threads.
+- [x] Run targeted backend/frontend verification and review the diff.
+- [x] Record final results and remaining review-thread status.
+
+## Review
+
+- Addressed all unresolved actionable PR #286 review threads:
+  - Analytics events and session last-activity now sort mixed SQLite and ISO timestamps by parsed epoch time.
+  - Time-window filtering now treats SQLite `YYYY-MM-DD HH:MM:SS` timestamps as UTC before cutoff comparisons.
+  - The analytics page now applies successful summary/session/event responses independently and reports failed sections without blanking successful sections.
+- Verification passed:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+
 ## Current Batch: Analytics Dashboard Release Commit
 
 - [x] Confirm the analytics dashboard implementation worktree and release-please trigger requirements.

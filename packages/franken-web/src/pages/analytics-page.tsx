@@ -45,19 +45,25 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     setIsLoading(true);
     setLoadError(null);
 
-    void Promise.all([
+    void Promise.allSettled([
       client.fetchSummary(filters),
       client.fetchSessions(filters),
       client.fetchEvents(filters),
-    ]).then(([nextSummary, nextSessions, nextEvents]) => {
+    ]).then(([summaryResult, sessionsResult, eventsResult]) => {
       if (cancelled) return;
-      setSummary(nextSummary);
-      setSessions(nextSessions);
-      setEventPage(nextEvents);
-    }).catch((error) => {
-      if (!cancelled) {
-        setLoadError(error instanceof Error ? error.message : 'Unable to load analytics.');
+      const errors = [summaryResult, sessionsResult, eventsResult]
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason instanceof Error ? result.reason.message : 'Unable to load analytics.');
+      if (summaryResult.status === 'fulfilled') {
+        setSummary(summaryResult.value);
       }
+      if (sessionsResult.status === 'fulfilled') {
+        setSessions(sessionsResult.value);
+      }
+      if (eventsResult.status === 'fulfilled') {
+        setEventPage(eventsResult.value);
+      }
+      setLoadError(errors.length > 0 ? errors.join('; ') : null);
     }).finally(() => {
       if (!cancelled) {
         setIsLoading(false);

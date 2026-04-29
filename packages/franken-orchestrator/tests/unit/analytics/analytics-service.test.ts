@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createSqliteAnalyticsService } from '../../../src/analytics/sqlite-analytics-service.js';
+import type { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 
 function seedFbeastDb(dbPath: string) {
   const db = new Database(dbPath);
@@ -88,8 +89,16 @@ function seedFbeastDb(dbPath: string) {
 
 describe('createSqliteAnalyticsService', () => {
   let workDir: string | undefined;
+  let previousTz: string | undefined;
 
   afterEach(async () => {
+    vi.useRealTimers();
+    if (previousTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTz;
+    }
+    previousTz = undefined;
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -164,5 +173,79 @@ describe('createSqliteAnalyticsService', () => {
       severity: 'warning',
     });
     expect(detail?.raw).toMatchObject({ verdict: 'flagged' });
+  });
+
+  it('sorts mixed SQLite and ISO event timestamps by chronological time', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE cost_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(`
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('session-late', 'gpt-5.4', 1, 1, 0.01, '2026-04-28 23:59:59');
+    db.close();
+
+    const runs = {
+      listRuns: () => [{
+        id: 'run-early',
+        definitionId: 'review-bot',
+        definitionVersion: 1,
+        status: 'failed',
+        executionMode: 'process',
+        configSnapshot: {},
+        dispatchedBy: 'dashboard',
+        dispatchedByUser: 'operator',
+        createdAt: '2026-04-28T00:00:00.000Z',
+        attemptCount: 1,
+        latestExitCode: 1,
+      }],
+    } satisfies Pick<BeastRunService, 'listRuns'>;
+
+    const service = createSqliteAnalyticsService({ dbPath, runs: runs as BeastRunService });
+    const result = await service.listEvents({ timeWindow: 'all' });
+
+    expect(result.events.map((event) => event.id)).toEqual(['cost:1', 'beast-run:run-early']);
+  });
+
+  it('treats timezone-less SQLite timestamps as UTC for time-window cutoffs', async () => {
+    previousTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-28T12:00:00.000Z'));
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE cost_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(`
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('session-old', 'gpt-5.4', 1, 1, 0.01, '2026-04-27 08:30:00');
+    db.close();
+
+    const service = createSqliteAnalyticsService({ dbPath });
+    const result = await service.listEvents({ timeWindow: '24h' });
+
+    expect(result.events).toEqual([]);
   });
 });

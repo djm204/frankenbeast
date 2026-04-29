@@ -109,4 +109,15 @@ describe('AnalyticsPage', () => {
     expect(screen.getByText('"decision": "denied"')).toBeTruthy();
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
   });
+
+  it('keeps successful analytics sections visible when one endpoint fails', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchSessions).mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<AnalyticsPage client={client} />);
+
+    expect(await screen.findByText('fbeast_observer_log')).toBeTruthy();
+    expect(screen.getByText('Denied destructive command')).toBeTruthy();
+    expect(screen.getByText('HTTP 503')).toBeTruthy();
+  });
 });
