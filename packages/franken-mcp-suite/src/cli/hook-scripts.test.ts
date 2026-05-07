@@ -63,12 +63,12 @@ function installFakeHook(root: string): string {
   return binDir;
 }
 
-function installUnavailableTimeout(binDir: string): void {
+function installTimeoutExit(binDir: string, status: number): void {
   const timeoutPath = join(binDir, 'timeout');
   writeFileSync(timeoutPath, [
     '#!/usr/bin/env bash',
-    "printf 'timeout: command not found\\n' >&2",
-    'exit 127',
+    `printf 'timeout exited ${status}\\n' >&2`,
+    `exit ${status}`,
     '',
   ].join('\n'));
   chmodSync(timeoutPath, 0o755);
@@ -218,7 +218,24 @@ describe('Codex hook scripts', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
-    installUnavailableTimeout(binDir);
+    installTimeoutExit(binDir, 127);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it.each([125, 126])('fails open when timeout exits %s for pre-tool governance', (status) => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, status);
     const { preTool } = writeHookScripts(root, 'codex');
 
     const result = runScript(preTool, {
@@ -306,7 +323,23 @@ describe('Gemini hook scripts', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
-    installUnavailableTimeout(binDir);
+    installTimeoutExit(binDir, 127);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+    }, binDir);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it.each([125, 126])('fails open when timeout exits %s for before-tool governance', (status) => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, status);
     const { preTool } = writeHookScripts(root, 'gemini');
 
     const result = runScript(preTool, {

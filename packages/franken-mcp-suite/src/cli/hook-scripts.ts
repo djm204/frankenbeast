@@ -62,9 +62,11 @@ RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$
 STATUS=$?
 set -e
 
-if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ] || [ "$STATUS" -eq 127 ]; then
-  exit 0
-fi
+case "$STATUS" in
+  124|125|126|127|137)
+    exit 0
+    ;;
+esac
 
 if [ "$STATUS" -ne 0 ]; then
   SAFE_RESULT=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
@@ -133,9 +135,11 @@ RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$
 STATUS=$?
 set -e
 
-if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ] || [ "$STATUS" -eq 127 ]; then
-  exit 0
-fi
+case "$STATUS" in
+  124|125|126|127|137)
+    exit 0
+    ;;
+esac
 
 if [ "$STATUS" -ne 0 ]; then
   SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
