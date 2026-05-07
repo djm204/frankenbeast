@@ -43,9 +43,8 @@ export function isJsonClient(client: McpClient): client is 'claude' | 'gemini' {
 }
 
 /**
- * Detects which MCP client is present. Checks project-level dirs for
- * claude/gemini first, then home-level. Falls back to codex if the
- * codex binary is reachable, otherwise defaults to 'claude'.
+ * Detects which MCP client is present. Checks project-level JSON-client dirs
+ * first, then project-level Codex, then home-level fallbacks.
  */
 export function detectMcpClient(input: {
   cwd: string;
@@ -53,12 +52,12 @@ export function detectMcpClient(input: {
   exists: (path: string) => boolean;
   which?: (bin: string) => string | undefined;
 }): McpClient {
-  if (input.exists(join(input.cwd, '.codex'))) return 'codex';
-
   // Project-level dir wins
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.cwd, dir))) return client;
   }
+  if (input.exists(join(input.cwd, '.codex'))) return 'codex';
+
   // Home-level dir next
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.homeDir, dir))) return client;

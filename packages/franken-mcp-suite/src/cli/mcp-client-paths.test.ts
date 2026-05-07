@@ -20,4 +20,21 @@ describe('MCP client detection', () => {
 
     expect(client).toBe('codex');
   });
+
+  it('prefers project JSON clients over project Codex config', () => {
+    const cwd = '/project';
+    const homeDir = '/home/user';
+    const existing = new Set([
+      join(cwd, '.codex'),
+      join(cwd, '.gemini'),
+    ]);
+
+    const client = detectMcpClient({
+      cwd,
+      homeDir,
+      exists: (path) => existing.has(path),
+    });
+
+    expect(client).toBe('gemini');
+  });
 });
