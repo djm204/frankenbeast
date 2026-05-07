@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/djm204/frankenbeast/compare/v0.34.0...v0.35.0) (2026-05-07)
+
+
+### Features
+
+* **web:** add observer analytics dashboard ([#286](https://github.com/djm204/frankenbeast/issues/286)) ([a375ec3](https://github.com/djm204/frankenbeast/commit/a375ec3c484f03bb67260050931609332d62bdd8))
+
 ## [0.34.0](https://github.com/djm204/frankenbeast/compare/v0.33.0...v0.34.0) (2026-04-28)
 
 
