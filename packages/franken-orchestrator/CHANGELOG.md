@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.32.0...franken-orchestrator-v0.33.0) (2026-05-07)
+
+
+### Features
+
+* **web:** add observer analytics dashboard ([#286](https://github.com/djm204/frankenbeast/issues/286)) ([a375ec3](https://github.com/djm204/frankenbeast/commit/a375ec3c484f03bb67260050931609332d62bdd8))
+
 ## [0.32.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.31.0...franken-orchestrator-v0.32.0) (2026-04-28)
 
 
