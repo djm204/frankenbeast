@@ -353,6 +353,48 @@ npm run test:all
 
 See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup guide including Docker services.
 
+## Run the Dashboard with MCP Mode
+
+Use this path when you installed `@fbeast/mcp-suite` with `fbeast init` and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
+
+From the project where you initialized MCP:
+
+```bash
+# One-time MCP setup. Add --hooks if you want tool-call governance and audit logs.
+npx fbeast init --hooks
+```
+
+From this Frankenbeast repo, start the dashboard backend against that same project root:
+
+```bash
+npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project
+```
+
+If you initialized MCP in this repo, omit `--base-dir`.
+
+In a second terminal, start the web UI:
+
+```bash
+npm --workspace @frankenbeast/web run dev:chat
+```
+
+Open the Vite URL, usually `http://127.0.0.1:5173/`. The dashboard talks to the chat server on `http://127.0.0.1:3737` and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
+
+If you run the backend on a different port:
+
+```bash
+npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
+VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+```
+
+For Beast controls, set the operator token once in the repo root `.env` so both the server and dashboard see it:
+
+```env
+FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
+```
+
+See [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) for provider overrides and troubleshooting.
+
 ## Usage
 
 The CLI is available as `frankenbeast`, `franken`, or `frkn` — all are identical.
