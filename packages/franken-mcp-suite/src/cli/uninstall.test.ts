@@ -142,6 +142,24 @@ describe('fbeast uninstall', () => {
     expect(hasFbeast(after)).toBe(false);
   });
 
+  it('removes generated Gemini hook scripts without purging stored data', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    const preScript = join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
+    expect(existsSync(join(root, '.fbeast'))).toBe(true);
+  });
+
   it('removes fbeast section from AGENTS.md on codex uninstall', async () => {
     const root = tmpDir();
     dirs.push(root);
@@ -194,6 +212,33 @@ describe('fbeast uninstall', () => {
       list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
     expect(hasFbeast(preToolUse)).toBe(false);
     expect(hasFbeast(postToolUse)).toBe(false);
+  });
+
+  it('removes generated Codex hook scripts on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+    const preScript = join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh');
+    const postScript = join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh');
+    const legacyHooksDir = join(root, '.fbeast', 'hooks');
+    const legacyPreScript = join(legacyHooksDir, 'codex-pre-tool.sh');
+    const legacyPostScript = join(legacyHooksDir, 'codex-post-tool.sh');
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+    mkdirSync(legacyHooksDir, { recursive: true });
+    writeFileSync(legacyPreScript, '#!/usr/bin/env bash\n');
+    writeFileSync(legacyPostScript, '#!/usr/bin/env bash\n');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+    expect(existsSync(legacyPreScript)).toBe(true);
+    expect(existsSync(legacyPostScript)).toBe(true);
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
+    expect(existsSync(legacyPreScript)).toBe(false);
+    expect(existsSync(legacyPostScript)).toBe(false);
   });
 
   it('codex uninstall runs codex mcp remove fbeast-proxy', async () => {

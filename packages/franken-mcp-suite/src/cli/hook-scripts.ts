@@ -43,7 +43,12 @@ function writeGeminiScripts(hooksDir: string, dbPath: string): HookScriptPaths {
 # Reads tool call JSON from stdin, runs governor check, denies if blocked.
 set -euo pipefail
 
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
 DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
@@ -52,7 +57,16 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-if ! RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1); then
+set +e
+RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+STATUS=$?
+set -e
+
+if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ]; then
+  exit 0
+fi
+
+if [ "$STATUS" -ne 0 ]; then
   SAFE_RESULT=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"decision":"deny","reason":%s}\\n' "$SAFE_RESULT" >&1
   exit 2
@@ -66,13 +80,18 @@ exit 0
 # Reads tool result JSON from stdin, records observer event.
 set -euo pipefail
 
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
 DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 TOOL_RESPONSE=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_response',{})))" 2>/dev/null || echo "{}")
 
-fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
+timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
 exit 0
 `);
 
@@ -95,7 +114,12 @@ function writeCodexScripts(hooksDir: string, dbPath: string): HookScriptPaths {
 # Reads tool call JSON from stdin, runs governor check, denies if blocked.
 set -euo pipefail
 
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
 DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
@@ -104,7 +128,16 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-if ! RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1); then
+set +e
+RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+STATUS=$?
+set -e
+
+if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ]; then
+  exit 0
+fi
+
+if [ "$STATUS" -ne 0 ]; then
   SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$SAFE_REASON" >&1
   exit 2
@@ -118,13 +151,18 @@ exit 0
 # Reads tool result JSON from stdin, records observer event.
 set -euo pipefail
 
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
 DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 TOOL_RESPONSE=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_response',{})))" 2>/dev/null || echo "{}")
 
-fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
+timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
 exit 0
 `);
 

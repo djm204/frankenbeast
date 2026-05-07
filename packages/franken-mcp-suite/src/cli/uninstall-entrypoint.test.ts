@@ -66,4 +66,33 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(hasFbeast(before)).toBe(false);
     expect(hasFbeast(after)).toBe(false);
   });
+
+  it('honors an explicit Codex client argument', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const codexDir = join(root, '.codex');
+    const hooksDir = join(codexDir, 'hooks');
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(join(hooksDir, 'fbeast-codex-pre-tool.sh'), '#!/usr/bin/env bash\n');
+    writeFileSync(join(hooksDir, 'fbeast-codex-post-tool.sh'), '#!/usr/bin/env bash\n');
+    writeFileSync(join(codexDir, 'hooks.json'), JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: join(hooksDir, 'fbeast-codex-pre-tool.sh') }] }],
+        PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: join(hooksDir, 'fbeast-codex-post-tool.sh') }] }],
+      },
+    }));
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=codex', '--purge'];
+
+    await import('./uninstall.js');
+
+    expect(existsSync(join(codexDir, 'hooks.json'))).toBe(true);
+    const hooks = JSON.parse(readFileSync(join(codexDir, 'hooks.json'), 'utf-8'));
+    expect(hooks.hooks.PreToolUse).toEqual([]);
+    expect(hooks.hooks.PostToolUse).toEqual([]);
+    expect(existsSync(join(hooksDir, 'fbeast-codex-pre-tool.sh'))).toBe(false);
+    expect(existsSync(join(hooksDir, 'fbeast-codex-post-tool.sh'))).toBe(false);
+  });
 });

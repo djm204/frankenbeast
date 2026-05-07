@@ -27,7 +27,7 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
   if (client === 'codex') {
     uninstallCodex({ root, spawnFn });
   } else {
-    uninstallJsonClient({ claudeDir, client });
+    uninstallJsonClient({ root, claudeDir, client });
   }
 
   const fbeastDir = join(root, '.fbeast');
@@ -45,8 +45,8 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
 
 // ─── Claude / Gemini (settings.json-based) ───────────────────────────────────
 
-function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'gemini' }): void {
-  const { claudeDir, client } = options;
+function uninstallJsonClient(options: { root: string; claudeDir: string; client: 'claude' | 'gemini' }): void {
+  const { root, claudeDir, client } = options;
   const settingsPath = join(claudeDir, 'settings.json');
 
   if (existsSync(settingsPath)) {
@@ -98,6 +98,10 @@ function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'g
 
   const instrPath = join(claudeDir, 'fbeast-instructions.md');
   if (existsSync(instrPath)) unlinkSync(instrPath);
+
+  if (client === 'gemini') {
+    removeGeneratedHookScripts(root, 'gemini');
+  }
 }
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
@@ -162,12 +166,33 @@ function uninstallCodex(options: {
       writeFileSync(hooksPath, JSON.stringify(existing, null, 2) + '\n');
     } catch { /* ignore parse errors */ }
   }
+
+  removeGeneratedHookScripts(root, 'codex');
+}
+
+function removeGeneratedHookScripts(root: string, client: 'gemini' | 'codex'): void {
+  const scripts = client === 'gemini'
+    ? [
+      join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh'),
+    ]
+    : [
+      join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh'),
+      join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'codex-pre-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'codex-post-tool.sh'),
+    ];
+
+  for (const script of scripts) {
+    rmSync(script, { force: true });
+  }
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
-  const client = detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
+  const clientArg = process.argv.find((a) => a.startsWith('--client='))?.split('=')[1] as McpClient | undefined;
+  const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
   const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
   runUninstall({ root, claudeDir, client, purge }).catch((err) => {

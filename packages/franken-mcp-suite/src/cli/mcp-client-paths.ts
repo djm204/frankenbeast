@@ -53,6 +53,8 @@ export function detectMcpClient(input: {
   exists: (path: string) => boolean;
   which?: (bin: string) => string | undefined;
 }): McpClient {
+  if (input.exists(join(input.cwd, '.codex'))) return 'codex';
+
   // Project-level dir wins
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.cwd, dir))) return client;

@@ -25,8 +25,17 @@ function installFakeHook(root: string): string {
     'PHASE="$1"',
     'shift',
     '',
+    'if [ "${FBEAST_HOOK_SHOULD_NOT_RUN:-}" = "1" ]; then',
+    "  printf 'fbeast-hook should not have been invoked\\n' >&2",
+    '  exit 99',
+    'fi',
+    '',
     'if [ "$PHASE" = "pre-tool" ]; then',
     '  TOOL_NAME="${3:-}"',
+    '  if [ "$TOOL_NAME" = "hang" ]; then',
+    '    sleep 10',
+    '    exit 0',
+    '  fi',
     '  if [ "$TOOL_NAME" = "rm -rf /tmp/nope" ]; then',
     "    printf 'destructive action blocked\\n' >&2",
     '    exit 1',
@@ -37,6 +46,11 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
+    '  TOOL_NAME="${3:-}"',
+    '  if [ "$TOOL_NAME" = "hang" ]; then',
+    '    sleep 10',
+    '    exit 0',
+    '  fi',
     `  printf '{"logged":true}\\n'`,
     '  exit 0',
     'fi',
@@ -49,15 +63,22 @@ function installFakeHook(root: string): string {
   return binDir;
 }
 
-function runScript(scriptPath: string, input: unknown, binDir: string) {
+function runScript(
+  scriptPath: string,
+  input: unknown,
+  binDir: string,
+  extraEnv: Record<string, string> = {},
+) {
   return spawnSync(scriptPath, {
     cwd: dirname(scriptPath),
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ''}`,
+      ...extraEnv,
     },
     input: JSON.stringify(input),
     encoding: 'utf8',
+    timeout: 3_000,
   });
 }
 
@@ -118,6 +139,137 @@ describe('Codex hook scripts', () => {
       session_id: 'sess-1',
     }, binDir);
 
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('bypasses pre-tool hooks for spawned child processes', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'rm -rf /tmp/nope',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir, {
+      FRANKENBEAST_SPAWNED: '1',
+      FBEAST_HOOK_SHOULD_NOT_RUN: '1',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+  });
+
+  it('bypasses post-tool hooks when hooks are explicitly disabled', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'exec_command',
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_DISABLE_HOOKS: '1',
+      FBEAST_HOOK_SHOULD_NOT_RUN: '1',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+  });
+
+  it('fails open when pre-tool governance times out', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+    const startedAt = Date.now();
+
+    const result = runScript(preTool, {
+      tool_name: 'hang',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_HOOK_TIMEOUT_SECONDS: '1',
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails open when post-tool observer logging times out', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { postTool } = writeHookScripts(root, 'codex');
+    const startedAt = Date.now();
+
+    const result = runScript(postTool, {
+      tool_name: 'hang',
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_HOOK_TIMEOUT_SECONDS: '1',
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+});
+
+describe('Gemini hook scripts', () => {
+  const tempRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of tempRoots) {
+      if (existsSync(root)) {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+    tempRoots.length = 0;
+  });
+
+  it('bypasses before-tool hooks for spawned child processes', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'rm -rf /tmp/nope',
+      tool_input: {},
+    }, binDir, {
+      FRANKENBEAST_SPAWNED: '1',
+      FBEAST_HOOK_SHOULD_NOT_RUN: '1',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+  });
+
+  it('fails open when before-tool governance times out', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+    const startedAt = Date.now();
+
+    const result = runScript(preTool, {
+      tool_name: 'hang',
+      tool_input: {},
+    }, binDir, {
+      FBEAST_HOOK_TIMEOUT_SECONDS: '1',
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
   });
