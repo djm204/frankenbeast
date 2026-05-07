@@ -63,6 +63,17 @@ function installFakeHook(root: string): string {
   return binDir;
 }
 
+function installUnavailableTimeout(binDir: string): void {
+  const timeoutPath = join(binDir, 'timeout');
+  writeFileSync(timeoutPath, [
+    '#!/usr/bin/env bash',
+    "printf 'timeout: command not found\\n' >&2",
+    'exit 127',
+    '',
+  ].join('\n'));
+  chmodSync(timeoutPath, 0o755);
+}
+
 function runScript(
   scriptPath: string,
   input: unknown,
@@ -203,6 +214,23 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('fails open when timeout is unavailable for pre-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installUnavailableTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('fails open when post-tool observer logging times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -270,6 +298,22 @@ describe('Gemini hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails open when timeout is unavailable for before-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installUnavailableTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+    }, binDir);
+
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
   });

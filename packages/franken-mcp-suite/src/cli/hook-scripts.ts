@@ -62,7 +62,7 @@ RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$
 STATUS=$?
 set -e
 
-if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ]; then
+if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ] || [ "$STATUS" -eq 127 ]; then
   exit 0
 fi
 
@@ -133,7 +133,7 @@ RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$
 STATUS=$?
 set -e
 
-if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ]; then
+if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 137 ] || [ "$STATUS" -eq 127 ]; then
   exit 0
 fi
 
