@@ -95,4 +95,19 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(existsSync(join(hooksDir, 'fbeast-codex-pre-tool.sh'))).toBe(false);
     expect(existsSync(join(hooksDir, 'fbeast-codex-post-tool.sh'))).toBe(false);
   });
+
+  it('rejects an invalid explicit client argument', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=codez', '--purge'];
+
+    await expect(import('./uninstall.js')).rejects.toThrow(
+      'Invalid --client value "codez". Expected claude, gemini, or codex.',
+    );
+
+    expect(console.log).not.toHaveBeenCalledWith('fbeast uninstalled.');
+  });
 });

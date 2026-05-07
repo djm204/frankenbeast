@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'nod
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
+import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 
 export interface UninstallOptions {
@@ -191,7 +191,7 @@ function removeGeneratedHookScripts(root: string, client: 'gemini' | 'codex'): v
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
-  const clientArg = process.argv.find((a) => a.startsWith('--client='))?.split('=')[1] as McpClient | undefined;
+  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
   const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;

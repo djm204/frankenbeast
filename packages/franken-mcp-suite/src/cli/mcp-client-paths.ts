@@ -3,6 +3,8 @@ import { join } from 'node:path';
 /** MCP-compatible AI assistant clients fbeast knows how to configure. */
 export type McpClient = 'claude' | 'gemini' | 'codex';
 
+const MCP_CLIENTS = ['claude', 'gemini', 'codex'] as const;
+
 /** Clients that use a settings.json file in a config dir. */
 const JSON_CLIENT_DIR: Partial<Record<McpClient, string>> = {
   claude: '.claude',
@@ -40,6 +42,12 @@ export function resolveClientConfigDir(input: ResolveClientConfigDirInput): stri
  */
 export function isJsonClient(client: McpClient): client is 'claude' | 'gemini' {
   return client === 'claude' || client === 'gemini';
+}
+
+export function parseMcpClient(value: string | undefined): McpClient | undefined {
+  if (value === undefined) return undefined;
+  if ((MCP_CLIENTS as readonly string[]).includes(value)) return value as McpClient;
+  throw new Error(`Invalid --client value "${value}". Expected claude, gemini, or codex.`);
 }
 
 /**

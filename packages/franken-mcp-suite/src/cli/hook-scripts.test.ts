@@ -248,6 +248,23 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('denies when pre-tool governance is killed', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 137);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+  });
+
   it('fails open when post-tool observer logging times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -349,5 +366,21 @@ describe('Gemini hook scripts', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('denies when before-tool governance is killed', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 137);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
   });
 });

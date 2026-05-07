@@ -63,7 +63,7 @@ STATUS=$?
 set -e
 
 case "$STATUS" in
-  124|125|126|127|137)
+  124|125|126|127)
     exit 0
     ;;
 esac
@@ -136,7 +136,7 @@ STATUS=$?
 set -e
 
 case "$STATUS" in
-  124|125|126|127|137)
+  124|125|126|127)
     exit 0
     ;;
 esac
