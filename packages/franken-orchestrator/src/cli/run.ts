@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
 import { parse as parseDotenv } from 'dotenv';
 import { createSecretStore } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
@@ -347,6 +348,10 @@ export async function main(): Promise<void> {
         config,
       });
       const beastServices = beastOperatorToken ? createBeastServices(paths) : undefined;
+      const analytics = createSqliteAnalyticsService({
+        dbPath: join(paths.frankenbeastDir, 'beast.db'),
+        ...(beastServices ? { runs: beastServices.runs, agents: beastServices.agents } : {}),
+      });
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
@@ -391,6 +396,7 @@ export async function main(): Promise<void> {
               },
             }
           : {}),
+        analyticsDeps: { analytics },
       });
       console.log(`Chat server listening on ${server.url}`);
       return;

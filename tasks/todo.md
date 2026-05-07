@@ -1,5 +1,107 @@
 # fbeast dual-mode launch
 
+## Current Batch: PR 286 Review Comments
+
+- [x] Fetch thread-aware review comments for PR #286 and identify unresolved actionable feedback.
+- [x] Add backend regression tests for cross-format timestamp ordering and UTC SQLite cutoff filtering.
+- [x] Add frontend regression test for partial analytics endpoint failures.
+- [x] Implement the minimal fixes for the actionable review threads.
+- [x] Run targeted backend/frontend verification and review the diff.
+- [x] Record final results and remaining review-thread status.
+
+## Review
+
+- Addressed all unresolved actionable PR #286 review threads:
+  - Analytics events and session last-activity now sort mixed SQLite and ISO timestamps by parsed epoch time.
+  - Time-window filtering now treats SQLite `YYYY-MM-DD HH:MM:SS` timestamps as UTC before cutoff comparisons.
+  - The analytics page now applies successful summary/session/event responses independently and reports failed sections without blanking successful sections.
+- Verification passed:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+
+## Current Batch: Analytics Dashboard Release Commit
+
+- [x] Confirm the analytics dashboard implementation worktree and release-please trigger requirements.
+- [x] Re-run focused backend/frontend verification for the files being committed.
+- [x] Prepare a Conventional Commit for the analytics dashboard update.
+- [x] Record final commit and verification evidence.
+
+## Current Batch: MCP Dashboard README Clarity
+
+- [x] Add a root README section that shows how to run the dashboard after MCP init.
+- [x] Add MCP-suite README dashboard instructions near Beast mode.
+- [x] Add web README dashboard-with-MCP instructions near package quick start.
+- [x] Fix the web analytics test matcher type issue reported by CI.
+- [x] Re-run focused web build/tests and review the docs diff.
+- [x] Commit and push the PR update with a Conventional Commit.
+
+## Review
+
+- Added clear dashboard-with-MCP run paths to the root README, MCP suite README, and web README.
+- Clarified that the dashboard backend must point at the same project root as MCP mode via `--base-dir` when the MCP project is outside this repo.
+- Fixed the CI-reported web build failure by replacing jest-dom-only matchers in `analytics-page.test.tsx` with existing Vitest-safe assertions.
+- Verification passed:
+  - `npm run build` in `packages/franken-web`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+
+## Review
+
+- Prepared commit subject `feat(web): add observer analytics dashboard`; `feat` is a release-please changelog/bump type and will be evaluated when this branch lands on `main`.
+- Fresh verification passed on 2026-04-28:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in both touched packages
+  - `npm run build` in both touched packages
+  - `npm run test:root -- tests/unit/release-please-config.test.ts`
+
+## Current Batch: Analytics JSON Parse Fix
+
+- [x] Identify why analytics API responses are not JSON in the dashboard.
+- [x] Add a regression test for Vite `/api` proxying.
+- [x] Patch the Vite dev proxy configuration.
+- [x] Run targeted tests/typecheck/build.
+- [x] Update progress notes with verification evidence.
+
+## Review
+
+- Fixed the analytics JSON parse error root cause: Vite was not proxying `/api` to the backend in same-origin mode.
+- Added `packages/franken-web/tests/vite-config.test.ts` so `/api` proxy coverage stays explicit.
+- Restarted the web dev server at `http://127.0.0.1:5175/`.
+- 2026-04-28 release-commit verification rerun passed:
+  - `npm test -- --run tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts` in `packages/franken-orchestrator`
+  - `npm test -- --run tests/vite-config.test.ts src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx` in `packages/franken-web`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+
+## Current Batch: Observer Analytics Dashboard Implementation
+
+- [x] Confirm scope from existing progress note and approved dashboard spec.
+- [x] Add backend analytics API tests for summary, sessions, filtered events, and event details.
+- [x] Add frontend analytics client/page tests for live route, summary rendering, filters, and drawer.
+- [x] Implement normalized read-only analytics service and `/api/analytics/*` routes.
+- [x] Wire analytics routes into the chat server/dashboard backend startup.
+- [x] Implement the web analytics client, page, shell route, and styles.
+- [x] Run targeted backend/frontend tests and typechecks.
+- [x] Review diff for scope, update progress notes, and capture final verification.
+
+## Review
+
+- Implemented a read-only observer analytics dashboard under the live Analytics route.
+- Verification passed:
+  - `npm test -- tests/unit/analytics/analytics-service.test.ts tests/unit/http/analytics-routes.test.ts`
+  - `npm test -- src/lib/analytics-api.test.ts src/pages/analytics-page.test.tsx`
+  - `npm run typecheck` in `packages/franken-orchestrator`
+  - `npm run typecheck` in `packages/franken-web`
+  - `npm run build` in `packages/franken-orchestrator`
+  - `npm run build` in `packages/franken-web`
+- Local web dev server started at `http://127.0.0.1:5174/`.
+
 ## Current Batch: Agent Systems Audit
 
 - [x] Check for a matching progress document and create it if missing.
