@@ -16,6 +16,7 @@
 - PR #287 cycle 6 addressed two new Codex review threads locally:
   - Legacy Claude `preToolCall`/`postToolCall` entries with top-level fbeast hook commands are removed during uninstall.
   - Generated Claude hook command paths are shell-quoted so projects with spaces in their path can execute hooks.
+- Replied to and resolved review threads `PRRT_kwDORezACM6ArmFB` and `PRRT_kwDORezACM6ArmFH`, then pushed commit `c7c92ae`.
 - Verification passed in `packages/franken-mcp-suite`:
   - `rtk npm test -- --run src/cli/init.test.ts src/cli/uninstall.test.ts` (39 tests)
   - `rtk npm test --` (138 tests)
