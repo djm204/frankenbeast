@@ -11,6 +11,17 @@
 - [x] Push fixes and trigger another Codex review with `@codex`.
 - [ ] Repeat the `@codex` review-fix-comment-resolve-trigger cycle three total times, stopping early only if a cycle returns no actionable comments.
 
+## Review
+
+- PR #287 cycle 6 addressed two new Codex review threads locally:
+  - Legacy Claude `preToolCall`/`postToolCall` entries with top-level fbeast hook commands are removed during uninstall.
+  - Generated Claude hook command paths are shell-quoted so projects with spaces in their path can execute hooks.
+- Verification passed in `packages/franken-mcp-suite`:
+  - `rtk npm test -- --run src/cli/init.test.ts src/cli/uninstall.test.ts` (39 tests)
+  - `rtk npm test --` (138 tests)
+  - `rtk npm run typecheck`
+  - `rtk npm run build`
+
 ## Current Batch: PR 286 Review Comments
 
 - [x] Fetch thread-aware review comments for PR #286 and identify unresolved actionable feedback.

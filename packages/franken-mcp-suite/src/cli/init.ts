@@ -190,8 +190,8 @@ function mergeClaudeHooks(
 ): Record<string, unknown[]> {
   const scripts = writeHookScripts(root, 'claude');
   const fbeastHooks: Record<string, unknown[]> = {
-    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] }],
-    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] }],
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] }],
   };
 
   const hooks: Record<string, unknown[]> = {};
@@ -371,6 +371,10 @@ function isFbeastHook(value: unknown): boolean {
   return inner.some(
     (h) => isObjectRecord(h) && typeof h['command'] === 'string' && h['command'].includes('fbeast'),
   );
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

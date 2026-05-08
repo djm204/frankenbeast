@@ -66,14 +66,7 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
         for (const hookType of ['BeforeTool', 'AfterTool'] as const) {
           const list = hooks[hookType];
           if (Array.isArray(list)) {
-            hooks[hookType] = list.filter((entry: unknown) => {
-              if (typeof entry !== 'object' || entry === null) return true;
-              const inner = (entry as any).hooks;
-              if (!Array.isArray(inner)) return true;
-              return !inner.some(
-                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
-              );
-            });
+            hooks[hookType] = list.filter((entry: unknown) => !isFbeastHookEntry(entry));
           }
         }
         settings['hooks'] = hooks;
@@ -84,14 +77,7 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
       if (hooks) {
         for (const [hookType, hookList] of Object.entries(hooks)) {
           if (Array.isArray(hookList)) {
-            hooks[hookType] = hookList.filter((entry: unknown) => {
-              if (typeof entry !== 'object' || entry === null) return true;
-              const inner = (entry as any).hooks;
-              if (!Array.isArray(inner)) return true;
-              return !inner.some(
-                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
-              );
-            });
+            hooks[hookType] = hookList.filter((entry: unknown) => !isFbeastHookEntry(entry));
           }
         }
         settings['hooks'] = hooks;
@@ -158,14 +144,7 @@ function uninstallCodex(options: {
       if (hooks && typeof hooks === 'object') {
         for (const key of ['PreToolUse', 'PostToolUse'] as const) {
           if (Array.isArray(hooks[key])) {
-            hooks[key] = (hooks[key] as unknown[]).filter((entry: unknown) => {
-              if (typeof entry !== 'object' || entry === null) return true;
-              const inner = (entry as any).hooks;
-              if (!Array.isArray(inner)) return true;
-              return !inner.some(
-                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
-              );
-            });
+            hooks[key] = (hooks[key] as unknown[]).filter((entry: unknown) => !isFbeastHookEntry(entry));
           }
         }
         existing['hooks'] = hooks;
@@ -198,6 +177,21 @@ function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 
   for (const script of scripts) {
     rmSync(script, { force: true });
   }
+}
+
+function isFbeastHookEntry(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.command === 'string' && record.command.includes('fbeast')) return true;
+  if (typeof record.description === 'string' && record.description.includes('fbeast')) return true;
+
+  const inner = record.hooks;
+  if (!Array.isArray(inner)) return false;
+  return inner.some((hook: unknown) => {
+    if (typeof hook !== 'object' || hook === null) return false;
+    const command = (hook as Record<string, unknown>).command;
+    return typeof command === 'string' && command.includes('fbeast');
+  });
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);

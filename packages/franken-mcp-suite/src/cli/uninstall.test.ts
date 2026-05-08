@@ -115,6 +115,37 @@ describe('fbeast uninstall', () => {
     expect(existsSync(postScript)).toBe(false);
   });
 
+  it('removes legacy Claude top-level hook entries from settings.json', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = join(claudeDir, 'settings.json');
+    writeFileSync(settingsPath, JSON.stringify({
+      mcpServers: {
+        'fbeast-memory': { command: 'fbeast-memory' },
+        external: { command: 'external' },
+      },
+      hooks: {
+        preToolCall: [
+          { command: 'fbeast-hook pre-tool --db /tmp/beast.db $TOOL_NAME', description: 'fbeast governance check' },
+          { command: 'external-pre', description: 'keep me' },
+        ],
+        postToolCall: [
+          { command: 'fbeast-hook post-tool --db /tmp/beast.db $TOOL_NAME $RESULT', description: 'fbeast observer logging' },
+          { command: 'external-post', description: 'keep me' },
+        ],
+      },
+    }, null, 2));
+
+    await runUninstall({ root, claudeDir, purge: false });
+
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    expect(settings.mcpServers).toEqual({ external: { command: 'external' } });
+    expect(settings.hooks.preToolCall).toEqual([{ command: 'external-pre', description: 'keep me' }]);
+    expect(settings.hooks.postToolCall).toEqual([{ command: 'external-post', description: 'keep me' }]);
+  });
+
   it('accepts yes answers for purge confirmation prompts', async () => {
     await expect(confirmYesNo('Remove stored data?', async () => 'yes')).resolves.toBe(true);
     await expect(confirmYesNo('Remove stored data?', async () => 'Y')).resolves.toBe(true);

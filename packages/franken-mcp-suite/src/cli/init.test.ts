@@ -115,6 +115,22 @@ describe('fbeast init', () => {
     expect(postCmd).toContain('fbeast-claude-post-tool.sh');
   });
 
+  it('quotes Claude hook command paths when the project path contains spaces', () => {
+    const parent = tmpDir();
+    dirs.push(parent);
+    const root = join(parent, 'project with spaces');
+    mkdirSync(root, { recursive: true });
+
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: true });
+
+    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    const preCmd = (settings.hooks.PreToolUse[0] as any).hooks[0].command as string;
+    const postCmd = (settings.hooks.PostToolUse[0] as any).hooks[0].command as string;
+
+    expect(preCmd).toBe(`'${join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')}'`);
+    expect(postCmd).toBe(`'${join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')}'`);
+  });
+
   it('falls back to home config dir when no project-level dir exists', () => {
     const cwd = '/tmp/project';
     const homeDir = '/tmp/home';
