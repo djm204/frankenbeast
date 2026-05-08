@@ -1,5 +1,24 @@
 # fbeast dual-mode launch
 
+## Current Batch: PR 289 Review Comments
+
+- [x] Use the isolated `.worktrees/fbeast-passthrough` PR worktree and confirm it matches PR #289 head.
+- [x] Fetch thread-aware review comments and identify unresolved actionable feedback.
+- [x] Add a regression test for passthrough signal termination.
+- [x] Implement signal-aware passthrough exit behavior.
+- [x] Run focused MCP-suite verification.
+- [x] Record final review results and remaining thread status.
+
+## Review
+
+- Addressed the unresolved PR #289 review thread by propagating `spawnSync` signal termination from forwarded `frankenbeast` commands instead of reporting success.
+- Added regression coverage for `SIGTERM` passthrough behavior.
+- Verification passed in `packages/franken-mcp-suite`:
+  - `rtk npm test -- --run src/cli/main.test.ts`
+  - `rtk npm test --`
+  - `rtk npm run typecheck`
+  - `rtk npm run build`
+
 ## Current Batch: PR 286 Review Comments
 
 - [x] Fetch thread-aware review comments for PR #286 and identify unresolved actionable feedback.
