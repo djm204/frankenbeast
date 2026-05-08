@@ -38,4 +38,23 @@ describe('fbeast main CLI', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith('frankenbeast', ['network', 'up'], { stdio: 'inherit' });
     mockExit.mockRestore();
   });
+
+  it('propagates signal termination from passthrough commands', async () => {
+    const mockSpawnSync = vi.fn().mockReturnValue({ status: null, signal: 'SIGTERM', error: undefined });
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'network', 'up'];
+
+    const mockKill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    expect(mockKill).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    expect(mockExit).toHaveBeenCalledWith(143);
+  });
 });

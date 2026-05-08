@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { constants, homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
@@ -22,6 +22,10 @@ function passthrough(): never {
       console.error(`frankenbeast: ${result.error.message}`);
     }
     process.exit(1);
+  }
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    process.exit(128 + (constants.signals[result.signal] ?? 0));
   }
   process.exit(result.status ?? 0);
 }
