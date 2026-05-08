@@ -97,11 +97,22 @@ describe('fbeast uninstall', () => {
     const claudeDir = join(root, '.claude');
 
     runInit({ root, claudeDir, hooks: true });
+    const preScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
     await runUninstall({ root, claudeDir, purge: false });
 
     const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.hooks.preToolCall).toEqual([]);
-    expect(settings.hooks.postToolCall).toEqual([]);
+    const preHooks = settings.hooks?.PreToolUse ?? [];
+    const postHooks = settings.hooks?.PostToolUse ?? [];
+    const hasFbeastPre = preHooks.some((e: any) => e.hooks?.[0]?.command?.includes('fbeast'));
+    const hasFbeastPost = postHooks.some((e: any) => e.hooks?.[0]?.command?.includes('fbeast'));
+    expect(hasFbeastPre).toBe(false);
+    expect(hasFbeastPost).toBe(false);
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
   });
 
   it('accepts yes answers for purge confirmation prompts', async () => {

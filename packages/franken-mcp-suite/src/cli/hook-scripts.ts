@@ -15,7 +15,7 @@ export interface HookScriptPaths {
  * Writes hook scripts for the given client into a client-owned hooks directory.
  * Returns the paths to the generated scripts.
  */
-export function writeHookScripts(root: string, client: 'gemini' | 'codex'): HookScriptPaths {
+export function writeHookScripts(root: string, client: 'claude' | 'gemini' | 'codex'): HookScriptPaths {
   const hooksDir = client === 'codex'
     ? join(root, '.codex', 'hooks')
     : join(root, '.fbeast', 'hooks');
@@ -25,6 +25,9 @@ export function writeHookScripts(root: string, client: 'gemini' | 'codex'): Hook
 
   if (client === 'gemini') {
     return writeGeminiScripts(hooksDir, dbPath);
+  }
+  if (client === 'claude') {
+    return writeClaudeScripts(hooksDir, dbPath);
   }
   return writeCodexScripts(hooksDir, dbPath);
 }
@@ -57,13 +60,17 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
+if ! command -v timeout >/dev/null 2>&1; then
+  exit 0
+fi
+
 set +e
 RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
 STATUS=$?
 set -e
 
 case "$STATUS" in
-  124|125|126|127)
+  124|125|126)
     exit 0
     ;;
 esac
@@ -79,6 +86,83 @@ exit 0
 
   writeFileSync(postTool, `#!/usr/bin/env bash
 # fbeast AfterTool hook for Gemini CLI
+# Reads tool result JSON from stdin, records observer event.
+set -euo pipefail
+
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
+
+INPUT=$(cat)
+TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_response',{})))" 2>/dev/null || echo "{}")
+
+timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
+exit 0
+`);
+
+  chmodSync(preTool, 0o755);
+  chmodSync(postTool, 0o755);
+  return { preTool, postTool };
+}
+
+// ─── Claude Code ─────────────────────────────────────────────────────────────
+// PreToolUse:  stdin JSON { tool_name, tool_input, session_id, ... }
+// Deny:        stdout JSON { decision: "block", reason: "..." }, exit 2
+// PostToolUse: stdin JSON { tool_name, tool_response, ... }
+
+function writeClaudeScripts(hooksDir: string, dbPath: string): HookScriptPaths {
+  const preTool = join(hooksDir, 'fbeast-claude-pre-tool.sh');
+  const postTool = join(hooksDir, 'fbeast-claude-post-tool.sh');
+
+  writeFileSync(preTool, `#!/usr/bin/env bash
+# fbeast PreToolUse hook for Claude Code
+# Reads tool call JSON from stdin, runs governor check, denies if blocked.
+set -euo pipefail
+
+if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+DB_PATH=${JSON.stringify(dbPath)}
+HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
+
+INPUT=$(cat)
+TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+
+if [ -z "$TOOL_NAME" ]; then
+  exit 0
+fi
+
+if ! command -v timeout >/dev/null 2>&1; then
+  exit 0
+fi
+
+set +e
+RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+STATUS=$?
+set -e
+
+case "$STATUS" in
+  124|125|126)
+    exit 0
+    ;;
+esac
+
+if [ "$STATUS" -ne 0 ]; then
+  SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
+  printf '{"decision":"block","reason":%s}\\n' "$SAFE_REASON" >&1
+  exit 2
+fi
+
+exit 0
+`);
+
+  writeFileSync(postTool, `#!/usr/bin/env bash
+# fbeast PostToolUse hook for Claude Code
 # Reads tool result JSON from stdin, records observer event.
 set -euo pipefail
 
@@ -130,13 +214,17 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
+if ! command -v timeout >/dev/null 2>&1; then
+  exit 0
+fi
+
 set +e
 RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
 STATUS=$?
 set -e
 
 case "$STATUS" in
-  124|125|126|127)
+  124|125|126)
     exit 0
     ;;
 esac

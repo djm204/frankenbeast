@@ -182,20 +182,16 @@ function initCodex(options: {
 // ─── Hook config builders ─────────────────────────────────────────────────────
 
 /**
- * Claude Code: preToolCall / postToolCall command strings with $TOOL_NAME.
+ * Claude Code: PreToolUse / PostToolUse with generated shell scripts that read JSON from stdin.
  */
 function mergeClaudeHooks(
   existing: unknown,
   root: string,
 ): Record<string, unknown[]> {
-  const dbPath = join(root, '.fbeast', 'beast.db');
-  const fbeastHooks = {
-    preToolCall: [
-      { command: `fbeast-hook pre-tool --db "${dbPath}" $TOOL_NAME`, description: 'fbeast governance check' },
-    ],
-    postToolCall: [
-      { command: `fbeast-hook post-tool --db "${dbPath}" $TOOL_NAME $RESULT`, description: 'fbeast observer logging' },
-    ],
+  const scripts = writeHookScripts(root, 'claude');
+  const fbeastHooks: Record<string, unknown[]> = {
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] }],
   };
 
   const hooks: Record<string, unknown[]> = {};
@@ -370,9 +366,11 @@ if (isMain) {
 
 function isFbeastHook(value: unknown): boolean {
   if (!isObjectRecord(value)) return false;
-  const command = typeof value['command'] === 'string' ? value['command'] : '';
-  const description = typeof value['description'] === 'string' ? value['description'] : '';
-  return command.includes('fbeast') || description.includes('fbeast');
+  const inner = value['hooks'];
+  if (!Array.isArray(inner)) return false;
+  return inner.some(
+    (h) => isObjectRecord(h) && typeof h['command'] === 'string' && h['command'].includes('fbeast'),
+  );
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

@@ -79,14 +79,19 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
         settings['hooks'] = hooks;
       }
     } else {
-      // Claude: remove preToolCall/postToolCall entries referencing fbeast
+      // Claude: remove PreToolUse/PostToolUse matcher entries referencing fbeast
       const hooks = settings['hooks'] as Record<string, unknown[]> | undefined;
       if (hooks) {
         for (const [hookType, hookList] of Object.entries(hooks)) {
           if (Array.isArray(hookList)) {
-            hooks[hookType] = hookList.filter(
-              (h: any) => !h.description?.includes('fbeast') && !h.command?.includes('fbeast'),
-            );
+            hooks[hookType] = hookList.filter((entry: unknown) => {
+              if (typeof entry !== 'object' || entry === null) return true;
+              const inner = (entry as any).hooks;
+              if (!Array.isArray(inner)) return true;
+              return !inner.some(
+                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
+              );
+            });
           }
         }
         settings['hooks'] = hooks;
@@ -99,7 +104,9 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
   const instrPath = join(claudeDir, 'fbeast-instructions.md');
   if (existsSync(instrPath)) unlinkSync(instrPath);
 
-  if (client === 'gemini') {
+  if (client === 'claude') {
+    removeGeneratedHookScripts(root, 'claude');
+  } else if (client === 'gemini') {
     removeGeneratedHookScripts(root, 'gemini');
   }
 }
@@ -170,11 +177,16 @@ function uninstallCodex(options: {
   removeGeneratedHookScripts(root, 'codex');
 }
 
-function removeGeneratedHookScripts(root: string, client: 'gemini' | 'codex'): void {
+function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 'codex'): void {
   const scripts = client === 'gemini'
     ? [
       join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh'),
       join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh'),
+    ]
+    : client === 'claude'
+    ? [
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh'),
     ]
     : [
       join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh'),

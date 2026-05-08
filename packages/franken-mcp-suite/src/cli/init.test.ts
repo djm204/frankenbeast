@@ -97,20 +97,22 @@ describe('fbeast init', () => {
 
     runInit({ root, claudeDir: join(root, '.claude'), hooks: true });
 
+    // Shell scripts created
+    const preScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
+    // settings.json uses correct event names and matcher format
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
-    const dbPath = join(root, '.fbeast', 'beast.db');
-    expect(settings.hooks.preToolCall).toEqual([
-      {
-        command: `fbeast-hook pre-tool --db "${dbPath}" $TOOL_NAME`,
-        description: 'fbeast governance check',
-      },
-    ]);
-    expect(settings.hooks.postToolCall).toEqual([
-      {
-        command: `fbeast-hook post-tool --db "${dbPath}" $TOOL_NAME $RESULT`,
-        description: 'fbeast observer logging',
-      },
-    ]);
+    const preHooks = settings.hooks?.PreToolUse as unknown[];
+    const postHooks = settings.hooks?.PostToolUse as unknown[];
+    expect(Array.isArray(preHooks)).toBe(true);
+    expect(Array.isArray(postHooks)).toBe(true);
+    const preCmd = (preHooks[0] as any).hooks[0].command as string;
+    const postCmd = (postHooks[0] as any).hooks[0].command as string;
+    expect(preCmd).toContain('fbeast-claude-pre-tool.sh');
+    expect(postCmd).toContain('fbeast-claude-post-tool.sh');
   });
 
   it('falls back to home config dir when no project-level dir exists', () => {
