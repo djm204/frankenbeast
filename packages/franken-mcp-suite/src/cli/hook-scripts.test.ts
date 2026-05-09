@@ -372,7 +372,7 @@ describe('Claude Code hook scripts', () => {
     tempRoots.length = 0;
   });
 
-  it('returns Claude block output with exit 2 when the pre-tool hook blocks an action', () => {
+  it('returns Claude block reason on stderr with exit 2 when the pre-tool hook blocks an action', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -385,8 +385,9 @@ describe('Claude Code hook scripts', () => {
     }, binDir);
 
     expect(result.status).toBe(2);
-    expect(result.stdout).toContain('"decision":"block"');
-    expect(result.stdout).toContain('destructive action blocked');
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive action blocked');
   });
 
   it('keeps allowed pre-tool hooks silent for Claude Code', () => {
@@ -458,8 +459,9 @@ describe('Claude Code hook scripts', () => {
       session_id: 'sess-1',
     }, binDir);
 
-    expect(result.status, result.stderr).toBe(2);
-    expect(result.stdout).toContain('"decision":"block"');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('fbeast governor blocked');
   });
 
   it('keeps post-tool hooks silent', () => {

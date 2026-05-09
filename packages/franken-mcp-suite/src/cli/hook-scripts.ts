@@ -111,7 +111,7 @@ exit 0
 
 // ─── Claude Code ─────────────────────────────────────────────────────────────
 // PreToolUse:  stdin JSON { tool_name, tool_input, session_id, ... }
-// Deny:        stdout JSON { decision: "block", reason: "..." }, exit 2
+// Deny:        reason written to stderr, exit 2 (Claude Code shows stderr to user)
 // PostToolUse: stdin JSON { tool_name, tool_response, ... }
 
 function writeClaudeScripts(hooksDir: string, dbPath: string): HookScriptPaths {
@@ -153,8 +153,7 @@ case "$STATUS" in
 esac
 
 if [ "$STATUS" -ne 0 ]; then
-  SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
-  printf '{"decision":"block","reason":%s}\\n' "$SAFE_REASON" >&1
+  printf 'fbeast governor blocked: %s\n' "$RESULT" >&2
   exit 2
 fi
 
