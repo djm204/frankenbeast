@@ -71,7 +71,7 @@ fi
 set -e
 
 case "$STATUS" in
-  124|125)
+  124)
     exit 0
     ;;
 esac
@@ -153,7 +153,7 @@ fi
 set -e
 
 case "$STATUS" in
-  124|125)
+  124)
     exit 0
     ;;
 esac
@@ -234,7 +234,7 @@ fi
 set -e
 
 case "$STATUS" in
-  124|125)
+  124)
     exit 0
     ;;
 esac

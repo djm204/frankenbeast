@@ -304,7 +304,7 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('"permissionDecision":"deny"');
   });
 
-  it('fails open when timeout exits 125 for pre-tool governance', () => {
+  it('denies when timeout exits 125 (timeout internal failure) for pre-tool governance', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -317,8 +317,8 @@ describe('Codex hook scripts', () => {
       session_id: 'sess-1',
     }, binDir);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
   });
 
   it('denies when timeout exits 126 (command not executable) for pre-tool governance', () => {
@@ -539,6 +539,23 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toContain('fbeast governor blocked');
   });
 
+  it('denies when timeout exits 125 (timeout internal failure) for pre-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 125);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+  });
+
   it('denies when timeout exits 126 (command not executable) for pre-tool governance', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -696,7 +713,7 @@ describe('Gemini hook scripts', () => {
     expect(result.stdout).toContain('"decision":"deny"');
   });
 
-  it('fails open when timeout exits 125 for before-tool governance', () => {
+  it('denies when timeout exits 125 (timeout internal failure) for before-tool governance', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -708,8 +725,8 @@ describe('Gemini hook scripts', () => {
       tool_input: {},
     }, binDir);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
   });
 
   it('denies when timeout exits 126 (command not executable) for before-tool governance', () => {
