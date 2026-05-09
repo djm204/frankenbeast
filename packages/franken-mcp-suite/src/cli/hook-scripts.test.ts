@@ -394,6 +394,25 @@ describe('Codex hook scripts', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
   });
+
+  it('runs post-tool fbeast-hook directly when timeout is unavailable', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installRuntimeWithoutTimeout(binDir);
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'exec_command',
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
 });
 
 describe('Claude Code hook scripts', () => {
@@ -570,6 +589,25 @@ describe('Claude Code hook scripts', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
   });
+
+  it('runs post-tool fbeast-hook directly when timeout is unavailable', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installRuntimeWithoutTimeout(binDir);
+    const { postTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(postTool, {
+      tool_name: 'exec_command',
+      tool_response: { ok: true },
+      session_id: 'sess-1',
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
 });
 
 describe('Gemini hook scripts', () => {
@@ -723,5 +761,23 @@ describe('Gemini hook scripts', () => {
 
     expect(result.status).toBe(2);
     expect(result.stdout).toContain('"decision":"deny"');
+  });
+
+  it('runs post-tool fbeast-hook directly when timeout is unavailable', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installRuntimeWithoutTimeout(binDir);
+    const { postTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(postTool, {
+      tool_name: 'exec_command',
+      tool_response: { ok: true },
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
   });
 });
