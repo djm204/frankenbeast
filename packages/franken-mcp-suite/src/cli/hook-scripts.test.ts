@@ -266,7 +266,7 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
-  it('fails open when timeout is unavailable for pre-tool governance', () => {
+  it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -285,11 +285,30 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
-  it.each([125, 126])('fails open when timeout exits %s for pre-tool governance', (status) => {
+  it('denies via direct fbeast-hook call when timeout unavailable and hook blocks', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
-    installTimeoutExit(binDir, status);
+    installRuntimeWithoutTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'rm -rf /tmp/nope',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+  });
+
+  it('fails open when timeout exits 125 for pre-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 125);
     const { preTool } = writeHookScripts(root, 'codex');
 
     const result = runScript(preTool, {
@@ -300,6 +319,23 @@ describe('Codex hook scripts', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('denies when timeout exits 126 (command not executable) for pre-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 126);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
   });
 
   it('denies when pre-tool governance is killed', () => {
@@ -446,6 +482,61 @@ describe('Claude Code hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installRuntimeWithoutTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('denies via direct fbeast-hook call when timeout unavailable and hook blocks', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installRuntimeWithoutTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'rm -rf /tmp/nope',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+  });
+
+  it('denies when timeout exits 126 (command not executable) for pre-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 126);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+  });
+
   it('denies when pre-tool governance is killed', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -531,7 +622,7 @@ describe('Gemini hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
-  it('fails open when timeout is unavailable for before-tool governance', () => {
+  it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -549,11 +640,29 @@ describe('Gemini hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
-  it.each([125, 126])('fails open when timeout exits %s for before-tool governance', (status) => {
+  it('denies via direct fbeast-hook call when timeout unavailable and hook blocks', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
-    installTimeoutExit(binDir, status);
+    installRuntimeWithoutTimeout(binDir);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'rm -rf /tmp/nope',
+      tool_input: {},
+    }, binDir, {
+      PATH: binDir,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+  });
+
+  it('fails open when timeout exits 125 for before-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 125);
     const { preTool } = writeHookScripts(root, 'gemini');
 
     const result = runScript(preTool, {
@@ -563,6 +672,22 @@ describe('Gemini hook scripts', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('denies when timeout exits 126 (command not executable) for before-tool governance', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    installTimeoutExit(binDir, 126);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      tool_input: {},
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
   });
 
   it('denies when before-tool governance is killed', () => {

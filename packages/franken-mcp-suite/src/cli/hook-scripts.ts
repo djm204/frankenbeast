@@ -60,17 +60,18 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-if ! command -v timeout >/dev/null 2>&1; then
-  exit 0
-fi
-
 set +e
-RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
-STATUS=$?
+if command -v timeout >/dev/null 2>&1; then
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+else
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+fi
 set -e
 
 case "$STATUS" in
-  124|125|126)
+  124|125)
     exit 0
     ;;
 esac
@@ -137,17 +138,18 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-if ! command -v timeout >/dev/null 2>&1; then
-  exit 0
-fi
-
 set +e
-RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
-STATUS=$?
+if command -v timeout >/dev/null 2>&1; then
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+else
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+fi
 set -e
 
 case "$STATUS" in
-  124|125|126)
+  124|125)
     exit 0
     ;;
 esac
@@ -213,17 +215,18 @@ if [ -z "$TOOL_NAME" ]; then
   exit 0
 fi
 
-if ! command -v timeout >/dev/null 2>&1; then
-  exit 0
-fi
-
 set +e
-RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
-STATUS=$?
+if command -v timeout >/dev/null 2>&1; then
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+else
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  STATUS=$?
+fi
 set -e
 
 case "$STATUS" in
-  124|125|126)
+  124|125)
     exit 0
     ;;
 esac
