@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.36.0](https://github.com/djm204/frankenbeast/compare/v0.35.0...v0.36.0) (2026-05-11)
+
+
+### Features
+
+* **mcp-suite:** make fbeast a 1:1 proxy for frankenbeast ([#289](https://github.com/djm204/frankenbeast/issues/289)) ([84470d6](https://github.com/djm204/frankenbeast/commit/84470d68b60fa23b9f9e70f4881666cec37d1a72))
+
+
+### Bug Fixes
+
+* **mcp-suite:** mitigate hook hangs and uninstall residue ([#287](https://github.com/djm204/frankenbeast/issues/287)) ([b939d36](https://github.com/djm204/frankenbeast/commit/b939d36b68c8c3336af4df491819b32ec962d168))
+
 ## [0.35.0](https://github.com/djm204/frankenbeast/compare/v0.34.0...v0.35.0) (2026-05-07)
 
 
