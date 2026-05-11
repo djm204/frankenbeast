@@ -60,24 +60,28 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
     settings['mcpServers'] = mcpServers;
 
     if (client === 'gemini') {
-      // Gemini: remove BeforeTool/AfterTool entries referencing fbeast scripts
+      // Gemini: prune fbeast hooks from BeforeTool/AfterTool, keep entries with remaining hooks
       const hooks = settings['hooks'] as Record<string, unknown> | undefined;
       if (hooks) {
         for (const hookType of ['BeforeTool', 'AfterTool'] as const) {
           const list = hooks[hookType];
           if (Array.isArray(list)) {
-            hooks[hookType] = list.filter((entry: unknown) => !isFbeastHookEntry(entry));
+            hooks[hookType] = list
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         settings['hooks'] = hooks;
       }
     } else {
-      // Claude: remove PreToolUse/PostToolUse matcher entries referencing fbeast
+      // Claude: prune fbeast hooks from PreToolUse/PostToolUse entries, keep entries with remaining hooks
       const hooks = settings['hooks'] as Record<string, unknown[]> | undefined;
       if (hooks) {
         for (const [hookType, hookList] of Object.entries(hooks)) {
           if (Array.isArray(hookList)) {
-            hooks[hookType] = hookList.filter((entry: unknown) => !isFbeastHookEntry(entry));
+            hooks[hookType] = hookList
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         settings['hooks'] = hooks;
@@ -144,7 +148,9 @@ function uninstallCodex(options: {
       if (hooks && typeof hooks === 'object') {
         for (const key of ['PreToolUse', 'PostToolUse'] as const) {
           if (Array.isArray(hooks[key])) {
-            hooks[key] = (hooks[key] as unknown[]).filter((entry: unknown) => !isFbeastHookEntry(entry));
+            hooks[key] = (hooks[key] as unknown[])
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         existing['hooks'] = hooks;
@@ -179,19 +185,32 @@ function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 
   }
 }
 
-function isFbeastHookEntry(entry: unknown): boolean {
-  if (typeof entry !== 'object' || entry === null) return false;
+/**
+ * Returns a copy of entry with fbeast hooks removed from its inner `hooks` array,
+ * or null if the whole entry was fbeast-only (and should be dropped).
+ */
+function pruneFbeastFromEntry(entry: unknown): unknown | null {
+  if (typeof entry !== 'object' || entry === null) return entry;
   const record = entry as Record<string, unknown>;
-  if (typeof record.command === 'string' && record.command.includes('fbeast')) return true;
-  if (typeof record.description === 'string' && record.description.includes('fbeast')) return true;
 
-  const inner = record.hooks;
-  if (!Array.isArray(inner)) return false;
-  return inner.some((hook: unknown) => {
-    if (typeof hook !== 'object' || hook === null) return false;
-    const command = (hook as Record<string, unknown>).command;
-    return typeof command === 'string' && command.includes('fbeast');
-  });
+  if (typeof record.command === 'string') {
+    return record.command.includes('fbeast') ? null : entry;
+  }
+  if (typeof record.description === 'string' && record.description.includes('fbeast')) {
+    return null;
+  }
+
+  if (Array.isArray(record.hooks)) {
+    const remaining = record.hooks.filter((hook: unknown) => {
+      if (typeof hook !== 'object' || hook === null) return true;
+      const cmd = (hook as Record<string, unknown>).command;
+      return !(typeof cmd === 'string' && cmd.includes('fbeast'));
+    });
+    if (remaining.length === 0) return null;
+    return { ...record, hooks: remaining };
+  }
+
+  return entry;
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);

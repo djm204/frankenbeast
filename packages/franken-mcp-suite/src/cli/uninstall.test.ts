@@ -300,6 +300,71 @@ describe('fbeast uninstall', () => {
     expect(removedNames).toContain('fbeast-proxy');
   });
 
+  it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+
+    runInit({ root, claudeDir, hooks: true });
+
+    // Inject a non-fbeast handler into the same PreToolUse entry list
+    const settingsPath = join(claudeDir, 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: '/path/to/fbeast-hook.sh' },
+        { type: 'command', command: '/path/to/user-custom-hook.sh' },
+      ],
+    });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    await runUninstall({ root, claudeDir, purge: false });
+
+    const updated = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const preList = (updated.hooks?.PreToolUse ?? []) as unknown[];
+    const hasFbeast = preList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command?.includes('fbeast')),
+    );
+    const hasCustom = preList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command === '/path/to/user-custom-hook.sh'),
+    );
+    expect(hasFbeast).toBe(false);
+    expect(hasCustom).toBe(true);
+  });
+
+  it('preserves non-fbeast hooks sharing a Gemini BeforeTool entry on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    // Inject a mixed entry: fbeast hook + user hook in the same BeforeTool group
+    const settingsPath = join(geminiDir, 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings.hooks.BeforeTool.push({
+      hooks: [
+        { type: 'command', command: '/path/to/fbeast-before.sh' },
+        { type: 'command', command: '/path/to/user-before-hook.sh' },
+      ],
+    });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    const updated = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const beforeList = (updated.hooks?.BeforeTool ?? []) as unknown[];
+    const hasFbeast = beforeList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command?.includes('fbeast')),
+    );
+    const hasCustom = beforeList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command === '/path/to/user-before-hook.sh'),
+    );
+    expect(hasFbeast).toBe(false);
+    expect(hasCustom).toBe(true);
+  });
+
   it('treats closed stdin as a no answer when purge decision is missing', async () => {
     const root = tmpDir();
     dirs.push(root);
