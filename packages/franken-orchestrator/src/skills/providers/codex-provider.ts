@@ -71,7 +71,10 @@ export class CodexProvider implements ICliProvider {
   }
 
   filterEnv(env: Record<string, string>): Record<string, string> {
-    return { ...env };
+    return {
+      ...env,
+      FRANKENBEAST_SPAWNED: '1',
+    };
   }
 
   supportsStreamJson(): boolean {

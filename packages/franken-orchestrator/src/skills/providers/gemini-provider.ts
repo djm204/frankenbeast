@@ -85,6 +85,7 @@ export class GeminiProvider implements ICliProvider {
         delete filtered[key];
       }
     }
+    filtered['FRANKENBEAST_SPAWNED'] = '1';
     return filtered;
   }
 

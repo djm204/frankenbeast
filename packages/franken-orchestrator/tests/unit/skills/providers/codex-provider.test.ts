@@ -48,17 +48,24 @@ describe('CodexProvider', () => {
 
   // -- filterEnv -----------------------------------------------------------
 
-  it('filterEnv returns env unchanged (no filtering needed)', () => {
+  it('filterEnv marks spawned child processes without filtering credentials', () => {
     const env = { PATH: '/usr/bin', OPENAI_API_KEY: 'sk-123', HOME: '/home/user' };
     const filtered = provider.filterEnv(env);
-    expect(filtered).toEqual(env);
+    expect(filtered).toEqual({
+      ...env,
+      FRANKENBEAST_SPAWNED: '1',
+    });
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {
     const env = { PATH: '/usr/bin' };
     const filtered = provider.filterEnv(env);
     expect(filtered).not.toBe(env);
-    expect(filtered).toEqual(env);
+    expect(env).not.toHaveProperty('FRANKENBEAST_SPAWNED');
+    expect(filtered).toEqual({
+      ...env,
+      FRANKENBEAST_SPAWNED: '1',
+    });
   });
 
   // -- isRateLimited -------------------------------------------------------

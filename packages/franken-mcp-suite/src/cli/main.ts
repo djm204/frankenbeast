@@ -2,13 +2,13 @@
 import { existsSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
+import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
 
 function resolveClient(): McpClient {
-  const clientArg = process.argv.find((a) => a.startsWith('--client='))?.split('=')[1] as McpClient | undefined;
+  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   return clientArg ?? detectMcpClient({ cwd: process.cwd(), homeDir: homedir(), exists: existsSync });
 }
 

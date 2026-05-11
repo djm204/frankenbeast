@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
+import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 
 const ALL_SERVERS: FbeastServer[] = [
@@ -182,20 +182,16 @@ function initCodex(options: {
 // ─── Hook config builders ─────────────────────────────────────────────────────
 
 /**
- * Claude Code: preToolCall / postToolCall command strings with $TOOL_NAME.
+ * Claude Code: PreToolUse / PostToolUse with generated shell scripts that read JSON from stdin.
  */
 function mergeClaudeHooks(
   existing: unknown,
   root: string,
 ): Record<string, unknown[]> {
-  const dbPath = join(root, '.fbeast', 'beast.db');
-  const fbeastHooks = {
-    preToolCall: [
-      { command: `fbeast-hook pre-tool --db "${dbPath}" $TOOL_NAME`, description: 'fbeast governance check' },
-    ],
-    postToolCall: [
-      { command: `fbeast-hook post-tool --db "${dbPath}" $TOOL_NAME $RESULT`, description: 'fbeast observer logging' },
-    ],
+  const scripts = writeHookScripts(root, 'claude');
+  const fbeastHooks: Record<string, unknown[]> = {
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] }],
   };
 
   const hooks: Record<string, unknown[]> = {};
@@ -359,7 +355,7 @@ const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
   const { resolveInitOptions } = await import('./init-options.js');
-  const clientArg = process.argv.find((a) => a.startsWith('--client='))?.split('=')[1] as McpClient | undefined;
+  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
   const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const initOptions = await resolveInitOptions(process.argv);
@@ -370,9 +366,15 @@ if (isMain) {
 
 function isFbeastHook(value: unknown): boolean {
   if (!isObjectRecord(value)) return false;
-  const command = typeof value['command'] === 'string' ? value['command'] : '';
-  const description = typeof value['description'] === 'string' ? value['description'] : '';
-  return command.includes('fbeast') || description.includes('fbeast');
+  const inner = value['hooks'];
+  if (!Array.isArray(inner)) return false;
+  return inner.some(
+    (h) => isObjectRecord(h) && typeof h['command'] === 'string' && h['command'].includes('fbeast'),
+  );
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

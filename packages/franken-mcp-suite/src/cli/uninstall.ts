@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'nod
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { resolveClientConfigDir, detectMcpClient, type McpClient } from './mcp-client-paths.js';
+import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 
 export interface UninstallOptions {
@@ -27,7 +27,7 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
   if (client === 'codex') {
     uninstallCodex({ root, spawnFn });
   } else {
-    uninstallJsonClient({ claudeDir, client });
+    uninstallJsonClient({ root, claudeDir, client });
   }
 
   const fbeastDir = join(root, '.fbeast');
@@ -45,8 +45,8 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
 
 // ─── Claude / Gemini (settings.json-based) ───────────────────────────────────
 
-function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'gemini' }): void {
-  const { claudeDir, client } = options;
+function uninstallJsonClient(options: { root: string; claudeDir: string; client: 'claude' | 'gemini' }): void {
+  const { root, claudeDir, client } = options;
   const settingsPath = join(claudeDir, 'settings.json');
 
   if (existsSync(settingsPath)) {
@@ -60,33 +60,28 @@ function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'g
     settings['mcpServers'] = mcpServers;
 
     if (client === 'gemini') {
-      // Gemini: remove BeforeTool/AfterTool entries referencing fbeast scripts
+      // Gemini: prune fbeast hooks from BeforeTool/AfterTool, keep entries with remaining hooks
       const hooks = settings['hooks'] as Record<string, unknown> | undefined;
       if (hooks) {
         for (const hookType of ['BeforeTool', 'AfterTool'] as const) {
           const list = hooks[hookType];
           if (Array.isArray(list)) {
-            hooks[hookType] = list.filter((entry: unknown) => {
-              if (typeof entry !== 'object' || entry === null) return true;
-              const inner = (entry as any).hooks;
-              if (!Array.isArray(inner)) return true;
-              return !inner.some(
-                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
-              );
-            });
+            hooks[hookType] = list
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         settings['hooks'] = hooks;
       }
     } else {
-      // Claude: remove preToolCall/postToolCall entries referencing fbeast
+      // Claude: prune fbeast hooks from PreToolUse/PostToolUse entries, keep entries with remaining hooks
       const hooks = settings['hooks'] as Record<string, unknown[]> | undefined;
       if (hooks) {
         for (const [hookType, hookList] of Object.entries(hooks)) {
           if (Array.isArray(hookList)) {
-            hooks[hookType] = hookList.filter(
-              (h: any) => !h.description?.includes('fbeast') && !h.command?.includes('fbeast'),
-            );
+            hooks[hookType] = hookList
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         settings['hooks'] = hooks;
@@ -98,6 +93,12 @@ function uninstallJsonClient(options: { claudeDir: string; client: 'claude' | 'g
 
   const instrPath = join(claudeDir, 'fbeast-instructions.md');
   if (existsSync(instrPath)) unlinkSync(instrPath);
+
+  if (client === 'claude') {
+    removeGeneratedHookScripts(root, 'claude');
+  } else if (client === 'gemini') {
+    removeGeneratedHookScripts(root, 'gemini');
+  }
 }
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
@@ -147,14 +148,9 @@ function uninstallCodex(options: {
       if (hooks && typeof hooks === 'object') {
         for (const key of ['PreToolUse', 'PostToolUse'] as const) {
           if (Array.isArray(hooks[key])) {
-            hooks[key] = (hooks[key] as unknown[]).filter((entry: unknown) => {
-              if (typeof entry !== 'object' || entry === null) return true;
-              const inner = (entry as any).hooks;
-              if (!Array.isArray(inner)) return true;
-              return !inner.some(
-                (h: any) => typeof h.command === 'string' && h.command.includes('fbeast'),
-              );
-            });
+            hooks[key] = (hooks[key] as unknown[])
+              .map(pruneFbeastFromEntry)
+              .filter((e): e is unknown => e !== null);
           }
         }
         existing['hooks'] = hooks;
@@ -162,12 +158,66 @@ function uninstallCodex(options: {
       writeFileSync(hooksPath, JSON.stringify(existing, null, 2) + '\n');
     } catch { /* ignore parse errors */ }
   }
+
+  removeGeneratedHookScripts(root, 'codex');
+}
+
+function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 'codex'): void {
+  const scripts = client === 'gemini'
+    ? [
+      join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh'),
+    ]
+    : client === 'claude'
+    ? [
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh'),
+    ]
+    : [
+      join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh'),
+      join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'codex-pre-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'codex-post-tool.sh'),
+    ];
+
+  for (const script of scripts) {
+    rmSync(script, { force: true });
+  }
+}
+
+/**
+ * Returns a copy of entry with fbeast hooks removed from its inner `hooks` array,
+ * or null if the whole entry was fbeast-only (and should be dropped).
+ */
+function pruneFbeastFromEntry(entry: unknown): unknown | null {
+  if (typeof entry !== 'object' || entry === null) return entry;
+  const record = entry as Record<string, unknown>;
+
+  if (typeof record.command === 'string') {
+    return record.command.includes('fbeast') ? null : entry;
+  }
+  if (typeof record.description === 'string' && record.description.includes('fbeast')) {
+    return null;
+  }
+
+  if (Array.isArray(record.hooks)) {
+    const remaining = record.hooks.filter((hook: unknown) => {
+      if (typeof hook !== 'object' || hook === null) return true;
+      const cmd = (hook as Record<string, unknown>).command;
+      return !(typeof cmd === 'string' && cmd.includes('fbeast'));
+    });
+    if (remaining.length === 0) return null;
+    return { ...record, hooks: remaining };
+  }
+
+  return entry;
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
-  const client = detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
+  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
+  const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
   const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
   runUninstall({ root, claudeDir, client, purge }).catch((err) => {

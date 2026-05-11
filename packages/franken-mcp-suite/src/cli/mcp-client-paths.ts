@@ -3,6 +3,8 @@ import { join } from 'node:path';
 /** MCP-compatible AI assistant clients fbeast knows how to configure. */
 export type McpClient = 'claude' | 'gemini' | 'codex';
 
+const MCP_CLIENTS = ['claude', 'gemini', 'codex'] as const;
+
 /** Clients that use a settings.json file in a config dir. */
 const JSON_CLIENT_DIR: Partial<Record<McpClient, string>> = {
   claude: '.claude',
@@ -42,10 +44,15 @@ export function isJsonClient(client: McpClient): client is 'claude' | 'gemini' {
   return client === 'claude' || client === 'gemini';
 }
 
+export function parseMcpClient(value: string | undefined): McpClient | undefined {
+  if (value === undefined) return undefined;
+  if ((MCP_CLIENTS as readonly string[]).includes(value)) return value as McpClient;
+  throw new Error(`Invalid --client value "${value}". Expected claude, gemini, or codex.`);
+}
+
 /**
- * Detects which MCP client is present. Checks project-level dirs for
- * claude/gemini first, then home-level. Falls back to codex if the
- * codex binary is reachable, otherwise defaults to 'claude'.
+ * Detects which MCP client is present. Checks project-level JSON-client dirs
+ * first, then project-level Codex, then home-level fallbacks.
  */
 export function detectMcpClient(input: {
   cwd: string;
@@ -57,6 +64,8 @@ export function detectMcpClient(input: {
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.cwd, dir))) return client;
   }
+  if (input.exists(join(input.cwd, '.codex'))) return 'codex';
+
   // Home-level dir next
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.homeDir, dir))) return client;
