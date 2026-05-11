@@ -1,5 +1,6 @@
 # Lessons
 
+- Do not say or imply that all GitHub issues were reviewed when only the inventory plus a targeted likely-stale subset was deeply checked. Use precise scope language: "inventoried all, deeply reviewed X subset, Y remain for issue-by-issue review."
 - Create `tasks/<name-of-task>-progress.md` only for larger implementation, debugging, recovery, migration, or design tasks with multiple steps and meaningful interruption risk. Do not create progress docs for administrative tasks like committing, pushing, opening PRs, or quick one-shot work.
 - If user asks for `caveman` or very brief comms, switch style immediately and keep all later commentary/final response in caveman mode until user says stop.
 - For integration initiatives, assume existing engines should be wrapped, not rewritten. State explicitly when work is MCP transport/adapters versus core engine implementation.
@@ -9,6 +10,9 @@
 - If the user explicitly says a migration is a breaking change with no backward compatibility, do not preserve legacy paths or fallback behavior. Move the canonical runtime to the new contract directly.
 - When a user says a folder migration should be "across the board," do not stop at one package. Sweep all live runtime code first, then update active contract docs, and leave only stale historical docs untouched.
 - When a user corrects the suspected subsystem during debugging, treat that as a concrete signal update and re-check the live failure path before continuing with prior assumptions.
+- When a user corrects command wording, anchor the fix to the exact named command path before broadening the scope. For example, `fbeast uninstall` means inspect the fbeast CLI uninstall implementation first, even if the initial wording mentions MCP generally.
+- For linked TypeScript CLIs, source tests are not enough for live retry guidance. Rebuild the package after source changes and verify the compiled `dist` path contains the fix before telling the user to retry the linked binary.
 - For Codex hook protocol work, verify the success path as well as the deny path. `PreToolUse` allow responses must match Codex’s real protocol, not just "look symmetric" with deny responses, and generated repo-local hook scripts may still need regeneration even when MCP server code is updated.
+- Every commit subject must be a Conventional Commit, period. This includes regular commits, squash merge titles, manual history rewrites, release fixes, docs-only commits, and Codex-generated PR titles. Use forms like `feat(scope): summary`, `fix(scope): summary`, `docs(scope): summary`, or `chore(scope): summary`; never use bracket prefixes like `[codex] ...`.
 - When adding new dashboard API routes, update the Vite same-origin proxy for every backend route prefix the frontend calls. Otherwise Vite can return `index.html`, leading frontend clients to report JSON parse errors instead of backend failures.
 - In `packages/franken-web` tests, use existing Vitest-safe assertions such as `toBeTruthy()` unless jest-dom matcher types are configured in the package `tsconfig`; otherwise `npm run build` fails because `tsc` includes test files.

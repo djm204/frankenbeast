@@ -97,11 +97,53 @@ describe('fbeast uninstall', () => {
     const claudeDir = join(root, '.claude');
 
     runInit({ root, claudeDir, hooks: true });
+    const preScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
     await runUninstall({ root, claudeDir, purge: false });
 
     const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.hooks.preToolCall).toEqual([]);
-    expect(settings.hooks.postToolCall).toEqual([]);
+    const preHooks = settings.hooks?.PreToolUse ?? [];
+    const postHooks = settings.hooks?.PostToolUse ?? [];
+    const hasFbeastPre = preHooks.some((e: any) => e.hooks?.[0]?.command?.includes('fbeast'));
+    const hasFbeastPost = postHooks.some((e: any) => e.hooks?.[0]?.command?.includes('fbeast'));
+    expect(hasFbeastPre).toBe(false);
+    expect(hasFbeastPost).toBe(false);
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
+  });
+
+  it('removes legacy Claude top-level hook entries from settings.json', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = join(claudeDir, 'settings.json');
+    writeFileSync(settingsPath, JSON.stringify({
+      mcpServers: {
+        'fbeast-memory': { command: 'fbeast-memory' },
+        external: { command: 'external' },
+      },
+      hooks: {
+        preToolCall: [
+          { command: 'fbeast-hook pre-tool --db /tmp/beast.db $TOOL_NAME', description: 'fbeast governance check' },
+          { command: 'external-pre', description: 'keep me' },
+        ],
+        postToolCall: [
+          { command: 'fbeast-hook post-tool --db /tmp/beast.db $TOOL_NAME $RESULT', description: 'fbeast observer logging' },
+          { command: 'external-post', description: 'keep me' },
+        ],
+      },
+    }, null, 2));
+
+    await runUninstall({ root, claudeDir, purge: false });
+
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    expect(settings.mcpServers).toEqual({ external: { command: 'external' } });
+    expect(settings.hooks.preToolCall).toEqual([{ command: 'external-pre', description: 'keep me' }]);
+    expect(settings.hooks.postToolCall).toEqual([{ command: 'external-post', description: 'keep me' }]);
   });
 
   it('accepts yes answers for purge confirmation prompts', async () => {
@@ -140,6 +182,24 @@ describe('fbeast uninstall', () => {
       list.some((e: any) => e.hooks?.some((h: any) => h.command?.includes('fbeast')));
     expect(hasFbeast(before)).toBe(false);
     expect(hasFbeast(after)).toBe(false);
+  });
+
+  it('removes generated Gemini hook scripts without purging stored data', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    const preScript = join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh');
+    const postScript = join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
+    expect(existsSync(join(root, '.fbeast'))).toBe(true);
   });
 
   it('removes fbeast section from AGENTS.md on codex uninstall', async () => {
@@ -196,6 +256,33 @@ describe('fbeast uninstall', () => {
     expect(hasFbeast(postToolUse)).toBe(false);
   });
 
+  it('removes generated Codex hook scripts on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 0 });
+    const preScript = join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh');
+    const postScript = join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh');
+    const legacyHooksDir = join(root, '.fbeast', 'hooks');
+    const legacyPreScript = join(legacyHooksDir, 'codex-pre-tool.sh');
+    const legacyPostScript = join(legacyHooksDir, 'codex-post-tool.sh');
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+    mkdirSync(legacyHooksDir, { recursive: true });
+    writeFileSync(legacyPreScript, '#!/usr/bin/env bash\n');
+    writeFileSync(legacyPostScript, '#!/usr/bin/env bash\n');
+    expect(existsSync(preScript)).toBe(true);
+    expect(existsSync(postScript)).toBe(true);
+    expect(existsSync(legacyPreScript)).toBe(true);
+    expect(existsSync(legacyPostScript)).toBe(true);
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    expect(existsSync(preScript)).toBe(false);
+    expect(existsSync(postScript)).toBe(false);
+    expect(existsSync(legacyPreScript)).toBe(false);
+    expect(existsSync(legacyPostScript)).toBe(false);
+  });
+
   it('codex uninstall runs codex mcp remove fbeast-proxy', async () => {
     const root = tmpDir();
     dirs.push(root);
@@ -211,6 +298,71 @@ describe('fbeast uninstall', () => {
       .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
       .map((c) => c.args[2]);
     expect(removedNames).toContain('fbeast-proxy');
+  });
+
+  it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+
+    runInit({ root, claudeDir, hooks: true });
+
+    // Inject a non-fbeast handler into the same PreToolUse entry list
+    const settingsPath = join(claudeDir, 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: '/path/to/fbeast-hook.sh' },
+        { type: 'command', command: '/path/to/user-custom-hook.sh' },
+      ],
+    });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    await runUninstall({ root, claudeDir, purge: false });
+
+    const updated = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const preList = (updated.hooks?.PreToolUse ?? []) as unknown[];
+    const hasFbeast = preList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command?.includes('fbeast')),
+    );
+    const hasCustom = preList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command === '/path/to/user-custom-hook.sh'),
+    );
+    expect(hasFbeast).toBe(false);
+    expect(hasCustom).toBe(true);
+  });
+
+  it('preserves non-fbeast hooks sharing a Gemini BeforeTool entry on uninstall', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    // Inject a mixed entry: fbeast hook + user hook in the same BeforeTool group
+    const settingsPath = join(geminiDir, 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings.hooks.BeforeTool.push({
+      hooks: [
+        { type: 'command', command: '/path/to/fbeast-before.sh' },
+        { type: 'command', command: '/path/to/user-before-hook.sh' },
+      ],
+    });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    await runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false });
+
+    const updated = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const beforeList = (updated.hooks?.BeforeTool ?? []) as unknown[];
+    const hasFbeast = beforeList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command?.includes('fbeast')),
+    );
+    const hasCustom = beforeList.some((e: any) =>
+      e.hooks?.some((h: any) => h.command === '/path/to/user-before-hook.sh'),
+    );
+    expect(hasFbeast).toBe(false);
+    expect(hasCustom).toBe(true);
   });
 
   it('treats closed stdin as a no answer when purge decision is missing', async () => {

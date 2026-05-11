@@ -69,6 +69,7 @@ describe('GeminiProvider', () => {
     const filtered = provider.filterEnv(env);
     expect(filtered).toHaveProperty('PATH', '/usr/bin');
     expect(filtered).toHaveProperty('HOME', '/home/user');
+    expect(filtered).toHaveProperty('FRANKENBEAST_SPAWNED', '1');
     expect(filtered).not.toHaveProperty('GEMINI_API_KEY');
     expect(filtered).not.toHaveProperty('GOOGLE_CLOUD_PROJECT');
     expect(filtered).not.toHaveProperty('GOOGLE_API_KEY');
@@ -78,7 +79,9 @@ describe('GeminiProvider', () => {
     const env = { PATH: '/usr/bin', GEMINI_KEY: 'secret' };
     const filtered = provider.filterEnv(env);
     expect(env).toHaveProperty('GEMINI_KEY', 'secret');
+    expect(env).not.toHaveProperty('FRANKENBEAST_SPAWNED');
     expect(filtered).not.toBe(env);
+    expect(filtered).toHaveProperty('FRANKENBEAST_SPAWNED', '1');
   });
 
   // -- isRateLimited -------------------------------------------------------

@@ -1,5 +1,28 @@
 # fbeast dual-mode launch
 
+## Current Batch: PR 287 Review Comments
+
+- [x] Fetch unresolved PR #287 review threads with thread resolution state.
+- [x] Identify the actionable `timeout` portability regression in generated pre-tool hooks.
+- [x] Add failing regression tests for missing `timeout` behavior.
+- [x] Implement minimal generated hook fail-open handling for missing `timeout`.
+- [x] Run focused tests and typechecks.
+- [x] Reply to and resolve addressed review threads.
+- [x] Push fixes and trigger another Codex review with `@codex`.
+- [ ] Repeat the `@codex` review-fix-comment-resolve-trigger cycle three total times, stopping early only if a cycle returns no actionable comments.
+
+## Review
+
+- PR #287 cycle 6 addressed two new Codex review threads locally:
+  - Legacy Claude `preToolCall`/`postToolCall` entries with top-level fbeast hook commands are removed during uninstall.
+  - Generated Claude hook command paths are shell-quoted so projects with spaces in their path can execute hooks.
+- Replied to and resolved review threads `PRRT_kwDORezACM6ArmFB` and `PRRT_kwDORezACM6ArmFH`, then pushed commit `c7c92ae`.
+- Verification passed in `packages/franken-mcp-suite`:
+  - `rtk npm test -- --run src/cli/init.test.ts src/cli/uninstall.test.ts` (39 tests)
+  - `rtk npm test --` (138 tests)
+  - `rtk npm run typecheck`
+  - `rtk npm run build`
+
 ## Current Batch: PR 286 Review Comments
 
 - [x] Fetch thread-aware review comments for PR #286 and identify unresolved actionable feedback.
@@ -102,14 +125,57 @@
   - `npm run build` in `packages/franken-web`
 - Local web dev server started at `http://127.0.0.1:5174/`.
 
+## Current Batch: MCP Suite Subagent Hook Mitigation
+
+- [x] Record the implementation plan and current todo entry before source edits.
+- [x] Add failing hook-script tests for spawned-agent bypass and hook timeouts.
+- [x] Add a failing Codex provider test for `FRANKENBEAST_SPAWNED` env parity.
+- [x] Implement hook bypass and timeout behavior in generated Codex and Gemini scripts.
+- [x] Implement Codex and Gemini provider spawned-env parity.
+- [x] Run focused package tests and typechecks.
+- [x] Record verification results and review notes.
+
+## Current Batch: fbeast Uninstall Hooks
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Confirm uninstall currently removes hook config references but leaves generated hook script files behind.
+- [x] Add focused failing tests for Codex and Gemini hook script cleanup.
+- [x] Implement minimal generated hook script removal during uninstall.
+- [x] Re-run focused `franken-mcp-suite` verification and record results.
+- [x] Fix project Codex client detection so bare `fbeast uninstall` reaches Codex hook cleanup after rebuild.
+
+## Current Batch: GitHub Issue Triage
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Inventory open GitHub issues for `djm204/frankenbeast`.
+- [x] Identify issues made irrelevant by current repository state.
+- [x] Add explanatory comments to irrelevant issues and close them.
+- [x] Verify final issue states and record review notes.
+
+## Current Batch: Worktrees Web Dashboard Observability Investigation
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Identify worktrees related to web dashboard, observability, or analytics.
+- [x] Inspect branch/status/diff evidence for the candidate worktree.
+- [x] Determine whether the update is half-baked, completed, or unrelated.
+- [x] Record the conclusion and evidence in the progress document.
+
+## Current Batch: Agent Systems Audit Gap Fill Plan
+
+- [x] Check for a matching progress document and create it if missing.
+- [x] Resolve the relevant audit artifact for "today" and note the `2026-04-27` shell date versus `2026-04-28` audit date mismatch.
+- [x] Inspect the audit gaps and source/test surfaces named by the audit.
+- [x] Write a concrete implementation plan to fill the audit gaps.
+- [ ] User review the gap-fill plan before implementation starts.
+
 ## Current Batch: Agent Systems Audit
 
 - [x] Check for a matching progress document and create it if missing.
-- [ ] Verify secure code execution from source and tests, not docs.
-- [ ] Verify deterministic state, checkpointing, replay, and memory from source and tests.
-- [ ] Verify identity boundaries, scoped permissions, and HITL enforcement from source and tests.
-- [ ] Verify observer/monitor pattern behavior from source and tests.
-- [ ] Document legitimate capabilities, gaps, and verification evidence.
+- [x] Verify secure code execution from source and tests, not docs.
+- [x] Verify deterministic state, checkpointing, replay, and memory from source and tests.
+- [x] Verify identity boundaries, scoped permissions, and HITL enforcement from source and tests.
+- [x] Verify observer/monitor pattern behavior from source and tests.
+- [x] Document legitimate capabilities, gaps, and verification evidence.
 
 ## Current Batch: Context Remaining Question
 
@@ -226,6 +292,10 @@
 
 ## Review
 
+- 2026-05-06: MCP Suite Subagent Hook Mitigation completed. Generated Codex/Gemini hooks now bypass when `FRANKENBEAST_SPAWNED=1` or `FBEAST_DISABLE_HOOKS=1`, and `fbeast-hook` invocations are bounded by `timeout "${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"` with timeout fail-open behavior. Codex and Gemini providers now mark spawned child processes with `FRANKENBEAST_SPAWNED=1`. Red phase reproduced the missing bypass/timeout/env behavior; green verification passed via focused hook/provider tests and package typechecks in `packages/franken-mcp-suite` and `packages/franken-orchestrator`.
+- 2026-05-02: Fixed `fbeast uninstall` so it removes generated hook script files, not only hook config references. Gemini uninstall now removes `.fbeast/hooks/gemini-before-tool.sh` and `.fbeast/hooks/gemini-after-tool.sh` while preserving `.fbeast/` data without `--purge`; Codex uninstall now removes `.codex/hooks/fbeast-codex-pre-tool.sh`, `.codex/hooks/fbeast-codex-post-tool.sh`, and legacy `.fbeast/hooks/codex-*.sh` scripts. Verified via `rtk npm test -- --run src/cli/uninstall.test.ts`, `rtk npm test -- --run src/cli/uninstall.test.ts src/cli/init.test.ts src/cli/uninstall-entrypoint.test.ts`, and `rtk npm run typecheck` in `packages/franken-mcp-suite`.
+- 2026-05-02 follow-up: Live retry showed rebuild alone was insufficient because bare `fbeast uninstall` could auto-detect home `.claude`/`.gemini` before project `.codex/`, skipping Codex hook cleanup. Fixed detection to prefer project `.codex/`, added `--client=` parsing to the direct `fbeast-uninstall` entrypoint, and rebuilt `packages/franken-mcp-suite/dist`. Verified via `rtk npm test -- --run src/cli/mcp-client-paths.test.ts src/cli/uninstall-entrypoint.test.ts`, `rtk npm test -- --run src/cli/mcp-client-paths.test.ts src/cli/uninstall.test.ts src/cli/init.test.ts src/cli/uninstall-entrypoint.test.ts src/cli/main.test.ts`, `rtk npm run typecheck`, and `rtk npm run build`.
+- 2026-04-28: GitHub issue triage closed 24 no-longer-relevant or already-resolved issues after commenting on each. First pass closed #22, #24, #25, #28, #32, #33, #35, #36, #40, #41, #42, #43, #45, #46, #50, #82, #85. Full remaining review then closed #19, #55, #61, #63, #64, #70, #80. GitHub now reports 41 open issues. Closed as completed: #19, #22, #32. The rest were closed as not planned/obsolete because consolidation removed the referenced package, directory, or code path. Issues left open still map to live code/docs or have unresolved acceptance criteria after review.
 - 2026-04-27: Crash-forensics review found two half-baked threads. First, a proxy-mode implementation was left mid-flight in `packages/franken-mcp-suite` and matches `docs/superpowers/plans/2026-04-21-fbeast-proxy-mcp-server.md` almost one-for-one: new `fbeast-proxy` server/registry files, `init --mode=proxy`, uninstall cleanup, tests, package bin wiring, and docs updates are all dirty, but no current batch in `tasks/todo.md` tracks them. Second, the unchecked Beast Mode Hardening batch has already started: `packages/franken-orchestrator/src/cli/args.ts`, `run.ts`, and the deleted `provider`/`dashboard` CLI files/tests show the "close config and flag no-op gaps" subtask in progress, with `docs/guides/run-cli-beast.md` likely belonging to the same interrupted hardening/docs thread.
 - 2026-04-27: Added a non-negotiable progress-document workflow rule. Future tasks must immediately check for `tasks/<name-of-task>-progress.md`, create it if missing, and keep it updated as the persistent acceptance-criteria checklist.
 - 2026-04-27: MCP Suite Proxy Recovery completed from the dropped-task forensics. Proxy mode is implemented in `packages/franken-mcp-suite`, documented, and covered by startup smoke verification that `fbeast-proxy` exposes only `search_tools` and `execute_tool`. Verified via `cd packages/franken-mcp-suite && npm test -- --run src/shared/tool-registry.test.ts src/servers/proxy.test.ts src/cli/init.test.ts src/cli/uninstall.test.ts`, `cd packages/franken-mcp-suite && npm test -- --run src/integration/server-startup.integration.test.ts src/shared/tool-registry.test.ts src/servers/proxy.test.ts src/cli/init.test.ts src/cli/uninstall.test.ts`, `cd packages/franken-mcp-suite && npm run typecheck`, and `cd packages/franken-mcp-suite && npm test` (23 files, 106 tests).
