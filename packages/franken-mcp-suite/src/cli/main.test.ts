@@ -35,7 +35,59 @@ describe('fbeast main CLI', () => {
       // process.exit throws in test
     }
 
-    expect(mockSpawnSync).toHaveBeenCalledWith('frankenbeast', ['network', 'up'], { stdio: 'inherit' });
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      'frankenbeast',
+      ['network', 'up'],
+      expect.objectContaining({ stdio: 'inherit', shell: process.platform === 'win32' }),
+    );
+    mockExit.mockRestore();
+  });
+
+  it('uses shell on Windows so npm .cmd shims are resolved', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'network', 'up'];
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      'frankenbeast',
+      ['network', 'up'],
+      expect.objectContaining({ shell: true }),
+    );
+    mockExit.mockRestore();
+    platformSpy.mockRestore();
+  });
+
+  it('reports correct package name when frankenbeast binary is missing', async () => {
+    const enoent: NodeJS.ErrnoException = Object.assign(new Error('spawn frankenbeast ENOENT'), { code: 'ENOENT' });
+    const mockSpawnSync = vi.fn().mockReturnValue({ status: null, signal: null, error: enoent });
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'network', 'up'];
+
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('franken-orchestrator');
+    expect(message).not.toContain('@fbeast/orchestrator');
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockError.mockRestore();
     mockExit.mockRestore();
   });
 

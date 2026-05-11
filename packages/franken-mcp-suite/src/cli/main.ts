@@ -13,11 +13,14 @@ function resolveClient(): McpClient {
 }
 
 function passthrough(): never {
-  const result = spawnSync('frankenbeast', process.argv.slice(2), { stdio: 'inherit' });
+  const result = spawnSync('frankenbeast', process.argv.slice(2), {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
   if (result.error) {
     const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     if (isNotFound) {
-      console.error("frankenbeast: binary not found — install @fbeast/orchestrator or run 'npm link --workspace=franken-orchestrator'");
+      console.error("frankenbeast: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'");
     } else {
       console.error(`frankenbeast: ${result.error.message}`);
     }
@@ -83,12 +86,12 @@ switch (subcommand) {
         });
       },
       exec: async (cmd, args) => {
-        const result = spawn(cmd, args, { stdio: 'inherit' });
+        const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
         if (result.error) {
           const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
           throw new Error(
             isNotFound
-              ? `${cmd}: binary not found — install @fbeast/orchestrator or run 'npm link --workspace=franken-orchestrator'`
+              ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
               : `${cmd} failed: ${result.error.message}`,
           );
         }
