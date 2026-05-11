@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { constants, homedir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
 
@@ -11,14 +12,43 @@ function resolveClient(): McpClient {
   return clientArg ?? detectMcpClient({ cwd: process.cwd(), homeDir: homedir(), exists: existsSync });
 }
 
-switch (command) {
+function passthrough(): never {
+  const result = spawnSync('frankenbeast', process.argv.slice(2), {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (result.error) {
+    const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
+    if (isNotFound) {
+      console.error("frankenbeast: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'");
+    } else {
+      console.error(`frankenbeast: ${result.error.message}`);
+    }
+    process.exit(1);
+  }
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    process.exit(128 + (constants.signals[result.signal] ?? 0));
+  }
+  process.exit(result.status ?? 0);
+}
+
+if (command !== 'mcp') {
+  passthrough();
+}
+
+// ─── fbeast mcp ───────────────────────────────────────────────────────────────
+
+const subcommand = process.argv[3];
+
+switch (subcommand) {
   case 'init': {
     const KNOWN_INIT_FLAGS = ['--hooks', '--pick', '--client', '--mode'];
-    const unknownFlags = process.argv.slice(3).filter(
+    const unknownFlags = process.argv.slice(4).filter(
       (a) => a.startsWith('--') && !KNOWN_INIT_FLAGS.some((k) => a === k || a.startsWith(k + '=')),
     );
     if (unknownFlags.length > 0) {
-      console.error(`fbeast init: unknown flag(s): ${unknownFlags.join(', ')}`);
+      console.error(`fbeast mcp init: unknown flag(s): ${unknownFlags.join(', ')}`);
       console.error('  Known flags: --hooks  --pick[=<servers>]  --mode=standard|proxy  --client=claude|gemini|codex');
       process.exit(1);
     }
@@ -42,9 +72,9 @@ switch (command) {
   case 'beast': {
     const { runBeastMode } = await import('./beast-mode.js');
     const { createInterface } = await import('node:readline');
-    const { spawnSync } = await import('node:child_process');
+    const { spawnSync: spawn } = await import('node:child_process');
     const root = process.cwd();
-    await runBeastMode(process.argv.slice(3), {
+    await runBeastMode(process.argv.slice(4), {
       root,
       confirm: (msg) => {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -56,12 +86,12 @@ switch (command) {
         });
       },
       exec: async (cmd, args) => {
-        const result = spawnSync(cmd, args, { stdio: 'inherit' });
+        const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
         if (result.error) {
           const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
           throw new Error(
             isNotFound
-              ? `${cmd}: binary not found — install @fbeast/orchestrator or run 'npm link --workspace=franken-orchestrator'`
+              ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
               : `${cmd} failed: ${result.error.message}`,
           );
         }
@@ -77,18 +107,21 @@ switch (command) {
     break;
   }
   default:
-    console.log('Usage: fbeast <command>');
+    console.log('Usage: fbeast mcp <command>');
     console.log('');
-    console.log('Commands:');
-    console.log('  init                        Set up fbeast MCP servers');
-    console.log('  init --client=<name>        Target client: claude (default), gemini, codex');
-    console.log('  init --pick                 Choose which servers to install');
-    console.log('  init --mode=proxy           Register one proxy MCP server instead of individual servers');
-    console.log('  init --hooks                Add pre/post-tool hooks');
-    console.log('  uninstall                   Remove fbeast MCP config');
-    console.log('  uninstall --client=<name>   Target a specific client');
-    console.log('  uninstall --purge           Also remove stored data');
-    console.log('  beast                       Activate Beast mode');
-    console.log('  beast --provider=<name>     LLM provider: anthropic-api (default), codex-cli, claude-cli');
-    process.exit(command ? 1 : 0);
+    console.log('MCP server management commands:');
+    console.log('  mcp init                        Set up fbeast MCP servers');
+    console.log('  mcp init --client=<name>        Target client: claude (default), gemini, codex');
+    console.log('  mcp init --pick                 Choose which servers to install');
+    console.log('  mcp init --mode=proxy           Register one proxy MCP server instead of individual servers');
+    console.log('  mcp init --hooks                Add pre/post-tool hooks');
+    console.log('  mcp uninstall                   Remove fbeast MCP config');
+    console.log('  mcp uninstall --client=<name>   Target a specific client');
+    console.log('  mcp uninstall --purge           Also remove stored data');
+    console.log('  mcp beast                       Activate Beast mode');
+    console.log('  mcp beast --provider=<name>     LLM provider: anthropic-api (default), codex-cli, claude-cli');
+    console.log('');
+    console.log('All other commands are forwarded to frankenbeast.');
+    console.log('Run: frankenbeast --help');
+    process.exit(subcommand ? 1 : 0);
 }
