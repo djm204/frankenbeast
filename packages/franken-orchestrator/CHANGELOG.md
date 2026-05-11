@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.33.0...franken-orchestrator-v0.33.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* **mcp-suite:** mitigate hook hangs and uninstall residue ([#287](https://github.com/djm204/frankenbeast/issues/287)) ([b939d36](https://github.com/djm204/frankenbeast/commit/b939d36b68c8c3336af4df491819b32ec962d168))
+
 ## [0.33.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.32.0...franken-orchestrator-v0.33.0) (2026-05-07)
 
 
