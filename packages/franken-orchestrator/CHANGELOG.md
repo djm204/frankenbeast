@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.33.1...franken-orchestrator-v0.34.0) (2026-05-17)
+
+
+### Features
+
+* **orchestrator:** beast mode hardening — explicit resume, fail-closed deps, verification matrix ([#292](https://github.com/djm204/frankenbeast/issues/292)) ([c0dd018](https://github.com/djm204/frankenbeast/commit/c0dd01899fd429e4b80bfb85218f0f98890cc136))
+
 ## [0.33.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.33.0...franken-orchestrator-v0.33.1) (2026-05-11)
 
 
