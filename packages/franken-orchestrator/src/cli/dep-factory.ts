@@ -163,7 +163,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     options.runConfig?.llmConfig?.default?.model
     ?? options.runConfig?.model;
   const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
-  const effectiveBudget = options.runConfig?.maxTotalTokens ?? options.budget;
+  const effectiveBudget = options.budget;
   const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
   const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
   const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
@@ -451,7 +451,14 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...(runConfigOverrides ? { runConfigOverrides } : {}),
   });
 
-  const consolidated = createBeastDeps(beastConfig, existingDeps);
+  let consolidated: ConsolidatedDeps;
+  try {
+    consolidated = createBeastDeps(beastConfig, existingDeps);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn(`createBeastDeps failed: ${reason}`, 'dep-factory');
+    throw new Error(`createBeastDeps failed: ${reason}`);
+  }
 
   // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']
   // which the beast loop validates via hasSkill(). SkillManagerAdapter doesn't know about cli:*

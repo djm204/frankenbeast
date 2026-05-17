@@ -154,4 +154,43 @@ describe('BeastLoop', () => {
       'task-cli',
     );
   });
+
+  it('aborts when maxTotalTokens is exceeded mid-run', async () => {
+    const deps = makeDeps();
+    deps.observer.getTokenSpend = vi.fn(async () => ({
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      estimatedCostUsd: 0.01,
+    }));
+
+    const loop = new BeastLoop(deps, { maxTotalTokens: 100 });
+    const result = await loop.run({
+      projectId: 'proj',
+      userInput: 'test',
+    });
+
+    expect(result.status).toBe('aborted');
+    expect(result.abortReason).toContain('Token budget exceeded');
+  });
+
+  it('aborts when maxDurationMs is exceeded mid-run', async () => {
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const deps = makeDeps();
+    (deps.memory.getContext as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      now = 250;
+      return { adrs: [], knownErrors: [], rules: [] };
+    });
+
+    const loop = new BeastLoop(deps, { maxDurationMs: 100 });
+    const result = await loop.run({
+      projectId: 'proj',
+      userInput: 'test',
+    });
+
+    expect(result.status).toBe('aborted');
+    expect(result.abortReason).toContain('Execution duration exceeded');
+    nowSpy.mockRestore();
+  });
 });
