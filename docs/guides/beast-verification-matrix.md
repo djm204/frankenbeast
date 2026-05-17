@@ -26,9 +26,9 @@ npm test -- --run \
 - `skill`: `tests/integration/cli/skill-command.test.ts`
 - `security`: `tests/integration/cli/security-command.test.ts`
 - `network`: `tests/integration/network/network-cli.test.ts`
-- `beasts`: `tests/integration/beasts/agent-routes.test.ts` — **KNOWN PRE-EXISTING FAILURE** (see below); excluded from the hardening release gate.
+- `beasts`: `tests/integration/beasts/agent-routes.test.ts`
 
-Run (release-gate set — excludes the pre-existing `beasts` failure):
+Run (full release-gate set):
 
 ```bash
 cd packages/franken-orchestrator
@@ -39,31 +39,14 @@ npm test -- --run \
   tests/integration/chat/chat-server.test.ts \
   tests/integration/cli/skill-command.test.ts \
   tests/integration/cli/security-command.test.ts \
-  tests/integration/network/network-cli.test.ts
+  tests/integration/network/network-cli.test.ts \
+  tests/integration/beasts/agent-routes.test.ts
 ```
-
-## Known Pre-Existing Failure: `beasts`
-
-`tests/integration/beasts/agent-routes.test.ts` has 2 failing tests
-(`agent-routes.test.ts:211`, `:465` — `created.data.status` is `'failed'`,
-expected `'initializing'`).
-
-- **Status:** pre-existing on `main` (`100dd1f`, ~4 weeks before this branch). The
-  Beast Mode Hardening branch (`f152d1d`) does not touch the `beasts` surface;
-  reverting this branch's `beast-loop.ts`/`dep-factory.ts` to `main` reproduces
-  the identical failure.
-- **Root cause:** `agent-routes` `createRun` dispatch passes `initConfig` that
-  omits fields the target beast definition's `configSchema` requires
-  (`goal`/`outputPath`/`initAction`), so `BeastDispatchService.createRun`
-  throws a real (non-`unrecognized_keys`) validation error and the agent is
-  marked `failed`.
-- **Scope decision:** out of scope for the run/resume/dep-factory hardening
-  contract. Tracked for a separate `beasts`-surface fix; this gate excludes it
-  but the entry stays here so it is not silently forgotten.
 
 ## Interpretation
 
 - A failing command-family proof means that surface is not release-ready, even if lower-level unit tests still pass.
 - The core runtime hardening set must stay green alongside the command-family set.
 - New beast-surface flags or subcommands are not considered complete until they are added to this matrix with a focused proof test.
-- Documented known pre-existing failures (see "Known Pre-Existing Failure") are excluded from the release gate only while their entry records evidence, root cause, and a tracking decision. A regression in any family that is *not* documented here blocks release.
+- All eight command families plus the core hardening set are green as of this branch's base (`origin/main` @ `610a0ea`); the full set above must stay green to release.
+- If a family must ever be temporarily excluded, add a "Known Pre-Existing Failure" section recording evidence, root cause, and a tracking decision; an undocumented regression in any family blocks release.
