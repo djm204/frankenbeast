@@ -137,6 +137,22 @@ npm test -- --run tests/unit/server/app.test.ts tests/unit/gateway/approval-gate
 
 Result: 4 files passed, 26 tests passed.
 
+## Follow-Up Implementation Status
+
+Updated 2026-05-18 — security-hardening Chunk 2 (ADR-035). See
+`docs/adr/035-mcp-input-validation-and-path-containment.md`. (Chunk 1 /
+Pillar 3 rows are tracked in its own PR and will appear in this section once
+both merge.)
+
+| Pillar 1 gap | Status | Evidence |
+|--------------|--------|----------|
+| MCP tool schemas are metadata, not enforced validation | **fixed** | Commit `acb7265`; `validateToolArguments` + shared `dispatchTool` gate every tool (SDK CallTool path and in-process `callTool`). Tests: `src/shared/server-factory.test.ts` › "rejects missing required property / wrong type / unknown extra property / passes valid". |
+| File scanning can read arbitrary supplied paths | **fixed** | Commit `7085b5c`; `createFirewallAdapter` real-path-contains `scanFile` to the configured project root. Tests: `src/servers/firewall.test.ts` › "rejects scanning a path outside the project root" / "allows scanning a file inside the project root". |
+
+Residual (ADR-035): MCP validation is structural only (no deep JSON-Schema
+`format`/`enum`/nested/array-item validation), matching the flat advertised
+schema contract.
+
 ## Bottom Line
 
 Frankenbeast is strongest today as an orchestration, audit, planning, review, and local-governance framework. It has real observability and some real approval/auth controls.
