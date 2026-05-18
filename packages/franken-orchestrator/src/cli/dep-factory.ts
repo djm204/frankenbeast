@@ -385,12 +385,14 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       const { stdin, stdout } = await import('node:process');
 
       if (!stdin.isTTY) {
-        // Non-interactive mode (CI, piped input) — auto-approve without readline.
+        // Non-interactive mode fails closed (denied) unless FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1 is explicitly set.
         // defaultDecision short-circuits before gateway is called, so gateway is a no-op placeholder.
         governor = new GovernorPortAdapter({
           gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as never,
           projectId: basename(paths.root),
-          defaultDecision: 'approved' as const,
+          defaultDecision: process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL === '1'
+            ? ('approved' as const)
+            : ('rejected' as const),
         });
       } else {
         const rl = createInterface({ input: stdin, output: stdout });
