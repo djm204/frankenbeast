@@ -19,6 +19,7 @@ import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
+import { requireOperatorAuth } from './operator-auth.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
@@ -36,6 +37,7 @@ export interface ChatAppOptions {
   projectName?: string;
   sessionContinuation?: boolean;
   sessionTokenSecret?: string;
+  operatorToken?: string;
   engine?: ConversationEngine;
   runtime?: ChatRuntime;
   turnRunner?: TurnRunner;
@@ -98,6 +100,13 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const app = new Hono();
   app.use('*', requestId);
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
+  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken;
+  if (effectiveOperatorToken) {
+    app.use('/v1/chat/*', requireOperatorAuth({
+      operatorToken: effectiveOperatorToken,
+      security: opts.beastControl?.security ?? transportSecurity,
+    }));
+  }
   app.onError(errorHandler);
 
   const routes = chatRoutes({
