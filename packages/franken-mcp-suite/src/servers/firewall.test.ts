@@ -62,4 +62,14 @@ describe('Firewall Server', () => {
     const res = await adapter.scanFile('safe.txt');
     expect(res.verdict).toBe('clean');
   });
+
+  it('allows children when the configured root is the filesystem root', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fw-fsroot-'));
+    const file = join(dir, 'safe.txt');
+    writeFileSync(file, 'hello');
+    // root '/' previously produced a '//' prefix and rejected every child.
+    const adapter = createFirewallAdapter(join(dir, 'fw.db'), 'standard', { root: '/' });
+    const res = await adapter.scanFile(file);
+    expect(res.verdict).toBe('clean');
+  });
 });

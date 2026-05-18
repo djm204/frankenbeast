@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from 'franken-orchestrator';
 import type { InjectionTier } from 'franken-orchestrator';
@@ -39,7 +39,10 @@ export function createFirewallAdapter(
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
     const realTarget = realpathSync(target); // throws ENOENT for missing — acceptable, caller handles
-    if (realTarget !== root && !realTarget.startsWith(root + sep)) {
+    // relative() handles the filesystem-root case (root === sep) where a
+    // naive `root + sep` prefix would become a double separator.
+    const rel = relative(root, realTarget);
+    if (rel !== '' && (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel))) {
       throw new Error(`Refusing to scan path outside project root: ${requested}`);
     }
     return realTarget;

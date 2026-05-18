@@ -55,7 +55,7 @@ export function validateToolArguments(
     if (!prop) {
       return { ok: false, message: `Tool ${tool.name} received unknown property: ${key}` };
     }
-    const actual = Array.isArray(value) ? 'array' : typeof value;
+    const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
     if (prop.type === 'integer' ? !Number.isInteger(value) : actual !== prop.type) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be ${prop.type}` };
     }

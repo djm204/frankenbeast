@@ -72,6 +72,20 @@ describe('createMcpServer', () => {
     expect(calls).toEqual([{ msg: 'hi' }]);
   });
 
+  it('rejects null for an object-typed property (typeof null === "object")', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const res = await srv.callTool('cfg', { args: null });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
   it('handler returns correct format', async () => {
     const tools: ToolDef[] = [
       {
