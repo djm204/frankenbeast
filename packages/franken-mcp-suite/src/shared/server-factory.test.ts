@@ -31,6 +31,47 @@ describe('createMcpServer', () => {
     expect(server.tools[0]!.name).toBe('fbeast_memory_query');
   });
 
+  function makeServerWithSpy() {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'echo',
+      description: 'echo',
+      inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+      handler: async (args) => { calls.push(args); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const callTool = (name: string, args: unknown) => srv.callTool(name, args);
+    return { srv, calls, tool, callTool };
+  }
+
+  it('rejects missing required property without calling the handler', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', {});
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects wrong property type', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 123 });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects unknown extra property', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 'hi', extra: 1 });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('passes a valid argument object through to the handler', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 'hi' });
+    expect(res.isError).toBeFalsy();
+    expect(calls).toEqual([{ msg: 'hi' }]);
+  });
+
   it('handler returns correct format', async () => {
     const tools: ToolDef[] = [
       {
