@@ -100,6 +100,15 @@ describe('ApprovalGateway — security integration', () => {
     }
   });
 
+  it('throws at construction when signed approvals are required without a verifier', () => {
+    expect(() => new ApprovalGateway({
+      channel: makeFakeChannel(),
+      auditRecorder: makeFakeAuditRecorder(),
+      config: { ...defaultConfig(), requireSignedApprovals: true },
+      // no signatureVerifier
+    })).toThrow(/signed approvals.*verifier/i);
+  });
+
   it('does not return SessionToken for non-APPROVE decisions', async () => {
     const tokenStore = new SessionTokenStore();
     const channel = makeFakeChannel({ decision: 'REGEN', feedback: 'nope' });
