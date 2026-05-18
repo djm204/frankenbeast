@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createFirewallServer } from './firewall.js';
+import { createFirewallAdapter } from '../adapters/firewall-adapter.js';
 
 describe('Firewall Server', () => {
   it('exposes 2 tools', () => {
@@ -42,5 +46,20 @@ describe('Firewall Server', () => {
     const fileResult = await scanFileTool.handler({ path: '/tmp/prompt.txt' });
     expect(firewall.scanFile).toHaveBeenCalledWith('/tmp/prompt.txt');
     expect(fileResult.content[0]!.text).toContain('clean');
+  });
+
+  it('rejects scanning a path outside the project root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-root-'));
+    const adapter = createFirewallAdapter(join(root, 'fw.db'), 'standard', { root });
+    await expect(adapter.scanFile('../../etc/passwd')).rejects.toThrow(/outside.*root/i);
+    await expect(adapter.scanFile('/etc/passwd')).rejects.toThrow(/outside.*root/i);
+  });
+
+  it('allows scanning a file inside the project root', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-root-'));
+    writeFileSync(join(root, 'safe.txt'), 'hello');
+    const adapter = createFirewallAdapter(join(root, 'fw.db'), 'standard', { root });
+    const res = await adapter.scanFile('safe.txt');
+    expect(res.verdict).toBe('clean');
   });
 });

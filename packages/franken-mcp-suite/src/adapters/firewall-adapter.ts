@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from 'franken-orchestrator';
 import type { InjectionTier } from 'franken-orchestrator';
@@ -22,6 +23,7 @@ interface FirewallAdapterDeps {
 export function createFirewallAdapter(
   dbPathOrDeps: string | FirewallAdapterDeps,
   tier: InjectionTier = 'standard',
+  options: { root?: string } = {},
 ): FirewallAdapter {
   if (typeof dbPathOrDeps !== 'string') {
     return dbPathOrDeps;
@@ -32,6 +34,17 @@ export function createFirewallAdapter(
     ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
     : PATTERNS_ALL_TIERS;
 
+  const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
+
+  function resolveContained(requested: string): string {
+    const target = resolve(root, requested);
+    const realTarget = realpathSync(target); // throws ENOENT for missing — acceptable, caller handles
+    if (realTarget !== root && !realTarget.startsWith(root + sep)) {
+      throw new Error(`Refusing to scan path outside project root: ${requested}`);
+    }
+    return realTarget;
+  }
+
   return {
     async scanText(input) {
       const result = scanWithPatterns(input, patterns);
@@ -40,7 +53,8 @@ export function createFirewallAdapter(
     },
 
     async scanFile(path) {
-      const content = readFileSync(path, 'utf8');
+      const safePath = resolveContained(path);
+      const content = readFileSync(safePath, 'utf8');
       const result = scanWithPatterns(content, patterns);
       logScan(content, result);
       return result;
