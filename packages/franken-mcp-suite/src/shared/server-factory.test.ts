@@ -72,6 +72,30 @@ describe('createMcpServer', () => {
     expect(calls).toEqual([{ msg: 'hi' }]);
   });
 
+  it('requires an OWN required property (rejects prototype-chain keys)', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', Object.create({ msg: 'x' }));
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects explicit null wire arguments but defaults absent args to {}', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'noargs',
+      description: 'noargs',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const nullRes = await srv.callTool('noargs', null);
+    expect(nullRes.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+    const absentRes = await srv.callTool('noargs', undefined);
+    expect(absentRes.isError).toBeFalsy();
+    expect(calls).toEqual([{}]);
+  });
+
   it('rejects null for an object-typed property (typeof null === "object")', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

@@ -46,7 +46,7 @@ export function validateToolArguments(
   const obj = args as Record<string, unknown>;
   const schema = tool.inputSchema;
   for (const req of schema.required ?? []) {
-    if (!(req in obj) || obj[req] === undefined) {
+    if (!Object.prototype.hasOwnProperty.call(obj, req) || obj[req] === undefined) {
       return { ok: false, message: `Tool ${tool.name} missing required property: ${req}` };
     }
   }
@@ -72,7 +72,9 @@ async function dispatchTool(
   if (!tool) {
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
-  const validated = validateToolArguments(tool, args ?? {});
+  // Only an *absent* argument object defaults to {}; an explicit `null` (or any
+  // non-object) on the wire must reach the validator and be rejected.
+  const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
