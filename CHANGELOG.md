@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.1](https://github.com/djm204/frankenbeast/compare/v0.37.0...v0.37.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **security:** Chunk 2 — MCP schema enforcement & firewall path containment ([#297](https://github.com/djm204/frankenbeast/issues/297)) ([d8ac1e4](https://github.com/djm204/frankenbeast/commit/d8ac1e47c10b3e979bc6298f6d68bcf870e72bdb))
+
+
+### Documentation
+
+* **plans:** chunk 2026-04-28 security gap-fill into 4 implementation plans ([#294](https://github.com/djm204/frankenbeast/issues/294)) ([bd26d85](https://github.com/djm204/frankenbeast/commit/bd26d85af9b5042eba305cad980e6b25ddbf8d07))
+
 ## [0.37.0](https://github.com/djm204/frankenbeast/compare/v0.36.0...v0.37.0) (2026-05-17)
 
 
