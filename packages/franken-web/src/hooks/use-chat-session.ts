@@ -29,6 +29,7 @@ export interface ActivityEvent {
 
 export interface UseChatSessionOptions {
   baseUrl: string;
+  operatorToken?: string;
   projectId: string;
   sessionId?: string;
   sessionSeed?: number;
@@ -187,7 +188,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [tier, setTier] = useState<string | null>(null);
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
 
-  const clientRef = useRef(new ChatApiClient(opts.baseUrl));
+  const clientRef = useRef(new ChatApiClient(opts.baseUrl, opts.operatorToken));
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
 

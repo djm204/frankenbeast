@@ -100,14 +100,17 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const app = new Hono();
   app.use('*', requestId);
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
-  // Chat auth is gated on an explicit chat operator token only. It is
-  // deliberately NOT coupled to the beast control-plane token
-  // (`beastControl.operatorToken`): that token authorizes the beast control
-  // plane, a different trust domain than user-facing chat, and coupling them
-  // would silently 401 existing chat clients in beast-enabled deployments.
-  if (opts.operatorToken) {
+  // Chat /v1/chat/* is gated by an operator token whenever one is configured.
+  // The same operator token authorizes the beast control plane and chat in
+  // this codebase (matching the existing `VITE_BEAST_OPERATOR_TOKEN` pattern
+  // already used by franken-web for beast routes); first-party clients
+  // (franken-web ChatApiClient, network/chat-attach) plumb the token through.
+  // `startChatServer` separately fails closed when chat is exposed without a
+  // token (managed mode or non-loopback host).
+  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken;
+  if (effectiveOperatorToken) {
     app.use('/v1/chat/*', requireOperatorAuth({
-      operatorToken: opts.operatorToken,
+      operatorToken: effectiveOperatorToken,
       security: opts.beastControl?.security ?? transportSecurity,
     }));
   }

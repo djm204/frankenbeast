@@ -222,16 +222,21 @@ describe('Chat HTTP Routes', () => {
       },
     });
 
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      authorization: 'Bearer operator-token',
+    };
+
     const createRes = await app.request('/v1/chat/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ projectId: 'proj' }),
     });
     const { data: created } = await createRes.json();
 
     const promptOneRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ content: 'spawn a martin beast' }),
     });
     expect(promptOneRes.status).toBe(200);
@@ -241,7 +246,7 @@ describe('Chat HTTP Routes', () => {
 
     const promptTwoRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ content: 'claude' }),
     });
     const promptTwo = await promptTwoRes.json();
@@ -249,7 +254,7 @@ describe('Chat HTTP Routes', () => {
 
     const promptThreeRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ content: 'Ship Beast monitoring' }),
     });
     const promptThree = await promptThreeRes.json();
@@ -257,7 +262,7 @@ describe('Chat HTTP Routes', () => {
 
     const dispatchRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ content: 'docs/chunks' }),
     });
     const dispatchBody = await dispatchRes.json();
@@ -265,7 +270,9 @@ describe('Chat HTTP Routes', () => {
     expect(dispatchBody.data.outcome.content).toContain('Martin Loop');
     expect(dispatchBody.data.outcome.content).toContain('running');
 
-    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`, {
+      headers: { authorization: 'Bearer operator-token' },
+    });
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript.some((message: { content: string }) => message.content.includes('Ship Beast monitoring'))).toBe(true);
     expect(sessionBody.data.beastContext).toBeNull();

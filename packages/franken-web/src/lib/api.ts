@@ -75,7 +75,10 @@ export function toSocketUrl(baseUrl: string, sessionId: string, token: string): 
 }
 
 export class ChatApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly operatorToken?: string,
+  ) {}
 
   async createSession(projectId: string): Promise<ChatSession> {
     return this.request<ChatSession>('/v1/chat/sessions', {
@@ -130,7 +133,19 @@ export class ChatApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, init);
+    // Plumb the operator token through every chat request when one is set,
+    // matching the `Authorization: Bearer …` convention BeastApiClient uses.
+    // When no token is configured, leave init untouched so callers see the
+    // exact request shape they passed.
+    let effectiveInit: RequestInit = init;
+    if (this.operatorToken) {
+      const headers = new Headers(init.headers);
+      if (!headers.has('authorization')) {
+        headers.set('authorization', `Bearer ${this.operatorToken}`);
+      }
+      effectiveInit = { ...init, headers };
+    }
+    const res = await fetch(`${this.baseUrl}${path}`, effectiveInit);
 
     if (!res.ok) {
       let message = `HTTP ${res.status}`;

@@ -32,6 +32,8 @@ export interface StartChatServerOptions {
   sessionContinuation?: boolean;
   /** Optional dedicated chat operator token; when set, gates all /v1/chat/* routes. */
   operatorToken?: string;
+  /** Test-only escape hatch for the fail-closed startup guard. */
+  allowUnauthenticatedChatForTests?: boolean;
   networkControl?: {
     root: string;
     frankenbeastDir: string;
@@ -66,10 +68,26 @@ export function resolveChatServerSessionStore(options: Pick<StartChatServerOptio
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
 export async function startChatServer(options: StartChatServerOptions): Promise<ChatServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
   const path = options.path ?? DEFAULT_WS_PATH;
+
+  // Fail closed: refuse to expose /v1/chat/* without an operator token when
+  // the server is exposed (managed-network mode OR non-loopback host).
+  // Loopback-only dev without a token is intentionally allowed.
+  const effectiveOperatorToken = options.operatorToken ?? options.beastControl?.operatorToken;
+  const isManaged = process.env['FRANKENBEAST_NETWORK_MANAGED'] === '1';
+  const isExposed = isManaged || !LOOPBACK_HOSTS.has(host);
+  if (isExposed && !effectiveOperatorToken && !options.allowUnauthenticatedChatForTests) {
+    throw new Error(
+      `Refusing to start chat-server on ${host} without an operator token: `
+      + 'set FRANKENBEAST_BEAST_OPERATOR_TOKEN (or pass operatorToken/beastControl) '
+      + 'or bind to a loopback host. Pass allowUnauthenticatedChatForTests in tests.',
+    );
+  }
   const tokenSecret = createSessionTokenSecret();
   const sessionStore = resolveChatServerSessionStore(options);
   const runtime = createChatRuntime({
