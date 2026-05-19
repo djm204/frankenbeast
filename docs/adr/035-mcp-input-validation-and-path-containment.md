@@ -53,6 +53,11 @@ Commits: `acb7265` (schema enforcement), `7085b5c` (path containment).
   Schemas in this codebase are flat `{ type, description }` maps, so this
   matches the advertised contract — but consumers must not assume deep
   JSON-Schema semantics.
+- **Unknown properties are rejected (fail closed), not allowed.** This is a
+  deliberate security posture for first-party tools, not JSON-Schema
+  `additionalProperties` default behavior (the flat `ToolInputSchema` has no
+  such field). A tool that legitimately needs extra fields must declare them
+  in its own `inputSchema`; the global gate is intentionally strict.
 - `realpathSync` throws `ENOENT` for a missing in-root path; the firewall
   server handler already catches and surfaces this as a tool error
   (`isError: true`), which is acceptable behavior.
