@@ -87,6 +87,23 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
+  it('does not auto-approve HITL in non-interactive mode by default', async () => {
+    const prev = process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL;
+    delete process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL;
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+    const { deps, finalize } = await createCliDeps({
+      paths, baseBranch: 'main', budget: 1.0, provider: 'claude',
+      noPr: true, verbose: false, reset: false,
+    });
+    const outcome = await deps.governor.requestApproval({
+      requestId: 'r1', summary: 's', risk: 'high', requiresHitl: true,
+    } as never);
+    expect(outcome.decision).not.toBe('approved');
+    await finalize();
+    if (prev !== undefined) process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL = prev;
+  });
+
   it('uses real adapters via createBeastDeps even when enabledModules disables flags', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);

@@ -513,4 +513,34 @@ describe('Chat HTTP Routes', () => {
     const res = await app.request('/health');
     expect(res.headers.get('x-request-id')).toEqual(expect.any(String));
   });
+
+  describe('chat route operator auth', () => {
+    const baseChatOpts = () => ({
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('Mock reply') },
+      projectName: 'test-project',
+    });
+
+    it('rejects unauthenticated chat requests when an operator token is configured', async () => {
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const res = await app.request('/v1/chat/sessions', { method: 'POST', body: '{}' });
+      expect(res.status).toBe(401);
+    });
+
+    it('accepts chat requests with a valid bearer operator token', async () => {
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const res = await app.request('/v1/chat/sessions', {
+        method: 'POST',
+        headers: { authorization: 'Bearer secret-op-token', 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(res.status).not.toBe(401);
+    });
+
+    it('keeps /health public', async () => {
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const res = await app.request('/health');
+      expect(res.status).toBe(200);
+    });
+  });
 });

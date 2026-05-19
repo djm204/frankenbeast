@@ -1,0 +1,85 @@
+# ADR-034: Fail-Closed HTTP & Approval Boundaries
+
+- **Date:** 2026-05-18
+- **Status:** Accepted
+- **Deciders:** pfk (with Claude Code), per security-hardening Chunk 1
+
+## Context
+
+The 2026-04-28 agent-systems audit (Pillar 3 — Identity Boundaries) found four
+fail-open boundaries, re-verified against `main` on 2026-05-17:
+
+- `/v1/chat/*` HTTP routes (session create/read, message submit, approval
+  update) were mounted with no operator/session authentication.
+- Non-interactive CLI runs wired `GovernorPortAdapter` with
+  `defaultDecision: 'approved'`, so every HITL gate auto-approved in CI / piped
+  input.
+- `ApprovalGateway` verified signatures only when *both*
+  `requireSignedApprovals` and a `signatureVerifier` were present —
+  `requireSignedApprovals: true` with no verifier silently skipped
+  verification.
+- The governor HTTP server accepted unsigned `/v1/approval/respond` requests
+  whenever no signing secret was configured.
+
+## Decision
+
+Tighten all four boundaries to fail closed; no new runtime, pure boundary
+hardening with TDD:
+
+- Generalize the existing beast operator-auth middleware into a shared
+  `requireOperatorAuth` (`packages/franken-orchestrator/src/http/operator-auth.ts`).
+  `createChatApp` applies it to `/v1/chat/*` when an explicit chat
+  `operatorToken` is configured. `/health` stays public. `beast-auth.ts` now
+  delegates to the shared helper.
+  - **Correction (PR #296 Codex review, P1):** chat auth is gated *only* on an
+    explicit chat `operatorToken`, deliberately **not** on
+    `beastControl.operatorToken`. The beast token authorizes the beast
+    control plane — a different trust domain than user-facing chat — and
+    coupling them silently 401'd existing franken-web chat clients in
+    beast-enabled (`chat-server`) deployments. `startChatServer` now accepts an
+    optional dedicated `operatorToken` to secure chat intentionally.
+- Non-interactive HITL defaults to **`rejected`** unless
+  `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1` is explicitly set. Note: the
+  Chunk 1 plan specified the literal `'denied'`, but `ApprovalOutcome.decision`
+  is `'approved' | 'rejected' | 'abort'` — `'denied'` is not a member, so
+  `'rejected'` (the valid "not approved" value) is used to keep typecheck green
+  and semantics correct.
+- `ApprovalGateway` throws at construction when `requireSignedApprovals` is set
+  without a `signatureVerifier`.
+- The governor server rejects unsigned `/v1/approval/respond` with `401` when no
+  signing secret is configured, unless `allowUnsignedApprovalsForTests: true`
+  is explicitly passed.
+
+Commits: `9cb1259` (chat auth), `b984d2d` (non-interactive HITL),
+`05fb8ef` (governor signed-approval).
+
+## Consequences
+
+### Positive
+- The chat HTTP surface and HITL approval paths fail closed by default.
+- Misconfiguration (signed-required-without-verifier, unsigned governor) is now
+  a hard, early failure instead of a silent bypass.
+
+### Negative
+- Existing non-interactive automation that relied on implicit auto-approve must
+  now set `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1`.
+- Callers of `createChatApp` with an operator token must send the bearer token
+  on `/v1/chat/*` requests.
+
+### Risks
+- A `'rejected'` default for unanswerable non-interactive HITL gates a single
+  decision rather than aborting the run; downstream loop behavior on repeated
+  rejection is unchanged from existing reject handling.
+
+## Residual (out of scope)
+
+This chunk does not add OIDC, downscoped cloud-token issuance, or transport
+encryption (TLS/mTLS). Those remain separate future specs.
+
+## Alternatives Considered
+
+| Option | Pros | Cons | Rejected Because |
+|--------|------|------|-----------------|
+| Keep plan's literal `'denied'` | Matches plan prose verbatim | Not a member of `ApprovalOutcome.decision`; breaks typecheck | Type-invalid; `'rejected'` is the correct fail-closed enum |
+| Default non-interactive HITL to `'abort'` | Hard stop on unattended gate | Aborts entire run on any gate | Too aggressive for a single-gate default; `'rejected'` is the conservative deny |
+| Always require chat auth (no opt-in) | Strongest default | Breaks unauthenticated local/dev usage with no token configured | Token-gated when configured preserves existing tokenless local flows |

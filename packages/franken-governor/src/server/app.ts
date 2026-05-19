@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 export interface GovernorAppOptions {
   signingSecret?: string;
   slackWebhookUrl?: string;
+  allowUnsignedApprovalsForTests?: boolean;
 }
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
@@ -51,8 +52,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   app.post('/v1/approval/respond', async (c) => {
     const body = await c.req.json();
 
-    // Verify signature if signing secret configured
-    if (options.signingSecret) {
+    // Fail closed: unsigned approval responses are rejected unless a signing
+    // secret is configured (then verified) or an explicit test flag is set.
+    if (!options.signingSecret) {
+      if (!options.allowUnsignedApprovalsForTests) {
+        return c.json({ error: { message: 'Signing secret required for approval responses' } }, 401);
+      }
+    } else {
       const signature = c.req.header('x-governor-signature');
       if (!signature) {
         return c.json({ error: { message: 'Missing signature' } }, 401);

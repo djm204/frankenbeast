@@ -137,6 +137,21 @@ npm test -- --run tests/unit/server/app.test.ts tests/unit/gateway/approval-gate
 
 Result: 4 files passed, 26 tests passed.
 
+## Follow-Up Implementation Status
+
+Updated 2026-05-18 — security-hardening Chunk 1 (ADR-034). See
+`docs/adr/034-fail-closed-http-and-approval-boundaries.md`.
+
+| Pillar 3 gap | Status | Evidence |
+|--------------|--------|----------|
+| HTTP chat routes are unauthenticated | **fixed** | Commit `9cb1259`; `/v1/chat/*` gated by `requireOperatorAuth` when an operator token is configured. Test: `tests/integration/chat/chat-routes.test.ts` › "chat route operator auth". |
+| Non-interactive CLI can auto-approve HITL | **fixed** | Commit `b984d2d`; non-TTY `defaultDecision` is `'rejected'` unless `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1`. Test: `tests/integration/cli/dep-factory-wiring.test.ts` › "does not auto-approve HITL in non-interactive mode by default". |
+| Signed approval enforcement is misconfigurable | **fixed** | Commit `05fb8ef`; `ApprovalGateway` throws when `requireSignedApprovals` is set without a `signatureVerifier`. Test: `tests/unit/gateway/approval-gateway-security.test.ts` › "throws at construction when signed approvals are required without a verifier". |
+| Governor HTTP server allows unsigned operation | **fixed** | Commit `05fb8ef`; `/v1/approval/respond` returns 401 with no signing secret unless `allowUnsignedApprovalsForTests`. Test: `tests/unit/server/app.test.ts` › "rejects unsigned approval responses when no signing secret is configured". |
+
+All four Pillar 3 boundary gaps are `fixed`. Residual (OIDC, downscoped tokens,
+transport encryption) remains out of scope per ADR-034.
+
 ## Bottom Line
 
 Frankenbeast is strongest today as an orchestration, audit, planning, review, and local-governance framework. It has real observability and some real approval/auth controls.
