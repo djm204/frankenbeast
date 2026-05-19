@@ -30,6 +30,8 @@ export interface StartChatServerOptions {
   executionLlm?: ILlmClient;
   projectName: string;
   sessionContinuation?: boolean;
+  /** Optional dedicated chat operator token; when set, gates all /v1/chat/* routes. */
+  operatorToken?: string;
   networkControl?: {
     root: string;
     frankenbeastDir: string;
@@ -92,6 +94,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     runtime: runtime.runtime,
     turnRunner: runtime.turnRunner,
     sessionTokenSecret: tokenSecret,
+    ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),

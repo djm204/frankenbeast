@@ -28,9 +28,16 @@ hardening with TDD:
 
 - Generalize the existing beast operator-auth middleware into a shared
   `requireOperatorAuth` (`packages/franken-orchestrator/src/http/operator-auth.ts`).
-  `createChatApp` applies it to `/v1/chat/*` when an operator token is
-  configured (explicit `operatorToken` or `beastControl.operatorToken`).
-  `/health` stays public. `beast-auth.ts` now delegates to the shared helper.
+  `createChatApp` applies it to `/v1/chat/*` when an explicit chat
+  `operatorToken` is configured. `/health` stays public. `beast-auth.ts` now
+  delegates to the shared helper.
+  - **Correction (PR #296 Codex review, P1):** chat auth is gated *only* on an
+    explicit chat `operatorToken`, deliberately **not** on
+    `beastControl.operatorToken`. The beast token authorizes the beast
+    control plane — a different trust domain than user-facing chat — and
+    coupling them silently 401'd existing franken-web chat clients in
+    beast-enabled (`chat-server`) deployments. `startChatServer` now accepts an
+    optional dedicated `operatorToken` to secure chat intentionally.
 - Non-interactive HITL defaults to **`rejected`** unless
   `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1` is explicitly set. Note: the
   Chunk 1 plan specified the literal `'denied'`, but `ApprovalOutcome.decision`
