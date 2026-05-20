@@ -189,6 +189,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
 
   const clientRef = useRef(new ChatApiClient(opts.baseUrl, opts.operatorToken));
+  // Refresh the client when the baseUrl or operatorToken changes (e.g. token
+  // loaded async / rotated after mount); useRef alone would pin the original.
+  useEffect(() => {
+    clientRef.current = new ChatApiClient(opts.baseUrl, opts.operatorToken);
+  }, [opts.baseUrl, opts.operatorToken]);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
 

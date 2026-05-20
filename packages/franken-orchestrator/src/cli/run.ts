@@ -317,12 +317,26 @@ export async function main(): Promise<void> {
 
   if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
     if (args.subcommand === 'chat') {
-      // Plumb the operator token so the attach client can authenticate when
-      // the managed chat-server has it configured (which it must, when
-      // exposed). Falls back to env / .env via resolveBeastOperatorToken; no
-      // secret store boot is required for the attach path.
-      const attachOperatorToken = await resolveBeastOperatorToken(root, { config })
-        .catch(() => undefined);
+      // Resolve the operator token so the attach client can authenticate
+      // when the managed chat-server has it configured (which it must, when
+      // exposed). Mirror chat-server's boot: try the configured secret
+      // store first (so deployments that keep the token only in the secure
+      // backend still work), then fall through to env / .env via
+      // resolveBeastOperatorToken.
+      let attachSecretStore: ISecretStore | undefined;
+      try {
+        const secureBackend = config.network.secureBackend ?? 'local-encrypted';
+        attachSecretStore = createSecretStore(secureBackend, {
+          projectRoot: root,
+          passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+        });
+      } catch {
+        attachSecretStore = undefined;
+      }
+      const attachOperatorToken = await resolveBeastOperatorToken(root, {
+        ...(attachSecretStore ? { secretStore: attachSecretStore } : {}),
+        config,
+      }).catch(() => undefined);
       const managedAttachment = await resolveManagedChatAttachment({
         config,
         frankenbeastDir: paths.frankenbeastDir,
