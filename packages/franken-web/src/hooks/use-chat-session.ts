@@ -242,7 +242,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     return () => {
       cancelled = true;
     };
-  }, [opts.projectId, opts.sessionId, opts.sessionSeed]);
+    // Include auth context in deps so a late-loaded / rotated operator
+    // token (or baseUrl change) re-runs the authenticated bootstrap and
+    // recovers from an initial 401.
+  }, [opts.projectId, opts.sessionId, opts.sessionSeed, opts.baseUrl, opts.operatorToken]);
 
   useEffect(() => {
     if (!sessionId || !socketToken) {
