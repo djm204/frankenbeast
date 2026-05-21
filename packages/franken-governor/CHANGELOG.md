@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.0...franken-governor-v0.5.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **security:** Chunk 1 — fail-closed HTTP & approval boundaries ([#296](https://github.com/djm204/frankenbeast/issues/296)) ([f281e8e](https://github.com/djm204/frankenbeast/commit/f281e8eb98c6208a7da2f06e2923c57bd9890090))
+
 ## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.4.0...franken-governor-v0.5.0) (2026-03-21)
 
 
