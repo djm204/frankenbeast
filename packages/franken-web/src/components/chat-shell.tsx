@@ -128,12 +128,16 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     tokenTotals,
   } = useChatSession({
     baseUrl,
+    operatorToken: beastOperatorToken,
     projectId,
     sessionId: selectedSessionId,
     sessionSeed,
   });
 
-  const chatClient = useMemo(() => new ChatApiClient(baseUrl), [baseUrl]);
+  const chatClient = useMemo(
+    () => new ChatApiClient(baseUrl, beastOperatorToken),
+    [baseUrl, beastOperatorToken],
+  );
   const analyticsClient = useMemo(() => new AnalyticsApiClient(baseUrl), [baseUrl]);
   const beastClient = useMemo(
     () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),

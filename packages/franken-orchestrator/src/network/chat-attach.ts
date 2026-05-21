@@ -15,11 +15,15 @@ interface ManagedNetworkState {
 export interface ManagedChatAttachment {
   baseUrl: string;
   wsUrl: string;
+  /** Operator token to present on /v1/chat/* HTTP requests (Authorization: Bearer). */
+  operatorToken?: string;
 }
 
 export interface ResolveManagedChatAttachmentOptions {
   config: OrchestratorConfig;
   frankenbeastDir: string;
+  /** Operator token resolved by the caller (e.g. from FRANKENBEAST_BEAST_OPERATOR_TOKEN). */
+  operatorToken?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -50,6 +54,7 @@ export async function resolveManagedChatAttachment(
   return {
     baseUrl,
     wsUrl: baseUrl.replace(/^http/, 'ws') + '/v1/chat/ws',
+    ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
   };
 }
 
@@ -60,9 +65,13 @@ interface RemoteChatSession {
 }
 
 async function createRemoteSession(target: ManagedChatAttachment, projectId: string): Promise<RemoteChatSession> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (target.operatorToken) {
+    headers['authorization'] = `Bearer ${target.operatorToken}`;
+  }
   const createResponse = await fetch(`${target.baseUrl}/v1/chat/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ projectId }),
   });
   if (!createResponse.ok) {

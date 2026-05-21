@@ -126,4 +126,50 @@ describe('chat server bootstrap', () => {
       await server.close();
     }
   });
+
+  it('refuses to start when chat is exposed (managed mode) without an operator token', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const prev = process.env['FRANKENBEAST_NETWORK_MANAGED'];
+    process.env['FRANKENBEAST_NETWORK_MANAGED'] = '1';
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1', // loopback alone is not enough in managed mode
+        port: 0,
+        sessionStoreDir: TMP,
+        llm: { complete: vi.fn().mockResolvedValue('') },
+        projectName: 'test-project',
+      })).rejects.toThrow(/operator token/i);
+    } finally {
+      if (prev === undefined) delete process.env['FRANKENBEAST_NETWORK_MANAGED'];
+      else process.env['FRANKENBEAST_NETWORK_MANAGED'] = prev;
+    }
+  });
+
+  it('refuses to start on a non-loopback host without an operator token', async () => {
+    mkdirSync(TMP, { recursive: true });
+    await expect(startChatServer({
+      host: '0.0.0.0',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+    })).rejects.toThrow(/operator token/i);
+  });
+
+  it('starts on loopback without a token (dev mode)', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+    });
+    try {
+      const res = await fetch(`${server.url}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
 });

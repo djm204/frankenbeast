@@ -140,18 +140,31 @@ Result: 4 files passed, 26 tests passed.
 ## Follow-Up Implementation Status
 
 Updated 2026-05-18 — security-hardening Chunk 2 (ADR-035). See
-`docs/adr/035-mcp-input-validation-and-path-containment.md`. (Chunk 1 /
-Pillar 3 rows are tracked in its own PR and will appear in this section once
-both merge.)
+`docs/adr/035-mcp-input-validation-and-path-containment.md`.
 
 | Pillar 1 gap | Status | Evidence |
 |--------------|--------|----------|
-| MCP tool schemas are metadata, not enforced validation | **fixed** | Commit `acb7265`; `validateToolArguments` + shared `dispatchTool` gate every tool (SDK CallTool path and in-process `callTool`). Tests: `src/shared/server-factory.test.ts` › "rejects missing required property / wrong type / unknown extra property / passes valid". |
-| File scanning can read arbitrary supplied paths | **fixed** | Commit `7085b5c`; `createFirewallAdapter` real-path-contains `scanFile` to the configured project root. Tests: `src/servers/firewall.test.ts` › "rejects scanning a path outside the project root" / "allows scanning a file inside the project root". |
+| MCP tool schemas are metadata, not enforced validation | **fixed** | `validateToolArguments` + shared `dispatchTool` gate every tool (SDK CallTool path and in-process `callTool`); rejects missing/wrong-type/null/extra/prototype-chain args. Tests: `src/shared/server-factory.test.ts`. |
+| File scanning can read arbitrary supplied paths | **fixed** | `createFirewallAdapter` real-path-contains `scanFile` to the configured project root (correct at the filesystem root). Tests: `src/servers/firewall.test.ts`. |
 
 Residual (ADR-035): MCP validation is structural only (no deep JSON-Schema
 `format`/`enum`/nested/array-item validation), matching the flat advertised
-schema contract.
+schema contract; unknown properties are rejected as a deliberate fail-closed
+posture.
+
+Updated 2026-05-20 — security-hardening Chunk 1 (ADR-034). See
+`docs/adr/034-fail-closed-http-and-approval-boundaries.md`.
+
+| Pillar 3 gap | Status | Evidence |
+|--------------|--------|----------|
+| HTTP chat routes are unauthenticated | **fixed** | `/v1/chat/*` gated by `requireOperatorAuth` when an operator token is configured; `startChatServer` fails closed when chat is exposed (managed/non-loopback) without a token; first-party clients (franken-web `ChatApiClient`, `network/chat-attach`) plumb the token. Tests: `tests/integration/chat/chat-routes.test.ts`, `tests/integration/chat/chat-server.test.ts`, `packages/franken-web/tests/lib/api.test.ts`. |
+| Non-interactive CLI can auto-approve HITL | **fixed** | Non-TTY `defaultDecision` is `'rejected'` unless `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1`. Test: `tests/integration/cli/dep-factory-wiring.test.ts` › "does not auto-approve HITL in non-interactive mode by default". |
+| Signed approval enforcement is misconfigurable | **fixed** | `ApprovalGateway` throws when `requireSignedApprovals` is set without a `signatureVerifier`. Test: `tests/unit/gateway/approval-gateway-security.test.ts`. |
+| Governor HTTP server allows unsigned operation | **fixed** | `/v1/approval/respond` returns 401 with no signing secret unless `allowUnsignedApprovalsForTests`. Test: `tests/unit/server/app.test.ts`. |
+
+All four Pillar 3 boundary gaps are `fixed`. Residual (OIDC, downscoped tokens,
+transport encryption, and short-lived browser chat credentials) remains out of
+scope per ADR-034.
 
 ## Bottom Line
 

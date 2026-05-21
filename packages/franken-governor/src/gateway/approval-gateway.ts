@@ -31,6 +31,10 @@ export class ApprovalGateway {
     this.config = deps.config;
     this.signatureVerifier = deps.signatureVerifier;
     this.sessionTokenStore = deps.sessionTokenStore;
+
+    if (deps.config.requireSignedApprovals && !deps.signatureVerifier) {
+      throw new Error('Signed approvals are required but no signatureVerifier was supplied');
+    }
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalOutcome> {

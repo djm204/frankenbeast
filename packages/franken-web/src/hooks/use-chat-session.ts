@@ -29,6 +29,7 @@ export interface ActivityEvent {
 
 export interface UseChatSessionOptions {
   baseUrl: string;
+  operatorToken?: string;
   projectId: string;
   sessionId?: string;
   sessionSeed?: number;
@@ -187,7 +188,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [tier, setTier] = useState<string | null>(null);
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
 
-  const clientRef = useRef(new ChatApiClient(opts.baseUrl));
+  const clientRef = useRef(new ChatApiClient(opts.baseUrl, opts.operatorToken));
+  // Refresh the client when the baseUrl or operatorToken changes (e.g. token
+  // loaded async / rotated after mount); useRef alone would pin the original.
+  useEffect(() => {
+    clientRef.current = new ChatApiClient(opts.baseUrl, opts.operatorToken);
+  }, [opts.baseUrl, opts.operatorToken]);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -236,7 +242,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     return () => {
       cancelled = true;
     };
-  }, [opts.projectId, opts.sessionId, opts.sessionSeed]);
+    // Include auth context in deps so a late-loaded / rotated operator
+    // token (or baseUrl change) re-runs the authenticated bootstrap and
+    // recovers from an initial 401.
+  }, [opts.projectId, opts.sessionId, opts.sessionSeed, opts.baseUrl, opts.operatorToken]);
 
   useEffect(() => {
     if (!sessionId || !socketToken) {

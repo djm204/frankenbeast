@@ -46,7 +46,7 @@ describe('Governor Hono Server', () => {
 
   describe('POST /v1/approval/respond', () => {
     it('resolves a pending approval', async () => {
-      const app = createGovernorApp();
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
 
       // Create approval
       await app.request('/v1/approval/request', {
@@ -73,7 +73,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('returns 404 for unknown request', async () => {
-      const app = createGovernorApp();
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -136,6 +136,15 @@ describe('Governor Hono Server', () => {
         body: JSON.stringify({ requestId: 'req-3', decision: 'APPROVE' }),
       });
 
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects unsigned approval responses when no signing secret is configured', async () => {
+      const app = createGovernorApp();
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: 'r1', decision: 'approved' }),
+      });
       expect(res.status).toBe(401);
     });
 
