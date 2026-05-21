@@ -81,7 +81,9 @@ if (isMain(import.meta.url)) {
     },
   });
   const tier = values['tier'] === 'strict' ? 'strict' : 'standard';
-  const firewall = createFirewallAdapter(values['db']!, tier);
+  const firewall = createFirewallAdapter(values['db']!, tier, {
+    root: process.env['FBEAST_ROOT'] ?? process.cwd(),
+  });
   const server = createFirewallServer({ firewall });
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);

@@ -31,6 +31,85 @@ describe('createMcpServer', () => {
     expect(server.tools[0]!.name).toBe('fbeast_memory_query');
   });
 
+  function makeServerWithSpy() {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'echo',
+      description: 'echo',
+      inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+      handler: async (args) => { calls.push(args); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const callTool = (name: string, args: unknown) => srv.callTool(name, args);
+    return { srv, calls, tool, callTool };
+  }
+
+  it('rejects missing required property without calling the handler', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', {});
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects wrong property type', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 123 });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects unknown extra property', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 'hi', extra: 1 });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('passes a valid argument object through to the handler', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', { msg: 'hi' });
+    expect(res.isError).toBeFalsy();
+    expect(calls).toEqual([{ msg: 'hi' }]);
+  });
+
+  it('requires an OWN required property (rejects prototype-chain keys)', async () => {
+    const { calls, callTool } = makeServerWithSpy();
+    const res = await callTool('echo', Object.create({ msg: 'x' }));
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects explicit null wire arguments but defaults absent args to {}', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'noargs',
+      description: 'noargs',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const nullRes = await srv.callTool('noargs', null);
+    expect(nullRes.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+    const absentRes = await srv.callTool('noargs', undefined);
+    expect(absentRes.isError).toBeFalsy();
+    expect(calls).toEqual([{}]);
+  });
+
+  it('rejects null for an object-typed property (typeof null === "object")', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const res = await srv.callTool('cfg', { args: null });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
   it('handler returns correct format', async () => {
     const tools: ToolDef[] = [
       {
