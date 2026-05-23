@@ -19,7 +19,7 @@ Implement `@fbeast/live-bench`, a recurring real-client benchmark runner for Cod
 ## Chunks
 
 - [x] Chunk 1: Package skeleton and typed domain model.
-- [ ] Chunk 2: Corpus loader and validation.
+- [x] Chunk 2: Corpus loader and validation.
 - [ ] Chunk 3: Fixture workspace provisioning.
 - [ ] Chunk 4: Client adapter contract and fake adapter harness.
 - [ ] Chunk 5: Baseline/fbeast client configuration isolation.
@@ -34,3 +34,4 @@ Implement `@fbeast/live-bench`, a recurring real-client benchmark runner for Cod
 
 - 2026-05-23: Progress document created before implementation work.
 - 2026-05-23: Chunk 1 package skeleton and typed domain model implemented with TDD. RED: `npm run typecheck` failed with TS18003 before `src` existed. GREEN: `npm test -- --run tests/types.test.ts` passed (1 test) and `npm run typecheck` passed in `packages/live-bench`.
+- 2026-05-23: Chunk 2 corpus loader and validation implemented with TDD. RED: `npm test -- --run tests/corpus-loader.test.ts` failed because `src/corpus/loader.js` did not exist. GREEN: `npm test` passed (2 files, 5 tests) and `npm run typecheck` passed in `packages/live-bench`.
