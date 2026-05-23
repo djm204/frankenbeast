@@ -26,7 +26,7 @@
 - [x] Run focused tests and typechecks.
 - [x] Reply to and resolve addressed review threads.
 - [x] Push fixes and trigger another Codex review with `@codex`.
-- [ ] Repeat the `@codex` review-fix-comment-resolve-trigger cycle three total times, stopping early only if a cycle returns no actionable comments.
+- [x] Repeat the `@codex` review-fix-comment-resolve-trigger cycle three total times, stopping early only if a cycle returns no actionable comments.
 
 ## Review
 
@@ -39,6 +39,7 @@
   - `rtk npm test --` (138 tests)
   - `rtk npm run typecheck`
   - `rtk npm run build`
+- PR #287 is merged as `b939d36 fix(mcp-suite): mitigate hook hangs and uninstall residue (#287)`; the previous repeat-review gate is complete/superseded by merged PR state.
 
 ## Current Batch: PR 286 Review Comments
 
@@ -183,7 +184,23 @@
 - [x] Resolve the relevant audit artifact for "today" and note the `2026-04-27` shell date versus `2026-04-28` audit date mismatch.
 - [x] Inspect the audit gaps and source/test surfaces named by the audit.
 - [x] Write a concrete implementation plan to fill the audit gaps.
-- [ ] User review the gap-fill plan before implementation starts.
+- [x] User review the gap-fill plan before implementation starts.
+
+## Current Batch: Complete Remaining Gates
+
+- [x] Create isolated worktree from fresh `origin/main` for the remaining gates.
+- [x] Identify that Security Hardening Chunk 1 and Chunk 2 are already merged on `origin/main` as PR #296/#297.
+- [ ] Reconcile stale PR #287 and security-hardening progress checkboxes.
+- [ ] Implement Security Hardening Chunk 3: Sandboxed Beast Execution.
+- [ ] Implement Security Hardening Chunk 4: Durable Audit & Replay.
+- [ ] Turn the approved Live CLI Benchmark design into implementation chunks.
+- [ ] Implement the Live CLI Benchmark pipeline chunks.
+- [ ] Reconcile old dual-mode chunks 6–8 and consolidation residual plans against live code.
+- [ ] Run final verification and record handoff.
+
+## Review
+
+- 2026-05-23: User explicitly directed completing all remaining gates in context-friendly chunks. Treat this as approval to move past prior user-review gates while preserving chunking, progress-doc updates, and TDD verification discipline.
 
 ## Current Batch: Agent Systems Audit
 

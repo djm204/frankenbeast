@@ -9,5 +9,9 @@ Direction: re-couple chat to operator token + fail-closed startup + client plumb
 - [x] network/chat-attach.ts: accepts + presents operator token on remote session create
 - [x] tests: re-added auth headers; added 3 startup-guard tests; 2 api header tests
 - [x] ADR-034: final design + browser-static-token residual recorded
-- [ ] reply+resolve the 2 Round-2 threads with commit hashes
-- [ ] commit + push
+- [x] reply+resolve the 2 Round-2 threads with commit hashes
+- [x] commit + push
+
+## Review
+
+- PR #296 is merged on `origin/main` as `f281e8e fix(security): Chunk 1 — fail-closed HTTP & approval boundaries (#296)`. The local round-2 reply/push checklist was stale and is now complete/superseded by merged PR state.
