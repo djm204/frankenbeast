@@ -8,6 +8,7 @@ import { runHydration } from './phases/hydration.js';
 import { runPlanning, CritiqueSpiralError } from './phases/planning.js';
 import { runExecution } from './phases/execution.js';
 import { runClosure } from './phases/closure.js';
+import { StateSnapshotStore } from './context/state-snapshot-store.js';
 
 class RuntimeLimitExceededError extends Error {
   constructor(message: string) {
@@ -36,6 +37,10 @@ export class BeastLoop {
 
   async run(input: BeastInput): Promise<BeastResult> {
     const ctx = createContext(input);
+    const stateStore = this.config.stateDir ? new StateSnapshotStore(this.config.stateDir, ctx.sessionId) : undefined;
+    const recordPhase = (phase: string) => {
+      stateStore?.record({ runId: ctx.sessionId, projectId: ctx.projectId, phase });
+    };
     const logger = this.deps.logger;
     logger.info('BeastLoop: session start', {
       sessionId: ctx.sessionId,
@@ -56,10 +61,12 @@ export class BeastLoop {
       logger.info('BeastLoop: phase start', { phase: 'ingestion' });
       await runIngestion(ctx, this.deps.firewall, logger);
       logger.info('BeastLoop: phase end', { phase: 'ingestion' });
+      recordPhase('ingestion');
 
       logger.info('BeastLoop: phase start', { phase: 'hydration' });
       await runHydration(ctx, this.deps.memory, logger);
       logger.info('BeastLoop: phase end', { phase: 'hydration' });
+      recordPhase('hydration');
       await this.enforceRuntimeLimits(ctx);
 
       // Phase 2: Planning + Critique
@@ -73,6 +80,7 @@ export class BeastLoop {
         this.deps.graphBuilder,
       );
       logger.info('BeastLoop: phase end', { phase: 'planning' });
+      recordPhase('planning');
       await this.enforceRuntimeLimits(ctx);
 
       await this.maybeRunReflection('after-planning', ctx, logger);
@@ -92,6 +100,7 @@ export class BeastLoop {
         this.deps.refreshPlanTasks,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
+      recordPhase('execution');
       await this.enforceRuntimeLimits(ctx);
 
       await this.maybeRunReflection('after-execution', ctx, logger);
@@ -108,6 +117,7 @@ export class BeastLoop {
         this.deps.prCreator,
       );
       logger.info('BeastLoop: phase end', { phase: 'closure' });
+      recordPhase('closure');
       logger.info('BeastLoop: session end', {
         status: result.status,
         durationMs: result.durationMs,

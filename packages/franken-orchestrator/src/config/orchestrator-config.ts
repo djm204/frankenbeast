@@ -77,6 +77,9 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Consolidation: brain/memory database configuration. */
   brain: BrainConfigSchema.optional(),
 
+  /** Directory for durable Beast phase state snapshots. */
+  stateDir: z.string().optional(),
+
   /** Consolidation: typed provider list for ProviderRegistry. */
   consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
