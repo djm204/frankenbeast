@@ -39,7 +39,7 @@
 - Create: `packages/franken-observer/src/replay/replay-content-store.ts`
 - Test: `packages/franken-observer/src/replay/replay-content-store.test.ts`
 
-- [ ] **Step 1: Write the failing store test**
+- [x] **Step 1: Write the failing store test**
 
 `replay-content-store.test.ts`:
 
@@ -70,12 +70,12 @@ describe('ReplayContentStore', () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `cd packages/franken-observer && npm test -- --run src/replay/replay-content-store.test.ts`
 Expected: FAIL — modules do not exist.
 
-- [ ] **Step 3: Implement record types + store**
+- [x] **Step 3: Implement record types + store**
 
 `replay-record.ts`:
 
@@ -132,12 +132,12 @@ export class ReplayContentStore {
 }
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `cd packages/franken-observer && npm test -- --run src/replay/replay-content-store.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/franken-observer/src/replay/replay-record.ts packages/franken-observer/src/replay/replay-content-store.ts packages/franken-observer/src/replay/replay-content-store.test.ts
@@ -154,7 +154,7 @@ git commit -m "feat(observer): content-addressed replay record store"
 - Modify: `packages/franken-observer/src/index.ts`
 - Test: `packages/franken-observer/src/replay/deterministic-replayer.test.ts`
 
-- [ ] **Step 1: Write the failing replay test**
+- [x] **Step 1: Write the failing replay test**
 
 `deterministic-replayer.test.ts`:
 
@@ -188,12 +188,12 @@ it('throws if a referenced blob fails hash verification', () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `cd packages/franken-observer && npm test -- --run src/replay/deterministic-replayer.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Implement the replayer + manifest + exports**
+- [x] **Step 3: Implement the replayer + manifest + exports**
 
 `deterministic-replayer.ts`:
 
@@ -229,12 +229,12 @@ export type { ReplayRecord, ReplayRecordKind } from './replay/replay-record.js';
 export { hashContent } from './replay/replay-record.js';
 ```
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `cd packages/franken-observer && npm test -- --run src/replay/deterministic-replayer.test.ts src/audit-trail-store.test.ts src/execution-replayer.test.ts`
 Expected: PASS (existing replayer/trail tests stay green — additive change).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/franken-observer/src/replay/deterministic-replayer.ts packages/franken-observer/src/audit-trail-store.ts packages/franken-observer/src/index.ts packages/franken-observer/src/replay/deterministic-replayer.test.ts
@@ -251,7 +251,7 @@ git commit -m "feat(observer): deterministic replay + replay manifest persistenc
 - Modify: `packages/franken-orchestrator/src/skills/cli-skill-executor.ts`
 - Test: `packages/franken-orchestrator/tests/unit/adapters/cli-llm-adapter.test.ts`, `tests/unit/skills/cli-skill-executor.test.ts`
 
-- [ ] **Step 1: Write the failing capture test**
+- [x] **Step 1: Write the failing capture test**
 
 In `cli-llm-adapter.test.ts`:
 
@@ -267,21 +267,21 @@ it('records an llm.request and llm.response replay record per call', async () =>
 
 Mirror the pattern in `cli-skill-executor.test.ts` for `tool.call` / `tool.result`.
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `cd packages/franken-orchestrator && npm test -- --run tests/unit/adapters/cli-llm-adapter.test.ts tests/unit/skills/cli-skill-executor.test.ts`
 Expected: FAIL — adapters do not record replay records.
 
-- [ ] **Step 3: Implement capture**
+- [x] **Step 3: Implement capture**
 
 In `audit-observer-adapter.ts`, add a `recordReplay(record: ReplayRecord)` method that `put`s the raw content into a `ReplayContentStore` and appends the returned `ReplayRecord` to an in-run manifest array (flushed via `AuditTrailStore.save(runId, trail, manifest)` where the run already saves its trail). In `cli-llm-adapter.ts`, around the existing provider call, call `observer.recordReplay({ kind: 'llm.request', runId, provider, model, content: prompt })` before and `'llm.response'` after, hashing content via the store. In `cli-skill-executor.ts`, do the same for `tool.call` (args JSON) and `tool.result` (result JSON). Use the existing observer handle already threaded into these adapters — do not introduce a new global.
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `cd packages/franken-orchestrator && npm test -- --run tests/unit/adapters/cli-llm-adapter.test.ts tests/unit/skills/cli-skill-executor.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/franken-orchestrator/src/adapters/audit-observer-adapter.ts packages/franken-orchestrator/src/adapters/cli-llm-adapter.ts packages/franken-orchestrator/src/skills/cli-skill-executor.ts packages/franken-orchestrator/tests/unit/adapters/cli-llm-adapter.test.ts packages/franken-orchestrator/tests/unit/skills/cli-skill-executor.test.ts
@@ -298,7 +298,7 @@ git commit -m "feat(orchestrator): capture llm/tool replay records"
 - Modify: `packages/franken-orchestrator/src/beast-loop.ts`
 - Test: `packages/franken-orchestrator/tests/unit/beast-loop-state-persistence.test.ts`
 
-- [ ] **Step 1: Write the failing state-persistence test**
+- [x] **Step 1: Write the failing state-persistence test**
 
 `tests/unit/beast-loop-state-persistence.test.ts`:
 
@@ -319,12 +319,12 @@ it('persists a phase snapshot after each phase', async () => {
 });
 ```
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `cd packages/franken-orchestrator && npm test -- --run tests/unit/beast-loop-state-persistence.test.ts tests/unit/beast-loop.test.ts`
 Expected: FAIL — no state file written.
 
-- [ ] **Step 3: Implement snapshot store + wiring**
+- [x] **Step 3: Implement snapshot store + wiring**
 
 `state-snapshot-store.ts`:
 
@@ -359,12 +359,12 @@ export class StateSnapshotStore {
 
 Add an optional `stateStore?: StateSnapshotStore` to `BeastContext` (`franken-context.ts`). In `beast-loop.ts`, after each existing `logger.info('BeastLoop: phase end', { phase: X })` call (ingestion, hydration, planning, execution, closure), add `ctx.stateStore?.record({ runId: ctx.runId, phase: X, planVersion: ctx.planVersion, provider: ctx.provider });` using the values already on `ctx`. Construct the store where the loop is created (CLI/dep wiring), `stateDir = <fbeastRoot>/.fbeast/state`.
 
-- [ ] **Step 4: Run, verify pass**
+- [x] **Step 4: Run, verify pass**
 
 Run: `cd packages/franken-orchestrator && npm test -- --run tests/unit/beast-loop-state-persistence.test.ts tests/unit/beast-loop.test.ts`
 Expected: PASS (existing beast-loop tests unaffected — `stateStore` is optional).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/franken-orchestrator/src/context/state-snapshot-store.ts packages/franken-orchestrator/src/context/franken-context.ts packages/franken-orchestrator/src/beast-loop.ts packages/franken-orchestrator/tests/unit/beast-loop-state-persistence.test.ts
@@ -379,15 +379,15 @@ git commit -m "feat(orchestrator): persist beast phase state transitions"
 - Create: `docs/adr/037-durable-audit-and-deterministic-replay.md`
 - Modify: `docs/audits/agent-systems-audit-2026-04-28.md`
 
-- [ ] **Step 1: Write ADR-037**
+- [x] **Step 1: Write ADR-037**
 
 Record: replay records (LLM/tool) are content-addressed under `.fbeast/audit/blobs/` with sha256 verification; a manifest is persisted next to each audit trail; `DeterministicReplayer` replays saved LLM/tool outputs without a live provider; phase FSM snapshots are appended to `.fbeast/state/<runId>.jsonl` after each phase. Residual: full OS-level execution replay (process/syscall) is still out of scope; this is record/state replay only.
 
-- [ ] **Step 2: Audit follow-up**
+- [x] **Step 2: Audit follow-up**
 
 Map Pillar-2 gaps: "Replay is timeline analysis, not deterministic execution replay" → `fixed` (record-level); "LLM prompts and responses are not universally persisted" → `partially-fixed` (captured at cli-llm/skill adapters; note any uncovered paths); "main Beast loop … not modeled as a persisted finite-state machine" → `fixed`. "Checkpointing is partial" → `partially-fixed` (state snapshots added; full prompt/response in replay store). Cite commits/tests.
 
-- [ ] **Step 3: Verify the chunk**
+- [x] **Step 3: Verify the chunk**
 
 ```bash
 cd packages/franken-observer && npm test -- --run src/replay/replay-content-store.test.ts src/replay/deterministic-replayer.test.ts src/audit-trail-store.test.ts src/execution-replayer.test.ts && npm run typecheck
@@ -395,7 +395,7 @@ cd ../franken-orchestrator && npm test -- --run tests/unit/beast-loop-state-pers
 ```
 Expected: all exit `0`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/adr/037-durable-audit-and-deterministic-replay.md docs/audits/agent-systems-audit-2026-04-28.md
