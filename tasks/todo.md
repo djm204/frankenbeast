@@ -191,7 +191,7 @@
 - [x] Create isolated worktree from fresh `origin/main` for the remaining gates.
 - [x] Identify that Security Hardening Chunk 1 and Chunk 2 are already merged on `origin/main` as PR #296/#297.
 - [ ] Reconcile stale PR #287 and security-hardening progress checkboxes.
-- [ ] Implement Security Hardening Chunk 3: Sandboxed Beast Execution.
+- [x] Implement Security Hardening Chunk 3: Sandboxed Beast Execution.
 - [ ] Implement Security Hardening Chunk 4: Durable Audit & Replay.
 - [ ] Turn the approved Live CLI Benchmark design into implementation chunks.
 - [ ] Implement the Live CLI Benchmark pipeline chunks.

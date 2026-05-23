@@ -1,6 +1,9 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { BeastProcessSpec } from '../types.js';
+import { DEFAULT_BEAST_ENV_ALLOWLIST } from './sandbox-policy.js';
 
 export interface SpawnedProcessHandle {
   readonly pid: number;
@@ -13,38 +16,58 @@ export interface ProcessCallbacks {
 }
 
 export interface ProcessSupervisorLike {
+  validateCwd?(cwd: string | undefined): void;
   spawn(spec: BeastProcessSpec, callbacks: ProcessCallbacks): Promise<SpawnedProcessHandle>;
   stop(pid: number): Promise<void>;
   kill(pid: number): Promise<void>;
 }
 
-/**
- * Strip all CLAUDE* env vars from an env object to prevent plugin interference
- * in spawned processes.
- */
-function stripClaudeEnvVars(
-  env: NodeJS.ProcessEnv,
-): Record<string, string | undefined> {
-  const cleaned: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith('CLAUDE')) {
+export interface ProcessSupervisorOptions {
+  readonly projectRoot?: string | undefined;
+}
+
+function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const cleaned: Record<string, string> = {};
+  for (const key of DEFAULT_BEAST_ENV_ALLOWLIST) {
+    const value = env[key];
+    if (value !== undefined) {
       cleaned[key] = value;
     }
   }
   return cleaned;
 }
 
+export function assertContainedCwd(projectRoot: string | undefined, cwd: string | undefined): void {
+  if (!projectRoot || !cwd) {
+    return;
+  }
+
+  const root = realpathSync(resolve(projectRoot));
+  const target = realpathSync(resolve(cwd));
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new Error(`Refusing to spawn with cwd outside project root: ${cwd}`);
+  }
+}
+
 export class ProcessSupervisor implements ProcessSupervisorLike {
   private readonly processes = new Map<number, ChildProcess>();
+
+  constructor(private readonly options: ProcessSupervisorOptions = {}) {}
+
+  validateCwd(cwd: string | undefined): void {
+    assertContainedCwd(this.options.projectRoot, cwd);
+  }
 
   async spawn(
     spec: BeastProcessSpec,
     callbacks: ProcessCallbacks,
   ): Promise<SpawnedProcessHandle> {
+    this.validateCwd(spec.cwd);
+
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
       env: {
-        ...stripClaudeEnvVars(process.env),
+        ...allowlistedEnv(process.env),
         ...spec.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

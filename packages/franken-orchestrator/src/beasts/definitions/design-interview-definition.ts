@@ -36,7 +36,7 @@ export const designInterviewDefinition: BeastDefinition = {
       '--output', String(config.outputPath),
     ],
     env: { FRANKENBEAST_SPAWNED: '1' },
-    cwd: String(config.projectRoot ?? process.cwd()),
+    cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'design-interview',

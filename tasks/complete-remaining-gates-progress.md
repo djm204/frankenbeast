@@ -16,7 +16,7 @@ Complete the remaining Frankenbeast gates in context-friendly chunks without rel
 
 - [x] Chunk 0: Create isolated worktree from fresh `origin/main` and establish this progress document.
 - [x] Chunk 1: Reconcile stale PR #287 and already-merged audit chunk docs/checklists against current `origin/main`.
-- [ ] Chunk 2: Implement security hardening Chunk 3 — Sandboxed Beast Execution.
+- [x] Chunk 2: Implement security hardening Chunk 3 — Sandboxed Beast Execution.
 - [ ] Chunk 3: Implement security hardening Chunk 4 — Durable Audit & Replay.
 - [ ] Chunk 4: Convert Live CLI Benchmark design into an implementation plan split into context-friendly chunks.
 - [ ] Chunk 5: Implement Live CLI Benchmark pipeline chunks.
@@ -36,3 +36,4 @@ Complete the remaining Frankenbeast gates in context-friendly chunks without rel
 
 - 2026-05-23: `git fetch origin --prune` completed and created worktree `.worktrees/complete-remaining-gates` from `origin/main`.
 - 2026-05-23: Reconciled stale PR #287 and PR #296 local checklist items against merged PR state on `origin/main`.
+- 2026-05-23: Security hardening Chunk 3 implemented. Red tests failed for missing Docker runtime modules, leaking `GITHUB_TOKEN`, and cwd escape; green verification passed in `packages/franken-orchestrator`: `npm test -- --run tests/unit/beasts/execution/docker-container-runtime.test.ts tests/unit/beasts/container-beast-executor.test.ts tests/unit/beasts/execution/process-supervisor.test.ts tests/integration/beasts/beast-routes.test.ts tests/integration/beasts/agent-routes.test.ts` (38 tests) and `npm run typecheck`.
