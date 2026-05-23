@@ -8,6 +8,9 @@ import {
 import { SkillManager } from '../skills/skill-manager.js';
 import { SkillConfigStore } from '../skills/skill-config-store.js';
 import { AuditTrail, AuditTrailStore, createAuditEvent } from '@frankenbeast/observer';
+import { ReplayContentStore } from '../replay/replay-content-store.js';
+import { join, basename } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
@@ -106,6 +109,11 @@ export function createBeastDeps(
 
   // 2. Audit trail
   const auditTrail = new AuditTrail();
+  const metadataDir = config.configDir ?? '.fbeast';
+  const auditRoot = basename(metadataDir) === '.fbeast'
+    ? join(metadataDir, 'audit')
+    : join(metadataDir, '.fbeast', 'audit');
+  const replayStore = new ReplayContentStore(auditRoot);
 
   // 3. Provider registry
   const providers = buildProviderList(config.providers);
@@ -161,6 +169,9 @@ export function createBeastDeps(
   const observer = new AuditTrailObserverAdapter(
     existingDeps.observer,
     auditTrail,
+    'unknown',
+    'unknown',
+    replayStore,
   );
   const mcp = new McpSdkAdapter();
 
@@ -186,7 +197,17 @@ export function createBeastDeps(
     getTokenUsage: () => registry.getTokenUsage(),
     persistAuditTrail: (runId: string) => {
       const store = new AuditTrailStore(config.configDir ?? '.');
-      return store.save(runId, auditTrail);
+      const eventPath = store.save(runId, auditTrail);
+      const replayManifest = observer.getReplayManifest();
+      if (replayManifest.length > 0) {
+        mkdirSync(auditRoot, { recursive: true });
+        writeFileSync(
+          join(auditRoot, `${runId}.replay.json`),
+          JSON.stringify(replayManifest, null, 2),
+          'utf8',
+        );
+      }
+      return eventPath;
     },
 
     // Optional pass-through deps (spread conditionally)

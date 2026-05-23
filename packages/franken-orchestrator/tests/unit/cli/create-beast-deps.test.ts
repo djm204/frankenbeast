@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createBeastDeps, type BeastDepsConfig, type ExistingDeps } from '../../../src/cli/create-beast-deps.js';
 import { MiddlewareChainFirewallAdapter } from '../../../src/adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../../../src/adapters/brain-memory-adapter.js';
@@ -132,5 +135,23 @@ describe('createBeastDeps()', () => {
     // Should be the same reference as registry.getTokenUsage()
     const registryUsage = deps.providerRegistry!.getTokenUsage();
     expect(usage).toEqual(registryUsage);
+  });
+
+  it('persists replay manifests captured by the wrapped observer', () => {
+    const root = mkdtempSync(join(tmpdir(), 'create-beast-deps-replay-'));
+    const deps = createBeastDeps({ ...minimalConfig, configDir: root }, mockExistingDeps());
+
+    deps.observer.recordReplay!({
+      kind: 'tool.result',
+      runId: 'run-1',
+      toolName: 'cli:01',
+      content: JSON.stringify({ ok: true }),
+    });
+    deps.persistAuditTrail!('run-1');
+
+    const manifest = JSON.parse(readFileSync(join(root, '.fbeast', 'audit', 'run-1.replay.json'), 'utf8'));
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0]).toMatchObject({ kind: 'tool.result', runId: 'run-1', toolName: 'cli:01' });
+    expect(manifest[0].contentRef).toMatch(/^[a-f0-9]{64}$/);
   });
 });

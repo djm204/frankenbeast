@@ -164,6 +164,40 @@ describe('CliObserverBridge', () => {
       expect(totals.totalTokens).toBe(300);
     });
 
+    it('records replay content through observerDeps and exposes a content-ref manifest', () => {
+      const writes: string[] = [];
+      const bridge = new CliObserverBridge({
+        budgetLimitUsd: 5.0,
+        replayStore: {
+          put: (content: string) => {
+            writes.push(content);
+            return 'a'.repeat(64);
+          },
+          get: () => 'stored',
+        },
+      });
+      bridge.startTrace('session-1');
+
+      bridge.observerDeps.recordReplay?.({
+        kind: 'tool.result',
+        runId: 'session-1',
+        toolName: 'cli:01',
+        content: JSON.stringify({ ok: true }),
+      });
+
+      expect(writes).toEqual([JSON.stringify({ ok: true })]);
+      expect(bridge.getReplayManifest()).toEqual([
+        expect.objectContaining({
+          version: 1,
+          kind: 'tool.result',
+          runId: 'session-1',
+          toolName: 'cli:01',
+          contentRef: 'a'.repeat(64),
+        }),
+      ]);
+      expect(JSON.stringify(bridge.getReplayManifest())).not.toContain('ok');
+    });
+
     it('startSpan creates a child span on the trace', () => {
       const bridge = new CliObserverBridge(defaultConfig);
       bridge.startTrace('session-1');

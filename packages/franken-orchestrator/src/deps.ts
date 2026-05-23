@@ -106,6 +106,14 @@ export interface IObserverModule {
   startTrace(sessionId: string): void;
   startSpan(name: string): SpanHandle;
   getTokenSpend(sessionId: string): Promise<TokenSpendData>;
+  recordReplay?(record: {
+    readonly kind: 'llm.request' | 'llm.response' | 'tool.call' | 'tool.result' | 'environment.snapshot';
+    readonly runId: string;
+    readonly provider?: string | undefined;
+    readonly model?: string | undefined;
+    readonly toolName?: string | undefined;
+    readonly content: string;
+  }): void;
 }
 
 export interface SpanHandle {

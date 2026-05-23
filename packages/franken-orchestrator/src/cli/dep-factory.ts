@@ -1,5 +1,5 @@
-import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, resolve, join } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -28,6 +28,7 @@ import { IssueReview } from '../issues/issue-review.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import { IssueRunner, type IssueRuntimeSupport, type IssueRuntimeArtifacts } from '../issues/issue-runner.js';
 import { setupTraceViewer } from './trace-viewer.js';
+import { ReplayContentStore } from '../replay/replay-content-store.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
@@ -79,6 +80,8 @@ export interface CliDepOptions {
   runConfig?: RunConfig | undefined;
   /** OrchestratorConfig for consolidation field overrides (security, brain, providers). */
   orchestratorConfig?: import('../config/orchestrator-config.js').OrchestratorConfig | undefined;
+  /** Stable Beast session/run id used to correlate replay records and persisted manifests. */
+  runSessionId?: string | undefined;
 }
 
 export interface IssueCliDeps {
@@ -215,8 +218,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const logger = new BeastLogger({ verbose, captureForFile: true, logFile });
 
   // Observer
-  const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget });
-  observerBridge.startTrace(`cli-session-${Date.now()}`);
+  const replayAuditRoot = resolve(paths.root, '.fbeast', 'audit');
+  const replayStore = new ReplayContentStore(replayAuditRoot);
+  const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget, replayStore });
+  const runSessionId = options.runSessionId ?? `cli-session-${Date.now()}`;
+  observerBridge.startTrace(runSessionId);
 
   // Trace viewer (verbose mode only)
   let traceViewerHandle: TraceViewerHandle | null = null;
@@ -253,6 +259,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...((effectiveModel ?? options.adapterModel) != null ? { model: (effectiveModel ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
+    replayRunId: runSessionId,
+    replayRecorder: (record) => observerBridge.recordReplay(record),
     ...(options.providers ? { providers: options.providers } : {}),
     registry,
     ...(options.providersConfig ? { providerOverrides: options.providersConfig } : {}),
@@ -521,7 +529,27 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   // Augment finalize to persist audit trail and close SqliteBrain
   const previousFinalizeForBrain = finalize;
   finalize = async () => {
-    try { consolidated.persistAuditTrail?.(`run-${Date.now()}`); } catch { /* best-effort */ }
+    const runId = runSessionId;
+    try {
+      consolidated.persistAuditTrail?.(runId);
+      const bridgeManifest = observerBridge.getReplayManifest();
+      if (bridgeManifest.length > 0) {
+        mkdirSync(replayAuditRoot, { recursive: true });
+        const replayManifestPath = join(replayAuditRoot, `${runId}.replay.json`);
+        let existingManifest: unknown[] = [];
+        if (existsSync(replayManifestPath)) {
+          const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
+          if (Array.isArray(parsed)) {
+            existingManifest = parsed;
+          }
+        }
+        writeFileSync(
+          replayManifestPath,
+          JSON.stringify([...existingManifest, ...bridgeManifest], null, 2),
+          'utf8',
+        );
+      }
+    } catch { /* best-effort */ }
     try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
     await previousFinalizeForBrain();
   };

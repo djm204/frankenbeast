@@ -1,6 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
@@ -352,8 +353,12 @@ export class Session {
   private async runExecute(): Promise<BeastResult> {
     const { paths, planDirOverride, budget } = this.config;
     const chunkDir = planDirOverride ?? paths.plansDir;
+    const runSessionId = randomUUID();
 
-    const { deps, logger, finalize } = await createCliDeps(this.buildDepOptions());
+    const { deps, logger, finalize } = await createCliDeps({
+      ...this.buildDepOptions(),
+      runSessionId,
+    });
     const checkpointEntries = deps.checkpoint?.readAll() ?? new Set<string>();
 
     if (this.config.resume) {
@@ -423,10 +428,14 @@ export class Session {
     if (this.config.maxTotalTokens !== undefined) {
       loopConfig.maxTotalTokens = this.config.maxTotalTokens;
     }
+    if (this.config.orchestratorConfig?.stateDir !== undefined) {
+      loopConfig.stateDir = this.config.orchestratorConfig.stateDir;
+    }
 
     try {
       const result = await new BeastLoop(fullDeps, loopConfig).run({
         projectId,
+        sessionId: runSessionId,
         userInput: `Process chunks in ${chunkDir}`,
       });
 

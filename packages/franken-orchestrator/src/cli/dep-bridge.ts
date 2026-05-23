@@ -103,6 +103,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
       dbPath: config?.brain?.dbPath ?? dbPath,
     },
     skillsDir: options.skillsDir ?? resolve(options.paths.root, 'skills'),
+    configDir: resolve(options.paths.root, '.fbeast'),
     reflection: true,
   };
 }

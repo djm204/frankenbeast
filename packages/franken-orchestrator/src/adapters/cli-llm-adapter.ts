@@ -28,6 +28,14 @@ type ProviderOverride = {
   model?: string | undefined;
 };
 
+type LlmReplayRecorder = (record: {
+  kind: 'llm.request' | 'llm.response';
+  runId: string;
+  provider?: string | undefined;
+  model?: string | undefined;
+  content: string;
+}) => void;
+
 type SpawnFn = (
   command: string,
   args: readonly string[],
@@ -44,6 +52,10 @@ export interface CliLlmAdapterOpts {
   chatMode?: boolean;
   /** Called with each complete line of stdout as it arrives (for streaming progress). */
   onStreamLine?: (line: string) => void;
+  /** Capture replayable LLM request/response content. */
+  replayRecorder?: LlmReplayRecorder | undefined;
+  /** Stable run/session id for replay records. Defaults to per-request id. */
+  replayRunId?: string | undefined;
   /** Provider fallback chain; selected provider is normalized to the front. */
   providers?: readonly string[] | undefined;
   /** Registry for resolving fallback providers. Defaults to built-ins. */
@@ -63,6 +75,8 @@ export class CliLlmAdapter implements IAdapter {
     model?: string;
     chatMode: boolean;
     onStreamLine?: (line: string) => void;
+    replayRecorder?: LlmReplayRecorder | undefined;
+    replayRunId?: string | undefined;
     providers?: readonly string[] | undefined;
     providerOverrides?: Record<string, ProviderOverride> | undefined;
     _sleepFn?: ((durationMs: number) => Promise<void>) | undefined;
@@ -86,6 +100,8 @@ export class CliLlmAdapter implements IAdapter {
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
+      ...(opts.replayRecorder !== undefined ? { replayRecorder: opts.replayRecorder } : {}),
+      ...(opts.replayRunId !== undefined ? { replayRunId: opts.replayRunId } : {}),
       ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
       ...(opts.providerOverrides !== undefined ? { providerOverrides: opts.providerOverrides } : {}),
       ...(opts._sleepFn !== undefined ? { _sleepFn: opts._sleepFn } : {}),
@@ -135,11 +151,22 @@ export class CliLlmAdapter implements IAdapter {
 
     while (true) {
       const provider = this.resolveProvider(activeProvider);
+      const activeModel = this.resolveModel(activeProvider, model);
+      if (requestId) {
+        const replayRunId = this.opts.replayRunId ?? requestId;
+        this.opts.replayRecorder?.({
+          kind: 'llm.request',
+          runId: replayRunId,
+          provider: activeProvider,
+          ...(activeModel ? { model: activeModel } : {}),
+          content: prompt,
+        });
+      }
       const result = await this.spawnSingle({
         cmd: this.resolveCommand(activeProvider),
         args: provider.buildArgs({
           maxTurns,
-          model: this.resolveModel(activeProvider, model),
+          model: activeModel,
           chatMode,
           sessionContinue,
         }),
@@ -149,6 +176,15 @@ export class CliLlmAdapter implements IAdapter {
 
       if (result.exitCode === 0) {
         if (requestId) {
+          const replayRunId = this.opts.replayRunId ?? requestId;
+          const normalizedOutput = provider.normalizeOutput(result.stdout);
+          this.opts.replayRecorder?.({
+            kind: 'llm.response',
+            runId: replayRunId,
+            provider: activeProvider,
+            ...(activeModel ? { model: activeModel } : {}),
+            content: normalizedOutput,
+          });
           this.responseProviders.set(requestId, activeProvider);
           if (cacheSession?.persist && resolveProviderCacheCapabilities(provider).persistentAcrossProcesses) {
             this.responseSessions.set(requestId, {

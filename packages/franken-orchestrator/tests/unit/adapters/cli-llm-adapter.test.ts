@@ -188,6 +188,26 @@ describe('CliLlmAdapter', () => {
   });
 
   describe('execute', () => {
+    it('records llm.request and llm.response replay records when a replay recorder is configured', async () => {
+      const records: Array<{ kind: string; runId: string; content: string }> = [];
+      const { spawnFn } = createMockSpawn({ stdout: 'cached answer', exitCode: 0 });
+      const adapter = new CliLlmAdapter(
+        claudeProvider,
+        {
+          ...baseOpts,
+          replayRunId: 'session-run-1',
+          replayRecorder: (record: { kind: string; runId: string; content: string }) => records.push(record),
+        } as any,
+        spawnFn,
+      );
+
+      await adapter.execute({ prompt: 'hello', maxTurns: 1, requestId: 'llm-call-1' });
+
+      expect(records.map((record) => record.kind)).toEqual(['llm.request', 'llm.response']);
+      expect(records[0]).toMatchObject({ runId: 'session-run-1', content: 'hello' });
+      expect(records[1]).toMatchObject({ runId: 'session-run-1', content: 'cached answer' });
+    });
+
     describe('with ClaudeProvider', () => {
       it('spawns claude binary using provider.command', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'hello', exitCode: 0 });
