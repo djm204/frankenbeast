@@ -69,6 +69,17 @@ describe('AuditTrailStore', () => {
     expect(raw.events).toHaveLength(4);
   });
 
+  it('writes a replay manifest next to the audit trail when provided', () => {
+    store.save('run-1', sampleTrail(), [
+      { version: 1, kind: 'llm.response', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
+    ]);
+
+    const raw = JSON.parse(readFileSync(join(tempDir, '.fbeast', 'audit', 'run-1.replay.json'), 'utf-8'));
+    expect(raw).toEqual([
+      { version: 1, kind: 'llm.response', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
+    ]);
+  });
+
   it('exists() returns true for saved trails', () => {
     store.save('run-1', sampleTrail());
     expect(store.exists('run-1')).toBe(true);
