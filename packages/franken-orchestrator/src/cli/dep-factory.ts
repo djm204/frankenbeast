@@ -259,7 +259,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...((effectiveModel ?? options.adapterModel) != null ? { model: (effectiveModel ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
-    replayRunId: runSessionId,
+    replayRunId: () => observerBridge.getActiveSessionId() ?? runSessionId,
     replayRecorder: (record) => observerBridge.recordReplay(record),
     ...(options.providers ? { providers: options.providers } : {}),
     registry,

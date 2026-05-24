@@ -197,75 +197,79 @@ export class Session {
     const { paths, io } = this.config;
     const interviewOpts = this.buildDepOptions();
     interviewOpts.adapterWorkingDir = tmpdir();
-    const { cliLlmAdapter } = await createCliDeps(interviewOpts);
+    const { cliLlmAdapter, finalize } = await createCliDeps(interviewOpts);
 
-    const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
-    const progressLlm = new ProgressLlmClient(adapterLlm);
+    try {
+      const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
+      const progressLlm = new ProgressLlmClient(adapterLlm);
 
-    let capturedDesignDoc = '';
-    const capturingGraphBuilder = {
-      build: async (intent: { goal: string }) => {
-        capturedDesignDoc = intent.goal;
-        return { tasks: [] };
-      },
-    };
+      let capturedDesignDoc = '';
+      const capturingGraphBuilder = {
+        build: async (intent: { goal: string }) => {
+          capturedDesignDoc = intent.goal;
+          return { tasks: [] };
+        },
+      };
 
-    const interviewIo: InterviewIO = {
-      ask: async (prompt) => {
-        if (prompt === 'Approve this design? (yes/no)') {
-          return 'yes';
-        }
-        return io.ask(prompt);
-      },
-      display: () => {
-        // Session owns post-interview design presentation.
-      },
-    };
+      const interviewIo: InterviewIO = {
+        ask: async (prompt) => {
+          if (prompt === 'Approve this design? (yes/no)') {
+            return 'yes';
+          }
+          return io.ask(prompt);
+        },
+        display: () => {
+          // Session owns post-interview design presentation.
+        },
+      };
 
-    const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
-    await capturingInterview.build({ goal: 'Gather requirements' });
+      const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
+      await capturingInterview.build({ goal: 'Gather requirements' });
 
-    const displayDesignCard = (designDoc: string): string => {
-      const designPath = writeDesignDoc(paths, designDoc);
-      io.display(formatDesignCard({
-        ...extractDesignSummary(designDoc),
-        filePath: designPath,
-      }));
-      return designPath;
-    };
+      const displayDesignCard = (designDoc: string): string => {
+        const designPath = writeDesignDoc(paths, designDoc);
+        io.display(formatDesignCard({
+          ...extractDesignSummary(designDoc),
+          filePath: designPath,
+        }));
+        return designPath;
+      };
 
-    displayDesignCard(capturedDesignDoc);
+      displayDesignCard(capturedDesignDoc);
 
-    while (true) {
-      const noOp = isNoOpDesign(capturedDesignDoc);
-      const header = noOp
-        ? 'Analysis complete: no implementation changes needed.'
-        : 'Design ready. What next?';
+      while (true) {
+        const noOp = isNoOpDesign(capturedDesignDoc);
+        const header = noOp
+          ? 'Analysis complete: no implementation changes needed.'
+          : 'Design ready. What next?';
 
-      const choice = await io.ask(
-        `${header}\n\n  [c] Continue to planning phase${noOp ? ' anyway' : ''}\n  [r] Revise - give feedback to regenerate\n  [x] Exit\n`,
-      );
-      const normalized = choice.trim().toLowerCase();
-
-      if (normalized === 'x' || normalized === 'exit') {
-        return 'exit';
-      }
-
-      if (normalized === 'c' || normalized === 'continue') {
-        return 'continue';
-      }
-
-      if (normalized === 'r' || normalized === 'revise') {
-        const feedback = await io.ask('What would you like to change?');
-        const revised = await progressLlm.complete(
-          `Revise this design document based on the following feedback:\n\nFeedback: ${feedback}\n\nCurrent document:\n${capturedDesignDoc}`,
+        const choice = await io.ask(
+          `${header}\n\n  [c] Continue to planning phase${noOp ? ' anyway' : ''}\n  [r] Revise - give feedback to regenerate\n  [x] Exit\n`,
         );
-        capturedDesignDoc = revised;
-        displayDesignCard(revised);
-        continue;
-      }
+        const normalized = choice.trim().toLowerCase();
 
-      io.display('Please enter c, r, or x.');
+        if (normalized === 'x' || normalized === 'exit') {
+          return 'exit';
+        }
+
+        if (normalized === 'c' || normalized === 'continue') {
+          return 'continue';
+        }
+
+        if (normalized === 'r' || normalized === 'revise') {
+          const feedback = await io.ask('What would you like to change?');
+          const revised = await progressLlm.complete(
+            `Revise this design document based on the following feedback:\n\nFeedback: ${feedback}\n\nCurrent document:\n${capturedDesignDoc}`,
+          );
+          capturedDesignDoc = revised;
+          displayDesignCard(revised);
+          continue;
+        }
+
+        io.display('Please enter c, r, or x.');
+      }
+    } finally {
+      await finalize();
     }
   }
 
@@ -278,9 +282,10 @@ export class Session {
     depOptions.adapterWorkingDir = tmpdir();
     const progress = createStreamProgressWithSpinner({ label: 'Planning...' });
     depOptions.onStreamLine = progress.onLine;
-    const { cliLlmAdapter, logger } = await createCliDeps(depOptions);
+    const { cliLlmAdapter, logger, finalize } = await createCliDeps(depOptions);
 
-    // Load design doc
+    try {
+      // Load design doc
     let designContent: string;
     if (designDocPath) {
       designContent = readFileSync(designDocPath, 'utf-8');
@@ -348,6 +353,10 @@ export class Session {
         return chunkPaths;
       },
     });
+    } finally {
+      progress.stop();
+      await finalize();
+    }
   }
 
   private async runExecute(): Promise<BeastResult> {

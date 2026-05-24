@@ -36,6 +36,8 @@ type LlmReplayRecorder = (record: {
   content: string;
 }) => void;
 
+type ReplayRunId = string | (() => string | undefined);
+
 type SpawnFn = (
   command: string,
   args: readonly string[],
@@ -55,7 +57,7 @@ export interface CliLlmAdapterOpts {
   /** Capture replayable LLM request/response content. */
   replayRecorder?: LlmReplayRecorder | undefined;
   /** Stable run/session id for replay records. Defaults to per-request id. */
-  replayRunId?: string | undefined;
+  replayRunId?: ReplayRunId | undefined;
   /** Provider fallback chain; selected provider is normalized to the front. */
   providers?: readonly string[] | undefined;
   /** Registry for resolving fallback providers. Defaults to built-ins. */
@@ -76,7 +78,7 @@ export class CliLlmAdapter implements IAdapter {
     chatMode: boolean;
     onStreamLine?: (line: string) => void;
     replayRecorder?: LlmReplayRecorder | undefined;
-    replayRunId?: string | undefined;
+    replayRunId?: ReplayRunId | undefined;
     providers?: readonly string[] | undefined;
     providerOverrides?: Record<string, ProviderOverride> | undefined;
     _sleepFn?: ((durationMs: number) => Promise<void>) | undefined;
@@ -153,7 +155,7 @@ export class CliLlmAdapter implements IAdapter {
       const provider = this.resolveProvider(activeProvider);
       const activeModel = this.resolveModel(activeProvider, model);
       if (requestId) {
-        const replayRunId = this.opts.replayRunId ?? requestId;
+        const replayRunId = this.resolveReplayRunId(requestId);
         this.opts.replayRecorder?.({
           kind: 'llm.request',
           runId: replayRunId,
@@ -176,7 +178,7 @@ export class CliLlmAdapter implements IAdapter {
 
       if (result.exitCode === 0) {
         if (requestId) {
-          const replayRunId = this.opts.replayRunId ?? requestId;
+          const replayRunId = this.resolveReplayRunId(requestId);
           const normalizedOutput = provider.normalizeOutput(result.stdout);
           this.opts.replayRecorder?.({
             kind: 'llm.response',
@@ -265,6 +267,14 @@ export class CliLlmAdapter implements IAdapter {
       return this.provider;
     }
     return this.registry.get(name);
+  }
+
+  private resolveReplayRunId(requestId: string): string {
+    const configured = this.opts.replayRunId;
+    if (typeof configured === 'function') {
+      return configured() ?? requestId;
+    }
+    return configured ?? requestId;
   }
 
   private resolveCommand(name: string): string {

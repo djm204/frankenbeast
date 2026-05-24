@@ -34,6 +34,7 @@ export class CliObserverBridge implements IObserverModule {
   private readonly replayStore?: ReplayContentStoreLike | undefined;
   private readonly replayManifest: ReplayRecord[] = [];
   private trace: Trace | undefined;
+  private activeSessionId: string | undefined;
 
   constructor(config: CliObserverBridgeConfig) {
     this.counter = new TokenCounter();
@@ -44,7 +45,12 @@ export class CliObserverBridge implements IObserverModule {
   }
 
   startTrace(sessionId: string): void {
+    this.activeSessionId = sessionId;
     this.trace = TraceContext.createTrace(sessionId);
+  }
+
+  getActiveSessionId(): string | undefined {
+    return this.activeSessionId;
   }
 
   startSpan(name: string): SpanHandle {

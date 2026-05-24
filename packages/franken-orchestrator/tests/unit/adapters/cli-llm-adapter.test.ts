@@ -208,6 +208,27 @@ describe('CliLlmAdapter', () => {
       expect(records[1]).toMatchObject({ runId: 'session-run-1', content: 'cached answer' });
     });
 
+    it('resolves replay run ids lazily so reused adapters follow the active BeastLoop session', async () => {
+      const records: Array<{ kind: string; runId: string; content: string }> = [];
+      let activeRunId = 'issue-1';
+      const { spawnFn } = createMockSpawn({ stdout: 'cached answer', exitCode: 0 });
+      const adapter = new CliLlmAdapter(
+        claudeProvider,
+        {
+          ...baseOpts,
+          replayRunId: () => activeRunId,
+          replayRecorder: (record: { kind: string; runId: string; content: string }) => records.push(record),
+        } as any,
+        spawnFn,
+      );
+
+      await adapter.execute({ prompt: 'first issue', maxTurns: 1, requestId: 'llm-call-1' });
+      activeRunId = 'issue-2';
+      await adapter.execute({ prompt: 'second issue', maxTurns: 1, requestId: 'llm-call-2' });
+
+      expect(records.map((record) => record.runId)).toEqual(['issue-1', 'issue-1', 'issue-2', 'issue-2']);
+    });
+
     describe('with ClaudeProvider', () => {
       it('spawns claude binary using provider.command', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'hello', exitCode: 0 });

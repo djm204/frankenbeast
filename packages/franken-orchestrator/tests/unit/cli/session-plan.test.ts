@@ -13,6 +13,7 @@ let progressCtorInner: unknown = undefined;
 let progressCtorOptions: unknown = undefined;
 let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
+const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
 
@@ -57,7 +58,7 @@ vi.mock('../../../src/cli/dep-factory.js', () => ({
   createCliDeps: vi.fn(() => ({
     deps: mockDeps,
     logger: mockDeps.logger,
-    finalize: vi.fn(async () => {}),
+    finalize: mockFinalize,
     cliLlmAdapter: mockCliLlmAdapter,
   })),
 }));
@@ -238,6 +239,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFinalize.mockClear();
     adapterCtorArg = undefined;
     progressCtorInner = undefined;
     progressCtorOptions = undefined;
@@ -278,6 +280,14 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     await new Session(config).start();
 
     expect(mockLlmGraphBuild).toHaveBeenCalled();
+  });
+
+  it('runPlan() finalizes CLI dependencies so replay records are persisted', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig();
+    await new Session(config).start();
+
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
   it('runPlan() passes LLM directly to LlmGraphBuilder (no ProgressLlmClient spinner)', async () => {
