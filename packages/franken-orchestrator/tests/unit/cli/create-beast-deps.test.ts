@@ -154,4 +154,21 @@ describe('createBeastDeps()', () => {
     expect(manifest[0]).toMatchObject({ kind: 'tool.result', runId: 'run-1', toolName: 'cli:01' });
     expect(manifest[0].contentRef).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it('does not double-nest .fbeast when configDir already points to metadata', () => {
+    const root = mkdtempSync(join(tmpdir(), 'create-beast-deps-metadata-'));
+    const metadataDir = join(root, '.fbeast');
+    const deps = createBeastDeps({ ...minimalConfig, configDir: metadataDir }, mockExistingDeps());
+
+    deps.observer.recordReplay!({
+      kind: 'tool.result',
+      runId: 'run-1',
+      toolName: 'cli:01',
+      content: JSON.stringify({ ok: true }),
+    });
+    deps.persistAuditTrail!('run-1');
+
+    const manifest = JSON.parse(readFileSync(join(metadataDir, 'audit', 'run-1.replay.json'), 'utf8'));
+    expect(manifest).toHaveLength(1);
+  });
 });
