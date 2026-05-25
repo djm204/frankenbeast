@@ -220,17 +220,21 @@ export class SafetyEvaluator implements Evaluator {
       if (alternative[i] === '(') {
         const close = this.findClosingGroup(alternative, i);
         if (close === -1) break;
-        const groupedPrefix = this.expandSimpleAlternativePrefix(
-          this.splitTopLevelAlternatives(
-            this.stripGroupPrefix(alternative.slice(i + 1, close)),
-          )[0] ?? '',
-        );
-        tokens.push(
-          ...groupedPrefix.slice(
-            0,
-            MAX_ALTERNATIVE_PREFIX_TOKENS - tokens.length,
-          ),
-        );
+        const groupedPrefixes = this.splitTopLevelAlternatives(
+          this.stripGroupPrefix(alternative.slice(i + 1, close)),
+        )
+          .map((nestedAlternative) =>
+            this.expandSimpleAlternativePrefix(nestedAlternative),
+          )
+          .filter((prefix) => prefix.length > 0);
+        if (groupedPrefixes.length > 0) {
+          tokens.push(
+            `ALT:${groupedPrefixes
+              .map((prefix) => prefix[0])
+              .filter((token) => token !== undefined)
+              .join(',')}`,
+          );
+        }
         if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) break;
         i = close;
         continue;
@@ -314,6 +318,8 @@ export class SafetyEvaluator implements Evaluator {
       }
     } else if (char === '(') {
       return null;
+    } else if (char === '.') {
+      value = 'ANY';
     } else {
       value = char;
     }
@@ -331,6 +337,9 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === 'd') return 'DIGIT';
     if (escaped === 'w') return 'WORD';
     if (escaped === 's') return 'SPACE';
+    if (escaped === 'D') return 'NOT_DIGIT';
+    if (escaped === 'W') return 'NOT_WORD';
+    if (escaped === 'S') return 'NOT_SPACE';
     if (escaped === 'x') return '\\x';
     return escaped;
   }
@@ -370,13 +379,35 @@ export class SafetyEvaluator implements Evaluator {
 
   private regexTokensOverlap(left: string, right: string): boolean {
     if (left === right) return true;
+    if (left === 'ANY' || right === 'ANY') return true;
+    if (left.startsWith('ALT:')) return this.altTokenOverlaps(left, right);
+    if (right.startsWith('ALT:')) return this.altTokenOverlaps(right, left);
     if (left === 'WORD') return this.wordTokenOverlaps(right);
     if (right === 'WORD') return this.wordTokenOverlaps(left);
     if (left === 'DIGIT') return this.digitTokenOverlaps(right);
     if (right === 'DIGIT') return this.digitTokenOverlaps(left);
+    if (left === 'NOT_DIGIT') return !this.digitTokenOverlaps(right);
+    if (right === 'NOT_DIGIT') return !this.digitTokenOverlaps(left);
+    if (left === 'NOT_WORD') return !this.wordTokenOverlaps(right);
+    if (right === 'NOT_WORD') return !this.wordTokenOverlaps(left);
+    if (left === 'NOT_SPACE') return right !== 'SPACE';
+    if (right === 'NOT_SPACE') return left !== 'SPACE';
     if (left.startsWith('RANGE:')) return this.rangeTokenOverlaps(left, right);
     if (right.startsWith('RANGE:')) return this.rangeTokenOverlaps(right, left);
+    if (left.startsWith('CLASS:')) return this.classTokenOverlaps(left, right);
+    if (right.startsWith('CLASS:')) return this.classTokenOverlaps(right, left);
     return false;
+  }
+
+  private altTokenOverlaps(altToken: string, token: string): boolean {
+    return altToken
+      .slice('ALT:'.length)
+      .split(',')
+      .some((alternativeToken) =>
+        alternativeToken.length > 0
+          ? this.regexTokensOverlap(alternativeToken, token)
+          : false,
+      );
   }
 
   private wordTokenOverlaps(token: string): boolean {
@@ -399,6 +430,37 @@ export class SafetyEvaluator implements Evaluator {
         ? start <= otherEnd && otherStart <= end
         : false;
     }
+    if (token.startsWith('CLASS:')) return this.classTokenOverlaps(token, rangeToken);
+    return false;
+  }
+
+  private classTokenOverlaps(classToken: string, token: string): boolean {
+    const characterClass = classToken.slice('CLASS:'.length);
+    const body = characterClass.slice(1, -1);
+    if (body.startsWith('^')) return true;
+
+    for (let i = 0; i < body.length; i += 1) {
+      const char = body[i]!;
+      if (char === '\\') {
+        const escaped = body[i + 1];
+        if (escaped === undefined) continue;
+        const escapedToken = this.escapedAtomToken(escaped);
+        if (this.regexTokensOverlap(escapedToken, token)) return true;
+        i += 1;
+        continue;
+      }
+
+      if (body[i + 1] === '-' && body[i + 2] !== undefined) {
+        if (this.rangeTokenOverlaps(`RANGE:${char}-${body[i + 2]!}`, token)) {
+          return true;
+        }
+        i += 2;
+        continue;
+      }
+
+      if (this.regexTokensOverlap(char, token)) return true;
+    }
+
     return false;
   }
 

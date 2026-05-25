@@ -430,6 +430,30 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:\\w|a)+!$',
         severity: 'block',
       },
+      {
+        id: 'redos-later-nested-alternative',
+        description: 'later nested alternative pattern',
+        pattern: '(?:(?:a|b)|b)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-class-literal-alternation',
+        description: 'class literal alternation pattern',
+        pattern: '(?:(?:[ab]|b))+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-wildcard-literal-alternation',
+        description: 'wildcard literal alternation pattern',
+        pattern: '^(?:.|a)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-negated-escape-alternation',
+        description: 'negated escape alternation pattern',
+        pattern: '^(?:\\D|a)+\\d$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -437,8 +461,12 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(15);
+    expect(result.findings).toHaveLength(19);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
