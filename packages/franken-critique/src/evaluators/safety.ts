@@ -117,10 +117,7 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasBackreference(pattern: string): boolean {
-    const namedGroups = new Set(
-      [...pattern.matchAll(/\(\?<([^=!][^>]*)>/g)].map((match) => match[1]!),
-    );
-    let captureCount = 0;
+    const { captureCount, namedGroups } = this.collectCapturingGroups(pattern);
 
     for (let i = 0; i < pattern.length; i += 1) {
       const char = pattern[i]!;
@@ -134,14 +131,37 @@ export class SafetyEvaluator implements Evaluator {
         const named = pattern.slice(i + 1).match(/^k<([^>]+)>/);
         if (named && namedGroups.has(named[1]!)) return true;
         i += 1;
-        continue;
-      }
-      if (char === '(' && this.isCapturingGroup(pattern, i)) {
-        captureCount += 1;
       }
     }
 
     return false;
+  }
+
+  private collectCapturingGroups(pattern: string): {
+    captureCount: number;
+    namedGroups: Set<string>;
+  } {
+    const namedGroups = new Set<string>();
+    let captureCount = 0;
+
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '[') {
+        i = this.skipCharacterClass(pattern, i);
+        continue;
+      }
+      if (char === '\\') {
+        i += 1;
+        continue;
+      }
+      if (char === '(' && this.isCapturingGroup(pattern, i)) {
+        captureCount += 1;
+        const named = pattern.slice(i).match(/^\(\?<([^>]+)>/);
+        if (named) namedGroups.add(named[1]!);
+      }
+    }
+
+    return { captureCount, namedGroups };
   }
 
   private isCapturingGroup(pattern: string, start: number): boolean {
@@ -349,9 +369,25 @@ export class SafetyEvaluator implements Evaluator {
     let depth = 0;
     for (let i = start; i < pattern.length; i += 1) {
       const char = pattern[i]!;
-      if (char === '\\' || char === '[') return true;
+      if (char === '\\') {
+        const escaped = pattern[i + 1];
+        if (escaped === 'b' || escaped === 'B') {
+          i += 1;
+          continue;
+        }
+        return true;
+      }
+      if (char === '[') return true;
       if (char === '(') {
-        if (depth === 0) return true;
+        if (depth === 0) {
+          if (this.isZeroWidthAssertionGroup(pattern, i)) {
+            const close = this.findClosingGroup(pattern, i);
+            if (close === -1) return false;
+            i = close;
+            continue;
+          }
+          return true;
+        }
         depth += 1;
         continue;
       }
@@ -364,6 +400,15 @@ export class SafetyEvaluator implements Evaluator {
       if (char !== '^' && char !== '$') return true;
     }
     return false;
+  }
+
+  private isZeroWidthAssertionGroup(pattern: string, start: number): boolean {
+    return (
+      pattern.startsWith('(?=', start) ||
+      pattern.startsWith('(?!', start) ||
+      pattern.startsWith('(?<=', start) ||
+      pattern.startsWith('(?<!', start)
+    );
   }
 
   private regexAtomTokenAt(

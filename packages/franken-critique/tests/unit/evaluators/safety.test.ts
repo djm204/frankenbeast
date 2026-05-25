@@ -509,6 +509,12 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-forward-backreference-alternation',
+        description: 'forward backreference alternation pattern',
+        pattern: '^(?:\\1a|a)+(a)$',
+        severity: 'block',
+      },
+      {
         id: 'redos-case-folded-escaped-alternation',
         description: 'case folded escaped alternation pattern',
         pattern: '(?i:\\x41|aa)+$',
@@ -520,6 +526,12 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:(?:,a)|(?:,b)|,)+$',
         severity: 'block',
       },
+      {
+        id: 'redos-zero-width-suffix-alternation',
+        description: 'zero-width suffix alternation pattern',
+        pattern: '^((a|aa)(?=a))+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -527,9 +539,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(30);
+    expect(result.findings).toHaveLength(32);
     expect(result.findings).toEqual(
-      Array.from({ length: 30 }, () =>
+      Array.from({ length: 32 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
@@ -583,6 +595,12 @@ describe('SafetyEvaluator', () => {
         id: 'unknown-named-escape-not-backreference',
         description: 'unknown named escape is not backreference',
         pattern: '^\\k<missing>$',
+        severity: 'block',
+      },
+      {
+        id: 'class-text-not-named-group',
+        description: 'class text is not named group',
+        pattern: '^[((?<x>)]\\k<x>$',
         severity: 'block',
       },
       {
