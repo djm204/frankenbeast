@@ -1,0 +1,16 @@
+{
+  "taskId": "write-readme",
+  "tier": "core",
+  "taskClass": "artifact-critical",
+  "projectFixture": "tiny-node",
+  "prompt": "Create README.md with a concise project summary for this tiny Node fixture.",
+  "expectedArtifacts": ["README.md"],
+  "requiredChecks": [
+    { "type": "file-exists", "path": "README.md" },
+    { "type": "file-contains", "path": "README.md", "text": "tiny" }
+  ],
+  "timeoutMs": 120000,
+  "allowedNondeterminism": [],
+  "baselineSupported": true,
+  "notes": "Minimal artifact-critical smoke task for A/B benchmark plumbing."
+}
