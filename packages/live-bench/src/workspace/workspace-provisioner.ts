@@ -138,7 +138,11 @@ function dateSegment(timestamp: string): string {
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid runTimestamp: ${timestamp}`);
   }
-  return parsed.toISOString().slice(0, 10);
+  const normalized = parsed.toISOString();
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(normalized)) {
+    throw new Error(`Invalid runTimestamp: ${timestamp}`);
+  }
+  return normalized.slice(0, 10);
 }
 
 function daysInMonth(year: number, month: number): number {

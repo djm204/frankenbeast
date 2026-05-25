@@ -182,6 +182,8 @@ describe('workspace provisioning', () => {
     const yearZeroLeapDay = provisioner.provision({ ...row, runId: 'run-year-zero', runTimestamp: '0000-02-29T00:00:00.000Z' }, task);
     expect(yearZeroLeapDay.runDir).toContain(join('0000-02-29', 'run-year-zero'));
     expect(() => provisioner.provision({ ...row, runTimestamp: '0001-02-29T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '0000-01-01T00:00:00+01:00' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '9999-12-31T23:30:00-01:00' }, task)).toThrow(/Invalid runTimestamp/);
   });
 
   it('rejects mismatched benchmark rows and tasks before persisting metadata', () => {
