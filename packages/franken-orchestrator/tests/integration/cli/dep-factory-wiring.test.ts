@@ -52,6 +52,7 @@ function createTempPaths(): ProjectPaths {
     logFile: join(buildDir, 'session-build.log'),
     designDocFile: join(fbDir, 'design.md'),
     configFile: join(fbDir, 'config.json'),
+    stateDir: join(fbDir, 'state'),
     llmResponseFile: join(fbDir, 'llm-response.json'),
   };
 }

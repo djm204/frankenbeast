@@ -122,6 +122,7 @@ function makeMockObserver() {
     endSpan: vi.fn(),
     recordTokenUsage: vi.fn(),
     setMetadata: vi.fn(),
+    recordReplay: vi.fn(),
   };
 }
 
@@ -164,6 +165,58 @@ describe('CliSkillExecutor', () => {
   }
 
   describe('successful execution (promise detected)', () => {
+    it('records tool.call and tool.result replay records for the CLI skill execution', async () => {
+      martin.run.mockResolvedValue({
+        completed: true,
+        iterations: 1,
+        output: '<promise>IMPL_01_DONE</promise>',
+        tokensUsed: 250,
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput({ objective: 'Replay this task' }));
+
+      expect(observer.recordReplay).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool.call',
+        runId: 'session-1',
+        toolName: 'cli:01_types',
+        content: expect.stringContaining('Replay this task'),
+      }));
+      const toolCallRecord = observer.recordReplay.mock.calls.find(
+        ([record]: [{ kind: string; content: string }]) => record.kind === 'tool.call',
+      )?.[0];
+      expect(JSON.parse(toolCallRecord.content).input.dependencyOutputs).toEqual([]);
+      expect(observer.recordReplay).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool.result',
+        runId: 'session-1',
+        toolName: 'cli:01_types',
+        content: expect.stringContaining('IMPL_01_DONE'),
+      }));
+    });
+
+    it('serializes dependency output maps in replayable tool.call content', async () => {
+      martin.run.mockResolvedValue({
+        completed: true,
+        iterations: 1,
+        output: '<promise>IMPL_01_DONE</promise>',
+        tokensUsed: 250,
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput({
+        dependencyOutputs: new Map([
+          ['impl:00_bootstrap', 'bootstrap-output'],
+          ['impl:00_types', { files: ['types.ts'] }],
+        ]),
+      }));
+
+      const toolCallRecord = observer.recordReplay.mock.calls.find(
+        ([record]: [{ kind: string; content: string }]) => record.kind === 'tool.call',
+      )?.[0];
+      expect(JSON.parse(toolCallRecord.content).input.dependencyOutputs).toEqual([
+        ['impl:00_bootstrap', 'bootstrap-output'],
+        ['impl:00_types', { files: ['types.ts'] }],
+      ]);
+    });
+
     it('returns SkillResult with output and tokensUsed', async () => {
       martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ promiseDetected: true, tokensEstimated: 250 }));

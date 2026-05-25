@@ -10,9 +10,20 @@ import {
 import type { Trace, Span } from '@frankenbeast/observer';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';
+import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
 
 export interface CliObserverBridgeConfig {
   budgetLimitUsd: number;
+  replayStore?: ReplayContentStoreLike | undefined;
+}
+
+interface ReplayCaptureRecord {
+  readonly kind: ReplayRecordKind;
+  readonly runId: string;
+  readonly provider?: string | undefined;
+  readonly model?: string | undefined;
+  readonly toolName?: string | undefined;
+  readonly content: string;
 }
 
 export class CliObserverBridge implements IObserverModule {
@@ -20,17 +31,26 @@ export class CliObserverBridge implements IObserverModule {
   private readonly costCalc: CostCalculator;
   private readonly breaker: CircuitBreaker;
   private readonly loopDet: LoopDetector;
+  private readonly replayStore?: ReplayContentStoreLike | undefined;
+  private readonly replayManifest: ReplayRecord[] = [];
   private trace: Trace | undefined;
+  private activeSessionId: string | undefined;
 
   constructor(config: CliObserverBridgeConfig) {
     this.counter = new TokenCounter();
     this.costCalc = new CostCalculator(DEFAULT_PRICING);
     this.breaker = new CircuitBreaker({ limitUsd: config.budgetLimitUsd });
     this.loopDet = new LoopDetector();
+    this.replayStore = config.replayStore;
   }
 
   startTrace(sessionId: string): void {
+    this.activeSessionId = sessionId;
     this.trace = TraceContext.createTrace(sessionId);
+  }
+
+  getActiveSessionId(): string | undefined {
+    return this.activeSessionId;
   }
 
   startSpan(name: string): SpanHandle {
@@ -98,7 +118,29 @@ export class CliObserverBridge implements IObserverModule {
         SpanLifecycle.recordTokenUsage(span, usage, counter),
       setMetadata: (span: Span, data: Record<string, unknown>) =>
         SpanLifecycle.setMetadata(span, data),
+      recordReplay: (record) => this.recordReplay(record),
     };
+  }
+
+  recordReplay(record: ReplayCaptureRecord): void {
+    if (!this.replayStore) {
+      return;
+    }
+    const contentRef = this.replayStore.put(record.content);
+    this.replayManifest.push({
+      version: 1,
+      kind: record.kind,
+      runId: record.runId,
+      timestamp: new Date().toISOString(),
+      ...(record.provider ? { provider: record.provider } : {}),
+      ...(record.model ? { model: record.model } : {}),
+      ...(record.toolName ? { toolName: record.toolName } : {}),
+      contentRef,
+    });
+  }
+
+  getReplayManifest(): readonly ReplayRecord[] {
+    return [...this.replayManifest];
   }
 
   private requireTrace(): Trace {

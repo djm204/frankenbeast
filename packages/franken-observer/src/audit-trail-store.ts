@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AuditTrail } from './audit-event.js';
+import type { ReplayRecord } from './replay/replay-record.js';
 
 export interface PersistedAuditTrail {
   version: 1;
@@ -20,7 +21,7 @@ export class AuditTrailStore {
     this.auditDir = join(projectRoot, '.fbeast', 'audit');
   }
 
-  save(runId: string, trail: AuditTrail): string {
+  save(runId: string, trail: AuditTrail, manifest?: readonly ReplayRecord[]): string {
     mkdirSync(this.auditDir, { recursive: true });
 
     const filePath = join(this.auditDir, `${runId}.json`);
@@ -31,6 +32,9 @@ export class AuditTrailStore {
       events: trail.toJSON(),
     };
     writeFileSync(filePath, JSON.stringify(artifact, null, 2));
+    if (manifest) {
+      writeFileSync(join(this.auditDir, `${runId}.replay.json`), JSON.stringify(manifest, null, 2));
+    }
     return filePath;
   }
 

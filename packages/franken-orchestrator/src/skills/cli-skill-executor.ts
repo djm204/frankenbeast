@@ -122,6 +122,12 @@ export interface ObserverDeps {
   endSpan(span: Span, opts?: { status?: string; errorMessage?: string }, loopDetector?: LoopDetector): void;
   recordTokenUsage(span: Span, usage: TokenUsage, counter?: TokenCounter): void;
   setMetadata(span: Span, data: Record<string, unknown>): void;
+  recordReplay?(record: {
+    kind: 'tool.call' | 'tool.result';
+    runId: string;
+    toolName: string;
+    content: string;
+  }): void;
 }
 
 // ── Budget error ──
@@ -135,6 +141,22 @@ export class BudgetExceededError extends Error {
     this.name = 'BudgetExceededError';
     this.spent = spent;
     this.limit = limit;
+  }
+}
+
+function serializeSkillInputForReplay(input: SkillInput): Record<string, unknown> {
+  return {
+    ...input,
+    dependencyOutputs: Array.from(input.dependencyOutputs.entries()),
+  };
+}
+
+function safeReplayJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return JSON.stringify({ replaySerializationError: detail });
   }
 }
 
@@ -217,6 +239,12 @@ export class CliSkillExecutor {
     }
 
     const chunkId = this.extractChunkId(skillId);
+    this.observer.recordReplay?.({
+      kind: 'tool.call',
+      runId: input.sessionId,
+      toolName: skillId,
+      content: safeReplayJson({ skillId, input: serializeSkillInputForReplay(input), taskId }),
+    });
     const chunkSpan = this.observer.startSpan(this.observer.trace, { name: `cli:${chunkId}` });
 
     // Snapshot pre-chunk tokens for diff
@@ -491,6 +519,12 @@ export class CliSkillExecutor {
     }
 
     this.observer.endSpan(chunkSpan, { status: 'completed' });
+    this.observer.recordReplay?.({
+      kind: 'tool.result',
+      runId: input.sessionId,
+      toolName: skillId,
+      content: JSON.stringify({ output: martinResult.output, tokensUsed: chunkTokensUsed, iterations: martinResult.iterations }),
+    });
     return {
       output: martinResult.output,
       tokensUsed: chunkTokensUsed,

@@ -1,6 +1,16 @@
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { AuditTrail } from '@frankenbeast/observer';
 import { createAuditEvent } from '@frankenbeast/observer';
+import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
+
+export interface ReplayCaptureRecord {
+  readonly kind: ReplayRecordKind;
+  readonly runId: string;
+  readonly provider?: string | undefined;
+  readonly model?: string | undefined;
+  readonly toolName?: string | undefined;
+  readonly content: string;
+}
 
 /**
  * Wraps the existing IObserverModule and additionally records
@@ -12,6 +22,8 @@ export class AuditTrailObserverAdapter implements IObserverModule {
     private readonly auditTrail: AuditTrail,
     private currentPhase = 'unknown',
     private currentProvider = 'unknown',
+    private readonly replayStore?: ReplayContentStoreLike | undefined,
+    private readonly replayManifest: ReplayRecord[] = [],
   ) {}
 
   setPhase(phase: string): void {
@@ -60,5 +72,26 @@ export class AuditTrailObserverAdapter implements IObserverModule {
 
   getAuditTrail(): AuditTrail {
     return this.auditTrail;
+  }
+
+  recordReplay(record: ReplayCaptureRecord): void {
+    if (!this.replayStore) {
+      return;
+    }
+    const contentRef = this.replayStore.put(record.content);
+    this.replayManifest.push({
+      version: 1,
+      kind: record.kind,
+      runId: record.runId,
+      timestamp: new Date().toISOString(),
+      ...(record.provider ? { provider: record.provider } : {}),
+      ...(record.model ? { model: record.model } : {}),
+      ...(record.toolName ? { toolName: record.toolName } : {}),
+      contentRef,
+    });
+  }
+
+  getReplayManifest(): readonly ReplayRecord[] {
+    return [...this.replayManifest];
   }
 }
