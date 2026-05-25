@@ -1,7 +1,34 @@
 import { z } from 'zod';
 
+function structurallyEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((entry, index) => structurallyEqual(entry, right[index]));
+  }
+  if (
+    left
+    && right
+    && typeof left === 'object'
+    && typeof right === 'object'
+  ) {
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const leftKeys = Object.keys(leftRecord).sort();
+    const rightKeys = Object.keys(rightRecord).sort();
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => key === rightKeys[index]
+        && structurallyEqual(leftRecord[key], rightRecord[key]));
+  }
+  return false;
+}
+
 function assertNoConflictingAlias(record: Record<string, unknown>, camelKey: string, snakeKey: string): void {
-  if (record[camelKey] !== undefined && record[snakeKey] !== undefined && record[camelKey] !== record[snakeKey]) {
+  if (record[camelKey] !== undefined && record[snakeKey] !== undefined && !structurallyEqual(record[camelKey], record[snakeKey])) {
     throw new Error(`Conflicting benchmark aliases: ${camelKey} and ${snakeKey}`);
   }
 }
@@ -12,8 +39,8 @@ const BenchmarkCheckSchema = z.preprocess((value) => {
   }
   const record = value as Record<string, unknown>;
   assertNoConflictingAlias(record, 'requiredParams', 'required_params');
-  if (record.type === 'tool-call' && record.required_params !== undefined && record.requiredParams === undefined) {
-    const normalized: Record<string, unknown> = { ...record, requiredParams: record.required_params };
+  if (record.type === 'tool-call' && record.required_params !== undefined) {
+    const normalized: Record<string, unknown> = { ...record, requiredParams: record.requiredParams ?? record.required_params };
     delete normalized.required_params;
     return normalized;
   }

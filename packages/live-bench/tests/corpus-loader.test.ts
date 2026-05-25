@@ -92,6 +92,52 @@ describe('corpus loader', () => {
     expect(() => loadTaskFile(taskPath)).toThrow(/Conflicting benchmark aliases/);
   });
 
+  it('allows equivalent snake_case and camelCase alias values', () => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/equivalent-aliases.task.json', {
+      ...validTask,
+      expected_artifacts: [...validTask.expectedArtifacts],
+      requiredChecks: [{ type: 'tool-call', tool: 'write_file', requiredParams: ['path'] }],
+      required_checks: [{ type: 'tool-call', tool: 'write_file', requiredParams: ['path'] }],
+    });
+
+    expect(loadTaskFile(taskPath)).toMatchObject({
+      expectedArtifacts: ['README.md'],
+      requiredChecks: [{ type: 'tool-call', tool: 'write_file', requiredParams: ['path'] }],
+    });
+  });
+
+  it('allows equivalent tool-call required parameter aliases', () => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/equivalent-check-aliases.task.json', {
+      ...validTask,
+      requiredChecks: [{ type: 'tool-call', tool: 'write_file', requiredParams: ['path'], required_params: ['path'] }],
+    });
+
+    expect(loadTaskFile(taskPath)).toMatchObject({
+      requiredChecks: [{ type: 'tool-call', tool: 'write_file', requiredParams: ['path'] }],
+    });
+  });
+
+  it('rejects structurally different composite alias values', () => {
+    const root = tempCorpus();
+    const taskPath = writeTask(root, 'core/composite-conflict.task.json', {
+      ...validTask,
+      expected_artifacts: ['README.md', 'extra.md'],
+    });
+
+    expect(() => loadTaskFile(taskPath)).toThrow(/Conflicting benchmark aliases/);
+  });
+
+  it('rejects duplicate task ids in a selected corpus', () => {
+    const root = tempCorpus();
+    writeTask(root, 'core/a.task.json', { ...validTask, taskId: 'same-task' });
+    writeTask(root, 'core/b.task.json', { ...validTask, taskId: 'same-task' });
+    writeTask(root, 'candidate/c.task.json', { ...validTask, taskId: 'same-task', tier: 'candidate' });
+
+    expect(() => loadCorpus(root, ['core'])).toThrow(/Duplicate benchmark task id: same-task/);
+  });
+
   it('rejects core tasks that are not fair baseline comparisons', () => {
     const root = tempCorpus();
     const taskPath = writeTask(root, 'core/fbeast-only.task.json', {

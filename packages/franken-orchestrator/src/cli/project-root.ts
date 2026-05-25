@@ -17,6 +17,7 @@ export interface ProjectPaths {
   logFile: string;
   designDocFile: string;
   configFile: string;
+  stateDir: string;
   /** Raw LLM decomposition response cache */
   llmResponseFile: string;
 }
@@ -109,6 +110,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
     logFile: resolve(buildDir, 'build.log'),
     designDocFile: resolve(plansDir, 'design.md'),
     configFile: resolve(frankenbeastDir, 'config.json'),
+    stateDir: resolve(frankenbeastDir, 'state'),
     llmResponseFile: resolve(plansDir, 'llm-response.json'),
   };
 }
@@ -121,4 +123,5 @@ export function scaffoldFrankenbeast(paths: ProjectPaths): void {
   mkdirSync(paths.buildDir, { recursive: true });
   mkdirSync(paths.beastsDir, { recursive: true });
   mkdirSync(paths.beastLogsDir, { recursive: true });
+  mkdirSync(paths.stateDir, { recursive: true });
 }

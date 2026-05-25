@@ -437,9 +437,7 @@ export class Session {
     if (this.config.maxTotalTokens !== undefined) {
       loopConfig.maxTotalTokens = this.config.maxTotalTokens;
     }
-    if (this.config.orchestratorConfig?.stateDir !== undefined) {
-      loopConfig.stateDir = this.config.orchestratorConfig.stateDir;
-    }
+    loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 
     try {
       const result = await new BeastLoop(fullDeps, loopConfig).run({
