@@ -144,10 +144,11 @@ function daysInMonth(year: number, month: number): number {
 }
 
 function modelPathSegment(model: string): string {
-  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model) && !model.includes('..')) {
-    return model;
+  const codeUnits = Buffer.alloc(model.length * 2);
+  for (let index = 0; index < model.length; index += 1) {
+    codeUnits.writeUInt16BE(model.charCodeAt(index), index * 2);
   }
-  return `model-${Buffer.from(model).toString('base64url')}`;
+  return `model-${codeUnits.toString('base64url')}`;
 }
 
 function assertSafePathSegment(value: string, label: string): void {

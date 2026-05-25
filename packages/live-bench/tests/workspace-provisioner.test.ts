@@ -68,7 +68,7 @@ describe('workspace provisioning', () => {
       'codex-cli',
       'baseline',
       'none',
-      'gpt-test',
+      'model-AGcAcAB0AC0AdABlAHMAdA',
       'workspace',
     ));
     expect(result.evidenceDir).toBe(join(
@@ -79,7 +79,7 @@ describe('workspace provisioning', () => {
       'codex-cli',
       'baseline',
       'none',
-      'gpt-test',
+      'model-AGcAcAB0AC0AdABlAHMAdA',
       'evidence',
     ));
     expect(existsSync(join(result.workspaceDir, 'package.json'))).toBe(true);
@@ -118,6 +118,29 @@ describe('workspace provisioning', () => {
     expect(fbeast.runDir).not.toBe(baseline.runDir);
     expect(otherModel.runDir).not.toBe(baseline.runDir);
     expect(readFileSync(join(baseline.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep baseline\n');
+  });
+
+  it('uses collision-free model path segments', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+
+    const encodedPunctuation = provisioner.provision({ ...row, runId: 'run-question', model: '?' }, task);
+    writeFileSync(join(encodedPunctuation.evidenceDir, 'sentinel.txt'), 'keep question model\n', 'utf8');
+    const literalLookalike = provisioner.provision({ ...row, runId: 'run-question', model: 'model-Pw' }, task);
+    const loneSurrogate = provisioner.provision({ ...row, runId: 'run-question', model: '\uD800' }, task);
+    writeFileSync(join(loneSurrogate.evidenceDir, 'sentinel.txt'), 'keep surrogate model\n', 'utf8');
+    const replacementCharacter = provisioner.provision({ ...row, runId: 'run-question', model: '\uFFFD' }, task);
+
+    expect(encodedPunctuation.runDir).not.toBe(literalLookalike.runDir);
+    expect(loneSurrogate.runDir).not.toBe(replacementCharacter.runDir);
+    expect(readFileSync(join(encodedPunctuation.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep question model\n');
+    expect(readFileSync(join(loneSurrogate.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep surrogate model\n');
   });
 
   it('rejects non-canonical and timezone-less run timestamps', () => {
