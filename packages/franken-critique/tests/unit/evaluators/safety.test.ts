@@ -454,6 +454,18 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:\\D|a)+\\d$',
         severity: 'block',
       },
+      {
+        id: 'redos-word-range-alternation',
+        description: 'word range alternation pattern',
+        pattern: '^(?:\\w|[a-z]a)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-whitespace-tab-alternation',
+        description: 'whitespace tab alternation pattern',
+        pattern: '^(?:\\s|\\t)+!$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -461,7 +473,7 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(19);
+    expect(result.findings).toHaveLength(21);
     expect(result.findings).toEqual([
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
@@ -482,6 +494,43 @@ describe('SafetyEvaluator', () => {
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
     ]);
+  });
+
+  it('allows disjoint negated class and whitespace alternatives', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'negated-class-disjoint',
+        description: 'negated class disjoint',
+        pattern: '^(?:[^a]|a)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'not-space-disjoint',
+        description: 'not space disjoint',
+        pattern: '^(?:\\S| )+!$',
+        severity: 'block',
+      },
+      {
+        id: 'inline-negated-disjoint',
+        description: 'inline negated disjoint',
+        pattern: '^(?i:\\D|\\d)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'long-prefix-disjoint',
+        description: 'long prefix disjoint',
+        pattern: '^(?:a{33}b|a{33}c)+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput(''));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
   });
 });

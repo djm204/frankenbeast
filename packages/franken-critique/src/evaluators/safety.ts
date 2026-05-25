@@ -7,7 +7,7 @@ import type {
 import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
-const MAX_ALTERNATIVE_PREFIX_TOKENS = 32;
+const MAX_ALTERNATIVE_PREFIX_TOKENS = 256;
 
 interface RegexGroupState {
   startIndex: number;
@@ -337,6 +337,8 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === 'd') return 'DIGIT';
     if (escaped === 'w') return 'WORD';
     if (escaped === 's') return 'SPACE';
+    if (escaped === 't' || escaped === 'n' || escaped === 'r') return 'SPACE';
+    if (escaped === 'f' || escaped === 'v') return 'SPACE';
     if (escaped === 'D') return 'NOT_DIGIT';
     if (escaped === 'W') return 'NOT_WORD';
     if (escaped === 'S') return 'NOT_SPACE';
@@ -390,8 +392,8 @@ export class SafetyEvaluator implements Evaluator {
     if (right === 'NOT_DIGIT') return !this.digitTokenOverlaps(left);
     if (left === 'NOT_WORD') return !this.wordTokenOverlaps(right);
     if (right === 'NOT_WORD') return !this.wordTokenOverlaps(left);
-    if (left === 'NOT_SPACE') return right !== 'SPACE';
-    if (right === 'NOT_SPACE') return left !== 'SPACE';
+    if (left === 'NOT_SPACE') return !this.spaceTokenOverlaps(right);
+    if (right === 'NOT_SPACE') return !this.spaceTokenOverlaps(left);
     if (left.startsWith('RANGE:')) return this.rangeTokenOverlaps(left, right);
     if (right.startsWith('RANGE:')) return this.rangeTokenOverlaps(right, left);
     if (left.startsWith('CLASS:')) return this.classTokenOverlaps(left, right);
@@ -411,11 +413,27 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private wordTokenOverlaps(token: string): boolean {
-    return /^[A-Za-z0-9_]$/.test(token) || token === 'DIGIT';
+    if (/^[A-Za-z0-9_]$/.test(token) || token === 'DIGIT') return true;
+    if (token.startsWith('RANGE:')) {
+      const [, start, end] = token.match(/^RANGE:(.)-(.)$/) ?? [];
+      return start !== undefined && end !== undefined
+        ? this.rangeContainsWordCharacter(start, end)
+        : false;
+    }
+    if (token.startsWith('CLASS:')) return this.classTokenOverlaps(token, 'WORD');
+    return false;
   }
 
   private digitTokenOverlaps(token: string): boolean {
-    return /^\d$/.test(token) || token === 'WORD';
+    if (/^\d$/.test(token) || token === 'WORD') return true;
+    if (token.startsWith('RANGE:')) {
+      const [, start, end] = token.match(/^RANGE:(.)-(.)$/) ?? [];
+      return start !== undefined && end !== undefined
+        ? start <= '9' && end >= '0'
+        : false;
+    }
+    if (token.startsWith('CLASS:')) return this.classTokenOverlaps(token, 'DIGIT');
+    return false;
   }
 
   private rangeTokenOverlaps(rangeToken: string, token: string): boolean {
@@ -437,7 +455,7 @@ export class SafetyEvaluator implements Evaluator {
   private classTokenOverlaps(classToken: string, token: string): boolean {
     const characterClass = classToken.slice('CLASS:'.length);
     const body = characterClass.slice(1, -1);
-    if (body.startsWith('^')) return true;
+    if (body.startsWith('^')) return !this.positiveClassBodyOverlaps(body.slice(1), token);
 
     for (let i = 0; i < body.length; i += 1) {
       const char = body[i]!;
@@ -464,6 +482,14 @@ export class SafetyEvaluator implements Evaluator {
     return false;
   }
 
+  private spaceTokenOverlaps(token: string): boolean {
+    return token === 'SPACE' || /^[\t\n\r\f\v ]$/.test(token);
+  }
+
+  private positiveClassBodyOverlaps(body: string, token: string): boolean {
+    return this.classTokenOverlaps(`CLASS:[${body}]`, token);
+  }
+
   private rangeContainsWordCharacter(start: string, end: string): boolean {
     return (
       (start <= 'z' && end >= 'a') ||
@@ -471,6 +497,20 @@ export class SafetyEvaluator implements Evaluator {
       (start <= '9' && end >= '0') ||
       (start <= '_' && end >= '_')
     );
+  }
+
+  private caseFoldRegexLiterals(pattern: string): string {
+    let result = '';
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\') {
+        result += pattern.slice(i, i + 2);
+        i += 1;
+        continue;
+      }
+      result += char.toLowerCase();
+    }
+    return result;
   }
 
   private stripGroupPrefix(groupContent: string): string {
@@ -485,7 +525,9 @@ export class SafetyEvaluator implements Evaluator {
     const inlineModifier = groupContent.match(/^\?([A-Za-z-]+):/);
     if (inlineModifier) {
       const content = groupContent.slice(inlineModifier[0].length);
-      return inlineModifier[1]?.includes('i') ? content.toLowerCase() : content;
+      return inlineModifier[1]?.includes('i')
+        ? this.caseFoldRegexLiterals(content)
+        : content;
     }
 
     const namedCapture = groupContent.match(/^\?<[^>]+>/);
