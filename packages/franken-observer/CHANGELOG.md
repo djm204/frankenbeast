@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.6.0...franken-observer-v0.7.0) (2026-05-25)
+
+
+### Features
+
+* **observer:** durable audit replay ([#299](https://github.com/djm204/frankenbeast/issues/299)) ([34ddc5a](https://github.com/djm204/frankenbeast/commit/34ddc5aa6b17ac6ae87f714e1342a101d7ecd195))
+
 ## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.5.0...franken-observer-v0.6.0) (2026-04-28)
 
 

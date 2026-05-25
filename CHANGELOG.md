@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.38.0](https://github.com/djm204/frankenbeast/compare/v0.37.1...v0.38.0) (2026-05-25)
+
+
+### Features
+
+* **live-bench:** add benchmark foundation ([#300](https://github.com/djm204/frankenbeast/issues/300)) ([1203826](https://github.com/djm204/frankenbeast/commit/12038267bff530fa805e0904efaff4efc340d6be))
+* **live-bench:** provision isolated benchmark workspaces ([#301](https://github.com/djm204/frankenbeast/issues/301)) ([74a7969](https://github.com/djm204/frankenbeast/commit/74a7969e822421017de48e60b21dbee109d82fc1))
+* **observer:** durable audit replay ([#299](https://github.com/djm204/frankenbeast/issues/299)) ([34ddc5a](https://github.com/djm204/frankenbeast/commit/34ddc5aa6b17ac6ae87f714e1342a101d7ecd195))
+
+
+### Bug Fixes
+
+* **security:** sandbox Beast execution ([#298](https://github.com/djm204/frankenbeast/issues/298)) ([9a7b4f0](https://github.com/djm204/frankenbeast/commit/9a7b4f08a11bc3856d7090c4d2371e7048313cfd))
+
 ## [0.37.1](https://github.com/djm204/frankenbeast/compare/v0.37.0...v0.37.1) (2026-05-21)
 
 
