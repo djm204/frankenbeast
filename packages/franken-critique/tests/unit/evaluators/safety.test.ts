@@ -497,6 +497,12 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-not-word-unicode-class-alternation',
+        description: 'not word unicode class alternation pattern',
+        pattern: '^(?:\\W|[éê])+a$',
+        severity: 'block',
+      },
+      {
         id: 'redos-backreference-alternation',
         description: 'backreference alternation pattern',
         pattern: '^([a-z]+)(?:\\1|a)+$',
@@ -521,9 +527,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(29);
+    expect(result.findings).toHaveLength(30);
     expect(result.findings).toEqual(
-      Array.from({ length: 29 }, () =>
+      Array.from({ length: 30 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
@@ -565,6 +571,24 @@ describe('SafetyEvaluator', () => {
         id: 'dot-newline-disjoint',
         description: 'dot newline disjoint',
         pattern: '^(?:.|\\n)+$',
+        severity: 'block',
+      },
+      {
+        id: 'character-class-escape-not-backreference',
+        description: 'character class escape is not backreference',
+        pattern: '^[\\1]+$',
+        severity: 'block',
+      },
+      {
+        id: 'unknown-named-escape-not-backreference',
+        description: 'unknown named escape is not backreference',
+        pattern: '^\\k<missing>$',
+        severity: 'block',
+      },
+      {
+        id: 'deterministic-suffix-after-inner-alternation',
+        description: 'deterministic suffix after inner alternation',
+        pattern: '^((a|aa)b)+$',
         severity: 'block',
       },
     ]);

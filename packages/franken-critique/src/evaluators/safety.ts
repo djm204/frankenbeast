@@ -117,7 +117,40 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasBackreference(pattern: string): boolean {
-    return /\\(?:[1-9]\d*|k<[^>]+>)/.test(pattern);
+    const namedGroups = new Set(
+      [...pattern.matchAll(/\(\?<([^=!][^>]*)>/g)].map((match) => match[1]!),
+    );
+    let captureCount = 0;
+
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '[') {
+        i = this.skipCharacterClass(pattern, i);
+        continue;
+      }
+      if (char === '\\') {
+        const numeric = pattern.slice(i + 1).match(/^[1-9]\d*/);
+        if (numeric && Number(numeric[0]) <= captureCount) return true;
+        const named = pattern.slice(i + 1).match(/^k<([^>]+)>/);
+        if (named && namedGroups.has(named[1]!)) return true;
+        i += 1;
+        continue;
+      }
+      if (char === '(' && this.isCapturingGroup(pattern, i)) {
+        captureCount += 1;
+      }
+    }
+
+    return false;
+  }
+
+  private isCapturingGroup(pattern: string, start: number): boolean {
+    if (pattern[start + 1] !== '?') return true;
+    return (
+      pattern[start + 2] === '<' &&
+      pattern[start + 3] !== '=' &&
+      pattern[start + 3] !== '!'
+    );
   }
 
   private hasNestedQuantifiedExpression(pattern: string): boolean {
@@ -169,7 +202,10 @@ export class SafetyEvaluator implements Evaluator {
         if (group.containsQuantifiedAtom) {
           stack.at(-1)!.containsQuantifiedAtom = true;
         }
-        if (group.containsAmbiguousAlternation) {
+        if (
+          group.containsAmbiguousAlternation &&
+          !this.hasFollowingAtomInCurrentAlternative(pattern, i + 1)
+        ) {
           stack.at(-1)!.containsAmbiguousAlternation = true;
         }
         groupHistory.push(group);
@@ -304,6 +340,30 @@ export class SafetyEvaluator implements Evaluator {
       }
     }
     return -1;
+  }
+
+  private hasFollowingAtomInCurrentAlternative(
+    pattern: string,
+    start: number,
+  ): boolean {
+    let depth = 0;
+    for (let i = start; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\' || char === '[') return true;
+      if (char === '(') {
+        if (depth === 0) return true;
+        depth += 1;
+        continue;
+      }
+      if (char === ')' && depth === 0) return false;
+      if (char === '|' && depth === 0) return false;
+      if (char === ')') {
+        depth -= 1;
+        continue;
+      }
+      if (char !== '^' && char !== '$') return true;
+    }
+    return false;
   }
 
   private regexAtomTokenAt(
@@ -586,18 +646,31 @@ export class SafetyEvaluator implements Evaluator {
       if (token === 'DIGIT') return false;
       if (token === 'WORD' || token === 'SPACE' || token === 'DOT') return true;
       if (token.startsWith('RANGE:')) return !this.rangeIsWithin(token, '0', '9');
+      if (token.startsWith('CLASS:')) {
+        return this.classBodyContainsOutsideToken(token, (char) => /^\d$/.test(char));
+      }
     }
 
     if (complementToken === 'NOT_WORD') {
       if (token === 'WORD' || token === 'DIGIT') return false;
       if (token === 'SPACE' || token === 'DOT') return true;
       if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyWordCharacters(token);
+      if (token.startsWith('CLASS:')) {
+        return this.classBodyContainsOutsideToken(token, (char) =>
+          /^[A-Za-z0-9_]$/.test(char),
+        );
+      }
     }
 
     if (complementToken === 'NOT_SPACE') {
       if (token === 'SPACE') return false;
       if (token === 'WORD' || token === 'DIGIT' || token === 'DOT') return true;
       if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyWhitespace(token);
+      if (token.startsWith('CLASS:')) {
+        return this.classBodyContainsOutsideToken(token, (char) =>
+          /^[\t\n\r\f\v ]$/.test(char),
+        );
+      }
     }
 
     return this.tokenMayMatchSample(complementToken, token);
@@ -621,6 +694,58 @@ export class SafetyEvaluator implements Evaluator {
 
   private rangeContainsOnlyWhitespace(rangeToken: string): boolean {
     return rangeToken === 'RANGE:\t-\r' || rangeToken === 'RANGE: - ';
+  }
+
+  private classBodyContainsOutsideToken(
+    classToken: string,
+    contains: (char: string) => boolean,
+  ): boolean {
+    const characterClass = classToken.slice('CLASS:'.length);
+    const body = characterClass.slice(1, -1);
+    if (body.startsWith('^')) return true;
+
+    for (let i = 0; i < body.length; i += 1) {
+      const char = body[i]!;
+      if (char === '\\') {
+        const escaped = body[i + 1];
+        if (escaped === undefined) continue;
+        const token = this.escapedAtomToken(escaped);
+        if (token.length === 1 && !contains(token)) return true;
+        if (token.startsWith('NOT_')) return true;
+        i += 1;
+        continue;
+      }
+
+      if (body[i + 1] === '-' && body[i + 2] !== undefined) {
+        const start = char;
+        const end = body[i + 2]!;
+        if (!this.sampleRangeCharacters(start, end).every(contains)) return true;
+        i += 2;
+        continue;
+      }
+
+      if (!contains(char)) return true;
+    }
+
+    return false;
+  }
+
+  private sampleRangeCharacters(start: string, end: string): string[] {
+    return [
+      start,
+      end,
+      '0',
+      '9',
+      'A',
+      'Z',
+      '_',
+      'a',
+      'z',
+      ' ',
+      '\t',
+      '\n',
+      'é',
+    ].filter((char) => char >= start && char <= end);
   }
 
   private tokenMayMatchSample(left: string, right: string): boolean {
