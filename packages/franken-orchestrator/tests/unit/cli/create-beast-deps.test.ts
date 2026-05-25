@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createBeastDeps, type BeastDepsConfig, type ExistingDeps } from '../../../src/cli/create-beast-deps.js';
@@ -170,5 +170,8 @@ describe('createBeastDeps()', () => {
 
     const manifest = JSON.parse(readFileSync(join(metadataDir, 'audit', 'run-1.replay.json'), 'utf8'));
     expect(manifest).toHaveLength(1);
+    expect(existsSync(join(metadataDir, 'audit', 'run-1.json'))).toBe(true);
+    expect(existsSync(join(metadataDir, '.fbeast', 'audit', 'run-1.json'))).toBe(false);
+    expect(existsSync(join(metadataDir, '.fbeast', 'audit', 'run-1.replay.json'))).toBe(false);
   });
 });
