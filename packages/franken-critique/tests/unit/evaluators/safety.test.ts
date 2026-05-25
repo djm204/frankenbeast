@@ -484,6 +484,36 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:\\s|[ ])+!$',
         severity: 'block',
       },
+      {
+        id: 'redos-truncated-prefix-overlap',
+        description: 'truncated prefix overlap pattern',
+        pattern: '^(?:a{1001}|a{1001}a)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-not-word-unicode-alternation',
+        description: 'not word unicode alternation pattern',
+        pattern: '^(?:\\W|é)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-backreference-alternation',
+        description: 'backreference alternation pattern',
+        pattern: '^([a-z]+)(?:\\1|a)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-case-folded-escaped-alternation',
+        description: 'case folded escaped alternation pattern',
+        pattern: '(?i:\\x41|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-comma-alt-serialization',
+        description: 'comma alternative serialization pattern',
+        pattern: '^(?:(?:,a)|(?:,b)|,)+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -491,33 +521,12 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(24);
-    expect(result.findings).toEqual([
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
-    ]);
+    expect(result.findings).toHaveLength(29);
+    expect(result.findings).toEqual(
+      Array.from({ length: 29 }, () =>
+        expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      ),
+    );
   });
 
   it('allows disjoint and deterministic repeated alternatives', async () => {

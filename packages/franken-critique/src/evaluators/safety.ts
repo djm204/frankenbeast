@@ -7,7 +7,7 @@ import type {
 import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
-const MAX_ALTERNATIVE_PREFIX_TOKENS = 256;
+const MAX_ALTERNATIVE_PREFIX_TOKENS = MAX_SAFETY_PATTERN_LENGTH;
 
 interface RegexGroupState {
   startIndex: number;
@@ -111,7 +111,13 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasUnsafeRegexShape(pattern: string): boolean {
-    return this.hasNestedQuantifiedExpression(pattern);
+    return (
+      this.hasBackreference(pattern) || this.hasNestedQuantifiedExpression(pattern)
+    );
+  }
+
+  private hasBackreference(pattern: string): boolean {
+    return /\\(?:[1-9]\d*|k<[^>]+>)/.test(pattern);
   }
 
   private hasNestedQuantifiedExpression(pattern: string): boolean {
@@ -247,9 +253,7 @@ export class SafetyEvaluator implements Evaluator {
             }
           } else {
             tokens.push(
-              `ALT:${groupedPrefixes
-                .map((prefix) => prefix.tokens.join('\u0000'))
-                .join(',')}`,
+              `ALT:${JSON.stringify(groupedPrefixes.map((prefix) => prefix.tokens))}`,
             );
           }
         }
@@ -412,7 +416,7 @@ export class SafetyEvaluator implements Evaluator {
       left.tokens.length === limit &&
       right.tokens.length === limit
     ) {
-      return false;
+      return true;
     }
     return true;
   }
@@ -420,15 +424,17 @@ export class SafetyEvaluator implements Evaluator {
   private regexTokensOverlap(left: string, right: string): boolean {
     if (left === right) return true;
     if (left === 'DOT' || right === 'DOT') {
-      return this.tokenMayMatchSample(left, right);
+      return left === 'DOT'
+        ? this.dotTokenOverlaps(right)
+        : this.dotTokenOverlaps(left);
     }
     if (left.startsWith('ALT:')) return this.altTokenOverlaps(left, right);
     if (right.startsWith('ALT:')) return this.altTokenOverlaps(right, left);
+    if (left.startsWith('NOT_')) return this.complementTokenOverlaps(left, right);
+    if (right.startsWith('NOT_')) return this.complementTokenOverlaps(right, left);
     if (
       left === 'SPACE' ||
-      right === 'SPACE' ||
-      left.startsWith('NOT_') ||
-      right.startsWith('NOT_')
+      right === 'SPACE'
     ) {
       return this.tokenMayMatchSample(left, right);
     }
@@ -444,16 +450,38 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private altTokenOverlaps(altToken: string, token: string): boolean {
-    return altToken
-      .slice('ALT:'.length)
-      .split(',')
-      .some((alternativeToken) =>
-        alternativeToken.length > 0
-          ? alternativeToken
-              .split('\u0000')
-              .some((nestedToken) => this.regexTokensOverlap(nestedToken, token))
-          : false,
-      );
+    const alternatives = this.parseAltToken(altToken);
+    const tokenAlternatives = token.startsWith('ALT:')
+      ? this.parseAltToken(token)
+      : [[token]];
+    return alternatives.some((alternative) =>
+      tokenAlternatives.some((tokenAlternative) =>
+        alternative.some((nestedToken) =>
+          tokenAlternative.some((otherToken) =>
+            this.regexTokensOverlap(nestedToken, otherToken),
+          ),
+        ),
+      ),
+    );
+  }
+
+  private parseAltToken(altToken: string): string[][] {
+    try {
+      const parsed: unknown = JSON.parse(altToken.slice('ALT:'.length));
+      if (
+        Array.isArray(parsed) &&
+        parsed.every(
+          (alternative) =>
+            Array.isArray(alternative) &&
+            alternative.every((token) => typeof token === 'string'),
+        )
+      ) {
+        return parsed;
+      }
+    } catch {
+      return [];
+    }
+    return [];
   }
 
   private wordTokenOverlaps(token: string): boolean {
@@ -498,6 +526,8 @@ export class SafetyEvaluator implements Evaluator {
 
   private classTokenOverlaps(classToken: string, token: string): boolean {
     if (classToken.startsWith('CLASS:[^')) {
+      const body = classToken.slice('CLASS:[^'.length, -1);
+      if (token.length === 1) return !this.positiveClassBodyOverlaps(body, token);
       return this.tokenMayMatchSample(classToken, token);
     }
 
@@ -534,6 +564,63 @@ export class SafetyEvaluator implements Evaluator {
 
   private positiveClassBodyOverlaps(body: string, token: string): boolean {
     return this.classTokenOverlaps(`CLASS:[${body}]`, token);
+  }
+
+  private dotTokenOverlaps(token: string): boolean {
+    if (token.length === 1) return token !== '\n' && token !== '\r';
+    if (token === 'SPACE') return true;
+    if (token === 'NOT_SPACE') return true;
+    if (token === 'NOT_DIGIT' || token === 'NOT_WORD') return true;
+    if (token === 'WORD' || token === 'DIGIT') return true;
+    if (token.startsWith('RANGE:') || token.startsWith('CLASS:')) {
+      return this.tokenMayMatchSample('DOT', token);
+    }
+    return false;
+  }
+
+  private complementTokenOverlaps(complementToken: string, token: string): boolean {
+    if (token.length === 1) return this.tokenMatchesSample(complementToken, token);
+    if (token.startsWith('NOT_')) return true;
+
+    if (complementToken === 'NOT_DIGIT') {
+      if (token === 'DIGIT') return false;
+      if (token === 'WORD' || token === 'SPACE' || token === 'DOT') return true;
+      if (token.startsWith('RANGE:')) return !this.rangeIsWithin(token, '0', '9');
+    }
+
+    if (complementToken === 'NOT_WORD') {
+      if (token === 'WORD' || token === 'DIGIT') return false;
+      if (token === 'SPACE' || token === 'DOT') return true;
+      if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyWordCharacters(token);
+    }
+
+    if (complementToken === 'NOT_SPACE') {
+      if (token === 'SPACE') return false;
+      if (token === 'WORD' || token === 'DIGIT' || token === 'DOT') return true;
+      if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyWhitespace(token);
+    }
+
+    return this.tokenMayMatchSample(complementToken, token);
+  }
+
+  private rangeIsWithin(rangeToken: string, start: string, end: string): boolean {
+    const [, rangeStart, rangeEnd] = rangeToken.match(/^RANGE:(.)-(.)$/) ?? [];
+    return rangeStart !== undefined && rangeEnd !== undefined
+      ? rangeStart >= start && rangeEnd <= end
+      : false;
+  }
+
+  private rangeContainsOnlyWordCharacters(rangeToken: string): boolean {
+    return (
+      this.rangeIsWithin(rangeToken, 'a', 'z') ||
+      this.rangeIsWithin(rangeToken, 'A', 'Z') ||
+      this.rangeIsWithin(rangeToken, '0', '9') ||
+      rangeToken === 'RANGE:_-_'
+    );
+  }
+
+  private rangeContainsOnlyWhitespace(rangeToken: string): boolean {
+    return rangeToken === 'RANGE:\t-\r' || rangeToken === 'RANGE: - ';
   }
 
   private tokenMayMatchSample(left: string, right: string): boolean {
@@ -629,7 +716,27 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < pattern.length; i += 1) {
       const char = pattern[i]!;
       if (char === '\\') {
-        result += pattern.slice(i, i + 2);
+        if (
+          pattern[i + 1] === 'x' &&
+          /^[0-9A-Fa-f]{2}$/.test(pattern.slice(i + 2, i + 4))
+        ) {
+          result += String.fromCharCode(
+            Number.parseInt(pattern.slice(i + 2, i + 4), 16),
+          ).toLowerCase();
+          i += 3;
+          continue;
+        }
+        if (
+          pattern[i + 1] === 'u' &&
+          /^[0-9A-Fa-f]{4}$/.test(pattern.slice(i + 2, i + 6))
+        ) {
+          result += String.fromCharCode(
+            Number.parseInt(pattern.slice(i + 2, i + 6), 16),
+          ).toLowerCase();
+          i += 5;
+          continue;
+        }
+        result += `${char}${pattern[i + 1]?.toLowerCase() ?? ''}`;
         i += 1;
         continue;
       }
