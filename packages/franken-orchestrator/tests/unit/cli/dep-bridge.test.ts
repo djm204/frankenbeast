@@ -183,9 +183,9 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.skillsDir).toBe('/tmp/myproj/skills');
     });
 
-    it('defaults configDir to the project root so downstream stores append .fbeast once', () => {
+    it('defaults configDir to the project .fbeast metadata directory', () => {
       const config = bridgeToBeastConfig(makeOptions({ paths: makePaths({ root: '/tmp/myproj' }) }));
-      expect(config.configDir).toBe('/tmp/myproj');
+      expect(config.configDir).toBe('/tmp/myproj/.fbeast');
     });
 
     it('enables reflection by default', () => {

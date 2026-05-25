@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 
 // ── Mock heavy dependencies to isolate provider wiring ──
+
+const mockBridgeReplayManifest: Array<{ version: 1; kind: 'llm.request' | 'llm.response' | 'tool.call' | 'tool.result'; runId: string; timestamp: string; contentRef: string }> = [];
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
@@ -29,6 +31,9 @@ vi.mock('../../../src/skills/git-branch-isolator.js', () => ({
 vi.mock('../../../src/adapters/cli-observer-bridge.js', () => ({
   CliObserverBridge: vi.fn(function (this: Record<string, unknown>) {
     this.startTrace = vi.fn();
+    this.getActiveSessionId = vi.fn(() => undefined);
+    this.recordReplay = vi.fn();
+    this.getReplayManifest = vi.fn(() => [...mockBridgeReplayManifest]);
     this.observerDeps = {};
   }),
 }));
@@ -207,6 +212,7 @@ function makeOpts(overrides: Partial<CliDepOptions> = {}): CliDepOptions {
 describe('dep-factory provider wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockBridgeReplayManifest.length = 0;
   });
 
   it('throws descriptive error for unknown provider name', async () => {
@@ -375,6 +381,28 @@ describe('dep-factory provider wiring', () => {
       checkpointFile: expect.stringContaining('issue-89'),
       logFile: expect.stringContaining('issue-89'),
     }));
+  });
+
+  it('persists bridge replay manifests under each active run id', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({ runSessionId: 'cli-session-1' });
+    const result = await createCliDeps(opts);
+    mockBridgeReplayManifest.push(
+      { version: 1, kind: 'llm.request', runId: 'issue-89', timestamp: '2026-05-25T00:00:00.000Z', contentRef: 'a'.repeat(64) },
+      { version: 1, kind: 'tool.result', runId: 'cli-session-1', timestamp: '2026-05-25T00:00:01.000Z', contentRef: 'b'.repeat(64) },
+    );
+
+    await result.finalize();
+
+    const issueManifestPath = resolve(opts.paths.root, '.fbeast', 'audit', 'issue-89.replay.json');
+    const sessionManifestPath = resolve(opts.paths.root, '.fbeast', 'audit', 'cli-session-1.replay.json');
+    const issueManifest = JSON.parse(readFileSync(issueManifestPath, 'utf8')) as Array<{ runId: string }>;
+    const sessionManifest = JSON.parse(readFileSync(sessionManifestPath, 'utf8')) as Array<{ runId: string }>;
+
+    expect(issueManifest).toHaveLength(1);
+    expect(issueManifest[0]?.runId).toBe('issue-89');
+    expect(sessionManifest).toHaveLength(1);
+    expect(sessionManifest[0]?.runId).toBe('cli-session-1');
   });
 
   it('clears issue-scoped runtime artifacts when reset is requested', async () => {

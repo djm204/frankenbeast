@@ -535,19 +535,27 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       const bridgeManifest = observerBridge.getReplayManifest();
       if (bridgeManifest.length > 0) {
         mkdirSync(replayAuditRoot, { recursive: true });
-        const replayManifestPath = join(replayAuditRoot, `${runId}.replay.json`);
-        let existingManifest: unknown[] = [];
-        if (existsSync(replayManifestPath)) {
-          const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
-          if (Array.isArray(parsed)) {
-            existingManifest = parsed;
-          }
+        const manifestsByRunId = new Map<string, Array<(typeof bridgeManifest)[number]>>();
+        for (const record of bridgeManifest) {
+          const records = manifestsByRunId.get(record.runId) ?? [];
+          records.push(record);
+          manifestsByRunId.set(record.runId, records);
         }
-        writeFileSync(
-          replayManifestPath,
-          JSON.stringify([...existingManifest, ...bridgeManifest], null, 2),
-          'utf8',
-        );
+        for (const [manifestRunId, records] of manifestsByRunId) {
+          const replayManifestPath = join(replayAuditRoot, `${manifestRunId}.replay.json`);
+          let existingManifest: unknown[] = [];
+          if (existsSync(replayManifestPath)) {
+            const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
+            if (Array.isArray(parsed)) {
+              existingManifest = parsed;
+            }
+          }
+          writeFileSync(
+            replayManifestPath,
+            JSON.stringify([...existingManifest, ...records], null, 2),
+            'utf8',
+          );
+        }
       }
     } catch { /* best-effort */ }
     try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
