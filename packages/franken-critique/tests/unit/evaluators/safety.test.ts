@@ -34,7 +34,12 @@ describe('SafetyEvaluator', () => {
 
   it('passes when no safety rules are violated', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -47,7 +52,12 @@ describe('SafetyEvaluator', () => {
 
   it('fails when a blocking rule is violated', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -62,11 +72,18 @@ describe('SafetyEvaluator', () => {
 
   it('warns but passes on warning-severity rules', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'avoid console.log', pattern: 'console\\.log', severity: 'warn' },
+      {
+        id: 'r1',
+        description: 'avoid console.log',
+        pattern: 'console\\.log',
+        severity: 'warn',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const result = await evaluator.evaluate(createInput('console.log("debug")'));
+    const result = await evaluator.evaluate(
+      createInput('console.log("debug")'),
+    );
 
     expect(result.verdict).toBe('pass');
     expect(result.score).toBeLessThan(1);
@@ -74,14 +91,68 @@ describe('SafetyEvaluator', () => {
     expect(result.findings[0]!.severity).toBe('warning');
   });
 
-  it('detects multiple rule violations', async () => {
+  it('allows non-overlapping quantified alternation safety rules', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
-      { id: 'r2', description: 'no exec', pattern: 'exec\\(', severity: 'block' },
+      {
+        id: 'safe-alternation',
+        description: 'safe alternation',
+        pattern: '(?:cat|dog)+',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const result = await evaluator.evaluate(createInput('eval("x"); exec("y")'));
+    const result = await evaluator.evaluate(createInput('bird'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.score).toBe(1);
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('allows repeated groups with fixed inner quantifiers', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'fixed-digits',
+        description: 'fixed digits',
+        pattern: '(?:\\d{2})+',
+        severity: 'block',
+      },
+      {
+        id: 'fixed-letter',
+        description: 'fixed letter',
+        pattern: '(ab{3})+',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('safe content'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.score).toBe(1);
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('detects multiple rule violations', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
+      {
+        id: 'r2',
+        description: 'no exec',
+        pattern: 'exec\\(',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('eval("x"); exec("y")'),
+    );
 
     expect(result.verdict).toBe('fail');
     expect(result.findings).toHaveLength(2);
@@ -96,5 +167,186 @@ describe('SafetyEvaluator', () => {
     expect(result.verdict).toBe('pass');
     expect(result.score).toBe(1);
     expect(result.findings).toHaveLength(0);
+  });
+
+  it('reports malformed safety rule regexes instead of throwing', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'bad-regex',
+        description: 'bad regex',
+        pattern: 'eval(',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    await expect(
+      evaluator.evaluate(createInput('const x = 1;')),
+    ).resolves.toMatchObject({
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        expect.objectContaining({
+          message: expect.stringContaining('Invalid safety rule regex'),
+          severity: 'critical',
+        }),
+      ],
+    });
+  });
+
+  it('rejects nested quantifier patterns before evaluating content', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos',
+        description: 'redos pattern',
+        pattern: '(a+)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-optional',
+        description: 'redos optional pattern',
+        pattern: '(a?)+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('safe content without matching input'),
+    );
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Unsafe safety rule regex'),
+        severity: 'critical',
+      }),
+      expect.objectContaining({
+        message: expect.stringContaining('Unsafe safety rule regex'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
+  it('rejects nested brace quantifier patterns before evaluating content', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos-brace',
+        description: 'redos brace pattern',
+        pattern: '(a{1,})+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('safe content without matching input'),
+    );
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Unsafe safety rule regex'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
+  it('rejects grouped nested quantifier bypass patterns', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos-grouped-plus',
+        description: 'grouped plus pattern',
+        pattern: '((a)+)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-grouped-brace',
+        description: 'grouped brace pattern',
+        pattern: '((a{1,})){1,}$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('safe content without matching input'),
+    );
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+    ]);
+  });
+
+  it('does not echo invalid safety rule patterns in findings', async () => {
+    const secretPattern = 'secret_token_abc(';
+    const port = createMockGuardrailsPort([
+      {
+        id: 'secret-regex',
+        description: 'secret regex',
+        pattern: secretPattern,
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('safe content'));
+
+    expect(JSON.stringify(result.findings)).not.toContain(secretPattern);
+  });
+
+  it('rejects grouped overlapping alternation bypass patterns', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos-alternation',
+        description: 'grouped alternation pattern',
+        pattern: '((a|aa))+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-noncapturing-alternation',
+        description: 'grouped noncapturing alternation pattern',
+        pattern: '(?:(a|aa))+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-direct-alternation',
+        description: 'direct alternation pattern',
+        pattern: '(a|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-direct-noncapturing-alternation',
+        description: 'direct noncapturing alternation pattern',
+        pattern: '(?:a|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-named-capture-alternation',
+        description: 'named capture alternation pattern',
+        pattern: '(?<x>a|aa)+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('safe content'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toHaveLength(5);
+    expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+    ]);
   });
 });
