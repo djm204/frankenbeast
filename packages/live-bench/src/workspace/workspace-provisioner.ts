@@ -149,7 +149,7 @@ function modelPathSegment(model: string): string {
   for (let index = 0; index < model.length; index += 1) {
     codeUnits.writeUInt16BE(model.charCodeAt(index), index * 2);
   }
-  return `model-${codeUnits.toString('base64url')}`;
+  return `model-${codeUnits.toString('hex')}`;
 }
 
 function assertSafePathSegment(value: string, label: string): void {

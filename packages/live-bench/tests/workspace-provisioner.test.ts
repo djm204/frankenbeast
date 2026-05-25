@@ -68,7 +68,7 @@ describe('workspace provisioning', () => {
       'codex-cli',
       'baseline',
       'none',
-      'model-AGcAcAB0AC0AdABlAHMAdA',
+      'model-006700700074002d0074006500730074',
       'workspace',
     ));
     expect(result.evidenceDir).toBe(join(
@@ -79,7 +79,7 @@ describe('workspace provisioning', () => {
       'codex-cli',
       'baseline',
       'none',
-      'model-AGcAcAB0AC0AdABlAHMAdA',
+      'model-006700700074002d0074006500730074',
       'evidence',
     ));
     expect(existsSync(join(result.workspaceDir, 'package.json'))).toBe(true);
@@ -141,6 +141,25 @@ describe('workspace provisioning', () => {
     expect(loneSurrogate.runDir).not.toBe(replacementCharacter.runDir);
     expect(readFileSync(join(encodedPunctuation.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep question model\n');
     expect(readFileSync(join(loneSurrogate.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep surrogate model\n');
+  });
+
+  it('uses case-folding-safe model path segments', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+
+    const uppercaseBase64Lookalike = provisioner.provision({ ...row, runId: 'run-casefold', model: '\u00A0' }, task);
+    writeFileSync(join(uppercaseBase64Lookalike.evidenceDir, 'sentinel.txt'), 'keep uppercase lookalike\n', 'utf8');
+    const lowercaseBase64Lookalike = provisioner.provision({ ...row, runId: 'run-casefold', model: '\u6A40' }, task);
+
+    expect(uppercaseBase64Lookalike.runDir).not.toBe(lowercaseBase64Lookalike.runDir);
+    expect(uppercaseBase64Lookalike.runDir.toLowerCase()).not.toBe(lowercaseBase64Lookalike.runDir.toLowerCase());
+    expect(readFileSync(join(uppercaseBase64Lookalike.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep uppercase lookalike\n');
   });
 
   it('rejects non-canonical and timezone-less run timestamps', () => {
