@@ -179,6 +179,9 @@ describe('workspace provisioning', () => {
 
     const offsetResult = provisioner.provision({ ...row, runId: 'run-offset', runTimestamp: '2026-05-23T23:30:00+02:00' }, task);
     expect(offsetResult.runDir).toContain(join('2026-05-23', 'run-offset'));
+    const yearZeroLeapDay = provisioner.provision({ ...row, runId: 'run-year-zero', runTimestamp: '0000-02-29T00:00:00.000Z' }, task);
+    expect(yearZeroLeapDay.runDir).toContain(join('0000-02-29', 'run-year-zero'));
+    expect(() => provisioner.provision({ ...row, runTimestamp: '0001-02-29T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
   });
 
   it('rejects mismatched benchmark rows and tasks before persisting metadata', () => {
@@ -209,7 +212,19 @@ describe('workspace provisioning', () => {
     const linkRoot = join(linkParent, 'fixtures-link');
     symlinkSync(realFixturesRoot, linkRoot, 'dir');
 
-    expect(() => new FixtureStore(linkRoot)).toThrow(/Fixtures root must not be a symlink/);
+    expect(() => new FixtureStore(linkRoot)).toThrow(/Fixtures root path component must not be a symlink/);
+  });
+
+  it('rejects symlink ancestors of fixture roots', () => {
+    const realParent = tempRoot('live-bench-fixtures-real-parent-');
+    const linkParent = tempRoot('live-bench-fixtures-link-parent-');
+    const realFixturesRoot = join(realParent, 'fixtures');
+    const linkRoot = join(linkParent, 'fixtures-parent-link');
+    const fixturesRoot = join(linkRoot, 'fixtures');
+    mkdirSync(realFixturesRoot, { recursive: true });
+    symlinkSync(realParent, linkRoot, 'dir');
+
+    expect(() => new FixtureStore(fixturesRoot)).toThrow(/Fixtures root path component must not be a symlink/);
   });
 
   it('rejects symlink fixtures before copying fixture contents', () => {
@@ -283,7 +298,22 @@ describe('workspace provisioning', () => {
     expect(() => new WorkspaceProvisioner({
       fixtures: new FixtureStore(fixturesRoot),
       runsRoot,
-    })).toThrow(/runs root must not be a symlink/);
+    })).toThrow(/runs root path component must not be a symlink/);
+  });
+
+  it('rejects symlink ancestors of runs roots before creating directories', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const realParent = tempRoot('live-bench-runs-real-parent-');
+    const linkParent = tempRoot('live-bench-runs-link-parent-');
+    const linkRoot = join(linkParent, 'runs-parent-link');
+    const runsRoot = join(linkRoot, 'runs');
+    createFixture(fixturesRoot);
+    symlinkSync(realParent, linkRoot, 'dir');
+
+    expect(() => new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    })).toThrow(/runs root path component must not be a symlink/);
   });
 
   it('rejects symlink run id directories before destructive cleanup', () => {

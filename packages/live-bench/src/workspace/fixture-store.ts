@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
-import { basename, resolve, sep } from 'node:path';
+import { basename, join, parse, relative, resolve, sep } from 'node:path';
 
 export class FixtureStore {
   readonly fixturesRoot: string;
@@ -10,6 +10,7 @@ export class FixtureStore {
     if (!existsSync(this.fixturesRoot)) {
       throw new Error(`Fixtures root not found: ${this.fixturesRoot}`);
     }
+    assertNoSymlinkPathPrefix(this.fixturesRoot, 'Fixtures root');
     if (lstatSync(this.fixturesRoot).isSymbolicLink()) {
       throw new Error(`Fixtures root must not be a symlink: ${this.fixturesRoot}`);
     }
@@ -49,5 +50,19 @@ export class FixtureStore {
     }
 
     return fixturePath;
+  }
+}
+
+function assertNoSymlinkPathPrefix(target: string, label: string): void {
+  const absolute = resolve(target);
+  const root = parse(absolute).root;
+  const parts = relative(root, absolute).split(sep).filter((part) => part.length > 0);
+  let current = root;
+
+  for (const part of parts) {
+    current = join(current, part);
+    if (lstatSync(current).isSymbolicLink()) {
+      throw new Error(`${label} path component must not be a symlink: ${current}`);
+    }
   }
 }

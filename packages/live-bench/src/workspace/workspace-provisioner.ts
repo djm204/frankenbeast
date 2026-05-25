@@ -1,5 +1,5 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { join, parse, relative, resolve, sep } from 'node:path';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import type { FixtureStore } from './fixture-store.js';
 
@@ -39,6 +39,7 @@ export class WorkspaceProvisioner {
   constructor(config: WorkspaceProvisionerConfig) {
     this.fixtures = config.fixtures;
     this.runsRoot = resolve(config.runsRoot);
+    ensureNoSymlinkPathPrefix(this.runsRoot, 'runs root');
     ensureSafeExistingDirectory(this.runsRoot, 'runs root');
     mkdirSync(this.runsRoot, { recursive: true });
     this.runsRootReal = realpathSync(this.runsRoot);
@@ -141,7 +142,14 @@ function dateSegment(timestamp: string): string {
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 function modelPathSegment(model: string): string {
@@ -175,6 +183,23 @@ function ensureSafeExistingDirectory(path: string, label: string): void {
   }
   if (!stat.isDirectory()) {
     throw new Error(`${label} is not a directory: ${path}`);
+  }
+}
+
+function ensureNoSymlinkPathPrefix(target: string, label: string): void {
+  const absolute = resolve(target);
+  const root = parse(absolute).root;
+  const parts = relative(root, absolute).split(sep).filter((part) => part.length > 0);
+  let current = root;
+
+  for (const part of parts) {
+    current = join(current, part);
+    if (!existsSync(current)) {
+      return;
+    }
+    if (lstatSync(current).isSymbolicLink()) {
+      throw new Error(`${label} path component must not be a symlink: ${current}`);
+    }
   }
 }
 
