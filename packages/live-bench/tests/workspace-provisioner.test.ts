@@ -253,6 +253,20 @@ describe('workspace provisioning', () => {
     expect(() => provisioner.provision(row, task)).toThrow(/run date directory must not be a symlink/);
   });
 
+  it('rejects symlink runs roots before trusting the containment root', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const linkParent = tempRoot('live-bench-runs-link-parent-');
+    const outsideRoot = tempRoot('live-bench-outside-runs-root-');
+    const runsRoot = join(linkParent, 'runs-link');
+    createFixture(fixturesRoot);
+    symlinkSync(outsideRoot, runsRoot, 'dir');
+
+    expect(() => new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    })).toThrow(/runs root must not be a symlink/);
+  });
+
   it('rejects symlink run id directories before destructive cleanup', () => {
     const fixturesRoot = tempRoot('live-bench-fixtures-');
     const runsRoot = tempRoot('live-bench-runs-');

@@ -39,6 +39,7 @@ export class WorkspaceProvisioner {
   constructor(config: WorkspaceProvisionerConfig) {
     this.fixtures = config.fixtures;
     this.runsRoot = resolve(config.runsRoot);
+    ensureSafeExistingDirectory(this.runsRoot, 'runs root');
     mkdirSync(this.runsRoot, { recursive: true });
     this.runsRootReal = realpathSync(this.runsRoot);
   }
