@@ -412,6 +412,24 @@ describe('SafetyEvaluator', () => {
         pattern: '(?i:a|Aa)+$',
         severity: 'block',
       },
+      {
+        id: 'redos-case-folded-class-alternation',
+        description: 'case folded class alternation pattern',
+        pattern: '(?i:[A-Z]|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-grouped-alternative',
+        description: 'grouped alternative pattern',
+        pattern: '(?:a|(?:aa))+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-word-literal-alternation',
+        description: 'word literal alternation pattern',
+        pattern: '^(?:\\w|a)+!$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -419,8 +437,11 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(12);
+    expect(result.findings).toHaveLength(15);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),

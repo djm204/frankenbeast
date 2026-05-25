@@ -217,6 +217,25 @@ export class SafetyEvaluator implements Evaluator {
     const tokens: string[] = [];
 
     for (let i = 0; i < alternative.length; i += 1) {
+      if (alternative[i] === '(') {
+        const close = this.findClosingGroup(alternative, i);
+        if (close === -1) break;
+        const groupedPrefix = this.expandSimpleAlternativePrefix(
+          this.splitTopLevelAlternatives(
+            this.stripGroupPrefix(alternative.slice(i + 1, close)),
+          )[0] ?? '',
+        );
+        tokens.push(
+          ...groupedPrefix.slice(
+            0,
+            MAX_ALTERNATIVE_PREFIX_TOKENS - tokens.length,
+          ),
+        );
+        if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) break;
+        i = close;
+        continue;
+      }
+
       const token = this.regexAtomTokenAt(alternative, i);
       if (token === null) break;
 
@@ -232,6 +251,27 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     return tokens;
+  }
+
+  private findClosingGroup(pattern: string, start: number): number {
+    let depth = 0;
+    for (let i = start; i < pattern.length; i += 1) {
+      const char = pattern[i];
+      if (char === '\\') {
+        i += 1;
+        continue;
+      }
+      if (char === '[') {
+        i = this.skipCharacterClass(pattern, i);
+        continue;
+      }
+      if (char === '(') depth += 1;
+      if (char === ')') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
   }
 
   private regexAtomTokenAt(
@@ -314,15 +354,61 @@ export class SafetyEvaluator implements Evaluator {
       return String.fromCharCode(Number.parseInt(unicodeSingleton[1]!, 16));
     }
 
-    return characterClass;
+    const range = characterClass.match(/^\[([^\\\]])-([^\\\]])\]$/);
+    if (range) return `RANGE:${range[1]!}-${range[2]!}`;
+
+    return `CLASS:${characterClass}`;
   }
 
   private tokenPrefixOverlaps(left: string[], right: string[]): boolean {
     const limit = Math.min(left.length, right.length);
     for (let i = 0; i < limit; i += 1) {
-      if (left[i] !== right[i]) return false;
+      if (!this.regexTokensOverlap(left[i]!, right[i]!)) return false;
     }
     return true;
+  }
+
+  private regexTokensOverlap(left: string, right: string): boolean {
+    if (left === right) return true;
+    if (left === 'WORD') return this.wordTokenOverlaps(right);
+    if (right === 'WORD') return this.wordTokenOverlaps(left);
+    if (left === 'DIGIT') return this.digitTokenOverlaps(right);
+    if (right === 'DIGIT') return this.digitTokenOverlaps(left);
+    if (left.startsWith('RANGE:')) return this.rangeTokenOverlaps(left, right);
+    if (right.startsWith('RANGE:')) return this.rangeTokenOverlaps(right, left);
+    return false;
+  }
+
+  private wordTokenOverlaps(token: string): boolean {
+    return /^[A-Za-z0-9_]$/.test(token) || token === 'DIGIT';
+  }
+
+  private digitTokenOverlaps(token: string): boolean {
+    return /^\d$/.test(token) || token === 'WORD';
+  }
+
+  private rangeTokenOverlaps(rangeToken: string, token: string): boolean {
+    const [, start, end] = rangeToken.match(/^RANGE:(.)-(.)$/) ?? [];
+    if (start === undefined || end === undefined) return false;
+    if (token.length === 1) return token >= start && token <= end;
+    if (token === 'WORD') return this.rangeContainsWordCharacter(start, end);
+    if (token === 'DIGIT') return start <= '9' && end >= '0';
+    if (token.startsWith('RANGE:')) {
+      const [, otherStart, otherEnd] = token.match(/^RANGE:(.)-(.)$/) ?? [];
+      return otherStart !== undefined && otherEnd !== undefined
+        ? start <= otherEnd && otherStart <= end
+        : false;
+    }
+    return false;
+  }
+
+  private rangeContainsWordCharacter(start: string, end: string): boolean {
+    return (
+      (start <= 'z' && end >= 'a') ||
+      (start <= 'Z' && end >= 'A') ||
+      (start <= '9' && end >= '0') ||
+      (start <= '_' && end >= '_')
+    );
   }
 
   private stripGroupPrefix(groupContent: string): string {
