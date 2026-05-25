@@ -15,11 +15,23 @@ export function loadTaskFile(path: string): BenchmarkTask {
 
 export function loadCorpus(root: string, tiers?: readonly CorpusTier[]): BenchmarkTask[] {
   const allowed = tiers ? new Set<CorpusTier>(tiers) : undefined;
-  return taskFiles(root)
+  const tasks = taskFiles(root)
     .filter((path) => !allowed || allowed.has(readValidatedTaskTier(path)))
     .map((path) => loadTaskFile(path))
-    .filter((task) => !allowed || allowed.has(task.tier))
-    .sort((a, b) => a.taskId.localeCompare(b.taskId));
+    .filter((task) => !allowed || allowed.has(task.tier));
+
+  assertUniqueTaskIds(tasks);
+  return tasks.sort((a, b) => a.taskId.localeCompare(b.taskId));
+}
+
+function assertUniqueTaskIds(tasks: readonly BenchmarkTask[]): void {
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    if (seen.has(task.taskId)) {
+      throw new Error(`Duplicate benchmark task id: ${task.taskId}`);
+    }
+    seen.add(task.taskId);
+  }
 }
 
 function readTaskJson(path: string): unknown {
