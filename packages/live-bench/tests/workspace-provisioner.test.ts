@@ -131,7 +131,12 @@ describe('workspace provisioning', () => {
     });
 
     expect(() => provisioner.provision({ ...row, runTimestamp: '2026-02-31T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2026-13-01T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2026-05-23T24:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
     expect(() => provisioner.provision({ ...row, runTimestamp: '2026-05-23T12:34:56' }, task)).toThrow(/Invalid runTimestamp/);
+
+    const offsetResult = provisioner.provision({ ...row, runId: 'run-offset', runTimestamp: '2026-05-23T23:30:00+02:00' }, task);
+    expect(offsetResult.runDir).toContain(join('2026-05-23', 'run-offset'));
   });
 
   it('rejects mismatched benchmark rows and tasks before persisting metadata', () => {

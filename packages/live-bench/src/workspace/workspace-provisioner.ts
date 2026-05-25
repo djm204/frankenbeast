@@ -102,21 +102,45 @@ export class WorkspaceProvisioner {
   }
 }
 
+const RUN_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/;
+
 function dateSegment(timestamp: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)) {
+  const match = RUN_TIMESTAMP_PATTERN.exec(timestamp);
+  if (!match) {
     throw new Error(`Invalid runTimestamp: ${timestamp}`);
   }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, millisecondText = '000'] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const millisecond = Number(millisecondText);
+
+  if (
+    month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth(year, month)
+    || hour > 23
+    || minute > 59
+    || second > 59
+    || millisecond > 999
+  ) {
+    throw new Error(`Invalid runTimestamp: ${timestamp}`);
+  }
+
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid runTimestamp: ${timestamp}`);
   }
-  const [datePart] = timestamp.split('T');
-  const [yearText, monthText, dayText] = datePart!.split('-');
-  const canonicalDate = new Date(Date.UTC(Number(yearText), Number(monthText) - 1, Number(dayText))).toISOString().slice(0, 10);
-  if (canonicalDate !== datePart) {
-    throw new Error(`Invalid runTimestamp: ${timestamp}`);
-  }
   return parsed.toISOString().slice(0, 10);
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function modelPathSegment(model: string): string {
