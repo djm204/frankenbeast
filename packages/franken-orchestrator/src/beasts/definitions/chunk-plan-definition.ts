@@ -36,7 +36,7 @@ export const chunkPlanDefinition: BeastDefinition = {
       '--output-dir', String(config.outputDir),
     ],
     env: { FRANKENBEAST_SPAWNED: '1' },
-    cwd: String(config.projectRoot ?? process.cwd()),
+    cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'chunk-plan',

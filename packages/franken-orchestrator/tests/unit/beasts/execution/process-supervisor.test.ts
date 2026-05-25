@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ProcessSupervisor } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { BeastProcessSpec } from '../../../../src/beasts/types.js';
@@ -24,13 +27,17 @@ function makeCallbacks(overrides: Partial<ProcessCallbacks> = {}): ProcessCallba
 
 describe('ProcessSupervisor', () => {
   let supervisor: ProcessSupervisor;
+  let workDir: string | undefined;
 
   beforeEach(() => {
     supervisor = new ProcessSupervisor();
   });
 
   afterEach(async () => {
-    // Clean up any remaining processes
+    if (workDir) {
+      await rm(workDir, { recursive: true, force: true });
+      workDir = undefined;
+    }
   });
 
   describe('spawn with callbacks', () => {
@@ -148,6 +155,66 @@ describe('ProcessSupervisor', () => {
         delete process.env['CLAUDE_CODE_ENTRYPOINT'];
         delete process.env['CLAUDE_SESSION'];
         Object.assign(process.env, originalEnv);
+      }
+    });
+
+    it('does not inherit arbitrary host env into the child process', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-env-'));
+      const originalEnv = { ...process.env };
+      process.env.GITHUB_TOKEN = 'ghp_should_not_leak';
+      process.env.SECRET_X = 'nope';
+      process.env.PATH = originalEnv.PATH ?? '';
+      const callbacks = makeCallbacks();
+      const envLines: string[] = [];
+      callbacks.onStdout = vi.fn((line: string) => envLines.push(line));
+
+      try {
+        await new ProcessSupervisor({ projectRoot: workDir }).spawn({
+          command: process.execPath,
+          args: ['-e', 'console.log(JSON.stringify(process.env))'],
+          cwd: workDir,
+          env: { FRANKENBEAST_RUN_CONFIG: '/x' },
+        }, callbacks);
+
+        await vi.waitFor(() => {
+          expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+        }, { timeout: 5000 });
+
+        const seen = JSON.parse(envLines.join('')) as Record<string, string>;
+        expect(seen.GITHUB_TOKEN).toBeUndefined();
+        expect(seen.SECRET_X).toBeUndefined();
+        expect(seen.FRANKENBEAST_RUN_CONFIG).toBe('/x');
+        expect(seen.PATH).toBeTruthy();
+      } finally {
+        process.env = originalEnv;
+      }
+    });
+
+    it('rejects a cwd outside the configured project root', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-cwd-'));
+      const outside = await mkdtemp(join(tmpdir(), 'franken-supervisor-outside-'));
+      try {
+        await expect(new ProcessSupervisor({ projectRoot: workDir }).spawn(
+          { command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: outside },
+          makeCallbacks(),
+        )).rejects.toThrow(/cwd.*outside.*root/i);
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a cwd symlink that resolves outside the configured project root', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-cwd-'));
+      const outside = await mkdtemp(join(tmpdir(), 'franken-supervisor-outside-'));
+      const symlinked = join(workDir, 'linked-outside');
+      try {
+        await symlink(outside, symlinked, 'dir');
+        await expect(new ProcessSupervisor({ projectRoot: workDir }).spawn(
+          { command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: symlinked },
+          makeCallbacks(),
+        )).rejects.toThrow(/cwd.*outside.*root/i);
+      } finally {
+        await rm(outside, { recursive: true, force: true });
       }
     });
   });

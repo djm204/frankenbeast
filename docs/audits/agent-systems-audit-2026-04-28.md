@@ -152,6 +152,22 @@ Residual (ADR-035): MCP validation is structural only (no deep JSON-Schema
 schema contract; unknown properties are rejected as a deliberate fail-closed
 posture.
 
+Updated 2026-05-23 — security-hardening Chunk 3 (ADR-036). See
+`docs/adr/036-sandboxed-beast-execution.md`.
+
+| Pillar 1 gap | Status | Evidence |
+|--------------|--------|----------|
+| Container mode is not implemented | **fixed** | `ContainerBeastExecutor` delegates to `ProcessBeastExecutor` through a Docker-transforming supervisor; Docker specs use `docker run --rm --network none`. Tests: `tests/unit/beasts/container-beast-executor.test.ts`, `tests/unit/beasts/execution/docker-container-runtime.test.ts`. |
+| Execution is on the host with broad environment inheritance | **fixed** | `ProcessSupervisor` now builds child env from `DEFAULT_BEAST_ENV_ALLOWLIST` plus explicit `spec.env`; arbitrary host vars such as `GITHUB_TOKEN` are not inherited. Test: `tests/unit/beasts/execution/process-supervisor.test.ts`. |
+| Caller-controlled working directories can escape the intended project | **fixed** | `ProcessSupervisor({ projectRoot })` rejects `cwd` values outside the configured root before spawning. Test: `tests/unit/beasts/execution/process-supervisor.test.ts`. |
+| No micro-VM/gVisor/Wasm/seccomp/namespace sandbox | **partially-fixed** | Container mode now provides a Docker no-network execution path with an explicit workspace mount, but it is not a micro-VM/gVisor/Wasm/seccomp sandbox. |
+| Network air-gapping is not enforced for spawned processes | **partially-fixed** | Container mode uses Docker `--network none`; process mode remains a host process without OS-level network isolation. |
+
+Residual (ADR-036): process mode is not a hard sandbox; container mode requires
+Docker and a suitable image and does not yet provide read-only mounts,
+disposable workspaces, gVisor/Firecracker/Wasm, seccomp profiles, or per-run
+UID isolation.
+
 Updated 2026-05-20 — security-hardening Chunk 1 (ADR-034). See
 `docs/adr/034-fail-closed-http-and-approval-boundaries.md`.
 

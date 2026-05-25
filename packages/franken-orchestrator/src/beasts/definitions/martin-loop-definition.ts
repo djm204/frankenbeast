@@ -44,7 +44,7 @@ export const martinLoopDefinition: BeastDefinition = {
       '--plan-dir', String(config.chunkDirectory),
     ],
     env: { FRANKENBEAST_SPAWNED: '1' },
-    cwd: String(config.projectRoot ?? process.cwd()),
+    cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
   }),
   telemetryLabels: {
     family: 'martin-loop',

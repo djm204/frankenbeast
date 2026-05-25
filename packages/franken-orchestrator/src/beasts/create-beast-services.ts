@@ -2,6 +2,7 @@ import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
 import { ContainerBeastExecutor } from './execution/container-beast-executor.js';
+import { DEFAULT_SANDBOX_POLICY } from './execution/sandbox-policy.js';
 import { ProcessBeastExecutor } from './execution/process-beast-executor.js';
 import { ProcessSupervisor } from './execution/process-supervisor.js';
 import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
@@ -31,6 +32,7 @@ export interface BeastServiceBundle {
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
   const logStore = new BeastLogStore(paths.beastLogsDir);
+  const projectRoot = process.env.FBEAST_ROOT ?? process.cwd();
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
   const eventBus = new BeastEventBus();
@@ -40,11 +42,20 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   // eslint-disable-next-line prefer-const
   let runService: BeastRunService;
   const executors = {
-    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor(), {
+    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor({ projectRoot }), {
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
       eventBus,
     }),
-    container: new ContainerBeastExecutor(),
+    container: new ContainerBeastExecutor({
+      repository,
+      logStore,
+      eventBus,
+      onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
+      policy: {
+        ...DEFAULT_SANDBOX_POLICY,
+        workspaceHostPath: projectRoot,
+      },
+    }),
   };
 
   runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus });

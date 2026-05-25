@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
@@ -41,10 +41,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
+    this.supervisor.validateCwd?.(processSpec.cwd);
 
     // Write configSnapshot to a JSON file for the spawned process to load
+    const configRoot = resolve(processSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
     const configDir = join(
-      process.cwd(),
+      configRoot,
       '.fbeast',
       '.build',
       'run-configs',

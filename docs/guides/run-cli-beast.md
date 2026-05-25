@@ -130,6 +130,21 @@ frankenbeast beasts restart <run-id>
 
 Available catalog entries: `design-interview`, `chunk-plan`, `martin-loop`.
 
+### Execution isolation
+
+Beast dispatch supports two execution modes:
+
+| Mode | Boundary |
+|------|----------|
+| `process` | Host process with supervised lifecycle, env allowlist, and project-root cwd containment. This is **not** a hard sandbox. |
+| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, and the same env allowlist. |
+
+Container mode requires Docker and a sandbox image (`fbeast/sandbox:latest` by default in the runtime policy). It does not require a Docker daemon during unit tests because tests assert the generated Docker command instead of launching Docker.
+
+The default env allowlist is intentionally narrow: `PATH`, `HOME`, `LANG`, `LC_ALL`, `FRANKENBEAST_RUN_CONFIG`, `FRANKENBEAST_SPAWNED`, and the `FRANKENBEAST_MODULE_*` toggles for firewall, skills, memory, planner, critique, governor, and heartbeat. Secrets such as `GITHUB_TOKEN`, provider API keys, and arbitrary shell environment variables are not inherited unless the Beast definition explicitly places them in `spec.env` and the runtime policy allows the key.
+
+`container` mode uses Docker `--network none` to deny container network access. `process` mode does not have OS-level network isolation; use firewall/governor controls as advisory gates only, or choose container mode when network denial is required. Docker `--network none` is not a micro-VM, gVisor, Firecracker, Wasm, or seccomp sandbox.
+
 ---
 
 ## 6. Useful flags
