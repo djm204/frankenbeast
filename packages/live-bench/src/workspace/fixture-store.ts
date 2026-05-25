@@ -20,7 +20,7 @@ export class FixtureStore {
   }
 
   resolveFixture(name: string): string {
-    if (!name || name !== basename(name) || name.includes('..') || name.includes('/') || name.includes('\\')) {
+    if (!name || name === '.' || name !== basename(name) || name.includes('..') || name.includes('/') || name.includes('\\')) {
       throw new Error(`Invalid fixture name: ${name}`);
     }
 

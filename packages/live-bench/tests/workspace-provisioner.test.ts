@@ -156,6 +156,7 @@ describe('workspace provisioning', () => {
     const fixtures = new FixtureStore(tempRoot('live-bench-fixtures-'));
 
     expect(() => fixtures.resolveFixture('../secret')).toThrow(/Invalid fixture name/);
+    expect(() => fixtures.resolveFixture('.')).toThrow(/Invalid fixture name/);
     expect(() => fixtures.resolveFixture('nested/fixture')).toThrow(/Invalid fixture name/);
     expect(() => fixtures.resolveFixture('nested\\fixture')).toThrow(/Invalid fixture name/);
   });
