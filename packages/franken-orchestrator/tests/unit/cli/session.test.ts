@@ -463,6 +463,7 @@ describe('Session', () => {
           maxCritiqueIterations: 7,
           maxDurationMs: 123_000,
           maxTotalTokens: 45_000,
+          stateDir: config.paths.stateDir,
         }),
       );
     });
