@@ -123,10 +123,40 @@ describe('SafetyEvaluator', () => {
         pattern: '(ab{3})+',
         severity: 'block',
       },
+      {
+        id: 'exact-range-letter',
+        description: 'exact range letter',
+        pattern: '(?:a{2,2})+',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
     const result = await evaluator.evaluate(createInput('safe content'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.score).toBe(1);
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('allows optional outer groups with variable inner quantifiers', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'optional-plus',
+        description: 'optional plus',
+        pattern: '^(a+)?$',
+        severity: 'block',
+      },
+      {
+        id: 'optional-range',
+        description: 'optional range',
+        pattern: '^(a+){0,1}$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('bbb'));
 
     expect(result.verdict).toBe('pass');
     expect(result.score).toBe(1);
@@ -333,6 +363,18 @@ describe('SafetyEvaluator', () => {
         pattern: '(?<x>a|aa)+$',
         severity: 'block',
       },
+      {
+        id: 'redos-digit-class-alternation',
+        description: 'digit class alternation pattern',
+        pattern: '(?:[0-9]|\\d\\d)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-hex-alternation',
+        description: 'hex alternation pattern',
+        pattern: '(?:\\x61|a{2})+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -340,8 +382,10 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(5);
+    expect(result.findings).toHaveLength(7);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),

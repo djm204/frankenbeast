@@ -167,7 +167,7 @@ export class SafetyEvaluator implements Evaluator {
 
       const quantifier = this.quantifierAt(pattern, i);
       if (quantifier !== null) {
-        if (previousToken === 'group' && quantifier.variable) {
+        if (previousToken === 'group' && quantifier.repeatsGroup) {
           const quantifiedGroup = groupHistory.at(-1);
           if (
             quantifiedGroup?.containsQuantifiedAtom ||
@@ -198,7 +198,7 @@ export class SafetyEvaluator implements Evaluator {
   private hasOverlappingAlternation(groupContent: string): boolean {
     const alternatives = this.splitTopLevelAlternatives(
       this.stripGroupPrefix(groupContent),
-    );
+    ).map((alternative) => this.expandSimpleAlternativePrefix(alternative));
     if (alternatives.length < 2) return false;
 
     return alternatives.some((left, leftIndex) =>
@@ -207,9 +207,92 @@ export class SafetyEvaluator implements Evaluator {
           leftIndex !== rightIndex &&
           left.length > 0 &&
           right.length > 0 &&
-          (left.startsWith(right) || right.startsWith(left)),
+          this.tokenPrefixOverlaps(left, right),
       ),
     );
+  }
+
+  private expandSimpleAlternativePrefix(alternative: string): string[] {
+    const tokens: string[] = [];
+
+    for (let i = 0; i < alternative.length; i += 1) {
+      const token = this.regexAtomTokenAt(alternative, i);
+      if (token === null) break;
+
+      for (let count = 0; count < token.repeatCount; count += 1) {
+        tokens.push(token.value);
+      }
+      i = token.end;
+    }
+
+    return tokens;
+  }
+
+  private regexAtomTokenAt(
+    pattern: string,
+    start: number,
+  ): { value: string; end: number; repeatCount: number } | null {
+    const char = pattern[start];
+    if (char === undefined || char === '^' || char === '$' || char === '|') {
+      return null;
+    }
+
+    let value: string;
+    let end = start;
+
+    if (char === '[') {
+      end = this.skipCharacterClass(pattern, start);
+      value = this.characterClassToken(pattern.slice(start, end + 1));
+    } else if (char === '\\') {
+      const escaped = pattern[start + 1];
+      if (escaped === undefined) return null;
+      if (
+        escaped === 'x' &&
+        /^[0-9A-Fa-f]{2}$/.test(pattern.slice(start + 2, start + 4))
+      ) {
+        end = start + 3;
+        value = String.fromCharCode(Number.parseInt(pattern.slice(start + 2, start + 4), 16));
+      } else {
+        end = start + 1;
+        value = this.escapedAtomToken(escaped);
+      }
+    } else if (char === '(') {
+      return null;
+    } else {
+      value = char;
+    }
+
+    const quantifier = this.quantifierAt(pattern, end + 1);
+    const repeatCount = quantifier?.fixedCount ?? 1;
+    if (quantifier?.fixedCount !== undefined) {
+      end = quantifier.end;
+    }
+
+    return { value, end, repeatCount };
+  }
+
+  private escapedAtomToken(escaped: string): string {
+    if (escaped === 'd') return 'DIGIT';
+    if (escaped === 'w') return 'WORD';
+    if (escaped === 's') return 'SPACE';
+    if (escaped === 'x') return '\\x';
+    return escaped;
+  }
+
+  private characterClassToken(characterClass: string): string {
+    if (characterClass === '[0-9]' || characterClass === '[\\d]') return 'DIGIT';
+    if (characterClass === '[A-Za-z0-9_]' || characterClass === '[\\w]') {
+      return 'WORD';
+    }
+    return characterClass;
+  }
+
+  private tokenPrefixOverlaps(left: string[], right: string[]): boolean {
+    const limit = Math.min(left.length, right.length);
+    for (let i = 0; i < limit; i += 1) {
+      if (left[i] !== right[i]) return false;
+    }
+    return true;
   }
 
   private stripGroupPrefix(groupContent: string): string {
@@ -281,10 +364,18 @@ export class SafetyEvaluator implements Evaluator {
   private quantifierAt(
     pattern: string,
     start: number,
-  ): { end: number; variable: boolean } | null {
+  ): {
+    end: number;
+    variable: boolean;
+    repeatsGroup: boolean;
+    fixedCount?: number;
+  } | null {
     const char = pattern[start];
-    if (char === '+' || char === '*' || char === '?') {
-      return { end: start, variable: true };
+    if (char === '+' || char === '*') {
+      return { end: start, variable: true, repeatsGroup: true };
+    }
+    if (char === '?') {
+      return { end: start, variable: true, repeatsGroup: false };
     }
     if (char !== '{') return null;
 
@@ -295,6 +386,20 @@ export class SafetyEvaluator implements Evaluator {
     const match = body.match(/^(\d+)(?:,(\d*)?)?$/);
     if (!match) return null;
 
-    return { end: close, variable: body.includes(',') };
+    const min = Number(match[1]!);
+    const hasComma = body.includes(',');
+    const max = !hasComma
+      ? min
+      : match[2] === undefined || match[2] === ''
+        ? Infinity
+        : Number(match[2]);
+    const variable = min !== max;
+    const repeatsGroup = variable && max > 1;
+
+    if (variable) {
+      return { end: close, variable, repeatsGroup };
+    }
+
+    return { end: close, variable, repeatsGroup, fixedCount: min };
   }
 }
