@@ -257,7 +257,17 @@ export class SafetyEvaluator implements Evaluator {
         /^[0-9A-Fa-f]{2}$/.test(pattern.slice(start + 2, start + 4))
       ) {
         end = start + 3;
-        value = String.fromCharCode(Number.parseInt(pattern.slice(start + 2, start + 4), 16));
+        value = String.fromCharCode(
+          Number.parseInt(pattern.slice(start + 2, start + 4), 16),
+        );
+      } else if (
+        escaped === 'u' &&
+        /^[0-9A-Fa-f]{4}$/.test(pattern.slice(start + 2, start + 6))
+      ) {
+        end = start + 5;
+        value = String.fromCharCode(
+          Number.parseInt(pattern.slice(start + 2, start + 6), 16),
+        );
       } else {
         end = start + 1;
         value = this.escapedAtomToken(escaped);
@@ -290,6 +300,20 @@ export class SafetyEvaluator implements Evaluator {
     if (characterClass === '[A-Za-z0-9_]' || characterClass === '[\\w]') {
       return 'WORD';
     }
+
+    const singleton = characterClass.match(/^\[([^\\\]^-])\]$/);
+    if (singleton) return singleton[1]!;
+
+    const hexSingleton = characterClass.match(/^\[\\x([0-9A-Fa-f]{2})\]$/);
+    if (hexSingleton) {
+      return String.fromCharCode(Number.parseInt(hexSingleton[1]!, 16));
+    }
+
+    const unicodeSingleton = characterClass.match(/^\[\\u([0-9A-Fa-f]{4})\]$/);
+    if (unicodeSingleton) {
+      return String.fromCharCode(Number.parseInt(unicodeSingleton[1]!, 16));
+    }
+
     return characterClass;
   }
 
@@ -310,8 +334,11 @@ export class SafetyEvaluator implements Evaluator {
       return groupContent.slice(3);
     }
 
-    const inlineModifier = groupContent.match(/^\?[A-Za-z-]+:/);
-    if (inlineModifier) return groupContent.slice(inlineModifier[0].length);
+    const inlineModifier = groupContent.match(/^\?([A-Za-z-]+):/);
+    if (inlineModifier) {
+      const content = groupContent.slice(inlineModifier[0].length);
+      return inlineModifier[1]?.includes('i') ? content.toLowerCase() : content;
+    }
 
     const namedCapture = groupContent.match(/^\?<[^>]+>/);
     if (namedCapture) return groupContent.slice(namedCapture[0].length);
