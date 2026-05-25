@@ -269,6 +269,8 @@ describe('workspace provisioning', () => {
     expect(() => provisioner.provision({ ...row, runId: 'nested/run' }, task)).toThrow(/Invalid run id/);
     expect(() => provisioner.provision({ ...row, runId: 'nested\\run' }, task)).toThrow(/Invalid run id/);
     expect(() => provisioner.provision({ ...row, runId: '.' }, task)).toThrow(/Invalid run id/);
+    expect(() => provisioner.provision({ ...row, runId: 'Run-123' }, task)).toThrow(/Invalid run id/);
+    expect(() => provisioner.provision({ ...row, taskId: 'Write-readme' }, task)).toThrow(/Invalid task id/);
     expect(readFileSync(join(runsRoot, '2026-05-23', 'victim', 'sentinel.txt'), 'utf8')).toBe('keep me\n');
   });
 

@@ -161,7 +161,7 @@ function modelPathSegment(model: string): string {
 }
 
 function assertSafePathSegment(value: string, label: string): void {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) || value.includes('..')) {
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(value) || value.includes('..')) {
     throw new Error(`Invalid ${label}: ${value}`);
   }
 }
