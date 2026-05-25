@@ -7,6 +7,7 @@ import type {
 import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
+const MAX_ALTERNATIVE_PREFIX_TOKENS = 32;
 
 interface RegexGroupState {
   startIndex: number;
@@ -219,9 +220,14 @@ export class SafetyEvaluator implements Evaluator {
       const token = this.regexAtomTokenAt(alternative, i);
       if (token === null) break;
 
-      for (let count = 0; count < token.repeatCount; count += 1) {
+      for (
+        let count = 0;
+        count < token.repeatCount && tokens.length < MAX_ALTERNATIVE_PREFIX_TOKENS;
+        count += 1
+      ) {
         tokens.push(token.value);
       }
+      if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) break;
       i = token.end;
     }
 
@@ -303,6 +309,9 @@ export class SafetyEvaluator implements Evaluator {
     if (groupContent.startsWith('?<=') || groupContent.startsWith('?<!')) {
       return groupContent.slice(3);
     }
+
+    const inlineModifier = groupContent.match(/^\?[A-Za-z-]+:/);
+    if (inlineModifier) return groupContent.slice(inlineModifier[0].length);
 
     const namedCapture = groupContent.match(/^\?<[^>]+>/);
     if (namedCapture) return groupContent.slice(namedCapture[0].length);
@@ -400,6 +409,6 @@ export class SafetyEvaluator implements Evaluator {
       return { end: close, variable, repeatsGroup };
     }
 
-    return { end: close, variable, repeatsGroup, fixedCount: min };
+    return { end: close, variable, repeatsGroup: min > 1, fixedCount: min };
   }
 }

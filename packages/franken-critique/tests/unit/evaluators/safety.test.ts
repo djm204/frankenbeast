@@ -298,6 +298,12 @@ describe('SafetyEvaluator', () => {
         pattern: '((a{1,})){1,}$',
         severity: 'block',
       },
+      {
+        id: 'redos-fixed-outer-repeat',
+        description: 'fixed outer repeat pattern',
+        pattern: '(a+){10}$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -307,8 +313,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(2);
+    expect(result.findings).toHaveLength(3);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
     ]);
@@ -375,6 +382,18 @@ describe('SafetyEvaluator', () => {
         pattern: '(?:\\x61|a{2})+$',
         severity: 'block',
       },
+      {
+        id: 'redos-inline-modifier-alternation',
+        description: 'inline modifier alternation pattern',
+        pattern: '(?i:a|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-large-fixed-alternation',
+        description: 'large fixed alternation pattern',
+        pattern: '(?:a|a{1000000000})+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -382,8 +401,10 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(7);
+    expect(result.findings).toHaveLength(9);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
