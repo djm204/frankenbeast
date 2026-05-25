@@ -466,6 +466,24 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:\\s|\\t)+!$',
         severity: 'block',
       },
+      {
+        id: 'redos-not-digit-word-alternation',
+        description: 'not digit word alternation pattern',
+        pattern: '^(?:\\D|\\w)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-negated-class-word-alternation',
+        description: 'negated class word alternation pattern',
+        pattern: '^(?:[^a]|\\w)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-space-class-alternation',
+        description: 'space class alternation pattern',
+        pattern: '^(?:\\s|[ ])+!$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -473,8 +491,11 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(21);
+    expect(result.findings).toHaveLength(24);
     expect(result.findings).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
@@ -499,7 +520,7 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
-  it('allows disjoint negated class and whitespace alternatives', async () => {
+  it('allows disjoint and deterministic repeated alternatives', async () => {
     const port = createMockGuardrailsPort([
       {
         id: 'negated-class-disjoint',
@@ -516,7 +537,25 @@ describe('SafetyEvaluator', () => {
       {
         id: 'long-prefix-disjoint',
         description: 'long prefix disjoint',
-        pattern: '^(?:a{33}b|a{33}c)+$',
+        pattern: '^(?:a{257}b|a{257}c)+$',
+        severity: 'block',
+      },
+      {
+        id: 'nested-group-prefix-disjoint',
+        description: 'nested group prefix disjoint',
+        pattern: '^(?:(?:ab)|(?:ac))+$',
+        severity: 'block',
+      },
+      {
+        id: 'lazy-exact-count',
+        description: 'lazy exact counted quantifier',
+        pattern: '^(?:a{2}?)+$',
+        severity: 'block',
+      },
+      {
+        id: 'dot-newline-disjoint',
+        description: 'dot newline disjoint',
+        pattern: '^(?:.|\\n)+$',
         severity: 'block',
       },
     ]);

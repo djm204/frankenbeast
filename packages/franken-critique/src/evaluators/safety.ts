@@ -15,6 +15,11 @@ interface RegexGroupState {
   containsAmbiguousAlternation: boolean;
 }
 
+interface RegexPrefixExpansion {
+  tokens: string[];
+  truncated: boolean;
+}
+
 export class SafetyEvaluator implements Evaluator {
   readonly name = 'safety';
   readonly category = 'deterministic' as const;
@@ -206,15 +211,18 @@ export class SafetyEvaluator implements Evaluator {
       alternatives.some(
         (right, rightIndex) =>
           leftIndex !== rightIndex &&
-          left.length > 0 &&
-          right.length > 0 &&
+          left.tokens.length > 0 &&
+          right.tokens.length > 0 &&
           this.tokenPrefixOverlaps(left, right),
       ),
     );
   }
 
-  private expandSimpleAlternativePrefix(alternative: string): string[] {
+  private expandSimpleAlternativePrefix(
+    alternative: string,
+  ): RegexPrefixExpansion {
     const tokens: string[] = [];
+    let truncated = false;
 
     for (let i = 0; i < alternative.length; i += 1) {
       if (alternative[i] === '(') {
@@ -226,16 +234,29 @@ export class SafetyEvaluator implements Evaluator {
           .map((nestedAlternative) =>
             this.expandSimpleAlternativePrefix(nestedAlternative),
           )
-          .filter((prefix) => prefix.length > 0);
+          .filter((prefix) => prefix.tokens.length > 0);
         if (groupedPrefixes.length > 0) {
-          tokens.push(
-            `ALT:${groupedPrefixes
-              .map((prefix) => prefix[0])
-              .filter((token) => token !== undefined)
-              .join(',')}`,
-          );
+          truncated = truncated || groupedPrefixes.some((prefix) => prefix.truncated);
+          if (groupedPrefixes.length === 1) {
+            for (const token of groupedPrefixes[0]!.tokens) {
+              if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) {
+                truncated = true;
+                break;
+              }
+              tokens.push(token);
+            }
+          } else {
+            tokens.push(
+              `ALT:${groupedPrefixes
+                .map((prefix) => prefix.tokens.join('\u0000'))
+                .join(',')}`,
+            );
+          }
         }
-        if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) break;
+        if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) {
+          truncated = true;
+          break;
+        }
         i = close;
         continue;
       }
@@ -250,11 +271,14 @@ export class SafetyEvaluator implements Evaluator {
       ) {
         tokens.push(token.value);
       }
-      if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) break;
+      if (tokens.length >= MAX_ALTERNATIVE_PREFIX_TOKENS) {
+        truncated = token.repeatCount > tokens.length || token.end < alternative.length - 1;
+        break;
+      }
       i = token.end;
     }
 
-    return tokens;
+    return { tokens, truncated };
   }
 
   private findClosingGroup(pattern: string, start: number): number {
@@ -319,7 +343,7 @@ export class SafetyEvaluator implements Evaluator {
     } else if (char === '(') {
       return null;
     } else if (char === '.') {
-      value = 'ANY';
+      value = 'DOT';
     } else {
       value = char;
     }
@@ -337,8 +361,11 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === 'd') return 'DIGIT';
     if (escaped === 'w') return 'WORD';
     if (escaped === 's') return 'SPACE';
-    if (escaped === 't' || escaped === 'n' || escaped === 'r') return 'SPACE';
-    if (escaped === 'f' || escaped === 'v') return 'SPACE';
+    if (escaped === 't') return '\t';
+    if (escaped === 'n') return '\n';
+    if (escaped === 'r') return '\r';
+    if (escaped === 'f') return '\f';
+    if (escaped === 'v') return '\v';
     if (escaped === 'D') return 'NOT_DIGIT';
     if (escaped === 'W') return 'NOT_WORD';
     if (escaped === 'S') return 'NOT_SPACE';
@@ -371,29 +398,44 @@ export class SafetyEvaluator implements Evaluator {
     return `CLASS:${characterClass}`;
   }
 
-  private tokenPrefixOverlaps(left: string[], right: string[]): boolean {
-    const limit = Math.min(left.length, right.length);
+  private tokenPrefixOverlaps(
+    left: RegexPrefixExpansion,
+    right: RegexPrefixExpansion,
+  ): boolean {
+    const limit = Math.min(left.tokens.length, right.tokens.length);
     for (let i = 0; i < limit; i += 1) {
-      if (!this.regexTokensOverlap(left[i]!, right[i]!)) return false;
+      if (!this.regexTokensOverlap(left.tokens[i]!, right.tokens[i]!)) return false;
+    }
+    if (
+      left.truncated &&
+      right.truncated &&
+      left.tokens.length === limit &&
+      right.tokens.length === limit
+    ) {
+      return false;
     }
     return true;
   }
 
   private regexTokensOverlap(left: string, right: string): boolean {
     if (left === right) return true;
-    if (left === 'ANY' || right === 'ANY') return true;
+    if (left === 'DOT' || right === 'DOT') {
+      return this.tokenMayMatchSample(left, right);
+    }
     if (left.startsWith('ALT:')) return this.altTokenOverlaps(left, right);
     if (right.startsWith('ALT:')) return this.altTokenOverlaps(right, left);
+    if (
+      left === 'SPACE' ||
+      right === 'SPACE' ||
+      left.startsWith('NOT_') ||
+      right.startsWith('NOT_')
+    ) {
+      return this.tokenMayMatchSample(left, right);
+    }
     if (left === 'WORD') return this.wordTokenOverlaps(right);
     if (right === 'WORD') return this.wordTokenOverlaps(left);
     if (left === 'DIGIT') return this.digitTokenOverlaps(right);
     if (right === 'DIGIT') return this.digitTokenOverlaps(left);
-    if (left === 'NOT_DIGIT') return !this.digitTokenOverlaps(right);
-    if (right === 'NOT_DIGIT') return !this.digitTokenOverlaps(left);
-    if (left === 'NOT_WORD') return !this.wordTokenOverlaps(right);
-    if (right === 'NOT_WORD') return !this.wordTokenOverlaps(left);
-    if (left === 'NOT_SPACE') return !this.spaceTokenOverlaps(right);
-    if (right === 'NOT_SPACE') return !this.spaceTokenOverlaps(left);
     if (left.startsWith('RANGE:')) return this.rangeTokenOverlaps(left, right);
     if (right.startsWith('RANGE:')) return this.rangeTokenOverlaps(right, left);
     if (left.startsWith('CLASS:')) return this.classTokenOverlaps(left, right);
@@ -407,7 +449,9 @@ export class SafetyEvaluator implements Evaluator {
       .split(',')
       .some((alternativeToken) =>
         alternativeToken.length > 0
-          ? this.regexTokensOverlap(alternativeToken, token)
+          ? alternativeToken
+              .split('\u0000')
+              .some((nestedToken) => this.regexTokensOverlap(nestedToken, token))
           : false,
       );
   }
@@ -453,10 +497,12 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private classTokenOverlaps(classToken: string, token: string): boolean {
+    if (classToken.startsWith('CLASS:[^')) {
+      return this.tokenMayMatchSample(classToken, token);
+    }
+
     const characterClass = classToken.slice('CLASS:'.length);
     const body = characterClass.slice(1, -1);
-    if (body.startsWith('^')) return !this.positiveClassBodyOverlaps(body.slice(1), token);
-
     for (let i = 0; i < body.length; i += 1) {
       const char = body[i]!;
       if (char === '\\') {
@@ -488,6 +534,85 @@ export class SafetyEvaluator implements Evaluator {
 
   private positiveClassBodyOverlaps(body: string, token: string): boolean {
     return this.classTokenOverlaps(`CLASS:[${body}]`, token);
+  }
+
+  private tokenMayMatchSample(left: string, right: string): boolean {
+    const samples = [
+      'a',
+      'b',
+      'A',
+      'Z',
+      '0',
+      '5',
+      '9',
+      '_',
+      ' ',
+      '\t',
+      '\n',
+      '\r',
+      '!',
+      '-',
+      '.',
+      '/',
+    ];
+    return samples.some(
+      (sample) =>
+        this.tokenMatchesSample(left, sample) &&
+        this.tokenMatchesSample(right, sample),
+    );
+  }
+
+  private tokenMatchesSample(token: string, sample: string): boolean {
+    if (token.length === 1) return token === sample;
+    if (token === 'DOT') return sample !== '\n' && sample !== '\r';
+    if (token === 'WORD') return /^[A-Za-z0-9_]$/.test(sample);
+    if (token === 'DIGIT') return /^\d$/.test(sample);
+    if (token === 'SPACE') return /^[\t\n\r\f\v ]$/.test(sample);
+    if (token === 'NOT_DIGIT') return !/^\d$/.test(sample);
+    if (token === 'NOT_WORD') return !/^[A-Za-z0-9_]$/.test(sample);
+    if (token === 'NOT_SPACE') return !/^[\t\n\r\f\v ]$/.test(sample);
+    if (token.startsWith('RANGE:')) {
+      const [, start, end] = token.match(/^RANGE:(.)-(.)$/) ?? [];
+      return start !== undefined && end !== undefined
+        ? sample >= start && sample <= end
+        : false;
+    }
+    if (token.startsWith('CLASS:')) {
+      return this.classMatchesSample(token.slice('CLASS:'.length), sample);
+    }
+    return false;
+  }
+
+  private classMatchesSample(characterClass: string, sample: string): boolean {
+    const body = characterClass.slice(1, -1);
+    const negated = body.startsWith('^');
+    const positiveBody = negated ? body.slice(1) : body;
+    let matches = false;
+
+    for (let i = 0; i < positiveBody.length; i += 1) {
+      const char = positiveBody[i]!;
+      if (char === '\\') {
+        const escaped = positiveBody[i + 1];
+        if (escaped !== undefined) {
+          matches = this.tokenMatchesSample(this.escapedAtomToken(escaped), sample);
+          if (matches) break;
+          i += 1;
+        }
+        continue;
+      }
+
+      if (positiveBody[i + 1] === '-' && positiveBody[i + 2] !== undefined) {
+        matches = sample >= char && sample <= positiveBody[i + 2]!;
+        if (matches) break;
+        i += 2;
+        continue;
+      }
+
+      matches = char === sample;
+      if (matches) break;
+    }
+
+    return negated ? !matches : matches;
   }
 
   private rangeContainsWordCharacter(start: string, end: string): boolean {
@@ -598,10 +723,18 @@ export class SafetyEvaluator implements Evaluator {
   } | null {
     const char = pattern[start];
     if (char === '+' || char === '*') {
-      return { end: start, variable: true, repeatsGroup: true };
+      return {
+        end: pattern[start + 1] === '?' ? start + 1 : start,
+        variable: true,
+        repeatsGroup: true,
+      };
     }
     if (char === '?') {
-      return { end: start, variable: true, repeatsGroup: false };
+      return {
+        end: pattern[start + 1] === '?' ? start + 1 : start,
+        variable: true,
+        repeatsGroup: false,
+      };
     }
     if (char !== '{') return null;
 
@@ -622,10 +755,12 @@ export class SafetyEvaluator implements Evaluator {
     const variable = min !== max;
     const repeatsGroup = variable && max > 1;
 
+    const end = pattern[close + 1] === '?' ? close + 1 : close;
+
     if (variable) {
-      return { end: close, variable, repeatsGroup };
+      return { end, variable, repeatsGroup };
     }
 
-    return { end: close, variable, repeatsGroup: min > 1, fixedCount: min };
+    return { end, variable, repeatsGroup: min > 1, fixedCount: min };
   }
 }
