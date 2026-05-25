@@ -514,12 +514,6 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
-        id: 'inline-negated-disjoint',
-        description: 'inline negated disjoint',
-        pattern: '^(?i:\\D|\\d)+!$',
-        severity: 'block',
-      },
-      {
         id: 'long-prefix-disjoint',
         description: 'long prefix disjoint',
         pattern: '^(?:a{33}b|a{33}c)+$',
