@@ -9,5 +9,7 @@
   - `npm run build` passed from repo root.
   - `npm test -- --run tests/unit/cli/create-beast-deps.test.ts tests/unit/cli/dep-bridge.test.ts tests/unit/cli/dep-factory-providers.test.ts tests/unit/cli/session.test.ts tests/integration/cli/dep-factory-wiring.test.ts` passed in `packages/franken-orchestrator` (107 tests).
   - `npm run typecheck` passed from repo root.
-- [ ] Commit conflict resolution on PR #300 head and push to `origin/feat/live-bench-foundation`.
-- [ ] Verify GitHub reports PR #300 mergeable on the pushed head.
+- [x] Commit conflict resolution on PR #300 head and push to `origin/feat/live-bench-foundation`.
+  - Merge commit pushed: `206a95bd6b239426a20cc487620ea756f8b71243`.
+- [x] Verify GitHub reports PR #300 mergeable on the pushed head.
+  - `gh pr view 300 --json ...` reported `mergeable: MERGEABLE` for head `206a95bd6b239426a20cc487620ea756f8b71243`.
