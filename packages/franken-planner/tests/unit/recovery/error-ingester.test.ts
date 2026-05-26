@@ -46,4 +46,22 @@ describe('ErrorIngester', () => {
     const result = new ErrorIngester().classify(new Error('connection timeout after 30s'), [ke]);
     expect(result.type).toBe('known');
   });
+
+  it('rejects empty known error patterns before matching', () => {
+    expect(() =>
+      new ErrorIngester().classify(new Error('unrelated failure'), [makeKnownError('')]),
+    ).toThrow(/at least 6 characters/);
+  });
+
+  it('rejects trivial known error patterns before matching', () => {
+    expect(() =>
+      new ErrorIngester().classify(new Error('any error message'), [makeKnownError('error')]),
+    ).toThrow(/at least 6 characters/);
+  });
+
+  it('does not match literal patterns inside larger words', () => {
+    const ke = makeKnownError('timeout');
+    const result = new ErrorIngester().classify(new Error('operation timedout unexpectedly'), [ke]);
+    expect(result.type).toBe('unknown');
+  });
 });
