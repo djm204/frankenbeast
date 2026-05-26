@@ -34,10 +34,39 @@ describe('OrchestratorConfig', () => {
       ).toThrow();
     });
 
-    it('rejects negative token budget', () => {
-      expect(() =>
-        OrchestratorConfigSchema.parse({ maxTotalTokens: -1 }),
-      ).toThrow();
+    it('rejects token budgets too small for a single request', () => {
+      const result = OrchestratorConfigSchema.safeParse({ maxTotalTokens: 9_999 });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['maxTotalTokens']);
+        expect(result.error.issues[0]?.message).toContain('at least 10000');
+      }
+    });
+
+    it('rejects critique scores that cannot pass', () => {
+      const result = OrchestratorConfigSchema.safeParse({ minCritiqueScore: 1 });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['minCritiqueScore']);
+        expect(result.error.issues[0]?.message).toContain('less than 1');
+      }
+    });
+
+    it('rejects durations too short to accommodate critique iterations', () => {
+      const result = OrchestratorConfigSchema.safeParse({
+        maxCritiqueIterations: 3,
+        maxDurationMs: 20_000,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['maxDurationMs']);
+        expect(result.error.issues[0]?.message).toContain(
+          'at least 30000ms for 3 critique iterations',
+        );
+      }
     });
 
     it('rejects out-of-range critique score', () => {
