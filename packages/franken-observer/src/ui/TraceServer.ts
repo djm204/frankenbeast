@@ -170,7 +170,7 @@ function esc(s){
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;')
     .replace(/\`/g,'&#96;')
-    .replace(/\\$/g,'&#36;')
+    .split('$').join('&#36;')
 }
 function badge(status){
   const cls = status==='completed'?'ok':status==='error'?'err':'act'
