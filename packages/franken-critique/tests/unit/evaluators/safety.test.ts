@@ -34,7 +34,12 @@ describe('SafetyEvaluator', () => {
 
   it('passes when no safety rules are violated', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -47,7 +52,12 @@ describe('SafetyEvaluator', () => {
 
   it('fails when a blocking rule is violated', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -62,11 +72,18 @@ describe('SafetyEvaluator', () => {
 
   it('warns but passes on warning-severity rules', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'avoid console.log', pattern: 'console\\.log', severity: 'warn' },
+      {
+        id: 'r1',
+        description: 'avoid console.log',
+        pattern: 'console\\.log',
+        severity: 'warn',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const result = await evaluator.evaluate(createInput('console.log("debug")'));
+    const result = await evaluator.evaluate(
+      createInput('console.log("debug")'),
+    );
 
     expect(result.verdict).toBe('pass');
     expect(result.score).toBeLessThan(1);
@@ -76,12 +93,24 @@ describe('SafetyEvaluator', () => {
 
   it('detects multiple rule violations', async () => {
     const port = createMockGuardrailsPort([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
-      { id: 'r2', description: 'no exec', pattern: 'exec\\(', severity: 'block' },
+      {
+        id: 'r1',
+        description: 'no eval',
+        pattern: 'eval\\(',
+        severity: 'block',
+      },
+      {
+        id: 'r2',
+        description: 'no exec',
+        pattern: 'exec\\(',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const result = await evaluator.evaluate(createInput('eval("x"); exec("y")'));
+    const result = await evaluator.evaluate(
+      createInput('eval("x"); exec("y")'),
+    );
 
     expect(result.verdict).toBe('fail');
     expect(result.findings).toHaveLength(2);
@@ -96,5 +125,57 @@ describe('SafetyEvaluator', () => {
     expect(result.verdict).toBe('pass');
     expect(result.score).toBe(1);
     expect(result.findings).toHaveLength(0);
+  });
+
+  it('reports malformed safety rule regexes instead of throwing', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'bad',
+        description: 'bad regex',
+        pattern: 'eval(',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    await expect(
+      evaluator.evaluate(createInput('const x = 1;')),
+    ).resolves.toMatchObject({
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        expect.objectContaining({
+          message: expect.stringContaining('Invalid safety rule regex'),
+          severity: 'critical',
+        }),
+      ],
+    });
+  });
+
+  it('rejects nested quantifier patterns before evaluating content', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos',
+        description: 'redos pattern',
+        pattern: '(a+)+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const startedAt = performance.now();
+    const result = await evaluator.evaluate(createInput(`${'a'.repeat(40)}!`));
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(100);
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Unsafe safety rule regex'),
+        severity: 'critical',
+      }),
+    ]);
   });
 });
