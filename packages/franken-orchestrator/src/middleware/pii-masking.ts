@@ -15,7 +15,7 @@ const PII_RULES: Array<{
   {
     name: 'database-connection-string',
     pattern:
-      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>,)}]+(?:,[A-Za-z0-9.-]+:\d+[^\s'"`<>,)}]*)*/gi,
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/(?:[^\s'"`<>()@,]+@)?(?:\[[^\]\s'"`<>()]+\]|[A-Za-z0-9.-]+)(?::\d+)?(?:,(?:\[[^\]\s'"`<>()]+\]|[A-Za-z0-9.-]+)(?::\d+)?)*(?:\/[^\s'"`<>,)}]*)?(?:\?[^\s'"`<>,)}]*)?/gi,
     replacement: (match) => {
       const trailingDelimiter = match.match(/[.;:]+$/)?.[0] ?? '';
       return `[CONNECTION_STRING]${trailingDelimiter}`;
@@ -28,8 +28,11 @@ const PII_RULES: Array<{
   },
   {
     name: 'github-token',
-    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_.]{19,}[A-Za-z0-9_]/gi,
-    replacement: '[API_KEY]',
+    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_.-]{20,}/gi,
+    replacement: (match) => {
+      const trailingDelimiter = match.match(/[.;:]+$/)?.[0] ?? '';
+      return `[API_KEY]${trailingDelimiter}`;
+    },
   },
   {
     name: 'github-fine-grained-pat',
