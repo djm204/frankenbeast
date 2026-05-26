@@ -115,7 +115,7 @@ export class SafetyEvaluator implements Evaluator {
     return (
       this.hasBackreference(pattern) ||
       this.hasNestedQuantifiedExpression(pattern) ||
-      (pattern.includes('?s:') &&
+      (this.hasEnabledInlineModifier(pattern, 's') &&
         this.hasNestedQuantifiedExpression(this.expandDotAllLiterals(pattern)))
     );
   }
@@ -624,7 +624,9 @@ export class SafetyEvaluator implements Evaluator {
       left === 'SPACE' ||
       right === 'SPACE'
     ) {
-      return this.tokenMayMatchSample(left, right);
+      return left === 'SPACE'
+        ? this.spaceTokenOverlaps(right)
+        : this.spaceTokenOverlaps(left);
     }
     if (left === 'WORD') return this.wordTokenOverlaps(right);
     if (right === 'WORD') return this.wordTokenOverlaps(left);
@@ -748,7 +750,12 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private spaceTokenOverlaps(token: string): boolean {
-    return token === 'SPACE' || /^\s$/u.test(token);
+    if (token === 'SPACE') return true;
+    if (token.length === 1) return /^\s$/u.test(token);
+    if (token.startsWith('CLASS:')) return this.classTokenOverlaps(token, 'SPACE');
+    if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyNonWhitespace(token);
+    if (token === 'DOT' || token.startsWith('NOT_')) return true;
+    return false;
   }
 
   private positiveClassBodyOverlaps(body: string, token: string): boolean {
@@ -825,6 +832,13 @@ export class SafetyEvaluator implements Evaluator {
     return rangeToken === 'RANGE:\t-\r' || rangeToken === 'RANGE: - ';
   }
 
+  private rangeContainsOnlyNonWhitespace(rangeToken: string): boolean {
+    const [, start, end] = rangeToken.match(/^RANGE:(.)-(.)$/) ?? [];
+    return start !== undefined && end !== undefined
+      ? !this.sampleRangeCharacters(start, end).some((char) => /^\s$/u.test(char))
+      : false;
+  }
+
   private classBodyContainsOutsideToken(
     classToken: string,
     contains: (char: string) => boolean,
@@ -872,6 +886,7 @@ export class SafetyEvaluator implements Evaluator {
       ' ',
       '\t',
       '\n',
+      '\u1680',
       'é',
     ].filter((char) => char >= start && char <= end);
   }
@@ -1011,10 +1026,10 @@ export class SafetyEvaluator implements Evaluator {
     const inlineModifier = groupContent.match(/^\?([A-Za-z-]+):/);
     if (inlineModifier) {
       let content = groupContent.slice(inlineModifier[0].length);
-      if (inlineModifier[1]?.includes('s')) {
+      if (this.modifierTextEnables(inlineModifier[1] ?? '', 's')) {
         content = this.expandDotAllLiterals(content);
       }
-      return inlineModifier[1]?.includes('i')
+      return this.modifierTextEnables(inlineModifier[1] ?? '', 'i')
         ? this.caseFoldRegexLiterals(content)
         : content;
     }
@@ -1023,6 +1038,19 @@ export class SafetyEvaluator implements Evaluator {
     if (namedCapture) return groupContent.slice(namedCapture[0].length);
 
     return groupContent;
+  }
+
+  private hasEnabledInlineModifier(pattern: string, flag: string): boolean {
+    const inlineModifiers = pattern.matchAll(/\(\?([A-Za-z-]+):/g);
+    for (const match of inlineModifiers) {
+      if (this.modifierTextEnables(match[1] ?? '', flag)) return true;
+    }
+    return false;
+  }
+
+  private modifierTextEnables(modifiers: string, flag: string): boolean {
+    const [enabled = '', disabled = ''] = modifiers.split('-', 2);
+    return enabled.includes(flag) && !disabled.includes(flag);
   }
 
   private expandDotAllLiterals(pattern: string): string {

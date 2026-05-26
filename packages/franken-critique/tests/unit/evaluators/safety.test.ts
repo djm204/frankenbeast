@@ -627,6 +627,12 @@ describe('SafetyEvaluator', () => {
         pattern: '^(a+b+|c+d+)+y$',
         severity: 'block',
       },
+      {
+        id: 'disabled-case-fold-alternation',
+        description: 'disabled case fold alternation',
+        pattern: '^(?-i:A|a)+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -704,6 +710,18 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?s:(.|\\n\\n))+!$',
         severity: 'block',
       },
+      {
+        id: 'redos-unicode-space-alternation',
+        description: 'unicode space alternation pattern',
+        pattern: '^(?:\\s|\\u1680\\u1680)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-combined-dotall-alternation',
+        description: 'combined dotall alternation pattern',
+        pattern: '^(?is:(.|\\n\\n))+!$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -711,9 +729,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(11);
+    expect(result.findings).toHaveLength(13);
     expect(result.findings).toEqual(
-      Array.from({ length: 11 }, () =>
+      Array.from({ length: 13 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
