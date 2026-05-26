@@ -10,13 +10,16 @@ import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 const PII_RULES: Array<{
   name: string;
   pattern: RegExp;
-  replacement: string;
+  replacement: string | ((match: string) => string);
 }> = [
   {
     name: 'database-connection-string',
     pattern:
-      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>,)\]}]+/gi,
-    replacement: '[CONNECTION_STRING]',
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>,)}]+(?:,[A-Za-z0-9.-]+:\d+[^\s'"`<>,)}]*)*/gi,
+    replacement: (match) => {
+      const trailingDelimiter = match.match(/[.;:]+$/)?.[0] ?? '';
+      return `[CONNECTION_STRING]${trailingDelimiter}`;
+    },
   },
   {
     name: 'openai-api-key',
@@ -25,7 +28,7 @@ const PII_RULES: Array<{
   },
   {
     name: 'github-token',
-    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_]{19,}[A-Za-z0-9_]/gi,
+    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_.]{19,}[A-Za-z0-9_]/gi,
     replacement: '[API_KEY]',
   },
   {
@@ -75,7 +78,10 @@ const PII_RULES: Array<{
 function mask(text: string): string {
   let result = text;
   for (const rule of PII_RULES) {
-    result = result.replace(rule.pattern, rule.replacement);
+    const { pattern, replacement } = rule;
+    result = typeof replacement === 'function'
+      ? result.replace(pattern, replacement)
+      : result.replace(pattern, replacement);
   }
   return result;
 }
