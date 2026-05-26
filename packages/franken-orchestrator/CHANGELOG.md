@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.34.1...franken-orchestrator-v0.35.0) (2026-05-25)
+
+
+### Features
+
+* **observer:** durable audit replay ([#299](https://github.com/djm204/frankenbeast/issues/299)) ([34ddc5a](https://github.com/djm204/frankenbeast/commit/34ddc5aa6b17ac6ae87f714e1342a101d7ecd195))
+
+
+### Bug Fixes
+
+* **security:** sandbox Beast execution ([#298](https://github.com/djm204/frankenbeast/issues/298)) ([9a7b4f0](https://github.com/djm204/frankenbeast/commit/9a7b4f08a11bc3856d7090c4d2371e7048313cfd))
+
 ## [0.34.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.34.0...franken-orchestrator-v0.34.1) (2026-05-21)
 
 
