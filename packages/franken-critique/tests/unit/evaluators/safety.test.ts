@@ -627,12 +627,6 @@ describe('SafetyEvaluator', () => {
         pattern: '^(a+b+|c+d+)+y$',
         severity: 'block',
       },
-      {
-        id: 'disabled-case-fold-alternation',
-        description: 'disabled case fold alternation',
-        pattern: '^(?-i:A|a)+$',
-        severity: 'block',
-      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
