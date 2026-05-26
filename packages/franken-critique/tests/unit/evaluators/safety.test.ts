@@ -635,4 +635,39 @@ describe('SafetyEvaluator', () => {
     expect(result.verdict).toBe('pass');
     expect(result.findings).toHaveLength(0);
   });
+
+  it('rejects nullable and variable-quantified alternation bypass patterns', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos-empty-branch-alternation',
+        description: 'empty branch alternation pattern',
+        pattern: '^(a(?:|a))+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-variable-quantifier-alternation',
+        description: 'variable quantifier alternation pattern',
+        pattern: '^(?:aa|a?)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-nullable-nested-alternation',
+        description: 'nullable nested alternation pattern',
+        pattern: '^(?:a(?:|a))+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('safe content'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings).toEqual(
+      Array.from({ length: 3 }, () =>
+        expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
+      ),
+    );
+  });
 });

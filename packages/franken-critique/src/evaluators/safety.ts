@@ -8,6 +8,7 @@ import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
 const MAX_ALTERNATIVE_PREFIX_TOKENS = MAX_SAFETY_PATTERN_LENGTH;
+const EMPTY_ALTERNATIVE_TOKEN = 'EMPTY_ALTERNATIVE';
 
 interface RegexGroupState {
   startIndex: number;
@@ -278,8 +279,6 @@ export class SafetyEvaluator implements Evaluator {
       alternatives.some(
         (right, rightIndex) =>
           leftIndex !== rightIndex &&
-          left.tokens.length > 0 &&
-          right.tokens.length > 0 &&
           this.tokenPrefixOverlaps(left, right),
       ),
     );
@@ -307,8 +306,7 @@ export class SafetyEvaluator implements Evaluator {
         )
           .map((nestedAlternative) =>
             this.expandSimpleAlternativePrefix(nestedAlternative),
-          )
-          .filter((prefix) => prefix.tokens.length > 0);
+          );
         if (groupedPrefixes.length > 0) {
           truncated = truncated || groupedPrefixes.some((prefix) => prefix.truncated);
           if (groupedPrefixes.length === 1) {
@@ -321,7 +319,11 @@ export class SafetyEvaluator implements Evaluator {
             }
           } else {
             tokens.push(
-              `ALT:${JSON.stringify(groupedPrefixes.map((prefix) => prefix.tokens))}`,
+              `ALT:${JSON.stringify(
+                groupedPrefixes.map((prefix) =>
+                  prefix.tokens.length > 0 ? prefix.tokens : [EMPTY_ALTERNATIVE_TOKEN],
+                ),
+              )}`,
             );
           }
         }
@@ -471,7 +473,7 @@ export class SafetyEvaluator implements Evaluator {
 
     const quantifier = this.quantifierAt(pattern, end + 1);
     const repeatCount = quantifier?.fixedCount ?? 1;
-    if (quantifier?.fixedCount !== undefined) {
+    if (quantifier !== null) {
       end = quantifier.end;
     }
 
@@ -594,6 +596,8 @@ export class SafetyEvaluator implements Evaluator {
       : [[token]];
     return alternatives.some((alternative) =>
       tokenAlternatives.some((tokenAlternative) =>
+        alternative.includes(EMPTY_ALTERNATIVE_TOKEN) ||
+        tokenAlternative.includes(EMPTY_ALTERNATIVE_TOKEN) ||
         alternative.some((nestedToken) =>
           tokenAlternative.some((otherToken) =>
             this.regexTokensOverlap(nestedToken, otherToken),
