@@ -545,6 +545,24 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-octal-escape-alternation',
+        description: 'octal escape alternation pattern',
+        pattern: '^(?:\\141|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-octal-class-escape-alternation',
+        description: 'octal class escape alternation pattern',
+        pattern: '^(?:[\\141]|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-legacy-incomplete-hex-escape-alternation',
+        description: 'legacy incomplete hex escape alternation pattern',
+        pattern: '^(?:\\x|xx)+$',
+        severity: 'block',
+      },
+      {
         id: 'redos-comma-alt-serialization',
         description: 'comma alternative serialization pattern',
         pattern: '^(?:(?:,a)|(?:,b)|,)+$',
@@ -563,9 +581,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(36);
+    expect(result.findings).toHaveLength(39);
     expect(result.findings).toEqual(
-      Array.from({ length: 36 }, () =>
+      Array.from({ length: 39 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );

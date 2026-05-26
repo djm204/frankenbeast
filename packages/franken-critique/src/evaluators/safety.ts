@@ -493,12 +493,15 @@ export class SafetyEvaluator implements Evaluator {
       } else if (escaped === 'c' && /^[A-Za-z]$/.test(pattern[start + 2] ?? '')) {
         end = start + 2;
         value = String.fromCharCode(pattern.charCodeAt(start + 2) & 31);
-      } else if (escaped === '0' && !/^\d$/.test(pattern[start + 2] ?? '')) {
-        end = start + 1;
-        value = '\0';
       } else {
-        end = start + 1;
-        value = this.escapedAtomToken(escaped);
+        const octal = this.legacyOctalEscapeAt(pattern, start);
+        if (octal !== null) {
+          end = octal.end;
+          value = octal.value;
+        } else {
+          end = start + 1;
+          value = this.escapedAtomToken(escaped);
+        }
       }
     } else if (char === '(') {
       return null;
@@ -532,8 +535,31 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === 'D') return 'NOT_DIGIT';
     if (escaped === 'W') return 'NOT_WORD';
     if (escaped === 'S') return 'NOT_SPACE';
-    if (escaped === 'x') return '\\x';
     return escaped;
+  }
+
+  private legacyOctalEscapeAt(
+    pattern: string,
+    start: number,
+  ): { value: string; end: number } | null {
+    const escaped = pattern[start + 1];
+    if (escaped === undefined || !/^[0-7]$/.test(escaped)) return null;
+
+    let end = start + 1;
+    let octalDigits = escaped;
+    const maxLength = escaped <= '3' ? 3 : 2;
+    while (
+      octalDigits.length < maxLength &&
+      /^[0-7]$/.test(pattern[end + 1] ?? '')
+    ) {
+      end += 1;
+      octalDigits += pattern[end]!;
+    }
+
+    return {
+      value: String.fromCharCode(Number.parseInt(octalDigits, 8)),
+      end,
+    };
   }
 
   private classEscapedTokenAt(
@@ -557,9 +583,8 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === 'c' && /^[A-Za-z]$/.test(body[start + 2] ?? '')) {
       return { value: String.fromCharCode(body.charCodeAt(start + 2) & 31), end: start + 2 };
     }
-    if (escaped === '0' && !/^\d$/.test(body[start + 2] ?? '')) {
-      return { value: '\0', end: start + 1 };
-    }
+    const octal = this.legacyOctalEscapeAt(body, start);
+    if (octal !== null) return octal;
     if (escaped === 'b') return { value: '\b', end: start + 1 };
     if (escaped === 'B') return { value: 'NOT_BACKSPACE', end: start + 1 };
     return { value: this.escapedAtomToken(escaped), end: start + 1 };
