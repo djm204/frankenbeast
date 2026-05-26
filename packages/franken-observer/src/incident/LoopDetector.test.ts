@@ -70,6 +70,40 @@ describe('LoopDetector', () => {
     })
   })
 
+  describe('varied repetition patterns', () => {
+    it('detects fuzzy span-name repetitions with volatile metadata differences', () => {
+      const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 3 })
+
+      for (const name of [
+        'tool:search duration=101ms',
+        'tool:execute tokens=504',
+        'tool:search duration=117ms',
+        'tool:execute tokens=512',
+        'tool:search duration=124ms',
+      ]) {
+        expect(detector.check(name).detected).toBe(false)
+      }
+
+      const result = detector.check('tool:execute tokens=521')
+      expect(result.detected).toBe(true)
+      expect(result.detectedPattern).toEqual(['tool:search duration=101ms', 'tool:execute tokens=504'])
+      expect(result.repetitions).toBe(3)
+    })
+
+    it('detects repeated patterns separated by small gaps in history', () => {
+      const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 3 })
+
+      for (const name of ['plan', 'execute', 'heartbeat', 'plan', 'execute', 'retry-wait', 'plan']) {
+        expect(detector.check(name).detected).toBe(false)
+      }
+
+      const result = detector.check('execute')
+      expect(result.detected).toBe(true)
+      expect(result.detectedPattern).toEqual(['plan', 'execute'])
+      expect(result.repetitions).toBe(3)
+    })
+  })
+
   describe('event emission', () => {
     it('emits a loop-detected event when a loop is found', () => {
       const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
