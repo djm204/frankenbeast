@@ -1,4 +1,3 @@
-import { Worker } from 'node:worker_threads';
 import type {
   Evaluator,
   EvaluationInput,
@@ -8,18 +7,12 @@ import type {
 import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
-const REGEX_TEST_TIMEOUT_MS = 500;
 
 interface SafetyRuleLike {
   readonly pattern: string;
   readonly description: string;
   readonly severity: 'block' | 'warn';
 }
-
-type RegexTestResult =
-  | { readonly kind: 'match'; readonly matched: boolean }
-  | { readonly kind: 'timeout' }
-  | { readonly kind: 'error' };
 
 export class SafetyEvaluator implements Evaluator {
   readonly name = 'safety';
@@ -44,26 +37,8 @@ export class SafetyEvaluator implements Evaluator {
         continue;
       }
 
-      const testResult = await this.testRulePattern(
-        rule.pattern,
-        input.content,
-      );
-      if (testResult.kind === 'timeout' || testResult.kind === 'error') {
-        const finding = this.createInvalidRuleFinding(
-          rule,
-          testResult.kind === 'timeout'
-            ? 'Unsafe safety rule regex'
-            : 'Invalid safety rule regex',
-          testResult.kind === 'timeout'
-            ? `Regex evaluation exceeded ${REGEX_TEST_TIMEOUT_MS}ms and was terminated.`
-            : 'Fix or remove invalid pattern before enabling this rule.',
-        );
-        if (finding.severity === 'critical') hasBlock = true;
-        findings.push(finding);
-        continue;
-      }
-
-      if (testResult.matched) {
+      const regex = new RegExp(rule.pattern, 'g');
+      if (regex.test(input.content)) {
         const isBlock = rule.severity === 'block';
         if (isBlock) hasBlock = true;
 
@@ -161,47 +136,32 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasBackreference(pattern: string): boolean {
-    return /\\(?:[1-9]|k<)/u.test(pattern);
+    for (let i = 0; i < pattern.length; i += 1) {
+      if (pattern[i] !== '\\') continue;
+
+      const runStart = i;
+      while (i + 1 < pattern.length && pattern[i + 1] === '\\') i += 1;
+      const slashCount = i - runStart + 1;
+      const next = pattern[i + 1];
+
+      if (slashCount % 2 === 1 && /[1-9]/u.test(next ?? '')) return true;
+      if (slashCount % 2 === 1 && next === 'k' && pattern[i + 2] === '<') {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private hasNestedQuantifier(pattern: string): boolean {
+    const patternWithoutGroupPrefixes = pattern.replace(
+      /\(\?(?::|=|!|<(?!!|=)[A-Za-z][A-Za-z0-9_]*>)/gu,
+      '(',
+    );
     const groupWithQuantifiedAtomThenOuterQuantifier =
-      /\((?:\?:|\?<[A-Za-z][A-Za-z0-9_]*>)?[^)]*(?:[*+?]|\{\d+,?\d*\})[^)]*\)(?:[*+?]|\{\d+,?\d*\})/u;
-    return groupWithQuantifiedAtomThenOuterQuantifier.test(pattern);
-  }
-
-  private testRulePattern(
-    pattern: string,
-    content: string,
-  ): Promise<RegexTestResult> {
-    return new Promise((resolve) => {
-      const worker = new Worker(
-        `
-          const { parentPort, workerData } = require('node:worker_threads');
-          try {
-            const regex = new RegExp(workerData.pattern, 'g');
-            parentPort.postMessage({ kind: 'match', matched: regex.test(workerData.content) });
-          } catch {
-            parentPort.postMessage({ kind: 'error' });
-          }
-        `,
-        { eval: true, workerData: { pattern, content } },
-      );
-      let settled = false;
-      const finish = (result: RegexTestResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        void worker.terminate();
-        resolve(result);
-      };
-      const timeout = setTimeout(
-        () => finish({ kind: 'timeout' }),
-        REGEX_TEST_TIMEOUT_MS,
-      );
-
-      worker.once('message', (message: RegexTestResult) => finish(message));
-      worker.once('error', () => finish({ kind: 'error' }));
-    });
+      /\((?:[^()\\]|\\.)*(?:[*+]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)(?:[*+?]|\{\d+,?\d*\})/u;
+    return groupWithQuantifiedAtomThenOuterQuantifier.test(
+      patternWithoutGroupPrefixes,
+    );
   }
 }

@@ -178,4 +178,58 @@ describe('SafetyEvaluator', () => {
       }),
     ]);
   });
+
+  it('allows noncapturing groups with safe optional quantifiers', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'url',
+        description: 'example domain',
+        pattern: '(?:https?:\\/\\/)?example\\.com',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('https://example.com'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Safety rule violated'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
+  it('allows literal escaped backslash sequences that resemble backreferences', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'literal-number',
+        description: 'literal numeric backreference text',
+        pattern: '\\\\1',
+        severity: 'warn',
+      },
+      {
+        id: 'literal-name',
+        description: 'literal named backreference text',
+        pattern: '\\\\k<name>',
+        severity: 'warn',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(createInput('literal \\1 and \\k<name>'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('literal numeric backreference text'),
+        severity: 'warning',
+      }),
+      expect.objectContaining({
+        message: expect.stringContaining('literal named backreference text'),
+        severity: 'warning',
+      }),
+    ]);
+  });
 });
