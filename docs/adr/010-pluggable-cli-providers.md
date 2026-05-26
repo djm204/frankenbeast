@@ -4,6 +4,8 @@
 
 Accepted
 
+Supersedes: ADR-007
+
 ## Context
 
 The orchestrator hardcoded CLI agent support as a `'claude' | 'codex'` union type with if/else dispatch scattered across `martin-loop.ts`, `cli-llm-adapter.ts`, `args.ts`, `dep-factory.ts`, and `session.ts`. Adding a new provider (e.g., Gemini CLI, Aider) required touching 5+ files with no isolation or testability. Rate-limit handling, env-var filtering, and output normalization were inlined per provider.

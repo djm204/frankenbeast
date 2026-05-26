@@ -167,21 +167,24 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 ## Test Counts
 
-> Phase 7 baseline was 1,572 tests. Phases 8–11 added orchestrator, web, and root integration tests.
-> Architecture consolidation (Phase 1) removed 5 packages and ~760 tests (package deletion + audit).
+> Phase 7 baseline was 1,572 tests. Phases 8–11 and later consolidation work added orchestrator, web, MCP-suite, live-bench, and root integration tests.
+> Current tracked total was verified from the live workspace on 2026-05-26 with `npm test`, targeted package `vitest --reporter=json` runs, and `npm run test:root -- tests/docs-issue-86.test.ts` for this documentation guard.
+> Known stale/failing-module caveat: issues #27, #30, and #31 recorded historical red typecheck/build paths behind the old all-green claim. Those specific deleted-package paths are no longer in the current package set, but this table no longer treats historical package counts as proof of global health.
 
 | Module | Tests | Files | Status |
 |--------|-------|-------|--------|
-| franken-types | 0 | 0 | PASS (no test files) |
-| franken-brain | 123 | 13 | PASS |
+| @fbeast/live-bench | 31 | 3 | PASS |
+| @fbeast/mcp-suite | 163 | 26 | PASS |
+| franken-brain | 41 | 2 | PASS |
+| franken-critique | 129 | 17 | PASS |
+| franken-governor | 113 | 17 | PASS |
+| franken-observer | 412 | 32 | PASS |
+| franken-orchestrator | 2,129 | 219 | PASS (1 skipped) |
 | franken-planner | 187 | 17 | PASS |
-| franken-observer | 377 | 27 | PASS |
-| franken-critique | 107 | 16 | PASS |
-| franken-governor | 111 | 17 | PASS |
-| franken-orchestrator | 1,674 | 180 | PASS (1 skipped) |
-| franken-web | 145 | 38 | PASS |
-| Root integration | 132 | 10 | PASS |
-| **Total** | **2,856** | **318** | **ALL PASS** |
+| franken-types | 61 | 3 | PASS |
+| franken-web | 193 | 47 | FAIL (1 dashboard EventSource constructor test fails when run directly) |
+| Root integration/docs guard | 135 | 11 | PASS for `tests/docs-issue-86.test.ts`; broader root suite not re-counted in this update |
+| **Current tracked total** | **3,594** | **394** | **NOT ALL GREEN — see franken-web caveat** |
 
 ## Phase 8: CLI Gap Closure
 

@@ -3,6 +3,9 @@
 ## Status
 Accepted
 
+Supersedes: None
+Superseded by: ADR-010
+
 ## Context
 The RALPH loop workflow (chunk decomposition → CLI-spawned AI loops → git branch isolation → observer tracing) was implemented as an ad-hoc build runner script (`plan-2026-03-05/build-runner.ts`). This script duplicates concerns that `franken-observer` (tracing, cost tracking, circuit breakers), `franken-planner` (task ordering via PlanGraph), and `franken-orchestrator` (the execution pipeline) already handle.
 
