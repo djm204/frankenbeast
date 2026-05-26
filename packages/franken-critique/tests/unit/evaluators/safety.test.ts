@@ -651,12 +651,6 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:.|\\n\\n)+[(?s:]$',
         severity: 'block',
       },
-      {
-        id: 'scoped-dotall-leaves-outer-dot-unchanged',
-        description: 'scoped dotAll leaves outer dot unchanged',
-        pattern: '^(?s:a)(?:.|\\n)+!$',
-        severity: 'block',
-      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -664,6 +658,15 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('pass');
     expect(result.findings).toHaveLength(0);
+  });
+
+  it('limits inline dotAll rewriting to the modifier group scope', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      hasUnsafeRegexShape(pattern: string): boolean;
+    };
+
+    expect(evaluator.hasUnsafeRegexShape('^(?s:a)(?:.|\\n)+!$')).toBe(false);
+    expect(evaluator.hasUnsafeRegexShape('^(?s:(.|\\n\\n))+!$')).toBe(true);
   });
 
   it('rejects nullable and variable-quantified alternation bypass patterns', async () => {
