@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/djm204/frankenbeast/compare/v0.38.0...v0.38.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **security:** reject unsafe safety regex rules ([#302](https://github.com/djm204/frankenbeast/issues/302)) ([c639420](https://github.com/djm204/frankenbeast/commit/c639420a3a250d756e634e6e5db21d8a4f2d3fac))
+
 ## [0.38.0](https://github.com/djm204/frankenbeast/compare/v0.37.1...v0.38.0) (2026-05-25)
 
 

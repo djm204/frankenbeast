@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.0...franken-orchestrator-v0.35.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **security:** mask common secrets in PII middleware ([#306](https://github.com/djm204/frankenbeast/issues/306)) ([97e1374](https://github.com/djm204/frankenbeast/commit/97e13748dcd3afa00037a7195aee755ba8d1ef60))
+
 ## [0.35.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.34.1...franken-orchestrator-v0.35.0) (2026-05-25)
 
 
