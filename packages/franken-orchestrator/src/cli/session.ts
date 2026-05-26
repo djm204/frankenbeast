@@ -288,7 +288,13 @@ export class Session {
       // Load design doc
     let designContent: string;
     if (designDocPath) {
-      designContent = readFileSync(designDocPath, 'utf-8');
+      try {
+        designContent = readFileSync(designDocPath, 'utf-8');
+      } catch {
+        throw new Error(
+          `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
+        );
+      }
     } else {
       const stored = readDesignDoc(paths);
       if (!stored) {

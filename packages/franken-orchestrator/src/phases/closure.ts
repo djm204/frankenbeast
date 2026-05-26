@@ -62,7 +62,7 @@ export async function runClosure(
   const allSucceeded = taskOutcomes.every(o => o.status === 'success');
   const allSkipped = taskOutcomes.length > 0 && taskOutcomes.every(o => o.status === 'skipped');
 
-  const status = allSkipped ? 'skipped' : allSucceeded ? 'completed' : 'failed';
+  const status = allSkipped ? 'no-op' : allSucceeded ? 'completed' : 'failed';
 
   const result: BeastResult = {
     sessionId: ctx.sessionId,

@@ -86,10 +86,10 @@ describe('runClosure', () => {
     expect(failAudit).toBeTruthy();
   });
 
-  it('returns skipped status when all tasks are skipped', async () => {
+  it('returns no-op status when all tasks are skipped', async () => {
     const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), allSkippedOutcomes);
 
-    expect(result.status).toBe('skipped');
+    expect(result.status).toBe('no-op');
     expect(result.taskResults).toHaveLength(2);
   });
 

@@ -8,7 +8,7 @@ export interface BeastResult {
   readonly sessionId: string;
   readonly projectId: string;
   readonly phase: BeastPhase;
-  readonly status: 'completed' | 'failed' | 'aborted' | 'skipped';
+  readonly status: 'completed' | 'failed' | 'aborted' | 'skipped' | 'no-op';
   readonly tokenSpend: TokenSpend;
   readonly planSummary?: string | undefined;
   readonly taskResults?: readonly TaskOutcome[] | undefined;
