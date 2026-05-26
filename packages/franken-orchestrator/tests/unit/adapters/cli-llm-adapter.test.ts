@@ -403,6 +403,53 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow(/timeout/i);
       });
 
+      it('settles the timeout path once when the child closes before hard kill', async () => {
+        vi.useFakeTimers();
+        const killSignals: NodeJS.Signals[] = [];
+        const rejections: Error[] = [];
+
+        try {
+          const spawnFn = (): ChildProcess => {
+            const proc = new EventEmitter() as ChildProcess;
+            Object.defineProperty(proc, 'stdin', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stdout', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stderr', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'kill', {
+              value: vi.fn((signal?: NodeJS.Signals | number) => {
+                if (typeof signal === 'string') killSignals.push(signal);
+                if (signal === 'SIGTERM') {
+                  setTimeout(() => proc.emit('close', null), 1);
+                }
+                return true;
+              }),
+              writable: false,
+            });
+            return proc;
+          };
+          const adapter = new CliLlmAdapter(
+            claudeProvider,
+            { ...baseOpts, timeoutMs: 50 },
+            spawnFn,
+          );
+
+          const result = adapter.execute({ prompt: 'test', maxTurns: 1 }).catch((error: Error) => {
+            rejections.push(error);
+            throw error;
+          });
+          const assertion = expect(result).rejects.toThrow('CLI timeout after 50ms');
+
+          await vi.advanceTimersByTimeAsync(50);
+          await vi.advanceTimersByTimeAsync(1);
+          await assertion;
+          await vi.advanceTimersByTimeAsync(5_000);
+
+          expect(rejections).toHaveLength(1);
+          expect(killSignals).toEqual(['SIGTERM']);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it('sets cwd to opts.workingDir', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
         const adapter = new CliLlmAdapter(
