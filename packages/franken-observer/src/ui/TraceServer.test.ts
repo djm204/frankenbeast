@@ -1,3 +1,4 @@
+import { createContext, Script } from 'node:vm'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { TraceServer } from './TraceServer.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
@@ -59,6 +60,20 @@ describe('TraceServer', () => {
       const html = await fetch(server.url + '/').then(r => r.text())
       expect(html).not.toMatch(/<script\s+src=/i)
       expect(html).not.toMatch(/<link\s[^>]*rel=["']stylesheet["']/i)
+    })
+
+    it('escapes template-literal metacharacters in trace text before writing innerHTML', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+      expect(script).toBeDefined()
+
+      const context = createContext({ document: { getElementById: () => ({}) } }) as { esc?: (s: string) => string }
+      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      const escaped = context.esc!('goal`);globalThis.__xss=1;//${alert(1)}<img src=x onerror=alert(2)>')
+      expect(escaped).not.toContain('`')
+      expect(escaped).not.toContain('${')
+      expect(escaped).toContain('&lt;img src=x onerror=alert(2)&gt;')
     })
   })
 
