@@ -40,7 +40,7 @@ const PII_RULES: Array<{
   },
   {
     name: 'bearer-token',
-    pattern: /\bbearer\s+[A-Za-z0-9._~+/=-]{19,}[A-Za-z0-9_=/-]/gi,
+    pattern: /\bbearer\s+[A-Za-z0-9._~+/=-]{19,}[A-Za-z0-9_=\/+~-]/gi,
     replacement: '[API_KEY]',
   },
   {

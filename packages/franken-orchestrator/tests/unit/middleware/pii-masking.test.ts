@@ -95,17 +95,25 @@ describe('PiiMaskingMiddleware', () => {
     const openAiKey = `sk-${'abcdef1234567890'.repeat(2)}`;
     const githubToken = `ghp_${'abcdef1234567890'.repeat(2)}123456`;
     const bearerToken = `Bearer ${['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', 'payload', 'signature'].join('.')}`;
+    const plusBearerToken = `Bearer ${'opaqueToken'.repeat(3)}+`;
+    const tildeBearerToken = `Bearer ${'opaqueToken'.repeat(3)}~`;
     const result = mw.beforeRequest(
       makeRequest(
-        `tokens: ${openAiKey}. ${githubToken}. Authorization: ${bearerToken}. dbs=(postgres://user:secret@db.example.com:5432/app),redis://:cachepass@localhost:6379/0,done`,
+        `tokens: ${openAiKey}. ${githubToken}. Authorization: ${bearerToken}. plus=${plusBearerToken} tilde=${tildeBearerToken} dbs=(postgres://user:secret@db.example.com:5432/app),redis://:cachepass@localhost:6379/0,done`,
       ),
     );
     const content = result.messages[0]!.content as string;
     expect(content).toContain('tokens: [API_KEY]. [API_KEY]. Authorization: [API_KEY].');
+    expect(content).toContain('plus=[API_KEY]');
+    expect(content).toContain('tilde=[API_KEY]');
+    expect(content).not.toContain('plus=[API_KEY]+');
+    expect(content).not.toContain('tilde=[API_KEY]~');
     expect(content).toContain('dbs=([CONNECTION_STRING]),[CONNECTION_STRING],done');
     expect(content).not.toContain(openAiKey);
     expect(content).not.toContain(githubToken);
     expect(content).not.toContain(bearerToken.replace('Bearer ', ''));
+    expect(content).not.toContain(plusBearerToken.replace('Bearer ', ''));
+    expect(content).not.toContain(tildeBearerToken.replace('Bearer ', ''));
     expect(content).not.toContain('postgres://user:secret@db.example.com:5432/app');
     expect(content).not.toContain('redis://:cachepass@localhost:6379/0');
   });
