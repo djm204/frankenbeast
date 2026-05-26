@@ -21,7 +21,7 @@ const PII_RULES: Array<{
   {
     name: 'api-key-or-token',
     pattern:
-      /\b(?:sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho)_[A-Za-z0-9_]{20,}|xoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{20,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,})\b/g,
+      /\b(?:sk-[A-Za-z0-9_-]{16,}|(?:gh[opusr])_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}|xoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{20,}|bearer\s+[A-Za-z0-9._~+/=-]{20,})(?![A-Za-z0-9._~+/=-])/gi,
     replacement: '[API_KEY]',
   },
   {

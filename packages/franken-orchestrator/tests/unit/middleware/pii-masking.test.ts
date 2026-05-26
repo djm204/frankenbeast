@@ -46,23 +46,34 @@ describe('PiiMaskingMiddleware', () => {
   it('masks common API keys and bearer tokens', () => {
     const openAiKey = `sk-${'1234567890abcdef'.repeat(2)}`;
     const githubToken = `ghp_${'1234567890abcdef'.repeat(2)}123456`;
+    const githubFineGrainedToken = ['github', 'pat', '11AAAAAAA'].join('_')
+      + `_${'b'.repeat(22)}_${'c'.repeat(59)}`;
+    const githubAppToken = `ghs_${'1234567890abcdef'.repeat(2)}123456`;
     const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
     const bearerToken = `Bearer ${['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', 'payload', 'signature'].join('.')}`;
+    const lowercaseBearerToken = `bearer ${'base64token'.repeat(3)}==`;
 
     const result = mw.beforeRequest(
       makeRequest(
-        `openai=${openAiKey} github=${githubToken} slack=${slackToken} bearer=${bearerToken}`,
+        `openai=${openAiKey} github=${githubToken} github_pat=${githubFineGrainedToken} github_app=${githubAppToken} slack=${slackToken} bearer=${bearerToken} auth=${lowercaseBearerToken}`,
       ),
     );
     const content = result.messages[0]!.content as string;
     expect(content).toContain('openai=[API_KEY]');
     expect(content).toContain('github=[API_KEY]');
+    expect(content).toContain('github_pat=[API_KEY]');
+    expect(content).toContain('github_app=[API_KEY]');
     expect(content).toContain('slack=[API_KEY]');
     expect(content).toContain('bearer=[API_KEY]');
+    expect(content).toContain('auth=[API_KEY]');
     expect(content).not.toContain(openAiKey);
     expect(content).not.toContain(githubToken);
+    expect(content).not.toContain(githubFineGrainedToken);
+    expect(content).not.toContain(githubAppToken);
     expect(content).not.toContain(slackToken);
     expect(content).not.toContain(bearerToken.replace('Bearer ', ''));
+    expect(content).not.toContain(lowercaseBearerToken.replace('bearer ', ''));
+    expect(content).not.toContain('==');
   });
 
   it('masks database connection strings', () => {
