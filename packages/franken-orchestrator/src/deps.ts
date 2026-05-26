@@ -190,6 +190,7 @@ export interface McpToolInfo {
 
 /** Checkpoint persistence for crash recovery. */
 export interface ICheckpointStore {
+  readonly checkpointPath?: string | undefined;
   has(key: string): boolean;
   write(key: string): void;
   readAll(): Set<string>;

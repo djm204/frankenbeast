@@ -78,6 +78,11 @@ export async function runPlanning(
     // Critique the plan
     const critiqueResult = await critique.reviewPlan(plan);
     lastScore = critiqueResult.score;
+    if (critiqueResult.findings.length > 0) {
+      ctx.critiqueFeedback = critiqueResult.findings
+        .map(finding => `${finding.evaluator}: ${finding.message}`)
+        .join('\n');
+    }
 
     ctx.addAudit('critique', 'plan:reviewed', {
       iteration: i + 1,

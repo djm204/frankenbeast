@@ -51,6 +51,31 @@ describe('runPlanning', () => {
     expect(critique.reviewPlan).toHaveBeenCalledTimes(2);
   });
 
+  it('stores critique feedback on context so replanning can recover from findings', async () => {
+    const c = ctx();
+    let callCount = 0;
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            verdict: 'fail' as const,
+            findings: [
+              { evaluator: 'safety', severity: 'critical', message: 'add a rollback step' },
+              { evaluator: 'quality', severity: 'warning', message: 'split deployment task' },
+            ],
+            score: 0.3,
+          };
+        }
+        return { verdict: 'pass' as const, findings: [], score: 0.9 };
+      }),
+    });
+
+    await runPlanning(c, makePlanner(), critique, defaultConfig());
+
+    expect(c.critiqueFeedback).toBe('safety: add a rollback step\nquality: split deployment task');
+  });
+
   it('throws CritiqueSpiralError after max iterations', async () => {
     const c = ctx();
     const critique = makeCritique({

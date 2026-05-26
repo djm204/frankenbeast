@@ -3,29 +3,29 @@ import { dirname } from 'node:path';
 import type { ICheckpointStore } from '../deps.js';
 
 export class FileCheckpointStore implements ICheckpointStore {
-  constructor(private readonly filePath: string) {}
+  constructor(public readonly checkpointPath: string) {}
 
   has(key: string): boolean {
     return this.readAll().has(key);
   }
 
   write(key: string): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    appendFileSync(this.filePath, key + '\n');
+    mkdirSync(dirname(this.checkpointPath), { recursive: true });
+    appendFileSync(this.checkpointPath, key + '\n');
   }
 
   readAll(): Set<string> {
-    if (!existsSync(this.filePath)) {
+    if (!existsSync(this.checkpointPath)) {
       return new Set();
     }
-    const content = readFileSync(this.filePath, 'utf-8');
+    const content = readFileSync(this.checkpointPath, 'utf-8');
     const lines = content.split('\n').filter((line) => line.length > 0);
     return new Set(lines);
   }
 
   clear(): void {
-    if (existsSync(this.filePath)) {
-      writeFileSync(this.filePath, '');
+    if (existsSync(this.checkpointPath)) {
+      writeFileSync(this.checkpointPath, '');
     }
   }
 

@@ -14,6 +14,12 @@ export interface FrankenContext {
     context?: Record<string, unknown>;
   };
   plan?: unknown; // PlanGraph is module-specific
+  errorContext?: Error[];
+  circuitBreakerTripped?: boolean;
+  critiqueFeedback?: string;
+  governorApproval?: boolean;
+  retryCount?: number;
+  checkpointPath?: string;
   tokenSpend: TokenSpend;
   audit: Array<{
     timestamp: string;
