@@ -622,9 +622,21 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
-        id: 'deterministic-quantified-alternation',
-        description: 'deterministic quantified alternation',
-        pattern: '^(a+b+|c+d+)+y$',
+        id: 'dot-line-separator-disjoint',
+        description: 'dot line separator disjoint',
+        pattern: '^(?:.|\\u2028)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'backspace-class-disjoint',
+        description: 'backspace class disjoint',
+        pattern: '^(?:[\\b]|b)+$',
+        severity: 'block',
+      },
+      {
+        id: 'inline-modifier-text-in-class',
+        description: 'inline modifier text in class',
+        pattern: '^(?:.|\\n\\n)+[(?s:]$',
         severity: 'block',
       },
     ]);
@@ -716,6 +728,12 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?is:(.|\\n\\n))+!$',
         severity: 'block',
       },
+      {
+        id: 'redos-disjoint-quantified-branch',
+        description: 'disjoint quantified branch pattern',
+        pattern: '^(?:a+|\\d)+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -723,9 +741,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(13);
+    expect(result.findings).toHaveLength(14);
     expect(result.findings).toEqual(
-      Array.from({ length: 13 }, () =>
+      Array.from({ length: 14 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );

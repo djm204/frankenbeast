@@ -224,12 +224,7 @@ export class SafetyEvaluator implements Evaluator {
           group.containsAmbiguousAlternation = true;
         }
         if (group.containsQuantifiedAtom) {
-          const groupContent = pattern.slice(group.startIndex + 1, i);
-          if (this.hasDeterministicTopLevelAlternation(groupContent)) {
-            group.containsQuantifiedAtom = false;
-          } else {
-            stack.at(-1)!.containsQuantifiedAtom = true;
-          }
+          stack.at(-1)!.containsQuantifiedAtom = true;
         }
         if (group.containsAmbiguousAlternation) {
           const groupContent = pattern.slice(group.startIndex + 1, i);
@@ -476,6 +471,7 @@ export class SafetyEvaluator implements Evaluator {
     } else if (char === '\\') {
       const escaped = pattern[start + 1];
       if (escaped === undefined) return null;
+      if (escaped === 'b' || escaped === 'B') return null;
       if (
         escaped === 'x' &&
         /^[0-9A-Fa-f]{2}$/.test(pattern.slice(start + 2, start + 4))
@@ -562,6 +558,8 @@ export class SafetyEvaluator implements Evaluator {
     if (escaped === '0' && !/^\d$/.test(body[start + 2] ?? '')) {
       return { value: '\0', end: start + 1 };
     }
+    if (escaped === 'b') return { value: '\b', end: start + 1 };
+    if (escaped === 'B') return { value: 'NOT_BACKSPACE', end: start + 1 };
     return { value: this.escapedAtomToken(escaped), end: start + 1 };
   }
 
@@ -763,7 +761,7 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private dotTokenOverlaps(token: string): boolean {
-    if (token.length === 1) return token !== '\n' && token !== '\r';
+    if (token.length === 1) return token !== '\n' && token !== '\r' && token !== '\u2028' && token !== '\u2029';
     if (token === 'SPACE') return true;
     if (token === 'NOT_SPACE') return true;
     if (token === 'NOT_DIGIT' || token === 'NOT_WORD') return true;
@@ -1041,9 +1039,21 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private hasEnabledInlineModifier(pattern: string, flag: string): boolean {
-    const inlineModifiers = pattern.matchAll(/\(\?([A-Za-z-]+):/g);
-    for (const match of inlineModifiers) {
-      if (this.modifierTextEnables(match[1] ?? '', flag)) return true;
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\') {
+        i += 1;
+        continue;
+      }
+      if (char === '[') {
+        i = this.skipCharacterClass(pattern, i);
+        continue;
+      }
+      if (char !== '(' || pattern[i + 1] !== '?') continue;
+      const modifierMatch = pattern.slice(i + 2).match(/^([A-Za-z-]+):/);
+      if (modifierMatch && this.modifierTextEnables(modifierMatch[1] ?? '', flag)) {
+        return true;
+      }
     }
     return false;
   }
