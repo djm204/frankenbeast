@@ -674,6 +674,36 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:a*b|b)+$',
         severity: 'block',
       },
+      {
+        id: 'redos-lookahead-branch-alternation',
+        description: 'lookahead branch alternation pattern',
+        pattern: '^(?:(?!b)a|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-lookbehind-branch-alternation',
+        description: 'lookbehind branch alternation pattern',
+        pattern: '^(?:(?<!b)a|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-control-escape-alternation',
+        description: 'control escape alternation pattern',
+        pattern: '^(?:\\cJ|\\n\\n)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-nul-escape-alternation',
+        description: 'nul escape alternation pattern',
+        pattern: '^(?:\\0|\\x00\\x00)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-dotall-alternation',
+        description: 'dotall alternation pattern',
+        pattern: '^(?s:(.|\\n\\n))+!$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -681,9 +711,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(6);
+    expect(result.findings).toHaveLength(11);
     expect(result.findings).toEqual(
-      Array.from({ length: 6 }, () =>
+      Array.from({ length: 11 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );

@@ -113,7 +113,10 @@ export class SafetyEvaluator implements Evaluator {
 
   private hasUnsafeRegexShape(pattern: string): boolean {
     return (
-      this.hasBackreference(pattern) || this.hasNestedQuantifiedExpression(pattern)
+      this.hasBackreference(pattern) ||
+      this.hasNestedQuantifiedExpression(pattern) ||
+      (pattern.includes('?s:') &&
+        this.hasNestedQuantifiedExpression(this.expandDotAllLiterals(pattern)))
     );
   }
 
@@ -489,6 +492,12 @@ export class SafetyEvaluator implements Evaluator {
         value = String.fromCharCode(
           Number.parseInt(pattern.slice(start + 2, start + 6), 16),
         );
+      } else if (escaped === 'c' && /^[A-Za-z]$/.test(pattern[start + 2] ?? '')) {
+        end = start + 2;
+        value = String.fromCharCode(pattern.charCodeAt(start + 2) & 31);
+      } else if (escaped === '0' && !/^\d$/.test(pattern[start + 2] ?? '')) {
+        end = start + 1;
+        value = '\0';
       } else {
         end = start + 1;
         value = this.escapedAtomToken(escaped);
@@ -546,6 +555,12 @@ export class SafetyEvaluator implements Evaluator {
         value: String.fromCharCode(Number.parseInt(body.slice(start + 2, start + 6), 16)),
         end: start + 5,
       };
+    }
+    if (escaped === 'c' && /^[A-Za-z]$/.test(body[start + 2] ?? '')) {
+      return { value: String.fromCharCode(body.charCodeAt(start + 2) & 31), end: start + 2 };
+    }
+    if (escaped === '0' && !/^\d$/.test(body[start + 2] ?? '')) {
+      return { value: '\0', end: start + 1 };
     }
     return { value: this.escapedAtomToken(escaped), end: start + 1 };
   }
@@ -987,15 +1002,18 @@ export class SafetyEvaluator implements Evaluator {
   private stripGroupPrefix(groupContent: string): string {
     if (groupContent.startsWith('?:')) return groupContent.slice(2);
     if (groupContent.startsWith('?=') || groupContent.startsWith('?!')) {
-      return groupContent.slice(2);
+      return '';
     }
     if (groupContent.startsWith('?<=') || groupContent.startsWith('?<!')) {
-      return groupContent.slice(3);
+      return '';
     }
 
     const inlineModifier = groupContent.match(/^\?([A-Za-z-]+):/);
     if (inlineModifier) {
-      const content = groupContent.slice(inlineModifier[0].length);
+      let content = groupContent.slice(inlineModifier[0].length);
+      if (inlineModifier[1]?.includes('s')) {
+        content = this.expandDotAllLiterals(content);
+      }
       return inlineModifier[1]?.includes('i')
         ? this.caseFoldRegexLiterals(content)
         : content;
@@ -1005,6 +1023,26 @@ export class SafetyEvaluator implements Evaluator {
     if (namedCapture) return groupContent.slice(namedCapture[0].length);
 
     return groupContent;
+  }
+
+  private expandDotAllLiterals(pattern: string): string {
+    let result = '';
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\') {
+        result += pattern.slice(i, i + 2);
+        i += 1;
+        continue;
+      }
+      if (char === '[') {
+        const end = this.skipCharacterClass(pattern, i);
+        result += pattern.slice(i, end + 1);
+        i = end;
+        continue;
+      }
+      result += char === '.' ? '[\\s\\S]' : char;
+    }
+    return result;
   }
 
   private splitTopLevelAlternatives(groupContent: string): string[] {
