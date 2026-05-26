@@ -6,7 +6,7 @@
  * boxed headers, and service highlighting for verbose mode.
  */
 
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import type { ILogger } from '../deps.js';
@@ -182,6 +182,8 @@ const BADGE_COLORS: Record<string, string> = {
 };
 
 const BADGE_WIDTH = 10;
+const DEFAULT_MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_ROTATED_LOG_FILES = 3;
 
 function formatBadge(source: string): string {
   const color = BADGE_COLORS[source] ?? A.dim;
@@ -220,18 +222,28 @@ export interface BeastLoggerOptions {
   readonly captureForFile?: boolean;
   /** When set, log entries are appended to this file immediately (crash-safe). */
   readonly logFile?: string | undefined;
+  /** Maximum active log file size before rotating to .1, .2, etc. Defaults to 10 MiB. */
+  readonly maxLogFileBytes?: number | undefined;
+  /** Number of rotated log files to keep. Defaults to 3. */
+  readonly maxRotatedLogFiles?: number | undefined;
 }
 
 export class BeastLogger implements ILogger {
   private readonly verbose: boolean;
   private readonly captureForFile: boolean;
   private readonly logFile: string | undefined;
+  private readonly maxLogFileBytes: number;
+  private readonly maxRotatedLogFiles: number;
   private readonly entries: string[] = [];
+  private logFd: number | undefined;
+  private logBytes = 0;
 
   constructor(options: BeastLoggerOptions) {
     this.verbose = options.verbose;
     this.captureForFile = options.captureForFile ?? false;
     this.logFile = options.logFile;
+    this.maxLogFileBytes = options.maxLogFileBytes ?? DEFAULT_MAX_LOG_FILE_BYTES;
+    this.maxRotatedLogFiles = options.maxRotatedLogFiles ?? DEFAULT_ROTATED_LOG_FILES;
   }
 
   info(msg: string, dataOrSource?: unknown, source?: string): void {
@@ -279,6 +291,13 @@ export class BeastLogger implements ILogger {
     return [...this.entries];
   }
 
+  /** Flush and close the persistent log file handle, if one was opened. */
+  close(): void {
+    if (this.logFd === undefined) return;
+    closeSync(this.logFd);
+    this.logFd = undefined;
+  }
+
   private timestamp(): string {
     return `${A.gray}${new Date().toTimeString().slice(0, 8)}${A.reset}`;
   }
@@ -291,8 +310,61 @@ export class BeastLogger implements ILogger {
     const entry = `[${date} ${time}] [${level}] ${stripAnsi(msg)}`;
     this.entries.push(entry);
     if (this.logFile) {
-      appendFileSync(this.logFile, entry + '\n');
+      this.writeLogEntry(entry + '\n');
     }
+  }
+
+  private writeLogEntry(line: string): void {
+    if (!this.logFile) return;
+    const bytes = Buffer.byteLength(line);
+    this.ensureLogFileOpen(bytes);
+    writeSync(this.logFd!, line);
+    this.logBytes += bytes;
+  }
+
+  private ensureLogFileOpen(nextWriteBytes: number): void {
+    if (!this.logFile) return;
+    if (this.logFd === undefined) {
+      this.logBytes = this.currentLogFileSize();
+      if (this.shouldRotate(nextWriteBytes)) {
+        this.rotateLogFiles();
+        this.logBytes = 0;
+      }
+      this.logFd = openSync(this.logFile, 'a');
+      return;
+    }
+
+    if (this.shouldRotate(nextWriteBytes)) {
+      this.close();
+      this.rotateLogFiles();
+      this.logBytes = 0;
+      this.logFd = openSync(this.logFile, 'a');
+    }
+  }
+
+  private shouldRotate(nextWriteBytes: number): boolean {
+    return this.maxLogFileBytes > 0
+      && this.logBytes > 0
+      && this.logBytes + nextWriteBytes > this.maxLogFileBytes;
+  }
+
+  private currentLogFileSize(): number {
+    if (!this.logFile || !existsSync(this.logFile)) return 0;
+    return statSync(this.logFile).size;
+  }
+
+  private rotateLogFiles(): void {
+    if (!this.logFile || this.maxRotatedLogFiles < 1 || !existsSync(this.logFile)) return;
+
+    for (let index = this.maxRotatedLogFiles - 1; index >= 1; index -= 1) {
+      const from = `${this.logFile}.${index}`;
+      const to = `${this.logFile}.${index + 1}`;
+      if (existsSync(from)) {
+        renameSync(from, to);
+      }
+    }
+
+    renameSync(this.logFile, `${this.logFile}.1`);
   }
 
   private withData(msg: string, data: unknown): string {

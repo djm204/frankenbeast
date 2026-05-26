@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   BeastLogger,
   stripAnsi,
@@ -331,6 +334,48 @@ describe('BeastLogger', () => {
       expect(stripAnsi(terminal)).not.toContain('"stderr":"permission denied"');
       expect(entries[0]).toContain('"stderr": "permission denied"');
       expect(entries[0]).toContain('"tool": "gh"');
+    });
+
+    it('exposes an explicit close method for persistent file logging', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-close-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        const logger = new BeastLogger({ verbose: false, captureForFile: true, logFile });
+
+        logger.info('before close');
+        logger.close();
+        logger.info('after close');
+        logger.close();
+
+        const contents = readFileSync(logFile, 'utf8');
+        expect(contents).toContain('before close');
+        expect(contents).toContain('after close');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rotates log files before exceeding the configured max size', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-rotate-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        writeFileSync(logFile, `${'x'.repeat(80)}\n`);
+        const logger = new BeastLogger({
+          verbose: false,
+          captureForFile: true,
+          logFile,
+          maxLogFileBytes: 100,
+        });
+
+        logger.info('new file after rotation');
+        logger.close();
+
+        expect(existsSync(`${logFile}.1`)).toBe(true);
+        expect(readFileSync(`${logFile}.1`, 'utf8')).toContain('xxxxxxxxxx');
+        expect(readFileSync(logFile, 'utf8')).toContain('new file after rotation');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
