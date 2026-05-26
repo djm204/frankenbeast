@@ -15,13 +15,32 @@ const PII_RULES: Array<{
   {
     name: 'database-connection-string',
     pattern:
-      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>]+/gi,
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>,)\]}]+/gi,
     replacement: '[CONNECTION_STRING]',
   },
   {
-    name: 'api-key-or-token',
-    pattern:
-      /\b(?:sk-[A-Za-z0-9_-]{16,}|(?:gh[opusr])_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}|xoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{20,}|bearer\s+[A-Za-z0-9._~+/=-]{20,})(?![A-Za-z0-9._~+/=-])/gi,
+    name: 'openai-api-key',
+    pattern: /\bsk-[A-Za-z0-9_-]{15,}[A-Za-z0-9_-]/g,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'github-token',
+    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_]{19,}[A-Za-z0-9_]/gi,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'github-fine-grained-pat',
+    pattern: /\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}/gi,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'slack-bot-token',
+    pattern: /\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]/gi,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'bearer-token',
+    pattern: /\bbearer\s+[A-Za-z0-9._~+/=-]{19,}[A-Za-z0-9_=/-]/gi,
     replacement: '[API_KEY]',
   },
   {
