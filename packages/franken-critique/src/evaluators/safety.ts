@@ -228,11 +228,17 @@ export class SafetyEvaluator implements Evaluator {
             stack.at(-1)!.containsQuantifiedAtom = true;
           }
         }
-        if (
-          group.containsAmbiguousAlternation &&
-          !this.hasFollowingAtomInCurrentAlternative(pattern, i + 1)
-        ) {
-          stack.at(-1)!.containsAmbiguousAlternation = true;
+        if (group.containsAmbiguousAlternation) {
+          const groupContent = pattern.slice(group.startIndex + 1, i);
+          if (
+            !this.followingAtomDisambiguatesAlternation(
+              groupContent,
+              pattern,
+              i + 1,
+            )
+          ) {
+            stack.at(-1)!.containsAmbiguousAlternation = true;
+          }
         }
         groupHistory.push(group);
         previousToken = 'group';
@@ -376,10 +382,36 @@ export class SafetyEvaluator implements Evaluator {
     return -1;
   }
 
-  private hasFollowingAtomInCurrentAlternative(
+  private followingAtomDisambiguatesAlternation(
+    groupContent: string,
     pattern: string,
     start: number,
   ): boolean {
+    const followingToken = this.nextAtomTokenInCurrentAlternative(pattern, start);
+    if (followingToken === null) return false;
+
+    const alternatives = this.splitTopLevelAlternatives(
+      this.stripGroupPrefix(groupContent),
+    ).map((alternative) => {
+      const expansion = this.expandSimpleAlternativePrefix(alternative);
+      return {
+        tokens: [...expansion.tokens, followingToken.value],
+        truncated: expansion.truncated,
+      };
+    });
+
+    return !alternatives.some((left, leftIndex) =>
+      alternatives.some(
+        (right, rightIndex) =>
+          leftIndex !== rightIndex && this.tokenPrefixOverlaps(left, right),
+      ),
+    );
+  }
+
+  private nextAtomTokenInCurrentAlternative(
+    pattern: string,
+    start: number,
+  ): { value: string } | null {
     let depth = 0;
     for (let i = start; i < pattern.length; i += 1) {
       const char = pattern[i]!;
@@ -389,31 +421,29 @@ export class SafetyEvaluator implements Evaluator {
           i += 1;
           continue;
         }
-        return true;
       }
-      if (char === '[') return true;
+      if (char === '(' && depth === 0 && this.isZeroWidthAssertionGroup(pattern, i)) {
+        const close = this.findClosingGroup(pattern, i);
+        if (close === -1) return null;
+        i = close;
+        continue;
+      }
       if (char === '(') {
-        if (depth === 0) {
-          if (this.isZeroWidthAssertionGroup(pattern, i)) {
-            const close = this.findClosingGroup(pattern, i);
-            if (close === -1) return false;
-            i = close;
-            continue;
-          }
-          return true;
-        }
         depth += 1;
         continue;
       }
-      if (char === ')' && depth === 0) return false;
-      if (char === '|' && depth === 0) return false;
+      if (char === ')' && depth === 0) return null;
+      if (char === '|' && depth === 0) return null;
       if (char === ')') {
         depth -= 1;
         continue;
       }
-      if (char !== '^' && char !== '$') return true;
+      if (depth === 0 && char !== '^' && char !== '$') {
+        const token = this.regexAtomTokenAt(pattern, i);
+        return token === null ? null : { value: token.value };
+      }
     }
-    return false;
+    return null;
   }
 
   private isZeroWidthAssertionGroup(pattern: string, start: number): boolean {
@@ -472,6 +502,9 @@ export class SafetyEvaluator implements Evaluator {
     }
 
     const quantifier = this.quantifierAt(pattern, end + 1);
+    if (quantifier?.nullable) {
+      value = `ALT:${JSON.stringify([[EMPTY_ALTERNATIVE_TOKEN], [value]])}`;
+    }
     const repeatCount = quantifier?.fixedCount ?? 1;
     if (quantifier !== null) {
       end = quantifier.end;
@@ -1032,6 +1065,7 @@ export class SafetyEvaluator implements Evaluator {
     end: number;
     variable: boolean;
     repeatsGroup: boolean;
+    nullable: boolean;
     fixedCount?: number;
   } | null {
     const char = pattern[start];
@@ -1040,6 +1074,7 @@ export class SafetyEvaluator implements Evaluator {
         end: pattern[start + 1] === '?' ? start + 1 : start,
         variable: true,
         repeatsGroup: true,
+        nullable: char === '*',
       };
     }
     if (char === '?') {
@@ -1047,6 +1082,7 @@ export class SafetyEvaluator implements Evaluator {
         end: pattern[start + 1] === '?' ? start + 1 : start,
         variable: true,
         repeatsGroup: false,
+        nullable: true,
       };
     }
     if (char !== '{') return null;
@@ -1071,9 +1107,9 @@ export class SafetyEvaluator implements Evaluator {
     const end = pattern[close + 1] === '?' ? close + 1 : close;
 
     if (variable) {
-      return { end, variable, repeatsGroup };
+      return { end, variable, repeatsGroup, nullable: min === 0 };
     }
 
-    return { end, variable, repeatsGroup: min > 1, fixedCount: min };
+    return { end, variable, repeatsGroup: min > 1, fixedCount: min, nullable: min === 0 };
   }
 }

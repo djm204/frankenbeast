@@ -656,6 +656,24 @@ describe('SafetyEvaluator', () => {
         pattern: '^(?:a(?:|a))+$',
         severity: 'block',
       },
+      {
+        id: 'redos-nondisambiguating-suffix',
+        description: 'nondisambiguating suffix pattern',
+        pattern: '^((a|aa)a)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-nullable-prefix-alternation',
+        description: 'nullable prefix alternation pattern',
+        pattern: '^(?:a?b|b)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-star-prefix-alternation',
+        description: 'star prefix alternation pattern',
+        pattern: '^(?:a*b|b)+$',
+        severity: 'block',
+      },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
@@ -663,9 +681,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(3);
+    expect(result.findings).toHaveLength(6);
     expect(result.findings).toEqual(
-      Array.from({ length: 3 }, () =>
+      Array.from({ length: 6 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
