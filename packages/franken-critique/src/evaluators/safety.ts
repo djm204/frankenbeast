@@ -580,13 +580,12 @@ export class SafetyEvaluator implements Evaluator {
         end: start + 5,
       };
     }
-    if (escaped === 'c' && /^[A-Za-z]$/.test(body[start + 2] ?? '')) {
+    if (escaped === 'c' && /^[A-Za-z0-9_]$/.test(body[start + 2] ?? '')) {
       return { value: String.fromCharCode(body.charCodeAt(start + 2) & 31), end: start + 2 };
     }
     const octal = this.legacyOctalEscapeAt(body, start);
     if (octal !== null) return octal;
     if (escaped === 'b') return { value: '\b', end: start + 1 };
-    if (escaped === 'B') return { value: 'NOT_BACKSPACE', end: start + 1 };
     return { value: this.escapedAtomToken(escaped), end: start + 1 };
   }
 
@@ -986,7 +985,14 @@ export class SafetyEvaluator implements Evaluator {
 
   private tokenMatchesSample(token: string, sample: string): boolean {
     if (token.length === 1) return token === sample;
-    if (token === 'DOT') return sample !== '\n' && sample !== '\r';
+    if (token === 'DOT') {
+      return (
+        sample !== '\n' &&
+        sample !== '\r' &&
+        sample !== '\u2028' &&
+        sample !== '\u2029'
+      );
+    }
     if (token === 'WORD') return /^[A-Za-z0-9_]$/.test(sample);
     if (token === 'DIGIT') return /^\d$/.test(sample);
     if (token === 'SPACE') return /^\s$/u.test(sample);

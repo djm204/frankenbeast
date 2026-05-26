@@ -563,6 +563,18 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-class-word-boundary-identity-escape',
+        description: 'class word boundary identity escape pattern',
+        pattern: '^(?:[\\B]|BB)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-class-nonletter-control-escape',
+        description: 'class non-letter control escape pattern',
+        pattern: '^(?:[\\c0]|\\x10\\x10)+$',
+        severity: 'block',
+      },
+      {
         id: 'redos-comma-alt-serialization',
         description: 'comma alternative serialization pattern',
         pattern: '^(?:(?:,a)|(?:,b)|,)+$',
@@ -581,9 +593,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(39);
+    expect(result.findings).toHaveLength(41);
     expect(result.findings).toEqual(
-      Array.from({ length: 39 }, () =>
+      Array.from({ length: 41 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
@@ -655,6 +667,12 @@ describe('SafetyEvaluator', () => {
         id: 'dot-line-separator-disjoint',
         description: 'dot line separator disjoint',
         pattern: '^(?:.|\\u2028)+!$',
+        severity: 'block',
+      },
+      {
+        id: 'dot-all-line-terminators-disjoint',
+        description: 'dot all line terminators disjoint',
+        pattern: '^(?:.|[\\u2028\\u2029])+!$',
         severity: 'block',
       },
       {
