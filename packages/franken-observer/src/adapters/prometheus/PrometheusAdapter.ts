@@ -12,6 +12,10 @@ interface TokenCounts {
   completion: number
 }
 
+function escapePrometheusLabelValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"')
+}
+
 /**
  * Write-only ExportAdapter that accumulates token, span, and (optionally)
  * cost counters from flushed traces and exposes them in Prometheus text
@@ -78,9 +82,12 @@ export class PrometheusAdapter implements ExportAdapter {
       lines.push('# HELP franken_observer_tokens_total Total tokens processed by model and type')
       lines.push('# TYPE franken_observer_tokens_total counter')
       for (const [model, counts] of this.tokenCounters) {
-        lines.push(`franken_observer_tokens_total{model="${model}",type="prompt"} ${counts.prompt}`)
+        const escapedModel = escapePrometheusLabelValue(model)
         lines.push(
-          `franken_observer_tokens_total{model="${model}",type="completion"} ${counts.completion}`,
+          `franken_observer_tokens_total{model="${escapedModel}",type="prompt"} ${counts.prompt}`,
+        )
+        lines.push(
+          `franken_observer_tokens_total{model="${escapedModel}",type="completion"} ${counts.completion}`,
         )
       }
     }
@@ -89,7 +96,8 @@ export class PrometheusAdapter implements ExportAdapter {
       lines.push('# HELP franken_observer_spans_total Total spans recorded by status')
       lines.push('# TYPE franken_observer_spans_total counter')
       for (const [status, count] of this.spanCounters) {
-        lines.push(`franken_observer_spans_total{status="${status}"} ${count}`)
+        const escapedStatus = escapePrometheusLabelValue(status)
+        lines.push(`franken_observer_spans_total{status="${escapedStatus}"} ${count}`)
       }
     }
 
@@ -97,7 +105,8 @@ export class PrometheusAdapter implements ExportAdapter {
       lines.push('# HELP franken_observer_cost_usd_total Total cost in USD by model')
       lines.push('# TYPE franken_observer_cost_usd_total counter')
       for (const [model, cost] of this.costCounters) {
-        lines.push(`franken_observer_cost_usd_total{model="${model}"} ${cost}`)
+        const escapedModel = escapePrometheusLabelValue(model)
+        lines.push(`franken_observer_cost_usd_total{model="${escapedModel}"} ${cost}`)
       }
     }
 

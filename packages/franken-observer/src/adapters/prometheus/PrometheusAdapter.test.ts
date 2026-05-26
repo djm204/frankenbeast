@@ -82,6 +82,14 @@ describe('PrometheusAdapter', () => {
       expect(out).toContain('gpt-4o')
     })
 
+    it('escapes Prometheus label values in model labels', async () => {
+      const adapter = new PrometheusAdapter()
+      await adapter.flush(makeTrace('bad"model\\name\nnext', 25, 10))
+      const out = adapter.scrape()
+      expect(out).toContain('model="bad\\"model\\\\name\\nnext",type="prompt"')
+      expect(out).not.toContain('model="bad"model')
+    })
+
     it('skips token metrics for spans without token metadata', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTraceNoModel())
