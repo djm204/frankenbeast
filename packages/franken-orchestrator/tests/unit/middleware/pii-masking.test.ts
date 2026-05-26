@@ -43,6 +43,43 @@ describe('PiiMaskingMiddleware', () => {
     expect((result.messages[0]!.content as string)).toContain('[IP]');
   });
 
+  it('masks common API keys and bearer tokens', () => {
+    const openAiKey = `sk-${'1234567890abcdef'.repeat(2)}`;
+    const githubToken = `ghp_${'1234567890abcdef'.repeat(2)}123456`;
+    const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
+    const bearerToken = `Bearer ${['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', 'payload', 'signature'].join('.')}`;
+
+    const result = mw.beforeRequest(
+      makeRequest(
+        `openai=${openAiKey} github=${githubToken} slack=${slackToken} bearer=${bearerToken}`,
+      ),
+    );
+    const content = result.messages[0]!.content as string;
+    expect(content).toContain('openai=[API_KEY]');
+    expect(content).toContain('github=[API_KEY]');
+    expect(content).toContain('slack=[API_KEY]');
+    expect(content).toContain('bearer=[API_KEY]');
+    expect(content).not.toContain(openAiKey);
+    expect(content).not.toContain(githubToken);
+    expect(content).not.toContain(slackToken);
+    expect(content).not.toContain(bearerToken.replace('Bearer ', ''));
+  });
+
+  it('masks database connection strings', () => {
+    const result = mw.beforeRequest(
+      makeRequest(
+        'primary=postgres://user:secret@db.example.com:5432/app replica=mongodb+srv://admin:p4ss@cluster.example.com/db cache=redis://:cachepass@localhost:6379/0',
+      ),
+    );
+    const content = result.messages[0]!.content as string;
+    expect(content).toContain('primary=[CONNECTION_STRING]');
+    expect(content).toContain('replica=[CONNECTION_STRING]');
+    expect(content).toContain('cache=[CONNECTION_STRING]');
+    expect(content).not.toContain('postgres://user:secret@db.example.com:5432/app');
+    expect(content).not.toContain('mongodb+srv://admin:p4ss@cluster.example.com/db');
+    expect(content).not.toContain('redis://:cachepass@localhost:6379/0');
+  });
+
   it('masks PII in response (afterResponse)', () => {
     const result = mw.afterResponse(makeResponse('Email: user@test.com'));
     expect(result.content).toContain('[EMAIL]');

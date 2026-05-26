@@ -2,7 +2,8 @@ import type { LlmRequest } from '@franken/types';
 import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 
 /**
- * PII patterns from the original frankenfirewall (v0.pre-consolidation).
+ * PII patterns from the original frankenfirewall (v0.pre-consolidation), plus
+ * narrowly scoped secret patterns that commonly appear in prompts and logs.
  * Credit card regex validates Visa/MC/Amex/Discover prefixes.
  * SSN regex excludes invalid prefixes (000, 666, 9xx).
  */
@@ -11,6 +12,18 @@ const PII_RULES: Array<{
   pattern: RegExp;
   replacement: string;
 }> = [
+  {
+    name: 'database-connection-string',
+    pattern:
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/[^\s'"`<>]+/gi,
+    replacement: '[CONNECTION_STRING]',
+  },
+  {
+    name: 'api-key-or-token',
+    pattern:
+      /\b(?:sk-[A-Za-z0-9_-]{16,}|(?:ghp|gho)_[A-Za-z0-9_]{20,}|xoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{20,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,})\b/g,
+    replacement: '[API_KEY]',
+  },
   {
     name: 'email',
     pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
