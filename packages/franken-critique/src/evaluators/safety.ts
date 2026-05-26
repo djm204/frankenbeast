@@ -220,7 +220,12 @@ export class SafetyEvaluator implements Evaluator {
           group.containsAmbiguousAlternation = true;
         }
         if (group.containsQuantifiedAtom) {
-          stack.at(-1)!.containsQuantifiedAtom = true;
+          const groupContent = pattern.slice(group.startIndex + 1, i);
+          if (this.hasDeterministicTopLevelAlternation(groupContent)) {
+            group.containsQuantifiedAtom = false;
+          } else {
+            stack.at(-1)!.containsQuantifiedAtom = true;
+          }
         }
         if (
           group.containsAmbiguousAlternation &&
@@ -278,6 +283,13 @@ export class SafetyEvaluator implements Evaluator {
           this.tokenPrefixOverlaps(left, right),
       ),
     );
+  }
+
+  private hasDeterministicTopLevelAlternation(groupContent: string): boolean {
+    const alternatives = this.splitTopLevelAlternatives(
+      this.stripGroupPrefix(groupContent),
+    );
+    return alternatives.length > 1 && !this.hasOverlappingAlternation(groupContent);
   }
 
   private expandSimpleAlternativePrefix(
@@ -482,6 +494,27 @@ export class SafetyEvaluator implements Evaluator {
     return escaped;
   }
 
+  private classEscapedTokenAt(
+    body: string,
+    start: number,
+  ): { value: string; end: number } | null {
+    const escaped = body[start + 1];
+    if (escaped === undefined) return null;
+    if (escaped === 'x' && /^[0-9A-Fa-f]{2}$/.test(body.slice(start + 2, start + 4))) {
+      return {
+        value: String.fromCharCode(Number.parseInt(body.slice(start + 2, start + 4), 16)),
+        end: start + 3,
+      };
+    }
+    if (escaped === 'u' && /^[0-9A-Fa-f]{4}$/.test(body.slice(start + 2, start + 6))) {
+      return {
+        value: String.fromCharCode(Number.parseInt(body.slice(start + 2, start + 6), 16)),
+        end: start + 5,
+      };
+    }
+    return { value: this.escapedAtomToken(escaped), end: start + 1 };
+  }
+
   private characterClassToken(characterClass: string): string {
     if (characterClass === '[0-9]' || characterClass === '[\\d]') return 'DIGIT';
     if (characterClass === '[A-Za-z0-9_]' || characterClass === '[\\w]') {
@@ -641,11 +674,10 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < body.length; i += 1) {
       const char = body[i]!;
       if (char === '\\') {
-        const escaped = body[i + 1];
-        if (escaped === undefined) continue;
-        const escapedToken = this.escapedAtomToken(escaped);
-        if (this.regexTokensOverlap(escapedToken, token)) return true;
-        i += 1;
+        const escapedToken = this.classEscapedTokenAt(body, i);
+        if (escapedToken === null) continue;
+        if (this.regexTokensOverlap(escapedToken.value, token)) return true;
+        i = escapedToken.end;
         continue;
       }
 
@@ -664,7 +696,7 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private spaceTokenOverlaps(token: string): boolean {
-    return token === 'SPACE' || /^[\t\n\r\f\v ]$/.test(token);
+    return token === 'SPACE' || /^\s$/u.test(token);
   }
 
   private positiveClassBodyOverlaps(body: string, token: string): boolean {
@@ -713,7 +745,7 @@ export class SafetyEvaluator implements Evaluator {
       if (token.startsWith('RANGE:')) return !this.rangeContainsOnlyWhitespace(token);
       if (token.startsWith('CLASS:')) {
         return this.classBodyContainsOutsideToken(token, (char) =>
-          /^[\t\n\r\f\v ]$/.test(char),
+          /^\s$/u.test(char),
         );
       }
     }
@@ -752,12 +784,11 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < body.length; i += 1) {
       const char = body[i]!;
       if (char === '\\') {
-        const escaped = body[i + 1];
-        if (escaped === undefined) continue;
-        const token = this.escapedAtomToken(escaped);
-        if (token.length === 1 && !contains(token)) return true;
-        if (token.startsWith('NOT_')) return true;
-        i += 1;
+        const token = this.classEscapedTokenAt(body, i);
+        if (token === null) continue;
+        if (token.value.length === 1 && !contains(token.value)) return true;
+        if (token.value.startsWith('NOT_')) return true;
+        i = token.end;
         continue;
       }
 
@@ -811,6 +842,7 @@ export class SafetyEvaluator implements Evaluator {
       '-',
       '.',
       '/',
+      '\u00A0',
     ];
     return samples.some(
       (sample) =>
@@ -824,10 +856,10 @@ export class SafetyEvaluator implements Evaluator {
     if (token === 'DOT') return sample !== '\n' && sample !== '\r';
     if (token === 'WORD') return /^[A-Za-z0-9_]$/.test(sample);
     if (token === 'DIGIT') return /^\d$/.test(sample);
-    if (token === 'SPACE') return /^[\t\n\r\f\v ]$/.test(sample);
+    if (token === 'SPACE') return /^\s$/u.test(sample);
     if (token === 'NOT_DIGIT') return !/^\d$/.test(sample);
     if (token === 'NOT_WORD') return !/^[A-Za-z0-9_]$/.test(sample);
-    if (token === 'NOT_SPACE') return !/^[\t\n\r\f\v ]$/.test(sample);
+    if (token === 'NOT_SPACE') return !/^\s$/u.test(sample);
     if (token.startsWith('RANGE:')) {
       const [, start, end] = token.match(/^RANGE:(.)-(.)$/) ?? [];
       return start !== undefined && end !== undefined
@@ -849,11 +881,11 @@ export class SafetyEvaluator implements Evaluator {
     for (let i = 0; i < positiveBody.length; i += 1) {
       const char = positiveBody[i]!;
       if (char === '\\') {
-        const escaped = positiveBody[i + 1];
-        if (escaped !== undefined) {
-          matches = this.tokenMatchesSample(this.escapedAtomToken(escaped), sample);
+        const token = this.classEscapedTokenAt(positiveBody, i);
+        if (token !== null) {
+          matches = this.tokenMatchesSample(token.value, sample);
           if (matches) break;
-          i += 1;
+          i = token.end;
         }
         continue;
       }

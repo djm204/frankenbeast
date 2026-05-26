@@ -485,6 +485,18 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-hex-class-alternation',
+        description: 'hex class alternation pattern',
+        pattern: '^(?:[\\x61b]|aa)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-nbsp-space-alternation',
+        description: 'nbsp space alternation pattern',
+        pattern: '^(?:\\s|\\u00A0\\s)+!$',
+        severity: 'block',
+      },
+      {
         id: 'redos-truncated-prefix-overlap',
         description: 'truncated prefix overlap pattern',
         pattern: '^(?:a{1001}|a{1001}a)+$',
@@ -539,9 +551,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(32);
+    expect(result.findings).toHaveLength(34);
     expect(result.findings).toEqual(
-      Array.from({ length: 32 }, () =>
+      Array.from({ length: 34 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
@@ -607,6 +619,12 @@ describe('SafetyEvaluator', () => {
         id: 'deterministic-suffix-after-inner-alternation',
         description: 'deterministic suffix after inner alternation',
         pattern: '^((a|aa)b)+$',
+        severity: 'block',
+      },
+      {
+        id: 'deterministic-quantified-alternation',
+        description: 'deterministic quantified alternation',
+        pattern: '^(a+b+|c+d+)+y$',
         severity: 'block',
       },
     ]);
