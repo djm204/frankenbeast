@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.0...franken-observer-v0.7.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **observer:** escape trace viewer template metacharacters ([#305](https://github.com/djm204/frankenbeast/issues/305)) ([5403809](https://github.com/djm204/frankenbeast/commit/54038093b36f9e4539f8910117a4837c50cfdd28))
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.6.0...franken-observer-v0.7.0) (2026-05-25)
 
 
