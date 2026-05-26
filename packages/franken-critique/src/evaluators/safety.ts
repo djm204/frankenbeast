@@ -116,7 +116,9 @@ export class SafetyEvaluator implements Evaluator {
       this.hasBackreference(pattern) ||
       this.hasNestedQuantifiedExpression(pattern) ||
       (this.hasEnabledInlineModifier(pattern, 's') &&
-        this.hasNestedQuantifiedExpression(this.expandDotAllLiterals(pattern)))
+        this.hasNestedQuantifiedExpression(
+          this.expandScopedDotAllLiterals(pattern),
+        ))
     );
   }
 
@@ -890,7 +892,7 @@ export class SafetyEvaluator implements Evaluator {
   }
 
   private tokenMayMatchSample(left: string, right: string): boolean {
-    const samples = [
+    const samples = new Set([
       'a',
       'b',
       'A',
@@ -908,12 +910,53 @@ export class SafetyEvaluator implements Evaluator {
       '.',
       '/',
       '\u00A0',
-    ];
-    return samples.some(
+      ...this.tokenProbeSamples(left),
+      ...this.tokenProbeSamples(right),
+    ]);
+    return [...samples].some(
       (sample) =>
         this.tokenMatchesSample(left, sample) &&
         this.tokenMatchesSample(right, sample),
     );
+  }
+
+  private tokenProbeSamples(token: string): string[] {
+    if (token.startsWith('RANGE:')) {
+      const [, start, end] = token.match(/^RANGE:(.)-(.)$/) ?? [];
+      return start !== undefined && end !== undefined
+        ? this.sampleRangeCharacters(start, end)
+        : [];
+    }
+    if (!token.startsWith('CLASS:')) return [];
+
+    const characterClass = token.slice('CLASS:'.length);
+    const body = characterClass.slice(1, -1);
+    const positiveBody = body.startsWith('^') ? body.slice(1) : body;
+    const samples: string[] = [];
+
+    for (let i = 0; i < positiveBody.length; i += 1) {
+      const char = positiveBody[i]!;
+      if (char === '\\') {
+        const escapedToken = this.classEscapedTokenAt(positiveBody, i);
+        if (escapedToken !== null) {
+          if (escapedToken.value.length === 1) samples.push(escapedToken.value);
+          i = escapedToken.end;
+        }
+        continue;
+      }
+
+      if (positiveBody[i + 1] === '-' && positiveBody[i + 2] !== undefined) {
+        samples.push(
+          ...this.sampleRangeCharacters(char, positiveBody[i + 2]!),
+        );
+        i += 2;
+        continue;
+      }
+
+      samples.push(char);
+    }
+
+    return samples;
   }
 
   private tokenMatchesSample(token: string, sample: string): boolean {
@@ -1003,7 +1046,7 @@ export class SafetyEvaluator implements Evaluator {
           i += 5;
           continue;
         }
-        result += `${char}${pattern[i + 1]?.toLowerCase() ?? ''}`;
+        result += `${char}${pattern[i + 1] ?? ''}`;
         i += 1;
         continue;
       }
@@ -1081,6 +1124,71 @@ export class SafetyEvaluator implements Evaluator {
       result += char === '.' ? '[\\s\\S]' : char;
     }
     return result;
+  }
+
+  private expandScopedDotAllLiterals(pattern: string, dotAll = false): string {
+    let result = '';
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\') {
+        result += pattern.slice(i, i + 2);
+        i += 1;
+        continue;
+      }
+      if (char === '[') {
+        const end = this.skipCharacterClass(pattern, i);
+        result += pattern.slice(i, end + 1);
+        i = end;
+        continue;
+      }
+      if (char === '(' && pattern[i + 1] === '?') {
+        const modifierMatch = pattern.slice(i + 2).match(/^([A-Za-z-]+):/);
+        if (modifierMatch) {
+          const groupEnd = this.findGroupEnd(pattern, i);
+          if (groupEnd !== null) {
+            const modifiers = modifierMatch[1] ?? '';
+            const contentStart = i + 2 + modifierMatch[0].length;
+            const scopedDotAll = this.modifierTextEnables(modifiers, 's')
+              ? true
+              : modifiers.includes('-s')
+                ? false
+                : dotAll;
+            result += `(?:${this.expandScopedDotAllLiterals(
+              pattern.slice(contentStart, groupEnd),
+              scopedDotAll,
+            )})`;
+            i = groupEnd;
+            continue;
+          }
+        }
+      }
+      result += char === '.' && dotAll ? '[\\s\\S]' : char;
+    }
+    return result;
+  }
+
+  private findGroupEnd(pattern: string, start: number): number | null {
+    let depth = 0;
+    for (let i = start; i < pattern.length; i += 1) {
+      const char = pattern[i]!;
+      if (char === '\\') {
+        i += 1;
+        continue;
+      }
+      if (char === '[') {
+        i = this.skipCharacterClass(pattern, i);
+        continue;
+      }
+      if (char === '(') {
+        depth += 1;
+        continue;
+      }
+      if (char === ')') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return null;
   }
 
   private splitTopLevelAlternatives(groupContent: string): string[] {

@@ -533,6 +533,18 @@ describe('SafetyEvaluator', () => {
         severity: 'block',
       },
       {
+        id: 'redos-case-folded-preserves-negated-escape',
+        description: 'case folded negated escape pattern',
+        pattern: '^(?i:\\D|a)+$',
+        severity: 'block',
+      },
+      {
+        id: 'redos-nonascii-negated-class-range-overlap',
+        description: 'non-ascii negated class range overlap pattern',
+        pattern: '^(?:[^a]|[Ω-Ϋ][Ω-Ϋ])+$',
+        severity: 'block',
+      },
+      {
         id: 'redos-comma-alt-serialization',
         description: 'comma alternative serialization pattern',
         pattern: '^(?:(?:,a)|(?:,b)|,)+$',
@@ -551,9 +563,9 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
-    expect(result.findings).toHaveLength(34);
+    expect(result.findings).toHaveLength(36);
     expect(result.findings).toEqual(
-      Array.from({ length: 34 }, () =>
+      Array.from({ length: 36 }, () =>
         expect.objectContaining({ message: expect.stringContaining('Unsafe') }),
       ),
     );
@@ -637,6 +649,12 @@ describe('SafetyEvaluator', () => {
         id: 'inline-modifier-text-in-class',
         description: 'inline modifier text in class',
         pattern: '^(?:.|\\n\\n)+[(?s:]$',
+        severity: 'block',
+      },
+      {
+        id: 'scoped-dotall-leaves-outer-dot-unchanged',
+        description: 'scoped dotAll leaves outer dot unchanged',
+        pattern: '^(?s:a)(?:.|\\n)+!$',
         severity: 'block',
       },
     ]);
