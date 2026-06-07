@@ -382,6 +382,9 @@ export class CliLlmAdapter implements IAdapter {
         hardKillTimer = setTimeout(() => {
           try { child.kill('SIGKILL'); } catch {}
         }, 5_000);
+        // Don't keep the event loop alive waiting on the hard-kill fallback;
+        // short-lived invocations should exit promptly after a timeout reject.
+        hardKillTimer.unref();
         settle(() => reject(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`)));
       }, this.opts.timeoutMs);
 
@@ -395,8 +398,14 @@ export class CliLlmAdapter implements IAdapter {
       });
 
       child.on('error', (err) => {
+        if (timedOut) {
+          // An 'error' here can mean the process couldn't be killed; keep the
+          // scheduled hard-kill (SIGKILL) so a process that ignored SIGTERM is
+          // still terminated. Only cancel the original deadline timer.
+          clearTimeout(timer);
+          return;
+        }
         clearTimers();
-        if (timedOut) return;
         settle(() => reject(err));
       });
     });
