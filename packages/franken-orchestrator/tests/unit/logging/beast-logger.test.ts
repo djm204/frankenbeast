@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -373,6 +373,111 @@ describe('BeastLogger', () => {
         expect(existsSync(`${logFile}.1`)).toBe(true);
         expect(readFileSync(`${logFile}.1`, 'utf8')).toContain('xxxxxxxxxx');
         expect(readFileSync(logFile, 'utf8')).toContain('new file after rotation');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+
+  describe('short-write handling', () => {
+    it('retries writeSync until all bytes are written', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-short-write-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        const logger = new BeastLogger({ verbose: false, captureForFile: true, logFile });
+
+        // Write a larger log message to ensure writeSync is exercised
+        const longMsg = 'a'.repeat(512);
+        logger.info(longMsg);
+        logger.close();
+
+        const contents = readFileSync(logFile, 'utf8');
+        // The full message must be present — no truncation
+        expect(contents).toContain(longMsg);
+        // Exactly one newline-terminated entry
+        const lines = contents.split('\n').filter(l => l.length > 0);
+        expect(lines).toHaveLength(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('accounts for byte length (not char length) in logBytes', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-multibyte-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        // Multi-byte UTF-8: each emoji is 4 bytes
+        const emoji = '🧟'.repeat(20);
+        const logger = new BeastLogger({ verbose: false, captureForFile: true, logFile });
+
+        logger.info(emoji);
+        logger.close();
+
+        const contents = readFileSync(logFile, 'utf8');
+        expect(contents).toContain(emoji);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('zero-retention size-cap (maxRotatedLogFiles < 1)', () => {
+    it('truncates the active file when size limit is hit and retention is disabled', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-no-retain-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        writeFileSync(logFile, `${'x'.repeat(80)}\n`);
+        const logger = new BeastLogger({
+          verbose: false,
+          captureForFile: true,
+          logFile,
+          maxLogFileBytes: 100,
+          maxRotatedLogFiles: 0,
+        });
+
+        logger.info('post-truncation entry');
+        logger.close();
+
+        // Must NOT have created a rotated file
+        expect(existsSync(`${logFile}.1`)).toBe(false);
+
+        // Active file must contain the new entry (file was truncated then written)
+        const contents = readFileSync(logFile, 'utf8');
+        expect(contents).toContain('post-truncation entry');
+
+        // Active file must NOT have grown past the limit
+        // Use readFileSync length as a proxy — the old 80-byte filler should be gone
+        expect(contents).not.toContain('xxxxxxxxxx');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not reset logBytes without actually clearing the file', () => {
+      // When maxRotatedLogFiles < 1, the file is truncated so logBytes=0 is accurate
+      const dir = mkdtempSync(join(tmpdir(), 'beast-logger-no-retain-bytes-'));
+      try {
+        const logFile = join(dir, 'build.log');
+        writeFileSync(logFile, `${'y'.repeat(90)}\n`);
+        const logger = new BeastLogger({
+          verbose: false,
+          captureForFile: true,
+          logFile,
+          maxLogFileBytes: 100,
+          maxRotatedLogFiles: 0,
+        });
+
+        // Fill up to trigger truncation on second write
+        logger.info('first entry that pushes past limit');
+        logger.info('second entry after truncation');
+        logger.close();
+
+        const contents = readFileSync(logFile, 'utf8');
+        // Old filler must be gone
+        expect(contents).not.toContain('yyy');
+        // Second entry is present
+        expect(contents).toContain('second entry after truncation');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -6,7 +6,7 @@
  * boxed headers, and service highlighting for verbose mode.
  */
 
-import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, truncateSync, writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import type { ILogger } from '../deps.js';
@@ -316,10 +316,14 @@ export class BeastLogger implements ILogger {
 
   private writeLogEntry(line: string): void {
     if (!this.logFile) return;
-    const bytes = Buffer.byteLength(line);
-    this.ensureLogFileOpen(bytes);
-    writeSync(this.logFd!, line);
-    this.logBytes += bytes;
+    const buf = Buffer.from(line);
+    this.ensureLogFileOpen(buf.length);
+    let offset = 0;
+    while (offset < buf.length) {
+      const written = writeSync(this.logFd!, buf, offset, buf.length - offset);
+      offset += written;
+    }
+    this.logBytes += buf.length;
   }
 
   private ensureLogFileOpen(nextWriteBytes: number): void {
@@ -327,8 +331,7 @@ export class BeastLogger implements ILogger {
     if (this.logFd === undefined) {
       this.logBytes = this.currentLogFileSize();
       if (this.shouldRotate(nextWriteBytes)) {
-        this.rotateLogFiles();
-        this.logBytes = 0;
+        this.truncateOrRotate();
       }
       this.logFd = openSync(this.logFile, 'a');
       return;
@@ -336,10 +339,26 @@ export class BeastLogger implements ILogger {
 
     if (this.shouldRotate(nextWriteBytes)) {
       this.close();
-      this.rotateLogFiles();
-      this.logBytes = 0;
+      this.truncateOrRotate();
       this.logFd = openSync(this.logFile, 'a');
     }
+  }
+
+  /**
+   * Rotate log files when retention is enabled, or truncate the active file
+   * when retention is disabled (maxRotatedLogFiles < 1). Always resets logBytes
+   * to 0 only after the file has actually been emptied or replaced.
+   */
+  private truncateOrRotate(): void {
+    if (this.maxRotatedLogFiles < 1) {
+      // Retention disabled: truncate the active file in-place to enforce the size cap.
+      if (this.logFile && existsSync(this.logFile)) {
+        truncateSync(this.logFile, 0);
+      }
+    } else {
+      this.rotateLogFiles();
+    }
+    this.logBytes = 0;
   }
 
   private shouldRotate(nextWriteBytes: number): boolean {
