@@ -41,6 +41,7 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
 
     for (const chunkFile of chunkFiles) {
       const chunkId = chunkFile.replace('.md', '');
+      this.sanitizeChunkId(chunkId, chunkFile);
       const chunkPath = join(absDir, chunkFile);
       const content = this.readValidatedChunkContent(chunkPath, chunkId);
 
@@ -67,6 +68,21 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
     return { tasks };
   }
 
+  /**
+   * Rejects a chunkId that contains newline, carriage return, or other control
+   * characters.  Such characters could break the BEGIN/END delimiter lines and
+   * allow a maliciously-named chunk file to inject an early END marker.
+   */
+  private sanitizeChunkId(chunkId: string, chunkFile: string): void {
+    // eslint-disable-next-line no-control-regex
+    if (/[\x00-\x1f\x7f]/.test(chunkId)) {
+      throw new Error(
+        `Chunk file '${chunkFile}' produces a chunkId containing control characters; ` +
+          `rename the file to remove newlines, carriage returns, and other control characters`,
+      );
+    }
+  }
+
   private discoverChunks(dir: string): string[] {
     let entries: string[];
     try {
@@ -77,7 +93,14 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
     }
 
     return entries
-      .filter((f) => f.endsWith('.md') && !f.startsWith('00_') && /^\d{2}/.test(f))
+      .filter((f) => {
+        if (!f.endsWith('.md') || f.startsWith('00_') || !/^\d{2}/.test(f)) return false;
+        // Reject filenames containing control characters before they reach
+        // delimiter interpolation — defence-in-depth ahead of sanitizeChunkId.
+        // eslint-disable-next-line no-control-regex
+        if (/[\x00-\x1f\x7f]/.test(f)) return false;
+        return true;
+      })
       .sort();
   }
 
