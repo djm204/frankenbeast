@@ -46,12 +46,21 @@ export const ProvidersConfigSchema = z.object({
   overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
 });
 
+const MIN_TOTAL_TOKEN_BUDGET = 10_000;
+const MIN_DURATION_MS_PER_CRITIQUE_ITERATION = 10_000;
+
 const BaseOrchestratorConfigSchema = z.object({
   /** Maximum plan-critique iterations before escalation. */
   maxCritiqueIterations: z.number().int().min(1).max(10).default(3),
 
   /** Maximum total tokens before budget breaker trips. */
-  maxTotalTokens: z.number().int().min(1000).default(100_000),
+  maxTotalTokens: z
+    .number()
+    .int()
+    .min(MIN_TOTAL_TOKEN_BUDGET, {
+      message: `maxTotalTokens must be at least ${MIN_TOTAL_TOKEN_BUDGET} tokens`,
+    })
+    .default(100_000),
 
   /** Maximum execution time in milliseconds. */
   maxDurationMs: z.number().int().min(1000).default(300_000),
@@ -65,8 +74,14 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Whether to run LLM-based reflection at phase boundaries. */
   enableReflection: z.boolean().default(false),
 
-  /** Minimum critique score to pass (0-1). */
-  minCritiqueScore: z.number().min(0).max(1).default(0.7),
+  /** Minimum critique score to pass (0-1, exclusive upper bound). */
+  minCritiqueScore: z
+    .number()
+    .min(0)
+    .lt(1, {
+      message: 'minCritiqueScore must be less than 1 so a plan can pass',
+    })
+    .default(0.7),
 
   /** Provider configuration. */
   providers: ProvidersConfigSchema.default({}),
@@ -84,7 +99,21 @@ const BaseOrchestratorConfigSchema = z.object({
   consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
 
-export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(NetworkConfigSchema.shape);
+export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(
+  NetworkConfigSchema.shape,
+).superRefine((config, ctx) => {
+  const minDurationMs =
+    config.maxCritiqueIterations * MIN_DURATION_MS_PER_CRITIQUE_ITERATION;
+  if (config.maxDurationMs < minDurationMs) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['maxDurationMs'],
+      message:
+        `maxDurationMs must be at least ${minDurationMs}ms ` +
+        `for ${config.maxCritiqueIterations} critique iterations`,
+    });
+  }
+});
 
 export type OrchestratorConfig = z.infer<typeof OrchestratorConfigSchema>;
 

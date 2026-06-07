@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.0...franken-critique-v0.6.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **security:** harden reflection prompt context ([#304](https://github.com/djm204/frankenbeast/issues/304)) ([53beea2](https://github.com/djm204/frankenbeast/commit/53beea233254f76c9c2b92b82eef8641a3cfaeaa))
+* **security:** reject unsafe safety regex rules ([#302](https://github.com/djm204/frankenbeast/issues/302)) ([c639420](https://github.com/djm204/frankenbeast/commit/c639420a3a250d756e634e6e5db21d8a4f2d3fac))
+
 ## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.5.0...franken-critique-v0.6.0) (2026-03-26)
 
 

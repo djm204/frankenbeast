@@ -164,7 +164,13 @@ const sidebar = document.getElementById('sidebar')
 const panel   = document.getElementById('panel')
 
 function esc(s){
-  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  return String(s??'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/\`/g,'&#96;')
+    .split('$').join('&#36;')
 }
 function badge(status){
   const cls = status==='completed'?'ok':status==='error'?'err':'act'

@@ -2,15 +2,53 @@ import type { LlmRequest } from '@franken/types';
 import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 
 /**
- * PII patterns from the original frankenfirewall (v0.pre-consolidation).
+ * PII patterns from the original frankenfirewall (v0.pre-consolidation), plus
+ * narrowly scoped secret patterns that commonly appear in prompts and logs.
  * Credit card regex validates Visa/MC/Amex/Discover prefixes.
  * SSN regex excludes invalid prefixes (000, 666, 9xx).
  */
 const PII_RULES: Array<{
   name: string;
   pattern: RegExp;
-  replacement: string;
+  replacement: string | ((match: string) => string);
 }> = [
+  {
+    name: 'database-connection-string',
+    pattern:
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss):\/\/(?:[^\s'"`<>()@,]+@)?(?:\[[^\]\s'"`<>()]+\]|[A-Za-z0-9.-]+)(?::\d+)?(?:,(?:\[[^\]\s'"`<>()]+\]|[A-Za-z0-9.-]+)(?::\d+)?)*(?:\/[^\s'"`<>,)}]*)?(?:\?[^\s'"`<>,)}]*)?/gi,
+    replacement: (match) => {
+      const trailingDelimiter = match.match(/[.;:]+$/)?.[0] ?? '';
+      return `[CONNECTION_STRING]${trailingDelimiter}`;
+    },
+  },
+  {
+    name: 'openai-api-key',
+    pattern: /\bsk-[A-Za-z0-9_-]{15,}[A-Za-z0-9_-]/g,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'github-token',
+    pattern: /\b(?:gh[opusr])_[A-Za-z0-9_.-]{20,}/gi,
+    replacement: (match) => {
+      const trailingDelimiter = match.match(/[.;:]+$/)?.[0] ?? '';
+      return `[API_KEY]${trailingDelimiter}`;
+    },
+  },
+  {
+    name: 'github-fine-grained-pat',
+    pattern: /\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}/gi,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'slack-bot-token',
+    pattern: /\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]/gi,
+    replacement: '[API_KEY]',
+  },
+  {
+    name: 'bearer-token',
+    pattern: /\bbearer\s+[A-Za-z0-9._~+/=-]{19,}[A-Za-z0-9_=\/+~-]/gi,
+    replacement: '[API_KEY]',
+  },
   {
     name: 'email',
     pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
@@ -43,7 +81,10 @@ const PII_RULES: Array<{
 function mask(text: string): string {
   let result = text;
   for (const rule of PII_RULES) {
-    result = result.replace(rule.pattern, rule.replacement);
+    const { pattern, replacement } = rule;
+    result = typeof replacement === 'function'
+      ? result.replace(pattern, replacement)
+      : result.replace(pattern, replacement);
   }
   return result;
 }

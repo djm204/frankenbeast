@@ -59,6 +59,25 @@ describe('PlanExporter.toMarkdown', () => {
     expect(md).toContain('a');
   });
 
+  it('escapes markdown syntax in task ids and objectives', () => {
+    const task: Task = {
+      id: createTaskId('task**[spoof](https://evil.example)'),
+      objective: 'Ship **approved** [payload](https://evil.example)',
+      requiredSkills: [],
+      dependsOn: [],
+      status: 'pending',
+    };
+    const graph = PlanGraph.empty().addTask(task);
+
+    const md = new PlanExporter().toMarkdown(graph);
+
+    expect(md).toContain(
+      '- [ ] **task\\*\\*\\[spoof\\]\\(https://evil\\.example\\)**: Ship \\*\\*approved\\*\\* \\[payload\\]\\(https://evil\\.example\\)'
+    );
+    expect(md).not.toContain('task**[spoof](https://evil.example)');
+    expect(md).not.toContain('Ship **approved** [payload](https://evil.example)');
+  });
+
   it('lists tasks in topological order', () => {
     const graph = PlanGraph.empty()
       .addTask(makeTask('a'))
