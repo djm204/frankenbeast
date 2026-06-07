@@ -17,7 +17,7 @@ describe('issue #86 documentation accuracy', () => {
       'ILlmClient Return Type Divergence',
     ]) {
       expect(matrix).toMatch(
-        new RegExp(`### \\d+\\. ${resolvedType}[\\s\\S]*\\*\\*Status\\*\\*: Resolved`),
+        new RegExp(`### \\d+\\. ${resolvedType}(?:(?!###)[\\s\\S])*?\\*\\*Status\\*\\*: Resolved`),
       );
     }
   });
