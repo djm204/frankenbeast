@@ -47,16 +47,26 @@ describe('ErrorIngester', () => {
     expect(result.type).toBe('known');
   });
 
-  it('rejects empty known error patterns before matching', () => {
-    expect(() =>
-      new ErrorIngester().classify(new Error('unrelated failure'), [makeKnownError('')]),
-    ).toThrow(/at least 6 characters/);
+  it('skips empty known error patterns without aborting classification', () => {
+    const result = new ErrorIngester().classify(new Error('unrelated failure'), [
+      makeKnownError(''),
+    ]);
+    expect(result.type).toBe('unknown');
   });
 
-  it('rejects trivial known error patterns before matching', () => {
-    expect(() =>
-      new ErrorIngester().classify(new Error('any error message'), [makeKnownError('error')]),
-    ).toThrow(/at least 6 characters/);
+  it('skips trivial known error patterns without aborting classification', () => {
+    const result = new ErrorIngester().classify(new Error('any error message'), [
+      makeKnownError('error'),
+    ]);
+    expect(result.type).toBe('unknown');
+  });
+
+  it('still matches valid patterns that follow an invalid stored pattern', () => {
+    const trivial = makeKnownError('error');
+    const valid = makeKnownError('disk full');
+    const result = new ErrorIngester().classify(new Error('disk full error'), [trivial, valid]);
+    expect(result.type).toBe('known');
+    expect(result).toMatchObject({ knownError: valid });
   });
 
   it('does not match literal patterns inside larger words', () => {

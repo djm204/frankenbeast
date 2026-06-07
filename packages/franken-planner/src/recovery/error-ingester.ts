@@ -23,7 +23,21 @@ export class ErrorIngester {
 }
 
 function patternMatches(message: string, pattern: string): boolean {
-  const normalizedPattern = validatePattern(pattern);
+  let normalizedPattern: string;
+  try {
+    normalizedPattern = validatePattern(pattern);
+  } catch (err) {
+    // A single malformed/stale stored pattern (e.g. an empty or trivially
+    // short memory entry) must not abort the whole classification loop and
+    // mask valid later patterns. Skip it so matching falls through to the
+    // remaining knownErrors and, ultimately, the unknown-error path.
+    console.warn(
+      `[ErrorIngester] skipping invalid known error pattern ${JSON.stringify(pattern)}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  }
   const escapedPattern = escapeRegex(normalizedPattern).replace(/\s+/g, String.raw`\s+`);
   const matcher = new RegExp(
     String.raw`(?<![${WORD_CHAR_CLASS}])${escapedPattern}(?![${WORD_CHAR_CLASS}])`,
