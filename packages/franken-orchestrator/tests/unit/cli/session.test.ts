@@ -371,6 +371,36 @@ describe('Session', () => {
       rmSync(testDir, { recursive: true, force: true });
     });
 
+    it('throws friendly ENOENT error when designDocPath file is missing', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const missingPath = resolve(tmpdir(), `nonexistent-design-${Date.now()}.md`);
+      const config = makeConfig({
+        entryPhase: 'plan',
+        exitAfter: 'plan',
+        designDocPath: missingPath,
+      });
+
+      await expect(new Session(config).start()).rejects.toThrow(
+        /No design document found.*Check the path/,
+      );
+    });
+
+    it('rethrows non-ENOENT errors from designDocPath (e.g. EISDIR)', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      // Pass a directory path — readFileSync throws EISDIR, not ENOENT
+      const dirPath = tmpdir();
+      const config = makeConfig({
+        entryPhase: 'plan',
+        exitAfter: 'plan',
+        designDocPath: dirPath,
+      });
+
+      const err = await new Session(config).start().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      // Must NOT be the generic friendly message — the real error code survives
+      expect((err as Error).message).not.toMatch(/Check the path, run "frankenbeast interview"/);
+    });
+
     it('throws clear error when no design doc found', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       mockReadDesignDoc.mockReturnValueOnce(undefined);

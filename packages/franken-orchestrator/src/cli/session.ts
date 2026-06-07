@@ -290,10 +290,13 @@ export class Session {
     if (designDocPath) {
       try {
         designContent = readFileSync(designDocPath, 'utf-8');
-      } catch {
-        throw new Error(
-          `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
-        );
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(
+            `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
+          );
+        }
+        throw err;
       }
     } else {
       const stored = readDesignDoc(paths);

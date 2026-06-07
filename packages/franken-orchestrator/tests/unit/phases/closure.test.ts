@@ -103,6 +103,35 @@ describe('runClosure', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('returns failed status when all tasks skipped due to unmet dependencies', async () => {
+    const blockedByDeps: TaskOutcome[] = [
+      { taskId: 't1', status: 'skipped', error: 'Unmet dependencies' },
+      { taskId: 't2', status: 'skipped', error: 'Unmet dependencies' },
+    ];
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), blockedByDeps);
+
+    expect(result.status).toBe('failed');
+    expect(result.taskResults).toHaveLength(2);
+  });
+
+  it('returns failed status when all tasks skipped due to governor rejection', async () => {
+    const governorRejected: TaskOutcome[] = [
+      { taskId: 't1', status: 'skipped', error: 'Rejected' },
+    ];
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), governorRejected);
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('returns no-op when all tasks are intentionally skipped with no error', async () => {
+    const intentionalSkips: TaskOutcome[] = [
+      { taskId: 't1', status: 'skipped' },
+    ];
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), intentionalSkips);
+
+    expect(result.status).toBe('no-op');
+  });
+
   it('includes plan summary when plan exists', async () => {
     const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), successOutcomes);
     expect(result.planSummary).toBe('1 task(s) planned');

@@ -61,8 +61,12 @@ export async function runClosure(
 
   const allSucceeded = taskOutcomes.every(o => o.status === 'success');
   const allSkipped = taskOutcomes.length > 0 && taskOutcomes.every(o => o.status === 'skipped');
+  // Only report no-op when every skipped outcome is a benign/intentional skip
+  // (no error reason attached). Skips caused by unmet dependencies or governor
+  // rejections always carry an error field and must not be silently labelled no-op.
+  const benignAllSkipped = allSkipped && taskOutcomes.every(o => !o.error);
 
-  const status = allSkipped ? 'no-op' : allSucceeded ? 'completed' : 'failed';
+  const status = benignAllSkipped ? 'no-op' : allSucceeded ? 'completed' : 'failed';
 
   const result: BeastResult = {
     sessionId: ctx.sessionId,
