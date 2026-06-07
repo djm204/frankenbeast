@@ -104,6 +104,43 @@ describe('LoopDetector', () => {
     })
   })
 
+  describe('ordinal progressions are not loops', () => {
+    it('does not flag a normal incrementing iteration counter as a loop', () => {
+      // Mirrors the CLI executor span naming cli:<chunk>:iter-<n> over a normal
+      // 9-iteration run under the default detector.
+      const detector = new LoopDetector()
+      let detected = false
+      for (let i = 1; i <= 9; i += 1) {
+        detected = detector.check(`cli:chunk-a:iter-${i}`).detected || detected
+      }
+      expect(detected).toBe(false)
+    })
+
+    it('does not collapse hyphenated ordinal step names', () => {
+      const detector = new LoopDetector({ windowSize: 1, repeatThreshold: 3 })
+      for (const n of ['step-1', 'step-2']) {
+        expect(detector.check(n).detected).toBe(false)
+      }
+      expect(detector.check('step-3').detected).toBe(false)
+    })
+  })
+
+  describe('history retention for large windows', () => {
+    it('still detects loops when windowSize × repeatThreshold exceeds the default historyLimit', () => {
+      const detector = new LoopDetector({ windowSize: 50, repeatThreshold: 3 })
+      const pattern = Array.from({ length: 50 }, (_, i) => `span-${i}-fixed`)
+      let result = { detected: false } as ReturnType<typeof detector.check>
+      // Feed the 50-span pattern three times (150 spans > default 100 limit).
+      for (let rep = 0; rep < 3; rep += 1) {
+        for (const name of pattern) {
+          result = detector.check(name)
+        }
+      }
+      expect(result.detected).toBe(true)
+      expect(result.repetitions).toBe(3)
+    })
+  })
+
   describe('event emission', () => {
     it('emits a loop-detected event when a loop is found', () => {
       const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })

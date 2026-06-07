@@ -37,7 +37,13 @@ export class LoopDetector {
     this.repeatThreshold = options.repeatThreshold ?? 3
     this.similarityThreshold = options.similarityThreshold ?? 0.85
     this.maxGapBetweenRepetitions = options.maxGapBetweenRepetitions ?? 1
-    this.historyLimit = options.historyLimit ?? 100
+    // Never retain fewer spans than a full detection span needs, otherwise
+    // check() would trim history below detectLoop()'s minLength gate and no
+    // loop could ever be reported for larger window/threshold configurations.
+    const spanNeededForDetection =
+      this.windowSize * this.repeatThreshold +
+      Math.max(0, this.repeatThreshold - 1) * this.maxGapBetweenRepetitions
+    this.historyLimit = Math.max(options.historyLimit ?? 100, spanNeededForDetection)
   }
 
   check(spanName: string): LoopDetectionResult {
@@ -121,6 +127,14 @@ export class LoopDetector {
       return true
     }
 
+    // Names that differ only by ordinal counters (e.g. `step-1` vs `step-2`,
+    // `iter-1` vs `iter-9`) represent normal progression, not a loop. Without
+    // this guard the fuzzy match below would also collapse them into a fake
+    // loop because the edit distance is tiny.
+    if (LoopDetector.maskDigits(normalizedLeft) === LoopDetector.maskDigits(normalizedRight)) {
+      return false
+    }
+
     if (normalizedLeft.length < 6 || normalizedRight.length < 6) {
       return false
     }
@@ -128,12 +142,22 @@ export class LoopDetector {
     return LoopDetector.similarity(normalizedLeft, normalizedRight) >= this.similarityThreshold
   }
 
+  private static maskDigits(value: string): string {
+    return value.replace(/\d+/g, '#')
+  }
+
   private static normalizeSpanName(spanName: string): string {
     return spanName
       .toLowerCase()
       .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '#')
       .replace(/\b0x[0-9a-f]+\b/g, '#')
-      .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|tokens?|bytes?|kb|mb)?\b/g, '#')
+      .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|tokens?|bytes?|kb|mb)\b/g, '#')
+      // Collapse volatile metadata values written as `key=value`
+      // (e.g. `tokens=504`) so changing counts don't defeat loop detection.
+      // Bare ordinal suffixes like `iter-1` are intentionally left intact and
+      // handled by the digit-mask guard in spanNamesMatch(). `:` is the span
+      // namespace separator here, so it is deliberately excluded.
+      .replace(/=\s*\d+(?:\.\d+)?\b/g, '=#')
       .replace(/\s+/g, ' ')
       .trim()
   }
