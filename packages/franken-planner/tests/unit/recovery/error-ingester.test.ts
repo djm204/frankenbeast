@@ -61,6 +61,13 @@ describe('ErrorIngester', () => {
     expect(result.type).toBe('unknown');
   });
 
+  it('matches short canonical error codes despite the length gate', () => {
+    const result = new ErrorIngester().classify(new Error('spawnSync git EPERM'), [
+      makeKnownError('EPERM'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
   it('still matches valid patterns that follow an invalid stored pattern', () => {
     const trivial = makeKnownError('error');
     const valid = makeKnownError('disk full');

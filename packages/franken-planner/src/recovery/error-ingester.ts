@@ -2,6 +2,12 @@ import type { KnownError } from '../core/types.js';
 
 const MIN_PATTERN_LENGTH = 6;
 const WORD_CHAR_CLASS = String.raw`\p{L}\p{N}_`;
+/**
+ * Canonical OS/CLI error codes (e.g. `EPERM`, `EPIPE`, `SIGKILL`) are short but
+ * highly specific, so they are exempt from the minimum-length trivial-pattern
+ * gate. Matches an uppercase, underscore-or-digit token of at least 3 chars.
+ */
+const CANONICAL_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,}$/;
 
 export type ErrorClassification =
   | { type: 'known'; knownError: KnownError }
@@ -49,7 +55,10 @@ function patternMatches(message: string, pattern: string): boolean {
 
 function validatePattern(pattern: string): string {
   const normalizedPattern = pattern.trim();
-  if (normalizedPattern.length < MIN_PATTERN_LENGTH) {
+  if (
+    normalizedPattern.length < MIN_PATTERN_LENGTH &&
+    !CANONICAL_ERROR_CODE.test(normalizedPattern)
+  ) {
     throw new RangeError(
       `Known error patterns must be at least ${MIN_PATTERN_LENGTH} characters long`,
     );
