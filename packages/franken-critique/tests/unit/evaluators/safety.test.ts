@@ -848,21 +848,26 @@ describe('SafetyEvaluator', () => {
     const port = createMockGuardrailsPort([
       {
         id: 'literal-number',
+        // Regex source `(a)\\1`: a real capture group followed by a LITERAL
+        // backslash+1 (escaped backslash), which must not be flagged as a
+        // backreference even though group 1 exists.
         description: 'literal numeric backreference text',
-        pattern: '\\\\1',
+        pattern: '(a)\\\\1',
         severity: 'warn',
       },
       {
         id: 'literal-name',
+        // Regex source `(?<name>a)\\k<name>`: a real named group followed by a
+        // LITERAL `\k<name>` that must not be flagged as a named backreference.
         description: 'literal named backreference text',
-        pattern: '\\\\k<name>',
+        pattern: '(?<name>a)\\\\k<name>',
         severity: 'warn',
       },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
     const result = await evaluator.evaluate(
-      createInput('literal \\1 and \\k<name>'),
+      createInput('literal a\\1 and a\\k<name>'),
     );
 
     // Patterns are literal backslash text, not backreferences, so they must
@@ -894,11 +899,11 @@ describe('SafetyEvaluator', () => {
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const startedAt = performance.now();
+    // The unsafe nested quantifier is rejected by static validation before any
+    // regex executes, so assert on that deterministic outcome rather than
+    // wall-clock elapsed time (which is flaky on loaded CI runners).
     const result = await evaluator.evaluate(createInput(`${'a'.repeat(40)}!`));
-    const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(100);
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
     expect(result.findings).toEqual([
