@@ -338,7 +338,17 @@ export class CliLlmAdapter implements IAdapter {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      let timedOut = false;
+      let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
       let lineBuffer = '';
+
+      const clearTimers = (): void => {
+        clearTimeout(timer);
+        if (hardKillTimer) {
+          clearTimeout(hardKillTimer);
+          hardKillTimer = undefined;
+        }
+      };
 
       const settle = (fn: () => void): void => {
         if (settled) return;
@@ -367,24 +377,35 @@ export class CliLlmAdapter implements IAdapter {
       });
 
       const timer = setTimeout(() => {
+        timedOut = true;
         child.kill('SIGTERM');
-        const killTimer = setTimeout(() => {
+        hardKillTimer = setTimeout(() => {
           try { child.kill('SIGKILL'); } catch {}
         }, 5_000);
-        killTimer.unref();
+        // Don't keep the event loop alive waiting on the hard-kill fallback;
+        // short-lived invocations should exit promptly after a timeout reject.
+        hardKillTimer.unref();
         settle(() => reject(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`)));
       }, this.opts.timeoutMs);
 
       child.on('close', (code) => {
-        clearTimeout(timer);
+        clearTimers();
         if (this.opts.onStreamLine && lineBuffer.trim().length > 0) {
           this.opts.onStreamLine(lineBuffer);
         }
+        if (timedOut) return;
         settle(() => resolve({ stdout, stderr, exitCode: code ?? 1 }));
       });
 
       child.on('error', (err) => {
-        clearTimeout(timer);
+        if (timedOut) {
+          // An 'error' here can mean the process couldn't be killed; keep the
+          // scheduled hard-kill (SIGKILL) so a process that ignored SIGTERM is
+          // still terminated. Only cancel the original deadline timer.
+          clearTimeout(timer);
+          return;
+        }
+        clearTimers();
         settle(() => reject(err));
       });
     });
