@@ -1,5 +1,5 @@
 import type { BeastContext } from '../context/franken-context.js';
-import type { IPlannerModule, ICritiqueModule, ILogger } from '../deps.js';
+import type { IPlannerModule, ICritiqueModule, ILogger, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { NullLogger } from '../logger.js';
@@ -60,12 +60,17 @@ export async function runPlanning(
     if (i > 0) {
       logger.info('Planning: replan', { iteration: i + 1 });
     }
-    // Create or re-create plan
-    const plan = await planner.createPlan({
+    // Create or re-create plan. On replans, carry the prior critique feedback
+    // into the planner request so the iteration can actually repair the plan
+    // instead of receiving identical input and repeating until CritiqueSpiralError.
+    const planIntent: PlanIntent = {
       goal: ctx.sanitizedIntent.goal,
       strategy: ctx.sanitizedIntent.strategy,
-      context: ctx.sanitizedIntent.context,
-    });
+      context: ctx.critiqueFeedback
+        ? { ...ctx.sanitizedIntent.context, critiqueFeedback: ctx.critiqueFeedback }
+        : ctx.sanitizedIntent.context,
+    };
+    const plan = await planner.createPlan(planIntent);
 
     ctx.plan = plan;
     ctx.addAudit('planner', 'plan:created', {
@@ -82,6 +87,11 @@ export async function runPlanning(
       ctx.critiqueFeedback = critiqueResult.findings
         .map(finding => `${finding.evaluator}: ${finding.message}`)
         .join('\n');
+    } else {
+      // A clean review supersedes any earlier findings; clear the stale text so
+      // downstream recovery/closure logic doesn't treat an approved plan as
+      // still needing the previous fixes.
+      ctx.critiqueFeedback = undefined;
     }
 
     ctx.addAudit('critique', 'plan:reviewed', {
