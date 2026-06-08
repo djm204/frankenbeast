@@ -559,6 +559,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       }
     } catch { /* best-effort */ }
     try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
+    try { logger.close(); } catch { /* best-effort */ }
     await previousFinalizeForBrain();
   };
 
