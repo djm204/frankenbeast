@@ -386,18 +386,18 @@ describe('ChunkFileGraphBuilder', () => {
       expect(() => builder.testSanitize('05_thing', '05_thing.md')).not.toThrow();
     });
 
-    it('discoverChunks silently skips filenames containing control characters', async () => {
-      // Write a normal chunk so we can confirm discoverChunks still works
+    it('rejects (does not silently skip) chunk filenames with control characters', async () => {
       writeMdFile('01_clean.md', 'Clean chunk');
+      // A tab (\x09) is a control character that is creatable in a filename on
+      // Linux, simulating a crafted/malformed chunk name.
+      writeMdFile('02_a\tb.md', 'Crafted chunk');
 
       const builder = new ChunkFileGraphBuilder(tmpDir);
-      const graph = await builder.build(intent);
 
-      // Only the clean chunk should produce tasks; no error should be thrown
-      // (The malicious filename never reaches sanitizeChunkId because discoverChunks
-      //  filters it out at the listing stage.)
-      expect(graph.tasks).toHaveLength(2);
-      expect(graph.tasks[0]!.id).toBe('impl:01_clean');
+      // discoverChunks must surface this as an error rather than silently
+      // omitting the chunk (which could hide a crafted chunk or yield an
+      // empty plan) before delimiter interpolation.
+      await expect(builder.build(intent)).rejects.toThrow(/control characters/i);
     });
   });
 });

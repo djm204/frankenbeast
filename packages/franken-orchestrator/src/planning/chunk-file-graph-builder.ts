@@ -94,16 +94,24 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
       throw new Error(`Cannot read chunk directory '${dir}': ${msg}`);
     }
 
-    return entries
-      .filter((f) => {
-        if (!f.endsWith('.md') || f.startsWith('00_') || !/^\d{2}/.test(f)) return false;
-        // Reject filenames containing control characters before they reach
-        // delimiter interpolation — defence-in-depth ahead of sanitizeChunkId.
-        // eslint-disable-next-line no-control-regex
-        if (/[\x00-\x1f\x7f]/.test(f)) return false;
-        return true;
-      })
-      .sort();
+    const chunks: string[] = [];
+    for (const f of entries) {
+      // Skip non-chunk files (not .md, the 00_ template, or unnumbered).
+      if (!f.endsWith('.md') || f.startsWith('00_') || !/^\d{2}/.test(f)) continue;
+      // A chunk-shaped filename containing control characters is malformed or
+      // crafted; reject it explicitly rather than silently omitting it (which
+      // would hide the chunk, or yield an empty plan if it was the only one)
+      // before delimiter interpolation / sanitizeChunkId.
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x1f\x7f]/.test(f)) {
+        throw new Error(
+          `Chunk file name contains control characters: ${JSON.stringify(f)}; ` +
+            `rename it to remove newlines, carriage returns, and other control characters`,
+        );
+      }
+      chunks.push(f);
+    }
+    return chunks.sort();
   }
 
   private buildImplPrompt(chunkPath: string, chunkId: string, content: string): string {
