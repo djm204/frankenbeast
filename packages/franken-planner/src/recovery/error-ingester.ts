@@ -1,30 +1,31 @@
+import { constants } from 'node:os';
 import type { KnownError } from '../core/types.js';
 
 const MIN_PATTERN_LENGTH = 6;
 const WORD_CHAR_CLASS = String.raw`\p{L}\p{N}_`;
+const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+
 /**
- * Short errno-style codes that are highly specific and worth keeping even though
- * they fall under the minimum-length trivial-pattern gate. A curated allowlist is
- * used (rather than a shape like `E[A-Z]+`) because a shape would also exempt
- * ordinary E-words such as `error`/`end`, reintroducing the broad false positives
- * this gate exists to prevent. Longer codes (most signals, all `ERR_*` Node codes)
- * already clear the length gate on their own.
+ * Recognized canonical error/signal codes that are highly specific and worth
+ * keeping even when shorter than the trivial-pattern gate (e.g. `E2BIG`, `EDOM`,
+ * `SIGIO`). Derived from Node's own `os.constants` so the full errno/signal set
+ * is covered exactly, rather than a hand-curated list. This is deliberately not a
+ * shape like `E[A-Z]+`, which would also exempt ordinary words such as
+ * `error`/`end` and reintroduce the broad false positives the gate prevents.
  */
-const CANONICAL_ERRNO_CODES = new Set([
-  'EPERM', 'ENOENT', 'ESRCH', 'EINTR', 'EIO', 'ENXIO', 'EBADF', 'EAGAIN',
-  'ENOMEM', 'EACCES', 'EFAULT', 'EBUSY', 'EEXIST', 'EXDEV', 'ENODEV', 'ENOTDIR',
-  'EISDIR', 'EINVAL', 'ENFILE', 'EMFILE', 'ENOTTY', 'EFBIG', 'ENOSPC', 'ESPIPE',
-  'EROFS', 'EMLINK', 'EPIPE', 'ELOOP', 'EPROTO', 'EHOSTDOWN',
+const CANONICAL_CODES = new Set<string>([
+  ...Object.keys(constants.errno ?? {}),
+  ...Object.keys(constants.signals ?? {}),
 ]);
 
 /**
- * True when a sub-minimum-length pattern is a recognized canonical error code
- * (a known errno code or a Node `ERR_*` code). Matched case-insensitively to
- * mirror the `iu` matcher, so a lowercase stored code like `eperm` is accepted.
+ * True when a sub-minimum-length pattern is a recognized canonical code (a Node
+ * errno/signal code or a Node `ERR_*` code). Matched case-insensitively to mirror
+ * the `iu` matcher, so a lowercase stored code like `eperm` is accepted.
  */
 function isCanonicalErrorCode(pattern: string): boolean {
   const upper = pattern.toUpperCase();
-  return CANONICAL_ERRNO_CODES.has(upper) || /^ERR_[A-Z0-9_]+$/.test(upper);
+  return CANONICAL_CODES.has(upper) || /^ERR_[A-Z0-9_]+$/.test(upper);
 }
 
 export type ErrorClassification =
@@ -63,10 +64,17 @@ function patternMatches(message: string, pattern: string): boolean {
     return false;
   }
   const escapedPattern = escapeRegex(normalizedPattern).replace(/\s+/g, String.raw`\s+`);
-  const matcher = new RegExp(
-    String.raw`(?<![${WORD_CHAR_CLASS}])${escapedPattern}(?![${WORD_CHAR_CLASS}])`,
-    'iu',
-  );
+  // Only guard an edge with a word boundary when the pattern actually starts/ends
+  // with a word character. Applying the lookarounds unconditionally would drop
+  // legitimate partial patterns ending (or starting) in punctuation — e.g.
+  // `failed:` or `Cannot find module '` — when adjacent error text is a word.
+  const leadingBoundary = WORD_CHAR_RE.test(normalizedPattern[0] ?? '')
+    ? String.raw`(?<![${WORD_CHAR_CLASS}])`
+    : '';
+  const trailingBoundary = WORD_CHAR_RE.test(normalizedPattern[normalizedPattern.length - 1] ?? '')
+    ? String.raw`(?![${WORD_CHAR_CLASS}])`
+    : '';
+  const matcher = new RegExp(`${leadingBoundary}${escapedPattern}${trailingBoundary}`, 'iu');
 
   return matcher.test(message);
 }

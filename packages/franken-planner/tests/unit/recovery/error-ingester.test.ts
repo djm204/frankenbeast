@@ -82,6 +82,32 @@ describe('ErrorIngester', () => {
     expect(sig.type).toBe('known');
   });
 
+  it('matches short errno codes from os.constants (e.g. E2BIG)', () => {
+    const result = new ErrorIngester().classify(new Error('spawn E2BIG'), [
+      makeKnownError('E2BIG'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('matches short signal codes from os.constants (e.g. SIGIO)', () => {
+    const result = new ErrorIngester().classify(new Error('process got signal SIGIO'), [
+      makeKnownError('SIGIO'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('matches partial patterns ending in punctuation', () => {
+    const colon = new ErrorIngester().classify(new Error('failed:foo'), [
+      makeKnownError('failed:'),
+    ]);
+    expect(colon.type).toBe('known');
+
+    const quote = new ErrorIngester().classify(new Error("Cannot find module 'foo'"), [
+      makeKnownError("Cannot find module '"),
+    ]);
+    expect(quote.type).toBe('known');
+  });
+
   it('does not exempt short uppercase common words from the length gate', () => {
     // `THE` is not a recognized code shape, so it stays gated as trivial and is
     // skipped rather than matching common words in error text.
