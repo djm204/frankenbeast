@@ -805,4 +805,112 @@ describe('SafetyEvaluator', () => {
       ),
     );
   });
+
+  it('does not flag noncapturing groups with safe optional quantifiers', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'url',
+        description: 'example domain',
+        pattern: '(?:https?:\\/\\/)?example\\.com',
+        severity: 'block',
+      },
+      {
+        id: 'optional-group',
+        description: 'optional alternation group',
+        pattern: '(?:foo|bar)?baz',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('https://example.com and baz'),
+    );
+
+    // Neither rule should be rejected as "Unsafe safety rule regex".
+    expect(
+      result.findings.some((f) => f.message.includes('Unsafe')),
+    ).toBe(false);
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('example domain'),
+        severity: 'critical',
+      }),
+      expect.objectContaining({
+        message: expect.stringContaining('optional alternation group'),
+        severity: 'critical',
+      }),
+    ]);
+  });
+
+  it('does not treat escaped backslash sequences as backreferences', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'literal-number',
+        // Regex source `(a)\\1`: a real capture group followed by a LITERAL
+        // backslash+1 (escaped backslash), which must not be flagged as a
+        // backreference even though group 1 exists.
+        description: 'literal numeric backreference text',
+        pattern: '(a)\\\\1',
+        severity: 'warn',
+      },
+      {
+        id: 'literal-name',
+        // Regex source `(?<name>a)\\k<name>`: a real named group followed by a
+        // LITERAL `\k<name>` that must not be flagged as a named backreference.
+        description: 'literal named backreference text',
+        pattern: '(?<name>a)\\\\k<name>',
+        severity: 'warn',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    const result = await evaluator.evaluate(
+      createInput('literal a\\1 and a\\k<name>'),
+    );
+
+    // Patterns are literal backslash text, not backreferences, so they must
+    // not be rejected as "Unsafe safety rule regex".
+    expect(
+      result.findings.some((f) => f.message.includes('Unsafe')),
+    ).toBe(false);
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('literal numeric backreference text'),
+        severity: 'warning',
+      }),
+      expect.objectContaining({
+        message: expect.stringContaining('literal named backreference text'),
+        severity: 'warning',
+      }),
+    ]);
+  });
+
+  it('rejects genuinely unsafe nested quantifiers without catastrophic backtracking', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'redos',
+        description: 'redos pattern',
+        pattern: '(a+)+$',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+
+    // The unsafe nested quantifier is rejected by static validation before any
+    // regex executes, so assert on that deterministic outcome rather than
+    // wall-clock elapsed time (which is flaky on loaded CI runners).
+    const result = await evaluator.evaluate(createInput(`${'a'.repeat(40)}!`));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.score).toBe(0);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Unsafe safety rule regex'),
+        severity: 'critical',
+      }),
+    ]);
+  });
 });
