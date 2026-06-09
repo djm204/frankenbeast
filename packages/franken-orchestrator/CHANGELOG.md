@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.1...franken-orchestrator-v0.35.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **orchestrator:** bound config budget limits ([#308](https://github.com/djm204/frankenbeast/issues/308)) ([b4e2ad8](https://github.com/djm204/frankenbeast/commit/b4e2ad83c214f15cdba67673396c5ef2aba99bf3))
+* **orchestrator:** fence chunk file prompts ([#317](https://github.com/djm204/frankenbeast/issues/317)) ([c2ddec1](https://github.com/djm204/frankenbeast/commit/c2ddec1f3bf2ab6e3d4dcc4bae6117f7190cd243))
+* **orchestrator:** harden CLI adapter timeout handling ([#320](https://github.com/djm204/frankenbeast/issues/320)) ([df4a4e1](https://github.com/djm204/frankenbeast/commit/df4a4e110721d43726ea8bad3502c372718c65d0))
+* **orchestrator:** improve CLI no-op UX ([#318](https://github.com/djm204/frankenbeast/issues/318)) ([b45818f](https://github.com/djm204/frankenbeast/commit/b45818fb150861add8b632d0de23ca6c6e9c82b2))
+* **orchestrator:** persist BeastLogger file writes ([#315](https://github.com/djm204/frankenbeast/issues/315)) ([0bba450](https://github.com/djm204/frankenbeast/commit/0bba450dd52ee8331d73cfb342638119c4c4ab29))
+* **types:** add recovery fields to FrankenContext ([#312](https://github.com/djm204/frankenbeast/issues/312)) ([34c251a](https://github.com/djm204/frankenbeast/commit/34c251a62ea1eb054d08105beb1cbf659617698e))
+
 ## [0.35.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.0...franken-orchestrator-v0.35.1) (2026-05-26)
 
 

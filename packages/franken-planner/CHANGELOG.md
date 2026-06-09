@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.1...franken-planner-v0.4.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **planner:** escape markdown in plan exports ([#311](https://github.com/djm204/frankenbeast/issues/311)) ([98d63b5](https://github.com/djm204/frankenbeast/commit/98d63b5bb78fc05c224090cc24fe1aecb0145ff7))
+* **planner:** reject trivial error patterns ([#314](https://github.com/djm204/frankenbeast/issues/314)) ([1a67f64](https://github.com/djm204/frankenbeast/commit/1a67f648ea115aa18af06cc44593a5826ee09292))
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.0...franken-planner-v0.4.1) (2026-03-21)
 
 
