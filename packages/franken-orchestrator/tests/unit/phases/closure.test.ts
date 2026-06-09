@@ -132,6 +132,21 @@ describe('runClosure', () => {
     expect(result.status).toBe('no-op');
   });
 
+  it('returns no-op when there are no task outcomes (empty plan)', async () => {
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), []);
+
+    expect(result.status).toBe('no-op');
+  });
+
+  it('returns failed when all tasks skipped with an empty rejection reason', async () => {
+    const emptyReasonSkips: TaskOutcome[] = [
+      { taskId: 't1', status: 'skipped', error: '' },
+    ];
+    const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), emptyReasonSkips);
+
+    expect(result.status).toBe('failed');
+  });
+
   it('includes plan summary when plan exists', async () => {
     const result = await runClosure(ctx(), makeObserver(), makeHeartbeat(), defaultConfig(), successOutcomes);
     expect(result.planSummary).toBe('1 task(s) planned');

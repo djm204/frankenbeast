@@ -59,14 +59,23 @@ export async function runClosure(
     }
   }
 
-  const allSucceeded = taskOutcomes.every(o => o.status === 'success');
-  const allSkipped = taskOutcomes.length > 0 && taskOutcomes.every(o => o.status === 'skipped');
-  // Only report no-op when every skipped outcome is a benign/intentional skip
-  // (no error reason attached). Skips caused by unmet dependencies or governor
-  // rejections always carry an error field and must not be silently labelled no-op.
-  const benignAllSkipped = allSkipped && taskOutcomes.every(o => !o.error);
+  const hasOutcomes = taskOutcomes.length > 0;
+  const allSucceeded = hasOutcomes && taskOutcomes.every(o => o.status === 'success');
+  const allSkipped = hasOutcomes && taskOutcomes.every(o => o.status === 'skipped');
+  // Only report no-op when every skipped outcome is a benign/intentional skip.
+  // Skips caused by unmet dependencies or governor rejections always attach an
+  // error field (possibly an empty reason), so test for its presence rather
+  // than truthiness — an empty rejection reason must still count as a failure.
+  const benignAllSkipped = allSkipped && taskOutcomes.every(o => o.error === undefined);
 
-  const status = benignAllSkipped ? 'no-op' : allSucceeded ? 'completed' : 'failed';
+  // An empty plan (e.g. a no-op design that produced no chunk files) yields no
+  // task outcomes; `[].every()` is vacuously true, so special-case it as no-op
+  // instead of letting it fall through to a misleading `completed`.
+  const status: BeastResult['status'] = !hasOutcomes || benignAllSkipped
+    ? 'no-op'
+    : allSucceeded
+      ? 'completed'
+      : 'failed';
 
   const result: BeastResult = {
     sessionId: ctx.sessionId,

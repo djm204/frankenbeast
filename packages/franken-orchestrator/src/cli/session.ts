@@ -489,7 +489,11 @@ export class Session {
     console.log(logHeader('BUILD SUMMARY'));
     console.log(`  ${A.dim}Duration:${A.reset}  ${(result.durationMs / 1000 / 60).toFixed(1)} min`);
     console.log(`  ${A.dim}Budget:${A.reset}    ${budgetBar(result.tokenSpend.estimatedCostUsd, this.config.budget)}`);
-    console.log(`  ${A.dim}Status:${A.reset}    ${statusBadge(result.status === 'completed')}`);
+    const statusDisplay =
+      result.status === 'no-op'
+        ? statusBadge('neutral')
+        : statusBadge(result.status === 'completed');
+    console.log(`  ${A.dim}Status:${A.reset}    ${statusDisplay}`);
     if (result.taskResults?.length) {
       console.log(`\n  ${A.dim}Chunks:${A.reset}`);
       for (const t of result.taskResults) {
