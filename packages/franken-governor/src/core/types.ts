@@ -1,6 +1,11 @@
+import type { TriggerSeverity } from '@franken/types';
+
 export type ResponseCode = 'APPROVE' | 'REGEN' | 'ABORT' | 'DEBUG';
 
-export type TriggerSeverity = 'low' | 'medium' | 'high' | 'critical';
+// Canonicalized: the governor severity scale is the shared `@franken/types`
+// `TriggerSeverity` (see docs/CONTRACT_MATRIX.md §2), re-exported here so the
+// boundary is no longer a duplicated local union.
+export type { TriggerSeverity };
 
 export interface TriggerResult {
   readonly triggered: boolean;
