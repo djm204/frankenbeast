@@ -87,6 +87,30 @@ describe('ContextSerializer', () => {
     expect(restored.plan?.tasks).toEqual(ctx.plan?.tasks);
   });
 
+  it('round-trips recovery/error-handling fields', () => {
+    const ctx = makeContext();
+    ctx.errorContext = [new TypeError('boom')];
+    ctx.circuitBreakerTripped = true;
+    ctx.critiqueFeedback = 'safety: tighten validation';
+    ctx.governorApproval = false;
+    ctx.retryCount = 3;
+    ctx.checkpointPath = '/tmp/checkpoint.json';
+
+    const snapshot = serializeContext(ctx);
+    // Snapshot must be JSON-safe (errors serialized to plain objects).
+    const restored = deserializeContext(JSON.parse(JSON.stringify(snapshot)));
+
+    expect(restored.circuitBreakerTripped).toBe(true);
+    expect(restored.critiqueFeedback).toBe('safety: tighten validation');
+    expect(restored.governorApproval).toBe(false);
+    expect(restored.retryCount).toBe(3);
+    expect(restored.checkpointPath).toBe('/tmp/checkpoint.json');
+    expect(restored.errorContext).toHaveLength(1);
+    expect(restored.errorContext?.[0]).toBeInstanceOf(Error);
+    expect(restored.errorContext?.[0]?.name).toBe('TypeError');
+    expect(restored.errorContext?.[0]?.message).toBe('boom');
+  });
+
   it('handles context with no plan or sanitized intent', () => {
     const ctx = new BeastContext('proj-2', 'sess-2', 'Hello');
     const snapshot = serializeContext(ctx);

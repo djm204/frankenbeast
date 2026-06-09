@@ -78,6 +78,7 @@ describe('runExecution', () => {
     expect(governor.requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 't1', requiresHitl: true }),
     );
+    expect(c.governorApproval).toBe(true);
   });
 
   it('skips task when governor rejects', async () => {
@@ -98,6 +99,29 @@ describe('runExecution', () => {
 
     const outcomes = await runExecution(c, skills, governor, makeMemory(), makeObserver());
     expect(outcomes[0]!.status).toBe('skipped');
+    expect(c.governorApproval).toBe(false);
+    expect(c.circuitBreakerTripped).toBe(true);
+  });
+
+  it('tracks retry count and checkpoint path for execution recovery', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: [], dependsOn: [] },
+    ]);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn(() => false),
+      write: vi.fn(),
+      readAll: vi.fn(() => new Set<string>()),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+    };
+
+    await runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect(c.retryCount).toBe(2);
+    expect(c.checkpointPath).toBe('/tmp/franken-checkpoint.txt');
   });
 
   it('throws if plan is missing', async () => {
@@ -314,6 +338,10 @@ describe('runExecution', () => {
     expect(memory.recordTrace).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
     );
+    expect(c.errorContext).toHaveLength(1);
+    expect(c.errorContext![0]).toBeInstanceOf(Error);
+    expect(c.errorContext![0]!.message).toBe('boom');
+    expect(c.circuitBreakerTripped).toBe(true);
   });
 
   // ── CLI skill routing tests ──

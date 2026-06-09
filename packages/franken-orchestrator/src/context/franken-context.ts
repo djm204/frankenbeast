@@ -26,6 +26,12 @@ export class BeastContext {
   } | undefined;
 
   plan?: PlanGraph | undefined;
+  errorContext?: Error[] | undefined;
+  circuitBreakerTripped?: boolean | undefined;
+  critiqueFeedback?: string | undefined;
+  governorApproval?: boolean | undefined;
+  retryCount?: number | undefined;
+  checkpointPath?: string | undefined;
   phase: BeastPhase = 'ingestion';
 
   tokenSpend: TokenSpend = {

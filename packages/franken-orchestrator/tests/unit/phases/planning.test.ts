@@ -51,6 +51,85 @@ describe('runPlanning', () => {
     expect(critique.reviewPlan).toHaveBeenCalledTimes(2);
   });
 
+  it('stores critique feedback on context so replanning can recover from findings', async () => {
+    const c = ctx();
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [
+          { evaluator: 'safety', severity: 'critical', message: 'add a rollback step' },
+          { evaluator: 'quality', severity: 'warning', message: 'split deployment task' },
+        ],
+        score: 0.3,
+      })),
+    });
+    const config = { ...defaultConfig(), maxCritiqueIterations: 1 };
+
+    // When the run ends on findings, the feedback persists for downstream use.
+    await expect(runPlanning(c, makePlanner(), critique, config)).rejects.toThrow(
+      CritiqueSpiralError,
+    );
+
+    expect(c.critiqueFeedback).toBe('safety: add a rollback step\nquality: split deployment task');
+  });
+
+  it('propagates prior critique feedback into the replan request', async () => {
+    const c = ctx();
+    c.sanitizedIntent = { goal: 'ship it', strategy: 'safe', context: { repo: 'x' } };
+    let callCount = 0;
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            verdict: 'fail' as const,
+            findings: [{ evaluator: 'safety', severity: 'critical', message: 'add a rollback step' }],
+            score: 0.3,
+          };
+        }
+        return { verdict: 'pass' as const, findings: [], score: 0.9 };
+      }),
+    });
+    const planner = makePlanner();
+
+    await runPlanning(c, planner, critique, defaultConfig());
+
+    // First call: no feedback yet (original context preserved).
+    expect(planner.createPlan).toHaveBeenNthCalledWith(1, {
+      goal: 'ship it',
+      strategy: 'safe',
+      context: { repo: 'x' },
+    });
+    // Second call (replan): feedback injected into context for plan repair.
+    expect(planner.createPlan).toHaveBeenNthCalledWith(2, {
+      goal: 'ship it',
+      strategy: 'safe',
+      context: { repo: 'x', critiqueFeedback: 'safety: add a rollback step' },
+    });
+  });
+
+  it('clears stale critique feedback after a later clean review', async () => {
+    const c = ctx();
+    let callCount = 0;
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            verdict: 'fail' as const,
+            findings: [{ evaluator: 'safety', severity: 'critical', message: 'fix this' }],
+            score: 0.3,
+          };
+        }
+        return { verdict: 'pass' as const, findings: [], score: 0.95 };
+      }),
+    });
+
+    await runPlanning(c, makePlanner(), critique, defaultConfig());
+
+    expect(c.critiqueFeedback).toBeUndefined();
+  });
+
   it('throws CritiqueSpiralError after max iterations', async () => {
     const c = ctx();
     const critique = makeCritique({

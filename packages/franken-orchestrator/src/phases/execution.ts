@@ -43,6 +43,7 @@ export async function runExecution(
   refreshPlanTasks?: () => Promise<readonly PlanTask[]>,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
+  ctx.checkpointPath = checkpoint?.checkpointPath;
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
   logger.info('Execution: start', { phase: 'execution' });
 
@@ -88,6 +89,7 @@ export async function runExecution(
 
     if (readyIndex === -1) {
       // All remaining tasks have unmet dependencies — deadlock
+      ctx.circuitBreakerTripped = true;
       for (const task of pending) {
         outcomes.push({
           taskId: task.id,
@@ -159,6 +161,7 @@ async function executeTask(
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
 ): Promise<TaskOutcome> {
+  ctx.retryCount = (ctx.retryCount ?? 0) + 1;
   const startTime = Date.now();
   const span = observer.startSpan(`task:${task.id}`);
   logger.info('Execution: task start', {
@@ -193,8 +196,10 @@ async function executeTask(
         decision: approval.decision,
         reason: approval.reason,
       });
+      ctx.governorApproval = approval.decision === 'approved';
 
       if (approval.decision === 'rejected' || approval.decision === 'abort') {
+        ctx.circuitBreakerTripped = true;
         ctx.addAudit('governor', 'task:rejected', { taskId: task.id, reason: approval.reason });
         logger.warn('Execution: task rejected', {
           taskId: task.id,
@@ -308,7 +313,10 @@ async function executeTask(
     });
     return { taskId: task.id, status: 'success', output };
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorObject = error instanceof Error ? error : new Error(String(error));
+    ctx.errorContext = [...(ctx.errorContext ?? []), errorObject];
+    ctx.circuitBreakerTripped = true;
+    const errorMsg = errorObject.message;
     ctx.addAudit('executor', 'task:failed', { taskId: task.id, error: errorMsg });
     logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
     await memory.recordTrace({
