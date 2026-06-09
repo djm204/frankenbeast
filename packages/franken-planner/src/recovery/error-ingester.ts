@@ -3,15 +3,29 @@ import type { KnownError } from '../core/types.js';
 const MIN_PATTERN_LENGTH = 6;
 const WORD_CHAR_CLASS = String.raw`\p{L}\p{N}_`;
 /**
- * Canonical OS/CLI error codes are short but highly specific, so they are exempt
- * from the minimum-length trivial-pattern gate. The exemption is restricted to
- * recognized code shapes — errno (`EPERM`, `EPIPE`, `ENOENT`), Node error codes
- * (`ERR_MODULE_NOT_FOUND`), and signals (`SIGKILL`, `SIGTERM`) — so arbitrary
- * short uppercase words like `THE`/`AND` are NOT exempted (which would otherwise
- * reintroduce broad false positives). Matched case-insensitively to mirror the
- * `iu` matcher, so a lowercase stored code such as `eperm` is still accepted.
+ * Short errno-style codes that are highly specific and worth keeping even though
+ * they fall under the minimum-length trivial-pattern gate. A curated allowlist is
+ * used (rather than a shape like `E[A-Z]+`) because a shape would also exempt
+ * ordinary E-words such as `error`/`end`, reintroducing the broad false positives
+ * this gate exists to prevent. Longer codes (most signals, all `ERR_*` Node codes)
+ * already clear the length gate on their own.
  */
-const CANONICAL_ERROR_CODE = /^(?:E[A-Z]{2,}|ERR_[A-Z0-9_]+|SIG[A-Z]+)$/i;
+const CANONICAL_ERRNO_CODES = new Set([
+  'EPERM', 'ENOENT', 'ESRCH', 'EINTR', 'EIO', 'ENXIO', 'EBADF', 'EAGAIN',
+  'ENOMEM', 'EACCES', 'EFAULT', 'EBUSY', 'EEXIST', 'EXDEV', 'ENODEV', 'ENOTDIR',
+  'EISDIR', 'EINVAL', 'ENFILE', 'EMFILE', 'ENOTTY', 'EFBIG', 'ENOSPC', 'ESPIPE',
+  'EROFS', 'EMLINK', 'EPIPE', 'ELOOP', 'EPROTO', 'EHOSTDOWN',
+]);
+
+/**
+ * True when a sub-minimum-length pattern is a recognized canonical error code
+ * (a known errno code or a Node `ERR_*` code). Matched case-insensitively to
+ * mirror the `iu` matcher, so a lowercase stored code like `eperm` is accepted.
+ */
+function isCanonicalErrorCode(pattern: string): boolean {
+  const upper = pattern.toUpperCase();
+  return CANONICAL_ERRNO_CODES.has(upper) || /^ERR_[A-Z0-9_]+$/.test(upper);
+}
 
 export type ErrorClassification =
   | { type: 'known'; knownError: KnownError }
@@ -61,7 +75,7 @@ function validatePattern(pattern: string): string {
   const normalizedPattern = pattern.trim();
   if (
     normalizedPattern.length < MIN_PATTERN_LENGTH &&
-    !CANONICAL_ERROR_CODE.test(normalizedPattern)
+    !isCanonicalErrorCode(normalizedPattern)
   ) {
     throw new RangeError(
       `Known error patterns must be at least ${MIN_PATTERN_LENGTH} characters long`,
