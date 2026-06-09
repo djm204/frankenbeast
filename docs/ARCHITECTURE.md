@@ -315,6 +315,10 @@ impl:01_types → harden:01_types → impl:02_martin → harden:02_martin → ..
 
 This preserves the build-runner's impl+harden pattern inside the orchestrator's topological execution. The execution phase processes tasks in `PlanGraph.topoSort()` order — no special-casing needed.
 
+#### Chunk File Trust Model
+
+Chunk files are operator-reviewed project inputs, but `ChunkFileGraphBuilder` treats their contents as untrusted data when embedding them into agent objectives. The builder wraps each chunk body in `BEGIN_UNTRUSTED_CHUNK_CONTENT:<chunkId>` / `END_UNTRUSTED_CHUNK_CONTENT:<chunkId>` delimiters and tells the agent that instructions inside the block are non-authoritative when they conflict with outer guardrails, branch/commit rules, or verification requirements. Chunk files that contain the reserved delimiter marker names are rejected before graph construction so a crafted chunk cannot break out of the data block.
+
 #### Approach C Component Table
 
 | Component | Location | Responsibility |
