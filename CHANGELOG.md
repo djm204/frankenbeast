@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.2](https://github.com/djm204/frankenbeast/compare/v0.38.1...v0.38.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **orchestrator:** fence chunk file prompts ([#317](https://github.com/djm204/frankenbeast/issues/317)) ([c2ddec1](https://github.com/djm204/frankenbeast/commit/c2ddec1f3bf2ab6e3d4dcc4bae6117f7190cd243))
+
+
+### Documentation
+
+* refresh issue 86 status docs ([#319](https://github.com/djm204/frankenbeast/issues/319)) ([a21612f](https://github.com/djm204/frankenbeast/commit/a21612f5e0ce8cb73bd536746ac143b34e2df2f6))
+
 ## [0.38.1](https://github.com/djm204/frankenbeast/compare/v0.38.0...v0.38.1) (2026-05-26)
 
 

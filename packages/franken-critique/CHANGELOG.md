@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.1...franken-critique-v0.6.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **security:** harden safety rule regex evaluation ([#316](https://github.com/djm204/frankenbeast/issues/316)) ([e66d05d](https://github.com/djm204/frankenbeast/commit/e66d05ded19d281e57ed19881d3151d89158db0f))
+
 ## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.0...franken-critique-v0.6.1) (2026-05-26)
 
 

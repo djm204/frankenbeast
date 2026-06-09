@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.0...franken-types-v0.6.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **types:** add recovery fields to FrankenContext ([#312](https://github.com/djm204/frankenbeast/issues/312)) ([34c251a](https://github.com/djm204/frankenbeast/commit/34c251a62ea1eb054d08105beb1cbf659617698e))
+
 ## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.5.0...franken-types-v0.6.0) (2026-03-26)
 
 

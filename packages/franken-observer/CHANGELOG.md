@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.1...franken-observer-v0.7.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **observer:** detect varied loop patterns ([#313](https://github.com/djm204/frankenbeast/issues/313)) ([9411914](https://github.com/djm204/frankenbeast/commit/9411914488a2722649a98ba49b29deae1522cd2d))
+* **observer:** escape Prometheus label values ([#310](https://github.com/djm204/frankenbeast/issues/310)) ([6b68825](https://github.com/djm204/frankenbeast/commit/6b688255c7fd2b06e28c38eedcf5cc81f631ae21))
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.0...franken-observer-v0.7.1) (2026-05-26)
 
 
