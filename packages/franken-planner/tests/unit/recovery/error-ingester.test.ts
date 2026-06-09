@@ -46,4 +46,88 @@ describe('ErrorIngester', () => {
     const result = new ErrorIngester().classify(new Error('connection timeout after 30s'), [ke]);
     expect(result.type).toBe('known');
   });
+
+  it('skips empty known error patterns without aborting classification', () => {
+    const result = new ErrorIngester().classify(new Error('unrelated failure'), [
+      makeKnownError(''),
+    ]);
+    expect(result.type).toBe('unknown');
+  });
+
+  it('skips trivial known error patterns without aborting classification', () => {
+    const result = new ErrorIngester().classify(new Error('any error message'), [
+      makeKnownError('error'),
+    ]);
+    expect(result.type).toBe('unknown');
+  });
+
+  it('matches short canonical error codes despite the length gate', () => {
+    const result = new ErrorIngester().classify(new Error('spawnSync git EPERM'), [
+      makeKnownError('EPERM'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('matches a lowercase canonical code (case-insensitive exemption)', () => {
+    const result = new ErrorIngester().classify(new Error('spawnSync git EPERM'), [
+      makeKnownError('eperm'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('exempts ERR_/SIG code shapes from the length gate', () => {
+    const sig = new ErrorIngester().classify(new Error('child killed by SIGKILL'), [
+      makeKnownError('SIGKILL'),
+    ]);
+    expect(sig.type).toBe('known');
+  });
+
+  it('matches short errno codes from os.constants (e.g. E2BIG)', () => {
+    const result = new ErrorIngester().classify(new Error('spawn E2BIG'), [
+      makeKnownError('E2BIG'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('matches short signal codes from os.constants (e.g. SIGIO)', () => {
+    const result = new ErrorIngester().classify(new Error('process got signal SIGIO'), [
+      makeKnownError('SIGIO'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('matches partial patterns ending in punctuation', () => {
+    const colon = new ErrorIngester().classify(new Error('failed:foo'), [
+      makeKnownError('failed:'),
+    ]);
+    expect(colon.type).toBe('known');
+
+    const quote = new ErrorIngester().classify(new Error("Cannot find module 'foo'"), [
+      makeKnownError("Cannot find module '"),
+    ]);
+    expect(quote.type).toBe('known');
+  });
+
+  it('does not exempt short uppercase common words from the length gate', () => {
+    // `THE` is not a recognized code shape, so it stays gated as trivial and is
+    // skipped rather than matching common words in error text.
+    const result = new ErrorIngester().classify(new Error('THE build failed'), [
+      makeKnownError('THE'),
+    ]);
+    expect(result.type).toBe('unknown');
+  });
+
+  it('still matches valid patterns that follow an invalid stored pattern', () => {
+    const trivial = makeKnownError('error');
+    const valid = makeKnownError('disk full');
+    const result = new ErrorIngester().classify(new Error('disk full error'), [trivial, valid]);
+    expect(result.type).toBe('known');
+    expect(result).toMatchObject({ knownError: valid });
+  });
+
+  it('does not match literal patterns inside larger words', () => {
+    const ke = makeKnownError('timeout');
+    const result = new ErrorIngester().classify(new Error('operation timedout unexpectedly'), [ke]);
+    expect(result.type).toBe('unknown');
+  });
 });
