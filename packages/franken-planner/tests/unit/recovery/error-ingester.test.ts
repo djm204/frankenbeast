@@ -68,6 +68,29 @@ describe('ErrorIngester', () => {
     expect(result.type).toBe('known');
   });
 
+  it('matches a lowercase canonical code (case-insensitive exemption)', () => {
+    const result = new ErrorIngester().classify(new Error('spawnSync git EPERM'), [
+      makeKnownError('eperm'),
+    ]);
+    expect(result.type).toBe('known');
+  });
+
+  it('exempts ERR_/SIG code shapes from the length gate', () => {
+    const sig = new ErrorIngester().classify(new Error('child killed by SIGKILL'), [
+      makeKnownError('SIGKILL'),
+    ]);
+    expect(sig.type).toBe('known');
+  });
+
+  it('does not exempt short uppercase common words from the length gate', () => {
+    // `THE` is not a recognized code shape, so it stays gated as trivial and is
+    // skipped rather than matching common words in error text.
+    const result = new ErrorIngester().classify(new Error('THE build failed'), [
+      makeKnownError('THE'),
+    ]);
+    expect(result.type).toBe('unknown');
+  });
+
   it('still matches valid patterns that follow an invalid stored pattern', () => {
     const trivial = makeKnownError('error');
     const valid = makeKnownError('disk full');

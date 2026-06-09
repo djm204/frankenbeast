@@ -3,11 +3,15 @@ import type { KnownError } from '../core/types.js';
 const MIN_PATTERN_LENGTH = 6;
 const WORD_CHAR_CLASS = String.raw`\p{L}\p{N}_`;
 /**
- * Canonical OS/CLI error codes (e.g. `EPERM`, `EPIPE`, `SIGKILL`) are short but
- * highly specific, so they are exempt from the minimum-length trivial-pattern
- * gate. Matches an uppercase, underscore-or-digit token of at least 3 chars.
+ * Canonical OS/CLI error codes are short but highly specific, so they are exempt
+ * from the minimum-length trivial-pattern gate. The exemption is restricted to
+ * recognized code shapes — errno (`EPERM`, `EPIPE`, `ENOENT`), Node error codes
+ * (`ERR_MODULE_NOT_FOUND`), and signals (`SIGKILL`, `SIGTERM`) — so arbitrary
+ * short uppercase words like `THE`/`AND` are NOT exempted (which would otherwise
+ * reintroduce broad false positives). Matched case-insensitively to mirror the
+ * `iu` matcher, so a lowercase stored code such as `eperm` is still accepted.
  */
-const CANONICAL_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,}$/;
+const CANONICAL_ERROR_CODE = /^(?:E[A-Z]{2,}|ERR_[A-Z0-9_]+|SIG[A-Z]+)$/i;
 
 export type ErrorClassification =
   | { type: 'known'; knownError: KnownError }
