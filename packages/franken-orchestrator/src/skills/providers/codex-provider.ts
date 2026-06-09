@@ -30,19 +30,15 @@ export class CodexProvider implements ICliProvider {
       .filter((line) => line.length > 0);
 
     const extracted: string[] = [];
-    let parsedJsonLines = 0;
-
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as unknown;
-        parsedJsonLines++;
         tryExtractTextFromNode(parsed, extracted);
       } catch {
         extracted.push(line);
       }
     }
 
-    if (parsedJsonLines > 0 && extracted.length === 0) return '';
     return extracted.join('\n').trim();
   }
 

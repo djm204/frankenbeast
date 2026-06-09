@@ -290,6 +290,20 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
+  it('runPlan() reports the searched design doc path when an explicit file is missing', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const missingDesignDoc = resolve(
+      tmpdir(),
+      `missing-design-${Date.now()}-${Math.random().toString(36).slice(2)}.md`,
+    );
+    const config = makeConfig({ designDocPath: missingDesignDoc });
+
+    await expect(new Session(config).start()).rejects.toThrow(
+      `No design document found at ${missingDesignDoc}`,
+    );
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
   it('runPlan() passes LLM directly to LlmGraphBuilder (no ProgressLlmClient spinner)', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig();

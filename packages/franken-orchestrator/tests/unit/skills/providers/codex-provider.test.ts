@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { CodexProvider } from '../../../../src/skills/providers/codex-provider.js';
 import type { ICliProvider } from '../../../../src/skills/providers/cli-provider.js';
 
@@ -116,6 +118,15 @@ describe('CodexProvider', () => {
       JSON.stringify({ type: 'message_stop' }),
     ].join('\n');
     expect(provider.normalizeOutput(raw)).toBe('');
+  });
+
+  it('normalizeOutput does not keep a redundant parsed-json empty-output branch', () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, '../../../../src/skills/providers/codex-provider.ts'),
+      'utf-8',
+    );
+
+    expect(source).not.toContain('parsedJsonLines > 0 && extracted.length === 0');
   });
 
   it('normalizeOutput handles mixed JSON and plain text', () => {

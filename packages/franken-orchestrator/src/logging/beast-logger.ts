@@ -51,7 +51,10 @@ export function budgetBar(spent: number, limit: number): string {
 }
 
 /** Status badge: ` PASS ` on green bg or ` FAIL ` on red bg. */
-export function statusBadge(pass: boolean): string {
+export function statusBadge(pass: boolean | 'neutral'): string {
+  if (pass === 'neutral') {
+    return `${A.yellow}${A.bold} NO-OP ${A.reset}`;
+  }
   return pass
     ? `${A.bgGreen}${A.bold} PASS ${A.reset}`
     : `${A.bgRed}${A.bold} FAIL ${A.reset}`;

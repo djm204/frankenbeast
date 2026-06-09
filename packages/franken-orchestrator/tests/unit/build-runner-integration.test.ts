@@ -218,7 +218,9 @@ describe('build-runner integration — dep construction wiring', () => {
         const loop = new BeastLoop(deps);
         const result = await loop.run({ projectId: 'test', userInput: 'test' });
 
-        expect(result.status).toBe('completed');
+        // baseDeps' graphBuilder yields an empty plan, so a run with no task
+        // outcomes is a no-op (this test exercises wiring, not status).
+        expect(result.status).toBe('no-op');
         // Verify checkpoint is functional
         checkpoint.write('task-1:done');
         expect(checkpoint.has('task-1:done')).toBe(true);
@@ -236,7 +238,8 @@ describe('build-runner integration — dep construction wiring', () => {
       const loop = new BeastLoop(deps);
       const result = await loop.run({ projectId: 'test', userInput: 'test' });
 
-      expect(result.status).toBe('completed');
+      // Empty plan from baseDeps' graphBuilder ⇒ no-op run.
+      expect(result.status).toBe('no-op');
     });
 
     it('constructs ChunkFileGraphBuilder with plan directory', async () => {
@@ -332,7 +335,8 @@ describe('build-runner integration — dep construction wiring', () => {
         const loop = new BeastLoop(deps);
         const result = await loop.run({ projectId: 'test', userInput: 'test' });
 
-        expect(result.status).toBe('completed');
+        // Empty plan from baseDeps' graphBuilder ⇒ no-op run.
+        expect(result.status).toBe('no-op');
         // BeastLoop should have called logger.info at least once
         expect(spy).toHaveBeenCalled();
         const calls = spy.mock.calls.map(c => c[0] as string);
