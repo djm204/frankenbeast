@@ -4,7 +4,7 @@
 Accepted
 
 Supersedes: None
-Superseded by: ADR-010
+Superseded by: None (ADR-010 changes only CLI provider selection; the skill execution primitives defined here remain the active design reference, per ADR-008 and docs/ARCHITECTURE.md)
 
 ## Context
 The RALPH loop workflow (chunk decomposition → CLI-spawned AI loops → git branch isolation → observer tracing) was implemented as an ad-hoc build runner script (`plan-2026-03-05/build-runner.ts`). This script duplicates concerns that `franken-observer` (tracing, cost tracking, circuit breakers), `franken-planner` (task ordering via PlanGraph), and `franken-orchestrator` (the execution pipeline) already handle.

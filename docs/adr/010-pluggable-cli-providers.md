@@ -4,7 +4,7 @@
 
 Accepted
 
-Supersedes: ADR-007
+Supersedes: ADR-009 (partial — only the deferred-CLI-provider consequence; ADR-007's CLI skill execution primitives remain the active design reference)
 
 ## Context
 

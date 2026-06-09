@@ -168,7 +168,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 ## Test Counts
 
 > Phase 7 baseline was 1,572 tests. Phases 8–11 and later consolidation work added orchestrator, web, MCP-suite, live-bench, and root integration tests.
-> Current tracked total was verified from the live workspace on 2026-05-26 with `npm test`, targeted package `vitest --reporter=json` runs, and `npm run test:root -- tests/docs-issue-86.test.ts` for this documentation guard.
+> Current tracked total was verified from the live workspace on 2026-06-07 with `npm test`, targeted package `vitest --reporter=json` runs, and `npm run test:root -- tests/docs-issue-86.test.ts` for this documentation guard (the guard test was added in the 2026-06-07 commit, so this provenance reflects that run rather than the earlier 2026-05-26 baseline).
 > Known stale/failing-module caveat: issues #27, #30, and #31 recorded historical red typecheck/build paths behind the old all-green claim. Those specific deleted-package paths are no longer in the current package set, but this table no longer treats historical package counts as proof of global health.
 
 | Module | Tests | Files | Status |
