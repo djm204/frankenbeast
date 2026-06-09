@@ -502,7 +502,10 @@ export async function main(): Promise<void> {
 
   const result = await session.start();
 
-  if (result && result.status !== 'completed') {
+  // `no-op` is a benign terminal status (empty or intentionally-skipped plan),
+  // so it must exit successfully alongside `completed` — otherwise CI/scripts
+  // invoking frankenbeast for no-change tasks would see a spurious nonzero exit.
+  if (result && result.status !== 'completed' && result.status !== 'no-op') {
     process.exit(1);
   }
 }
