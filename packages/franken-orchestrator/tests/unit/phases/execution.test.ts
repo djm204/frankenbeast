@@ -122,6 +122,30 @@ describe('runExecution', () => {
 
     expect(c.retryCount).toBe(2);
     expect(c.checkpointPath).toBe('/tmp/franken-checkpoint.txt');
+    expect(checkpoint.write).toHaveBeenCalledWith('t1:done');
+    expect(checkpoint.write).toHaveBeenCalledWith('t2:done');
+  });
+
+  it('does not record in-memory completion when the checkpoint write fails', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+    ]);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn(() => false),
+      write: vi.fn(() => {
+        throw new Error('disk full');
+      }),
+      readAll: vi.fn(() => new Set<string>()),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+    };
+
+    await expect(
+      runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, undefined, checkpoint),
+    ).rejects.toThrow('disk full');
   });
 
   it('throws if plan is missing', async () => {

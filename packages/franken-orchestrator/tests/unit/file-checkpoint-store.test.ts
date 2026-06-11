@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.js';
@@ -108,6 +110,101 @@ describe('FileCheckpointStore', () => {
     it('handles clear on non-existent file', () => {
       expect(() => store.clear()).not.toThrow();
     });
+  });
+
+  describe('atomicity', () => {
+    it('leaves no temp or lock files behind after writes', () => {
+      store.write('key-a');
+      store.write('key-b');
+      store.clear();
+      store.write('key-c');
+      const leftovers = readdirSync(tmpDir).filter((f) => f !== 'checkpoint.log');
+      expect(leftovers).toEqual([]);
+    });
+
+    it('recovers when a stale lock file is left behind by a dead process', () => {
+      writeFileSync(`${filePath}.lock`, '');
+      const past = new Date(Date.now() - 60_000);
+      const { utimesSync } = require('node:fs');
+      utimesSync(`${filePath}.lock`, past, past);
+
+      store.write('key-after-stale-lock');
+
+      expect(store.has('key-after-stale-lock')).toBe(true);
+      expect(existsSync(`${filePath}.lock`)).toBe(false);
+    });
+  });
+
+  describe('corruption recovery', () => {
+    it('drops lines containing NUL bytes and keeps valid entries', () => {
+      writeFileSync(filePath, 'good-1\nbad\u0000entry\ngood-2\n');
+      const result = store.readAll();
+      expect(result).toEqual(new Set(['good-1', 'good-2']));
+    });
+
+    it('drops lines containing control characters', () => {
+      writeFileSync(filePath, 'good\nbroken\u0001line\n');
+      expect(store.readAll()).toEqual(new Set(['good']));
+      expect(store.has('good')).toBe(true);
+    });
+
+    it('drops absurdly long lines from torn writes', () => {
+      writeFileSync(filePath, `good\n${'x'.repeat(5000)}\n`);
+      expect(store.readAll()).toEqual(new Set(['good']));
+    });
+
+    it('rewrites a clean file on the next write after corruption', () => {
+      writeFileSync(filePath, 'good\nbad\u0000entry\n');
+      store.write('new-key');
+      const content = readFileSync(filePath, 'utf-8');
+      expect(content).toBe('good\nnew-key\n');
+    });
+  });
+
+  describe('concurrent writers', () => {
+    it('does not lose or corrupt entries under concurrent multi-process writes', async () => {
+      const ts = await import('typescript');
+      const { pathToFileURL, fileURLToPath } = await import('node:url');
+      const srcPath = fileURLToPath(
+        new URL('../../src/checkpoint/file-checkpoint-store.ts', import.meta.url),
+      );
+      const js = ts.transpileModule(readFileSync(srcPath, 'utf-8'), {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ES2022,
+        },
+      }).outputText;
+      const modPath = join(tmpDir, 'file-checkpoint-store.mjs');
+      writeFileSync(modPath, js);
+
+      const execFileAsync = promisify(execFile);
+      const WRITERS = 4;
+      const KEYS_PER_WRITER = 25;
+      const childScript = (proc: number) => `
+        import { FileCheckpointStore } from ${JSON.stringify(pathToFileURL(modPath).href)};
+        const store = new FileCheckpointStore(${JSON.stringify(filePath)});
+        for (let i = 0; i < ${KEYS_PER_WRITER}; i++) {
+          store.write('proc-${proc}-key-' + i);
+        }
+      `;
+
+      await Promise.all(
+        Array.from({ length: WRITERS }, (_, proc) =>
+          execFileAsync(process.execPath, ['--input-type=module', '-e', childScript(proc)]),
+        ),
+      );
+
+      const all = store.readAll();
+      expect(all.size).toBe(WRITERS * KEYS_PER_WRITER);
+      for (let proc = 0; proc < WRITERS; proc++) {
+        for (let i = 0; i < KEYS_PER_WRITER; i++) {
+          expect(all.has(`proc-${proc}-key-${i}`)).toBe(true);
+        }
+      }
+      // Every raw line must be a known key — no torn/merged lines.
+      const rawLines = readFileSync(filePath, 'utf-8').split('\n').filter((l) => l.length > 0);
+      expect(rawLines).toHaveLength(WRITERS * KEYS_PER_WRITER);
+    }, 30_000);
   });
 
   describe('recordCommit()', () => {

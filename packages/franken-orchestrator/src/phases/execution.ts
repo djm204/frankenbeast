@@ -126,9 +126,11 @@ export async function runExecution(
     outcomes.push(outcome);
 
     if (outcome.status === 'success') {
+      // Persist the checkpoint before mutating in-memory state so a crash here
+      // is recovered as "done" on restart instead of silently re-running the task.
+      checkpoint?.write(`${task.id}:done`);
       completed.add(task.id);
       completedOutputs.set(task.id, outcome.output);
-      checkpoint?.write(`${task.id}:done`);
     }
   }
 
