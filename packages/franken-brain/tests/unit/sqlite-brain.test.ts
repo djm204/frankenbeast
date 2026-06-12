@@ -127,11 +127,43 @@ describe('SqliteBrain', () => {
       bounded.close();
     });
 
-    it('tracks usage as entries are added', () => {
+    it('tracks usage as entries are added, counting key and value bytes', () => {
       brain.working.set('a', 'hello');
       const usage = brain.working.usage();
       expect(usage.entries).toBe(1);
-      expect(usage.totalBytes).toBe(JSON.stringify('hello').length);
+      expect(usage.totalBytes).toBe('a'.length + JSON.stringify('hello').length);
+    });
+
+    it('counts key bytes against the byte budget', () => {
+      const bounded = new SqliteBrain(':memory:', { maxTotalBytes: 30 });
+      expect(() => bounded.working.set('k'.repeat(40), 1)).toThrow(WorkingMemoryLimitError);
+      bounded.close();
+    });
+
+    it('rejects values that are not JSON-serializable', () => {
+      expect(() => brain.working.set('fn', () => 'hidden closure')).toThrow(
+        WorkingMemoryLimitError,
+      );
+    });
+
+    it('accounts for the serialized form, not a deceptive small JSON facade', () => {
+      // A Map stringifies to '{}' but would retain its full contents if stored
+      // by reference. The store normalizes to the JSON round-trip, so what is
+      // retained is exactly what was measured (and what flushToDb persists).
+      const big = new Map([['payload', 'x'.repeat(1000)]]);
+      brain.working.set('m', big);
+      expect(brain.working.get('m')).toEqual({});
+    });
+
+    it('keeps previous state when restore() exceeds limits', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
+      bounded.working.set('keep', 'me');
+      expect(() => bounded.working.restore({ a: 1, b: 2, c: 3 })).toThrow(
+        WorkingMemoryLimitError,
+      );
+      expect(bounded.working.get('keep')).toBe('me');
+      expect(bounded.working.keys()).toEqual(['keep']);
+      bounded.close();
     });
 
     it('handles complex objects (nested JSON)', () => {

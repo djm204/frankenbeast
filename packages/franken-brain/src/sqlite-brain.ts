@@ -63,15 +63,33 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.get(key);
   }
 
-  set(key: string, value: unknown): void {
+  /**
+   * Serializes and size-checks one entry without mutating state.
+   * Returns the JSON round-tripped value so what we retain in memory is
+   * exactly the accounted (and SQLite-persisted) form — a Map or class
+   * instance cannot hide megabytes behind a tiny `{}` serialization.
+   */
+  private prepareEntry(key: string, value: unknown): { normalized: unknown; size: number } {
     const serialized = JSON.stringify(value);
-    const size = serialized === undefined ? 0 : Buffer.byteLength(serialized, 'utf8');
-
-    if (size > this.limits.maxValueBytes) {
+    if (serialized === undefined) {
       throw new WorkingMemoryLimitError(
-        `Working memory value for "${key}" is ${size} bytes, exceeding maxValueBytes (${this.limits.maxValueBytes})`,
+        `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
       );
     }
+    const valueBytes = Buffer.byteLength(serialized, 'utf8');
+    if (valueBytes > this.limits.maxValueBytes) {
+      throw new WorkingMemoryLimitError(
+        `Working memory value for "${key}" is ${valueBytes} bytes, exceeding maxValueBytes (${this.limits.maxValueBytes})`,
+      );
+    }
+    // Keys are retained by the Map and the SQLite table too — count them.
+    const size = Buffer.byteLength(key, 'utf8') + valueBytes;
+    return { normalized: JSON.parse(serialized) as unknown, size };
+  }
+
+  set(key: string, value: unknown): void {
+    const { normalized, size } = this.prepareEntry(key, value);
+
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
         `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
@@ -84,7 +102,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
       );
     }
 
-    this.store.set(key, value);
+    this.store.set(key, normalized);
     this.sizes.set(key, size);
     this.totalBytes = newTotal;
   }
@@ -117,10 +135,33 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   restore(snap: Record<string, unknown>): void {
-    this.clear();
-    for (const [key, value] of Object.entries(snap)) {
-      this.set(key, value);
+    // Validate the whole snapshot before mutating so a limit failure
+    // leaves the previous state intact instead of a half-restored one.
+    const entries = Object.entries(snap);
+    if (entries.length > this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Snapshot has ${entries.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
+      );
     }
+    let total = 0;
+    const prepared: Array<[string, unknown, number]> = [];
+    for (const [key, value] of entries) {
+      const { normalized, size } = this.prepareEntry(key, value);
+      total += size;
+      prepared.push([key, normalized, size]);
+    }
+    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
+      throw new WorkingMemoryLimitError(
+        `Snapshot is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+      );
+    }
+
+    this.clear();
+    for (const [key, normalized, size] of prepared) {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+    }
+    this.totalBytes = total;
   }
 
   clear(): void {
