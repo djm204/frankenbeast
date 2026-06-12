@@ -10,13 +10,16 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { ICheckpointStore } from '../deps.js';
 
 const LOCK_RETRY_MS = 5;
-const LOCK_TIMEOUT_MS = 5000;
-// Lock holders only do a read + atomic rename, so anything older than this is a dead process.
-const STALE_LOCK_MS = 1000;
+const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+// A lock whose owner cannot be identified (crash between create and write of
+// the owner record) can only be reaped by age. The create-to-write window is
+// microseconds, so anything unreadable past this age is abandoned.
+const UNREADABLE_LOCK_REAP_MS = 10_000;
 const MAX_ENTRY_LENGTH = 4096;
 
 function sleepSync(ms: number): void {
@@ -32,10 +35,49 @@ function isValidEntry(line: string): boolean {
   return !/[\u0000-\u0008\u000B-\u001F\u007F]/.test(line);
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function writeAll(fd: number, payload: string): void {
+  const buf = Buffer.from(payload, 'utf8');
+  let written = 0;
+  while (written < buf.length) {
+    written += writeSync(fd, buf, written, buf.length - written);
+  }
+}
+
+/** Best-effort directory fsync so a rename survives power loss; ignored where unsupported. */
+function fsyncDir(dirPath: string): void {
+  try {
+    const fd = openSync(dirPath, 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // Directory fsync is not supported on all platforms — durability is best-effort there.
+  }
+}
+
 export class FileCheckpointStore implements ICheckpointStore {
   private writeCounter = 0;
+  private readonly lockToken = randomBytes(8).toString('hex');
+  private readonly lockTimeoutMs: number;
 
-  constructor(public readonly checkpointPath: string) {}
+  constructor(
+    public readonly checkpointPath: string,
+    options?: { lockTimeoutMs?: number },
+  ) {
+    this.lockTimeoutMs = options?.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+  }
 
   has(key: string): boolean {
     return this.readAll().has(key);
@@ -96,41 +138,89 @@ export class FileCheckpointStore implements ICheckpointStore {
     return content.split('\n').filter(isValidEntry);
   }
 
-  /** Write-to-temp + rename so readers never observe a partially written file. */
+  /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
   private atomicReplace(entries: string[]): void {
     const tmpPath = `${this.checkpointPath}.tmp.${process.pid}.${this.writeCounter++}`;
-    const fd = openSync(tmpPath, 'w');
     try {
-      const payload = entries.length > 0 ? entries.join('\n') + '\n' : '';
-      writeSync(fd, payload);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
+      const fd = openSync(tmpPath, 'w');
+      try {
+        const payload = entries.length > 0 ? entries.join('\n') + '\n' : '';
+        writeAll(fd, payload);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      renameSync(tmpPath, this.checkpointPath);
+    } catch (error) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // Temp file never created or already renamed.
+      }
+      throw error;
     }
-    renameSync(tmpPath, this.checkpointPath);
+    fsyncDir(dirname(this.checkpointPath));
+  }
+
+  private get lockOwnerRecord(): string {
+    return `${process.pid}:${this.lockToken}`;
+  }
+
+  /**
+   * Reaps a lock only when its owner is provably gone. The rename makes the
+   * reap atomic: of several waiters that all observed the dead owner, exactly
+   * one wins the rename and removes the lock; the rest retry acquisition.
+   */
+  private tryReapLock(lockPath: string): void {
+    let owner: string;
+    try {
+      owner = readFileSync(lockPath, 'utf-8');
+    } catch {
+      return; // Lock vanished — retry acquisition.
+    }
+
+    const pid = Number.parseInt(owner, 10);
+    if (Number.isInteger(pid) && pid > 0) {
+      if (isProcessAlive(pid)) {
+        return; // Live owner — never break a live lock, just keep waiting.
+      }
+    } else {
+      // Unreadable owner record: only the age fallback applies.
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs < UNREADABLE_LOCK_REAP_MS) {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+
+    const reapPath = `${lockPath}.reap.${this.lockOwnerRecord}`;
+    try {
+      renameSync(lockPath, reapPath);
+      unlinkSync(reapPath);
+    } catch {
+      // Another waiter won the reap race — retry acquisition.
+    }
   }
 
   private withLock(fn: () => void): void {
     const lockPath = `${this.checkpointPath}.lock`;
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    const deadline = Date.now() + this.lockTimeoutMs;
     for (;;) {
       try {
         const fd = openSync(lockPath, 'wx');
-        closeSync(fd);
+        try {
+          writeAll(fd, this.lockOwnerRecord);
+        } finally {
+          closeSync(fd);
+        }
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
           throw error;
         }
-        try {
-          if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
-            unlinkSync(lockPath);
-            continue;
-          }
-        } catch {
-          // Lock vanished between checks — retry acquisition.
-          continue;
-        }
+        this.tryReapLock(lockPath);
         if (Date.now() >= deadline) {
           throw new Error(`Timed out acquiring checkpoint lock: ${lockPath}`);
         }
@@ -140,10 +230,14 @@ export class FileCheckpointStore implements ICheckpointStore {
     try {
       fn();
     } finally {
+      // Release only a lock we still own; live locks are never reaped by
+      // peers, so a mismatch means we should leave it alone.
       try {
-        unlinkSync(lockPath);
+        if (readFileSync(lockPath, 'utf-8') === this.lockOwnerRecord) {
+          unlinkSync(lockPath);
+        }
       } catch {
-        // Already removed (e.g. broken as stale by a peer) — nothing to release.
+        // Lock already gone.
       }
     }
   }

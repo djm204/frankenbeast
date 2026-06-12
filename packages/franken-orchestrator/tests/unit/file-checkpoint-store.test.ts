@@ -122,7 +122,7 @@ describe('FileCheckpointStore', () => {
       expect(leftovers).toEqual([]);
     });
 
-    it('recovers when a stale lock file is left behind by a dead process', () => {
+    it('reaps an unreadable lock file only after the age fallback', () => {
       writeFileSync(`${filePath}.lock`, '');
       const past = new Date(Date.now() - 60_000);
       const { utimesSync } = require('node:fs');
@@ -132,6 +132,31 @@ describe('FileCheckpointStore', () => {
 
       expect(store.has('key-after-stale-lock')).toBe(true);
       expect(existsSync(`${filePath}.lock`)).toBe(false);
+    });
+
+    it('reaps a lock whose owner process is dead', async () => {
+      const { execFile } = require('node:child_process') as typeof import('node:child_process');
+      const deadPid: number = await new Promise((res, rej) => {
+        const child = execFile(process.execPath, ['-e', ''], (err: unknown) =>
+          err ? rej(err) : res(child.pid!),
+        );
+      });
+      writeFileSync(`${filePath}.lock`, `${deadPid}:deadbeef`);
+
+      store.write('key-after-dead-owner');
+
+      expect(store.has('key-after-dead-owner')).toBe(true);
+      expect(existsSync(`${filePath}.lock`)).toBe(false);
+    });
+
+    it('never breaks a lock held by a live process; write times out instead', () => {
+      // Our own pid is alive; a different token means another holder.
+      writeFileSync(`${filePath}.lock`, `${process.pid}:someone-else`);
+      const impatient = new FileCheckpointStore(filePath, { lockTimeoutMs: 200 });
+
+      expect(() => impatient.write('blocked')).toThrow(/Timed out acquiring checkpoint lock/);
+      // The live holder's lock must still be there, untouched.
+      expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:someone-else`);
     });
   });
 
