@@ -21,7 +21,20 @@ import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connect
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
-function createBeastApp(opts?: { rateLimitMax?: number }) {
+type AgentEvent = { type: string };
+
+function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[]) {
+  const actualTypes = new Set(events.map((event) => event.type));
+
+  for (const requiredType of requiredTypes) {
+    expect(actualTypes.has(requiredType), `expected agent events to include ${requiredType}`).toBe(true);
+  }
+}
+
+function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
+  // Intentionally exercise the route with the real repository, dispatch service,
+  // run service, and event log graph. This file lives under tests/integration so
+  // circular service/linking behavior is covered here rather than hidden in unit tests.
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
@@ -119,13 +132,13 @@ function createStandaloneAgentApp() {
   return { app };
 }
 
-describe('agent routes', () => {
+describe('agent routes integration', () => {
   afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
   it('rejects unauthenticated access to tracked agent endpoints', async () => {
-    const { app } = createBeastApp();
+    const { app } = createIntegratedBeastApp();
 
     const listResponse = await app.request('/v1/beasts/agents');
 
@@ -141,7 +154,7 @@ describe('agent routes', () => {
   });
 
   it('returns validation errors for invalid tracked agent payloads', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
 
     const response = await app.request('/v1/beasts/agents', {
       method: 'POST',
@@ -163,7 +176,7 @@ describe('agent routes', () => {
   });
 
   it('returns malformed json errors for invalid tracked agent request bodies', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
 
     const response = await app.request('/v1/beasts/agents', {
       method: 'POST',
@@ -184,7 +197,7 @@ describe('agent routes', () => {
   });
 
   it('creates, dispatches, and lists tracked agents for authorized operators', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -232,7 +245,7 @@ describe('agent routes', () => {
   });
 
   it('dispatches chunk-plan tracked agents during creation when init config is complete', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -282,19 +295,19 @@ describe('agent routes', () => {
     const detail = await detailResponse.json() as {
       data: {
         agent: { dispatchRunId?: string; chatSessionId?: string; status: string };
-        events: Array<{ type: string }>;
+        events: AgentEvent[];
       };
     };
 
     expect(detail.data.agent.status).toBe('running');
     expect(detail.data.agent.chatSessionId).toBe(createdSession.data.id);
     expect(detail.data.agent.dispatchRunId).toBeTruthy();
-    expect(detail.data.events.map((event) => event.type)).toEqual(expect.arrayContaining([
+    expectEventsToIncludeTypes(detail.data.events, [
       'agent.created',
       'agent.chat.bound',
       'agent.command.sent',
       'agent.dispatch.linked',
-    ]));
+    ]);
 
     const runResponse = await app.request(`/v1/beasts/runs/${detail.data.agent.dispatchRunId}`, {
       headers: {
@@ -308,7 +321,7 @@ describe('agent routes', () => {
   });
 
   it('returns tracked agent detail including init metadata and linked run id', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -365,18 +378,18 @@ describe('agent routes', () => {
     const detailBody = await detailResponse.json() as {
       data: {
         agent: { id: string; dispatchRunId?: string; initAction: { kind: string } };
-        events: Array<{ type: string }>;
+        events: AgentEvent[];
       };
     };
 
     expect(detailBody.data.agent.id).toBe(createdAgent.data.id);
     expect(detailBody.data.agent.initAction.kind).toBe('martin-loop');
     expect(detailBody.data.agent.dispatchRunId).toBe(createdRun.data.id);
-    expect(detailBody.data.events.map((event) => event.type)).toContain('agent.created');
+    expectEventsToIncludeTypes(detailBody.data.events, ['agent.created']);
   });
 
   it('resumes a stopped tracked agent by creating a new run attempt on the linked run', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -491,15 +504,15 @@ describe('agent routes', () => {
     const detail = await detailResponse.json() as {
       data: {
         agent: { status: string };
-        events: Array<{ type: string }>;
+        events: AgentEvent[];
       };
     };
     expect(detail.data.agent.status).toBe('stopped');
-    expect(detail.data.events.map((event) => event.type)).toContain('agent.stop.requested');
+    expectEventsToIncludeTypes(detail.data.events, ['agent.stop.requested']);
   });
 
   it('starts and restarts stopped tracked agents through agent-specific endpoints', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -582,7 +595,7 @@ describe('agent routes', () => {
   });
 
   it('soft-deletes stopped tracked agents so they disappear from the dashboard list', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -637,7 +650,7 @@ describe('agent routes', () => {
   });
 
   it('returns 404 for unknown tracked agents', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
 
     const response = await app.request('/v1/beasts/agents/agent-missing', {
       headers: {
@@ -655,7 +668,7 @@ describe('agent routes', () => {
   });
 
   it('rate-limits agent creation requests', async () => {
-    const { app, operatorToken } = createBeastApp({ rateLimitMax: 2 });
+    const { app, operatorToken } = createIntegratedBeastApp({ rateLimitMax: 2 });
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -680,7 +693,7 @@ describe('agent routes', () => {
   });
 
   it('marks agent as failed when dispatch throws instead of leaving orphaned initializing agents', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -716,15 +729,15 @@ describe('agent routes', () => {
     const detail = await detailResponse.json() as {
       data: {
         agent: { status: string };
-        events: Array<{ type: string }>;
+        events: AgentEvent[];
       };
     };
     expect(detail.data.agent.status).toBe('failed');
-    expect(detail.data.events.map((e) => e.type)).toContain('agent.dispatch.failed');
+    expectEventsToIncludeTypes(detail.data.events, ['agent.dispatch.failed']);
   });
 
   it('allows starting failed tracked agents via the start endpoint', async () => {
-    const { app, operatorToken } = createBeastApp();
+    const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
