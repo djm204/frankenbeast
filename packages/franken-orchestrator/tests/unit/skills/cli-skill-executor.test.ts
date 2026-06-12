@@ -6,9 +6,81 @@ import type { MartinLoopConfig, IterationResult, CliSkillConfig, GitIsolationCon
 import type { SkillInput, ICheckpointStore } from '../../../src/deps.js';
 import { makeLogger } from '../../helpers/stubs.js';
 import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
+import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
+import { ChunkSessionRenderer } from '../../../src/session/chunk-session-renderer.js';
+import { ChunkSessionCompactor } from '../../../src/session/chunk-session-compactor.js';
 import { createChunkSession } from '../../../src/session/chunk-session.js';
+import { CliSkillExecutor, type ObserverDeps } from '../../../src/skills/cli-skill-executor.js';
+import { MartinLoop } from '../../../src/skills/martin-loop.js';
+import { GitBranchIsolator } from '../../../src/skills/git-branch-isolator.js';
 
-// ── Factories ──
+// ── Typed test fixtures ──
+
+type MockMartin = MartinLoop & {
+  run: ReturnType<typeof vi.fn<MartinLoop['run']>>;
+};
+
+type MockGit = GitBranchIsolator & {
+  isolate: ReturnType<typeof vi.fn<GitBranchIsolator['isolate']>>;
+  merge: ReturnType<typeof vi.fn<GitBranchIsolator['merge']>>;
+  autoCommit: ReturnType<typeof vi.fn<GitBranchIsolator['autoCommit']>>;
+  hasMeaningfulChange: ReturnType<typeof vi.fn<GitBranchIsolator['hasMeaningfulChange']>>;
+  getCurrentHead: ReturnType<typeof vi.fn<GitBranchIsolator['getCurrentHead']>>;
+  getDiffStat: ReturnType<typeof vi.fn<GitBranchIsolator['getDiffStat']>>;
+  getWorkingDir: ReturnType<typeof vi.fn<GitBranchIsolator['getWorkingDir']>>;
+  getStatus: ReturnType<typeof vi.fn<GitBranchIsolator['getStatus']>>;
+  resetHard: ReturnType<typeof vi.fn<GitBranchIsolator['resetHard']>>;
+  getConflictedFiles: ReturnType<typeof vi.fn<GitBranchIsolator['getConflictedFiles']>>;
+  getConflictDiff: ReturnType<typeof vi.fn<GitBranchIsolator['getConflictDiff']>>;
+  completeMerge: ReturnType<typeof vi.fn<GitBranchIsolator['completeMerge']>>;
+  abortMerge: ReturnType<typeof vi.fn<GitBranchIsolator['abortMerge']>>;
+};
+
+type MockObserver = ObserverDeps & {
+  counter: {
+    grandTotal: ReturnType<typeof vi.fn<ObserverDeps['counter']['grandTotal']>>;
+    allModels: ReturnType<typeof vi.fn<ObserverDeps['counter']['allModels']>>;
+    totalsFor: ReturnType<typeof vi.fn<ObserverDeps['counter']['totalsFor']>>;
+  };
+  costCalc: {
+    totalCost: ReturnType<typeof vi.fn<ObserverDeps['costCalc']['totalCost']>>;
+  };
+  breaker: {
+    check: ReturnType<typeof vi.fn<ObserverDeps['breaker']['check']>>;
+  };
+  loopDetector: {
+    check: ReturnType<typeof vi.fn<ObserverDeps['loopDetector']['check']>>;
+  };
+  estimateContextWindow: ReturnType<typeof vi.fn<ObserverDeps['estimateContextWindow']>>;
+  startSpan: ReturnType<typeof vi.fn<ObserverDeps['startSpan']>>;
+  endSpan: ReturnType<typeof vi.fn<ObserverDeps['endSpan']>>;
+  recordTokenUsage: ReturnType<typeof vi.fn<ObserverDeps['recordTokenUsage']>>;
+  setMetadata: ReturnType<typeof vi.fn<ObserverDeps['setMetadata']>>;
+  recordReplay: ReturnType<typeof vi.fn<NonNullable<ObserverDeps['recordReplay']>>>;
+};
+
+type DefaultMartinConfig = NonNullable<ConstructorParameters<typeof CliSkillExecutor>[6]>;
+type CommitMessageFn = NonNullable<ConstructorParameters<typeof CliSkillExecutor>[4]>;
+type ExecutorLogger = ConstructorParameters<typeof CliSkillExecutor>[5];
+
+interface CliSkillHarness {
+  readonly martin: MockMartin;
+  readonly git: MockGit;
+  readonly observer: MockObserver;
+  executor(options?: {
+    verifyCommand?: string;
+    commitMessageFn?: CommitMessageFn;
+    logger?: ExecutorLogger;
+    defaultMartinConfig?: DefaultMartinConfig;
+  }): CliSkillExecutor;
+  execute(
+    skillId?: string,
+    input?: SkillInput,
+    config?: Partial<CliSkillConfig>,
+    checkpoint?: ICheckpointStore,
+    taskId?: string,
+  ): Promise<Awaited<ReturnType<CliSkillExecutor['execute']>>>;
+}
 
 function makeSkillInput(overrides?: Partial<SkillInput>): SkillInput {
   return {
@@ -28,8 +100,6 @@ function makeMartinConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConf
     maxIterations: 5,
     maxTurns: 10,
     provider: 'claude',
-    claudeCmd: 'claude',
-    codexCmd: 'codex',
     timeoutMs: 60000,
     ...overrides,
   };
@@ -60,6 +130,7 @@ function makeCliConfig(overrides?: {
 function makeIterResult(overrides?: Partial<IterationResult>): IterationResult {
   return {
     iteration: 1,
+    provider: 'claude',
     exitCode: 0,
     stdout: 'test output',
     stderr: '',
@@ -67,63 +138,140 @@ function makeIterResult(overrides?: Partial<IterationResult>): IterationResult {
     rateLimited: false,
     promiseDetected: false,
     tokensEstimated: 100,
+    sleepMs: 0,
     ...overrides,
   };
 }
 
-function makeMockMartin() {
-  return {
-    run: vi.fn().mockResolvedValue({
-      completed: true,
-      iterations: 1,
-      output: 'completed output',
-      tokensUsed: 100,
-    }),
-  };
+function makeMockMartin(): MockMartin {
+  const run = vi.fn<MartinLoop['run']>().mockResolvedValue({
+    completed: true,
+    iterations: 1,
+    output: 'completed output',
+    tokensUsed: 100,
+  });
+  return Object.assign(Object.create(MartinLoop.prototype) as MartinLoop, { run });
 }
 
-function makeMockGit() {
-  return {
-    isolate: vi.fn(),
-    merge: vi.fn().mockReturnValue({ merged: true, commits: 3 }),
-    autoCommit: vi.fn(),
-    hasMeaningfulChange: vi.fn(),
-    getCurrentHead: vi.fn(),
-    getDiffStat: vi.fn().mockReturnValue('src/foo.ts | 10 +++\n'),
-    getWorkingDir: vi.fn().mockReturnValue('/tmp/test-repo'),
-    getStatus: vi.fn().mockReturnValue(''),
-    resetHard: vi.fn(),
-    getConflictedFiles: vi.fn().mockReturnValue([]),
-    getConflictDiff: vi.fn().mockReturnValue(''),
-    completeMerge: vi.fn(),
-    abortMerge: vi.fn(),
-  };
+function makeMockGit(): MockGit {
+  return Object.assign(Object.create(GitBranchIsolator.prototype) as GitBranchIsolator, {
+    isolate: vi.fn<GitBranchIsolator['isolate']>(),
+    merge: vi.fn<GitBranchIsolator['merge']>().mockReturnValue({ merged: true, commits: 3 }),
+    autoCommit: vi.fn<GitBranchIsolator['autoCommit']>(),
+    hasMeaningfulChange: vi.fn<GitBranchIsolator['hasMeaningfulChange']>(),
+    getCurrentHead: vi.fn<GitBranchIsolator['getCurrentHead']>(),
+    getDiffStat: vi.fn<GitBranchIsolator['getDiffStat']>().mockReturnValue('src/foo.ts | 10 +++\n'),
+    getWorkingDir: vi.fn<GitBranchIsolator['getWorkingDir']>().mockReturnValue('/tmp/test-repo'),
+    getStatus: vi.fn<GitBranchIsolator['getStatus']>().mockReturnValue(''),
+    resetHard: vi.fn<GitBranchIsolator['resetHard']>(),
+    getConflictedFiles: vi.fn<GitBranchIsolator['getConflictedFiles']>().mockReturnValue([]),
+    getConflictDiff: vi.fn<GitBranchIsolator['getConflictDiff']>().mockReturnValue(''),
+    completeMerge: vi.fn<GitBranchIsolator['completeMerge']>(),
+    abortMerge: vi.fn<GitBranchIsolator['abortMerge']>(),
+  });
 }
 
-function makeMockObserver() {
+function makeMockObserver(): MockObserver {
   let spanCount = 0;
   return {
     trace: { id: 'trace-1' },
     counter: {
-      grandTotal: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
-      allModels: vi.fn().mockReturnValue([] as string[]),
-      totalsFor: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+      grandTotal: vi.fn<ObserverDeps['counter']['grandTotal']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+      allModels: vi.fn<ObserverDeps['counter']['allModels']>().mockReturnValue([]),
+      totalsFor: vi.fn<ObserverDeps['counter']['totalsFor']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
     },
     costCalc: {
-      totalCost: vi.fn().mockReturnValue(0),
+      totalCost: vi.fn<ObserverDeps['costCalc']['totalCost']>().mockReturnValue(0),
     },
     breaker: {
-      check: vi.fn().mockReturnValue({ tripped: false, limitUsd: 10, spendUsd: 0 }),
+      check: vi.fn<ObserverDeps['breaker']['check']>().mockReturnValue({ tripped: false, limitUsd: 10, spendUsd: 0 }),
     },
     loopDetector: {
-      check: vi.fn().mockReturnValue({ detected: false }),
+      check: vi.fn<ObserverDeps['loopDetector']['check']>().mockReturnValue({ detected: false }),
     },
-    startSpan: vi.fn().mockImplementation(() => ({ id: `span-${spanCount++}` })),
-    endSpan: vi.fn(),
-    recordTokenUsage: vi.fn(),
-    setMetadata: vi.fn(),
-    recordReplay: vi.fn(),
+    estimateContextWindow: vi.fn<ObserverDeps['estimateContextWindow']>().mockReturnValue({
+      usedTokens: 0,
+      maxTokens: 200000,
+      usageRatio: 0,
+      threshold: 0.8,
+      shouldCompact: false,
+    }),
+    startSpan: vi.fn<ObserverDeps['startSpan']>().mockImplementation(() => ({ id: `span-${spanCount++}` })),
+    endSpan: vi.fn<ObserverDeps['endSpan']>(),
+    recordTokenUsage: vi.fn<ObserverDeps['recordTokenUsage']>(),
+    setMetadata: vi.fn<ObserverDeps['setMetadata']>(),
+    recordReplay: vi.fn<NonNullable<ObserverDeps['recordReplay']>>(),
   };
+}
+
+function createHarness(): CliSkillHarness {
+  const martin = makeMockMartin();
+  const git = makeMockGit();
+  const observer = makeMockObserver();
+
+  return {
+    martin,
+    git,
+    observer,
+    executor(options = {}) {
+      return new CliSkillExecutor(
+        martin,
+        git,
+        observer,
+        options.verifyCommand,
+        options.commitMessageFn,
+        options.logger,
+        options.defaultMartinConfig,
+      );
+    },
+    execute(
+      skillId = 'cli:01_types',
+      input = makeSkillInput(),
+      config = makeCliConfig(),
+      checkpoint?: ICheckpointStore,
+      taskId?: string,
+    ) {
+      return this.executor().execute(skillId, input, config, checkpoint, taskId);
+    },
+  };
+}
+
+function makeStubSessionStore(): FileChunkSessionStore {
+  return Object.assign(Object.create(FileChunkSessionStore.prototype) as FileChunkSessionStore, {
+    save: vi.fn<FileChunkSessionStore['save']>(),
+    load: vi.fn<FileChunkSessionStore['load']>(),
+    delete: vi.fn<FileChunkSessionStore['delete']>(),
+    list: vi.fn<FileChunkSessionStore['list']>(),
+  });
+}
+
+function makeStubSnapshotStore(): FileChunkSessionSnapshotStore {
+  return Object.assign(Object.create(FileChunkSessionSnapshotStore.prototype) as FileChunkSessionSnapshotStore, {
+    writeSnapshot: vi.fn<FileChunkSessionSnapshotStore['writeSnapshot']>(),
+    list: vi.fn<FileChunkSessionSnapshotStore['list']>(),
+    restoreLatest: vi.fn<FileChunkSessionSnapshotStore['restoreLatest']>(),
+  });
+}
+
+function makeStubRenderer(): ChunkSessionRenderer {
+  return Object.assign(Object.create(ChunkSessionRenderer.prototype) as ChunkSessionRenderer, {
+    render: vi.fn<ChunkSessionRenderer['render']>(),
+  });
+}
+
+function makeStubCompactor(): ChunkSessionCompactor {
+  return Object.assign(Object.create(ChunkSessionCompactor.prototype) as ChunkSessionCompactor, {
+    compact: vi.fn<ChunkSessionCompactor['compact']>(),
+  });
+}
+
+type ReplayRecord = Parameters<NonNullable<ObserverDeps['recordReplay']>>[0];
+
+function replayRecord(observer: MockObserver, kind: 'tool.call' | 'tool.result'): ReplayRecord {
+  for (const [candidate] of observer.recordReplay.mock.calls) {
+    if (candidate.kind === kind) return candidate;
+  }
+  throw new Error(`Expected ${kind} replay record`);
 }
 
 function makeCheckpoint(overrides: Partial<ICheckpointStore> = {}): ICheckpointStore {
@@ -142,26 +290,24 @@ function makeCheckpoint(overrides: Partial<ICheckpointStore> = {}): ICheckpointS
 // ── Tests ──
 
 describe('CliSkillExecutor', () => {
-  let martin: ReturnType<typeof makeMockMartin>;
-  let git: ReturnType<typeof makeMockGit>;
-  let observer: ReturnType<typeof makeMockObserver>;
+  let harness: CliSkillHarness;
+  let martin: MockMartin;
+  let git: MockGit;
+  let observer: MockObserver;
 
   beforeEach(() => {
-    martin = makeMockMartin();
-    git = makeMockGit();
-    observer = makeMockObserver();
+    harness = createHarness();
+    ({ martin, git, observer } = harness);
   });
 
-  async function createAndExecute(
+  function createAndExecute(
     skillId = 'cli:01_types',
     input = makeSkillInput(),
     config = makeCliConfig(),
     checkpoint?: ICheckpointStore,
     taskId?: string,
   ) {
-    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(martin as any, git as any, observer);
-    return executor.execute(skillId, input, config, checkpoint, taskId);
+    return harness.execute(skillId, input, config, checkpoint, taskId);
   }
 
   describe('successful execution (promise detected)', () => {
@@ -181,9 +327,7 @@ describe('CliSkillExecutor', () => {
         toolName: 'cli:01_types',
         content: expect.stringContaining('Replay this task'),
       }));
-      const toolCallRecord = observer.recordReplay.mock.calls.find(
-        ([record]: [{ kind: string; content: string }]) => record.kind === 'tool.call',
-      )?.[0];
+      const toolCallRecord = replayRecord(observer, 'tool.call');
       expect(JSON.parse(toolCallRecord.content).input.dependencyOutputs).toEqual([]);
       expect(observer.recordReplay).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'tool.result',
@@ -202,15 +346,13 @@ describe('CliSkillExecutor', () => {
       });
 
       await createAndExecute('cli:01_types', makeSkillInput({
-        dependencyOutputs: new Map([
+        dependencyOutputs: new Map<string, unknown>([
           ['impl:00_bootstrap', 'bootstrap-output'],
           ['impl:00_types', { files: ['types.ts'] }],
         ]),
       }));
 
-      const toolCallRecord = observer.recordReplay.mock.calls.find(
-        ([record]: [{ kind: string; content: string }]) => record.kind === 'tool.call',
-      )?.[0];
+      const toolCallRecord = replayRecord(observer, 'tool.call');
       expect(JSON.parse(toolCallRecord.content).input.dependencyOutputs).toEqual([
         ['impl:00_bootstrap', 'bootstrap-output'],
         ['impl:00_types', { files: ['types.ts'] }],
@@ -233,22 +375,15 @@ describe('CliSkillExecutor', () => {
     });
 
     it('uses executor-level provider defaults when execution passes no martin config', async () => {
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(
-        martin as any,
-        git as any,
-        observer,
-        undefined,
-        undefined,
-        undefined,
-        {
+      const executor = harness.executor({
+        defaultMartinConfig: {
           provider: 'codex',
           providers: ['codex'],
           command: '/usr/local/bin/codex',
         },
-      );
+      });
 
-      await executor.execute('cli:01_types', makeSkillInput(), {} as never);
+      await executor.execute('cli:01_types', makeSkillInput(), {});
 
       expect(martin.run).toHaveBeenCalledWith(expect.objectContaining({
         provider: 'codex',
@@ -258,30 +393,23 @@ describe('CliSkillExecutor', () => {
     });
 
     it('passes chunk session services and task metadata into MartinLoop', async () => {
-      const sessionStore = { save: vi.fn(), load: vi.fn(), delete: vi.fn(), list: vi.fn() };
-      const snapshotStore = { writeSnapshot: vi.fn(), list: vi.fn(), restoreLatest: vi.fn() };
-      const renderer = { render: vi.fn() };
-      const compactor = { compact: vi.fn() };
-      const contextUsage = vi.fn();
+      const sessionStore = makeStubSessionStore();
+      const snapshotStore = makeStubSnapshotStore();
+      const renderer = makeStubRenderer();
+      const compactor = makeStubCompactor();
+      const contextUsage = vi.fn<NonNullable<MartinLoopConfig['contextUsage']>>();
 
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(
-        martin as any,
-        git as any,
-        observer,
-        undefined,
-        undefined,
-        undefined,
-        {
+      const executor = harness.executor({
+        defaultMartinConfig: {
           provider: 'claude',
           planName: 'demo-plan',
-          sessionStore: sessionStore as any,
-          snapshotStore: snapshotStore as any,
-          renderer: renderer as any,
-          compactor: compactor as any,
+          sessionStore,
+          snapshotStore,
+          renderer,
+          compactor,
           contextUsage,
-        } as any,
-      );
+        },
+      });
 
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig(), undefined, 'impl:01_types');
 
@@ -453,20 +581,13 @@ describe('CliSkillExecutor', () => {
       git.getCurrentHead.mockReturnValue('abc123');
 
       const checkpoint = makeCheckpoint();
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(
-        martin as any,
-        git as any,
-        observer,
-        undefined,
-        undefined,
-        undefined,
-        {
+      const executor = harness.executor({
+        defaultMartinConfig: {
           provider: 'claude',
           planName: 'demo-plan',
           sessionStore,
-        } as any,
-      );
+        },
+      });
 
       await executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger());
 
@@ -526,7 +647,7 @@ describe('CliSkillExecutor', () => {
       // Should have called martin.run twice (impl + conflict resolution)
       expect(martin.run).toHaveBeenCalledTimes(2);
       // Second call should have a conflict resolution prompt
-      const resolveConfig = martin.run.mock.calls[1]![0] as MartinLoopConfig;
+      const resolveConfig = martin.run.mock.calls[1]![0];
       expect(resolveConfig.prompt).toContain('merge conflict');
       expect(resolveConfig.prompt).toContain('docs/ARCHITECTURE.md');
       expect(resolveConfig.maxIterations).toBeLessThanOrEqual(3);
@@ -605,10 +726,9 @@ describe('CliSkillExecutor', () => {
 
   describe('commit message generation before merge', () => {
     it('calls commitMessageFn before merge and passes result to merge()', async () => {
-      const commitMessageFn = vi.fn().mockResolvedValue('feat(types): add shared type definitions');
+      const commitMessageFn = vi.fn<CommitMessageFn>().mockResolvedValue('feat(types): add shared type definitions');
 
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
+      const executor = harness.executor({ commitMessageFn });
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.getDiffStat).toHaveBeenCalledWith('01_types');
@@ -617,28 +737,25 @@ describe('CliSkillExecutor', () => {
     });
 
     it('passes undefined to merge when commitMessageFn is not provided', async () => {
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(martin as any, git as any, observer);
+      const executor = harness.executor();
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.merge).toHaveBeenCalledWith('01_types');
     });
 
     it('passes undefined to merge when commitMessageFn returns null', async () => {
-      const commitMessageFn = vi.fn().mockResolvedValue(null);
+      const commitMessageFn = vi.fn<CommitMessageFn>().mockResolvedValue(null);
 
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
+      const executor = harness.executor({ commitMessageFn });
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.merge).toHaveBeenCalledWith('01_types');
     });
 
     it('falls back to no message when commitMessageFn throws', async () => {
-      const commitMessageFn = vi.fn().mockRejectedValue(new Error('LLM down'));
+      const commitMessageFn = vi.fn<CommitMessageFn>().mockRejectedValue(new Error('LLM down'));
 
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
+      const executor = harness.executor({ commitMessageFn });
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       // Should still merge, just without a message
@@ -655,8 +772,7 @@ describe('CliSkillExecutor', () => {
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
 
-      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, undefined, logger);
+      const executor = harness.executor({ logger });
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(logger.warn).toHaveBeenCalledWith(
