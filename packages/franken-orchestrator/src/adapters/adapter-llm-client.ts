@@ -36,6 +36,17 @@ export interface ILlmObserver {
   trace: any;
 }
 
+export class AdapterLlmError extends Error {
+  constructor(
+    message: string,
+    public readonly requestId: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'AdapterLlmError';
+  }
+}
+
 export class AdapterLlmClient implements ILlmClient {
   private readonly adapter: IAdapter;
   private readonly observer?: ILlmObserver | undefined;
@@ -63,11 +74,30 @@ export class AdapterLlmClient implements ILlmClient {
       span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
     }
 
+    let failed = false;
     try {
-      const providerRequest = this.adapter.transformRequest(request);
-      const providerResponse = await this.adapter.execute(providerRequest);
-      const response = this.adapter.transformResponse(providerResponse, requestId);
-      const content = response.content ?? '';
+      let content: string | null;
+      try {
+        const providerRequest = this.adapter.transformRequest(request);
+        const providerResponse = await this.adapter.execute(providerRequest);
+        const response = this.adapter.transformResponse(providerResponse, requestId);
+        content = response.content;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new AdapterLlmError(
+          `LLM adapter call failed for request ${requestId}: ${message}`,
+          requestId,
+          { cause: error },
+        );
+      }
+
+      if (content == null) {
+        // An absent completion must not silently become an empty plan downstream.
+        throw new AdapterLlmError(
+          `LLM adapter returned no content for request ${requestId}`,
+          requestId,
+        );
+      }
 
       if (this.observer && span) {
         const promptTokens = Math.ceil(prompt.length / 4);
@@ -84,9 +114,12 @@ export class AdapterLlmClient implements ILlmClient {
       }
 
       return content;
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
       if (this.observer && span) {
-        this.observer.endSpan(span, { status: 'completed' });
+        this.observer.endSpan(span, { status: failed ? 'failed' : 'completed' });
       }
     }
   }
