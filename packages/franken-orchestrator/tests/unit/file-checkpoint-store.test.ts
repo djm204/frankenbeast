@@ -141,7 +141,7 @@ describe('FileCheckpointStore', () => {
           err ? rej(err) : res(child.pid!),
         );
       });
-      writeFileSync(`${filePath}.lock`, `${deadPid}:deadbeefdeadbeef`);
+      writeFileSync(`${filePath}.lock`, `${deadPid}:12345:deadbeefdeadbeef`);
 
       store.write('key-after-dead-owner');
 
@@ -166,12 +166,12 @@ describe('FileCheckpointStore', () => {
 
     it('never breaks a lock held by a live process; write times out instead', () => {
       // Our own pid is alive; a different token means another holder.
-      writeFileSync(`${filePath}.lock`, `${process.pid}:0123456789abcdef`);
+      writeFileSync(`${filePath}.lock`, `${process.pid}:0:0123456789abcdef`);
       const impatient = new FileCheckpointStore(filePath, { lockTimeoutMs: 200 });
 
       expect(() => impatient.write('blocked')).toThrow(/Timed out acquiring checkpoint lock/);
       // The live holder's lock must still be there, untouched.
-      expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:0123456789abcdef`);
+      expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:0:0123456789abcdef`);
     });
   });
 
@@ -185,6 +185,16 @@ describe('FileCheckpointStore', () => {
   });
 
   describe('lock owner records', () => {
+    it('reaps a lock whose PID was reused by a different process', () => {
+      // Our own pid is alive, but the recorded start time belongs to a dead
+      // process — liveness alone must not pin the lock to the reused PID.
+      writeFileSync(`${filePath}.lock`, `${process.pid}:1:0123456789abcdef`);
+
+      store.write('recovered-from-reused-pid');
+
+      expect(store.has('recovered-from-reused-pid')).toBe(true);
+    });
+
     it('treats a truncated numeric owner record as reapable, not as live PID', () => {
       // Crash mid-write can leave "1" — must not pin the lock to live PID 1.
       writeFileSync(`${filePath}.lock`, '1');
