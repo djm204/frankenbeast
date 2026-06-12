@@ -18,8 +18,9 @@ const LOCK_RETRY_MS = 5;
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
 // A lock whose owner cannot be identified (crash between create and write of
 // the owner record) can only be reaped by age. The create-to-write window is
-// microseconds, so anything unreadable past this age is abandoned.
-const UNREADABLE_LOCK_REAP_MS = 10_000;
+// microseconds, so anything unreadable past this age is abandoned. Kept well
+// under the acquisition timeout so waiters can recover instead of timing out.
+const UNREADABLE_LOCK_REAP_MS = 2000;
 const MAX_ENTRY_LENGTH = 4096;
 
 function sleepSync(ms: number): void {
@@ -185,9 +186,12 @@ export class FileCheckpointStore implements ICheckpointStore {
         return; // Live owner — never break a live lock, just keep waiting.
       }
     } else {
-      // Unreadable owner record: only the age fallback applies.
+      // Unreadable owner record: only the age fallback applies. Cap it below
+      // the acquisition timeout so a post-crash writer recovers rather than
+      // timing out before the fallback can fire.
+      const reapAgeMs = Math.min(UNREADABLE_LOCK_REAP_MS, this.lockTimeoutMs / 2);
       try {
-        if (Date.now() - statSync(lockPath).mtimeMs < UNREADABLE_LOCK_REAP_MS) {
+        if (Date.now() - statSync(lockPath).mtimeMs < reapAgeMs) {
           return;
         }
       } catch {
@@ -195,7 +199,8 @@ export class FileCheckpointStore implements ICheckpointStore {
       }
     }
 
-    const reapPath = `${lockPath}.reap.${this.lockOwnerRecord}`;
+    // Filename-safe (no colons — they are invalid on Windows outside the drive prefix).
+    const reapPath = `${lockPath}.reap.${process.pid}-${this.lockToken}`;
     try {
       renameSync(lockPath, reapPath);
       unlinkSync(reapPath);

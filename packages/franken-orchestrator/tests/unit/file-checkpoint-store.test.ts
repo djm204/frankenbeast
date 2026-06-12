@@ -149,6 +149,21 @@ describe('FileCheckpointStore', () => {
       expect(existsSync(`${filePath}.lock`)).toBe(false);
     });
 
+    it('recovers from an empty lock within the acquisition timeout', () => {
+      // Crash window: lock created but owner record never written. The reap
+      // age must sit below the lock timeout or the first post-crash write
+      // times out instead of recovering.
+      writeFileSync(`${filePath}.lock`, '');
+      const past = new Date(Date.now() - 3_000);
+      const { utimesSync } = require('node:fs');
+      utimesSync(`${filePath}.lock`, past, past);
+
+      const writer = new FileCheckpointStore(filePath, { lockTimeoutMs: 5_000 });
+      writer.write('recovered');
+
+      expect(writer.has('recovered')).toBe(true);
+    });
+
     it('never breaks a lock held by a live process; write times out instead', () => {
       // Our own pid is alive; a different token means another holder.
       writeFileSync(`${filePath}.lock`, `${process.pid}:someone-else`);
