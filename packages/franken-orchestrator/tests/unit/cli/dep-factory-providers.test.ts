@@ -8,6 +8,32 @@ import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 // ── Mock heavy dependencies to isolate provider wiring ──
 
 const mockBridgeReplayManifest: Array<{ version: 1; kind: 'llm.request' | 'llm.response' | 'tool.call' | 'tool.result'; runId: string; timestamp: string; contentRef: string }> = [];
+const optionalModuleMocks = vi.hoisted(() => {
+  const createReviewer = vi.fn(() => ({
+    review: vi.fn(async () => ({
+      verdict: 'pass',
+      iterations: [
+        {
+          result: {
+            overallScore: 1,
+            results: [],
+          },
+        },
+      ],
+    })),
+  }));
+  return {
+    critiqueError: undefined as unknown,
+    governorError: undefined as unknown,
+    createReviewer,
+    ApprovalGateway: vi.fn(function () {}),
+    CliChannel: vi.fn(function () {}),
+    defaultConfig: vi.fn(() => ({})),
+  };
+});
+const traceViewerMocks = vi.hoisted(() => ({
+  stop: vi.fn(async () => {}),
+}));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
@@ -78,7 +104,7 @@ vi.mock('../../../src/skills/cli-skill-executor.js', () => ({
 }));
 
 vi.mock('../../../src/cli/trace-viewer.js', () => ({
-  setupTraceViewer: vi.fn(async () => ({ stop: vi.fn() })),
+  setupTraceViewer: vi.fn(async () => ({ stop: traceViewerMocks.stop })),
 }));
 
 vi.mock('../../../src/session/chunk-session-store.js', () => ({
@@ -163,21 +189,25 @@ vi.mock('franken-brain', () => ({
   WorkingMemoryStore: vi.fn(function () {}),
 }));
 
-vi.mock('@franken/critique', () => ({
-  createReviewer: vi.fn(() => ({
-    review: vi.fn(async () => ({
-      verdict: 'pass',
-      iterations: [
-        {
-          result: {
-            overallScore: 1,
-            results: [],
-          },
-        },
-      ],
-    })),
-  })),
-}));
+vi.mock('@franken/critique', () => {
+  if (optionalModuleMocks.critiqueError) {
+    throw optionalModuleMocks.critiqueError;
+  }
+  return {
+    createReviewer: optionalModuleMocks.createReviewer,
+  };
+});
+
+vi.mock('@franken/governor', () => {
+  if (optionalModuleMocks.governorError) {
+    throw optionalModuleMocks.governorError;
+  }
+  return {
+    ApprovalGateway: optionalModuleMocks.ApprovalGateway,
+    CliChannel: optionalModuleMocks.CliChannel,
+    defaultConfig: optionalModuleMocks.defaultConfig,
+  };
+});
 
 // ── Helpers ──
 
@@ -212,6 +242,9 @@ function makeOpts(overrides: Partial<CliDepOptions> = {}): CliDepOptions {
 describe('dep-factory provider wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    optionalModuleMocks.critiqueError = undefined;
+    optionalModuleMocks.governorError = undefined;
+    traceViewerMocks.stop.mockClear();
     mockBridgeReplayManifest.length = 0;
   });
 
@@ -426,5 +459,89 @@ describe('dep-factory provider wiring', () => {
 
     expect(existsSync(issueCheckpoint)).toBe(false);
     expect(existsSync(chunkSession)).toBe(false);
+  });
+
+  it('uses critique stub when the optional critique module is truly missing', async () => {
+    optionalModuleMocks.critiqueError = Object.assign(
+      new Error("Cannot find package '@franken/critique' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    const result = await createCliDeps(makeOpts({
+      enabledModules: { critique: true, governor: false },
+    }));
+
+    await expect(result.deps.critique.reviewPlan({ tasks: [] })).resolves.toEqual({
+      verdict: 'pass',
+      findings: [],
+      score: 1.0,
+    });
+  });
+
+  it('fails loudly when the optional critique module exists but is broken', async () => {
+    optionalModuleMocks.critiqueError = new Error('critique init exploded');
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      enabledModules: { critique: true, governor: false },
+    }))).rejects.toThrow(/@franken\/critique.*critique init exploded/);
+  });
+
+  it('stops verbose trace viewer when critique initialization fails after observer setup', async () => {
+    optionalModuleMocks.critiqueError = new Error('critique init exploded');
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      verbose: true,
+      enabledModules: { critique: true, governor: false },
+    }))).rejects.toThrow(/@franken\/critique.*critique init exploded/);
+
+    expect(traceViewerMocks.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses governor stub when the optional governor module is truly missing', async () => {
+    optionalModuleMocks.governorError = Object.assign(
+      new Error("Cannot find package '@franken/governor' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    const result = await createCliDeps(makeOpts({
+      enabledModules: { critique: false, governor: true },
+    }));
+
+    await expect(result.deps.governor.requestApproval({
+      taskId: 'test',
+      summary: 'test',
+      requiresHitl: true,
+    })).resolves.toEqual({ decision: 'approved' });
+  });
+
+  it('fails loudly when the optional governor module exists but is broken', async () => {
+    optionalModuleMocks.governorError = new Error('governor init exploded');
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      enabledModules: { critique: false, governor: true },
+    }))).rejects.toThrow(/@franken\/governor.*governor init exploded/);
+  });
+
+  it('stops verbose trace viewer when governor initialization fails after observer setup', async () => {
+    optionalModuleMocks.governorError = new Error('governor init exploded');
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      verbose: true,
+      enabledModules: { critique: false, governor: true },
+    }))).rejects.toThrow(/@franken\/governor.*governor init exploded/);
+
+    expect(traceViewerMocks.stop).toHaveBeenCalledTimes(1);
   });
 });
