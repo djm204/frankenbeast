@@ -1,3 +1,4 @@
+import { Worker } from 'node:worker_threads';
 import type {
   Evaluator,
   EvaluationInput,
@@ -8,6 +9,9 @@ import type { GuardrailsPort } from '../types/contracts.js';
 
 const MAX_SAFETY_PATTERN_LENGTH = 1_000;
 const MAX_ALTERNATIVE_PREFIX_TOKENS = MAX_SAFETY_PATTERN_LENGTH;
+const REGEX_EVALUATION_BASE_TIMEOUT_MS = 2_000;
+const REGEX_EVALUATION_MAX_TIMEOUT_MS = 10_000;
+const REGEX_EVALUATION_BYTES_PER_EXTRA_MS = 32 * 1024;
 const EMPTY_ALTERNATIVE_TOKEN = 'EMPTY_ALTERNATIVE';
 
 interface RegexGroupState {
@@ -44,8 +48,21 @@ export class SafetyEvaluator implements Evaluator {
         continue;
       }
 
-      const regex = new RegExp(rule.pattern, 'g');
-      if (regex.test(input.content)) {
+      const matchResult = await this.regexMatchesWithTimeout(
+        rule.pattern,
+        input.content,
+      );
+      if (matchResult === 'timeout') {
+        findings.push({
+          message: `Safety rule regex evaluation timed out: ${rule.description}`,
+          severity: 'warning',
+          suggestion:
+            'Review this validated pattern or narrow the input scope; evaluation exceeded the regex safety timeout and was skipped to keep critique responsive.',
+        });
+        continue;
+      }
+
+      if (matchResult) {
         const isBlock = rule.severity === 'block';
         if (isBlock) hasBlock = true;
 
@@ -72,6 +89,81 @@ export class SafetyEvaluator implements Evaluator {
       score,
       findings,
     };
+  }
+
+  private async regexMatchesWithTimeout(
+    pattern: string,
+    content: string,
+  ): Promise<boolean | 'timeout'> {
+    const worker = new Worker(
+      `
+        import { parentPort, workerData } from 'node:worker_threads';
+        try {
+          const regex = new RegExp(workerData.pattern, 'g');
+          parentPort.postMessage({ matches: regex.test(workerData.content) });
+        } catch (error) {
+          parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
+        }
+      `,
+      { eval: true, workerData: { pattern, content } },
+    );
+
+    return new Promise<boolean | 'timeout'>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        void worker.terminate();
+        resolve('timeout');
+      }, this.regexEvaluationTimeoutMs(content.length));
+
+      worker.once('message', (message: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        void worker.terminate();
+
+        if (
+          typeof message === 'object' &&
+          message !== null &&
+          'matches' in message &&
+          typeof message.matches === 'boolean'
+        ) {
+          resolve(message.matches);
+          return;
+        }
+
+        if (
+          typeof message === 'object' &&
+          message !== null &&
+          'error' in message &&
+          typeof message.error === 'string'
+        ) {
+          reject(new Error(message.error));
+          return;
+        }
+
+        reject(new Error('Regex worker returned an invalid response'));
+      });
+
+      worker.once('error', (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        void worker.terminate();
+        reject(error);
+      });
+    });
+  }
+
+  private regexEvaluationTimeoutMs(contentLength: number): number {
+    const sizeAllowance = Math.ceil(
+      contentLength / REGEX_EVALUATION_BYTES_PER_EXTRA_MS,
+    );
+    return Math.min(
+      REGEX_EVALUATION_MAX_TIMEOUT_MS,
+      REGEX_EVALUATION_BASE_TIMEOUT_MS + sizeAllowance,
+    );
   }
 
   private validateRulePattern(rule: {

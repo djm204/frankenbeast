@@ -233,7 +233,7 @@ export class CliSkillExecutor {
     return 'committed';
   }
 
-  async execute(skillId: string, input: SkillInput, config: CliSkillConfig, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
+  async execute(skillId: string, input: SkillInput, config: Partial<CliSkillConfig>, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
     if (!skillId || skillId.trim().length === 0) {
       throw new Error('skillId must not be empty');
     }

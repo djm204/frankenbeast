@@ -156,217 +156,405 @@ function discoverWorkspacePackages(root: string): string[] {
   } catch { return []; }
 }
 
-export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
-  // Apply RunConfig overrides (config file takes precedence for spawned agents)
-  const effectiveProvider =
-    options.runConfig?.llmConfig?.default?.provider
-    ?? options.runConfig?.provider
-    ?? options.provider;
-  const effectiveModel =
-    options.runConfig?.llmConfig?.default?.model
-    ?? options.runConfig?.model;
-  const effectiveBranch = options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch;
-  const effectiveBudget = options.budget;
-  const effectiveBranchPattern = options.runConfig?.gitConfig?.branchPattern ?? 'feat/';
-  const effectivePrCreation = options.runConfig?.gitConfig?.prCreation;
-  const effectiveMergeStrategy = options.runConfig?.gitConfig?.mergeStrategy;
-  const effectiveSkills = options.runConfig?.skills;
-
-  const { paths, verbose, noPr, reset } = options;
-  const baseBranch = effectiveBranch;
-  const budget = effectiveBudget;
-
-  // Resolve per-agent module toggles (runConfig > options > env vars > default enabled)
-  const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
-  const modules = {
-    memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
-    planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
-    critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
-    governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+interface EffectiveCliConfig {
+  provider: string;
+  model?: string | undefined;
+  baseBranch: string;
+  budget: number;
+  branchPattern: string;
+  prCreation?: 'auto' | 'manual' | 'disabled' | undefined;
+  mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
+  skills?: string[] | undefined;
+  modules: {
+    memory: boolean;
+    planner: boolean;
+    critique: boolean;
+    governor: boolean;
   };
+}
 
-  // Derive plan name for plan-specific build artifacts
+interface SessionArtifacts {
+  planName: string;
+  checkpointFile: string;
+  logFile: string;
+}
+
+interface ObserverDepsBundle {
+  logger: BeastLogger;
+  observerBridge: CliObserverBridge;
+  replayAuditRoot: string;
+  runSessionId: string;
+  traceViewerHandle: TraceViewerHandle | null;
+}
+
+interface ExecutionStackDeps {
+  checkpoint: FileCheckpointStore;
+  chunkSessionStore: FileChunkSessionStore;
+  chunkSessionSnapshotStore: FileChunkSessionSnapshotStore;
+  chunkSessionRenderer: ChunkSessionRenderer;
+  registry: ReturnType<typeof createDefaultRegistry>;
+  martin: MartinLoop;
+  gitIso: GitBranchIsolator;
+}
+
+interface LlmDeps {
+  cliLlmAdapter: CliLlmAdapter;
+  cachedLlm: CachedCliLlmClient;
+}
+
+interface CliExecutorDeps {
+  cliExecutor: CliSkillExecutor;
+  prCreator?: PrCreator | undefined;
+}
+
+function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
+  const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
+  return {
+    provider: options.runConfig?.llmConfig?.default?.provider
+      ?? options.runConfig?.provider
+      ?? options.provider,
+    model: options.runConfig?.llmConfig?.default?.model
+      ?? options.runConfig?.model,
+    baseBranch: options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch,
+    budget: options.budget,
+    branchPattern: options.runConfig?.gitConfig?.branchPattern ?? 'feat/',
+    prCreation: options.runConfig?.gitConfig?.prCreation,
+    mergeStrategy: options.runConfig?.gitConfig?.mergeStrategy,
+    skills: options.runConfig?.skills,
+    modules: {
+      memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
+      planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
+      critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
+      governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+    },
+  };
+}
+
+function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
+  const { paths } = options;
   const planName = options.planDirOverride
     ? basename(options.planDirOverride).replace(/\/$/, '')
     : basename(paths.plansDir) === 'plans' ? 'session' : basename(paths.plansDir);
   const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
+  const now = new Date();
+  const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return {
+    planName,
+    checkpointFile,
+    logFile: resolve(paths.buildDir, `${planName}-${ts}-build.log`),
+  };
+}
 
-  // Reset if requested
-  if (reset) {
+function clearSessionArtifacts(options: CliDepOptions, artifacts: SessionArtifacts): void {
+  const { paths } = options;
+  if (options.reset) {
     const memoryDbPath = resolve(paths.buildDir, 'memory.db');
-    for (const f of [checkpointFile, paths.tracesDb, memoryDbPath]) {
+    for (const f of [artifacts.checkpointFile, paths.tracesDb, memoryDbPath]) {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
     }
     for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
       try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   } else if (!options.resume) {
-    for (const f of [checkpointFile]) {
-      try { if (existsSync(f)) unlinkSync(f); } catch {}
-    }
+    try { if (existsSync(artifacts.checkpointFile)) unlinkSync(artifacts.checkpointFile); } catch {}
     for (const dir of [paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
       try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   }
+}
 
-  // Build timestamped log file: .build/<plan-name>-<datetime>-build.log
-  const now = new Date();
-  const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19); // 2026-03-08T20-12-05
-  const logFile = resolve(paths.buildDir, `${planName}-${ts}-build.log`);
-  mkdirSync(paths.buildDir, { recursive: true });
-
-  const logger = new BeastLogger({ verbose, captureForFile: true, logFile });
-
-  // Observer
-  const replayAuditRoot = resolve(paths.root, '.fbeast', 'audit');
+async function createObserverDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  artifacts: SessionArtifacts,
+): Promise<ObserverDepsBundle> {
+  mkdirSync(options.paths.buildDir, { recursive: true });
+  const logger = new BeastLogger({
+    verbose: options.verbose,
+    captureForFile: true,
+    logFile: artifacts.logFile,
+  });
+  const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
-  const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget, replayStore });
+  const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
   const runSessionId = options.runSessionId ?? `cli-session-${Date.now()}`;
   observerBridge.startTrace(runSessionId);
+  const traceViewerHandle = options.verbose
+    ? await setupTraceViewer(options.paths.tracesDb, logger)
+    : null;
 
-  // Trace viewer (verbose mode only)
-  let traceViewerHandle: TraceViewerHandle | null = null;
-  if (verbose) {
-    traceViewerHandle = await setupTraceViewer(paths.tracesDb, logger);
-  }
+  return { logger, observerBridge, replayAuditRoot, runSessionId, traceViewerHandle };
+}
 
-  // CLI execution stack
-  const checkpoint = new FileCheckpointStore(checkpointFile);
-  const chunkSessionStore = new FileChunkSessionStore(paths.chunkSessionsDir);
-  const chunkSessionSnapshotStore = new FileChunkSessionSnapshotStore(paths.chunkSessionSnapshotsDir);
+function createExecutionStack(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  artifacts: SessionArtifacts,
+): ExecutionStackDeps {
+  const checkpoint = new FileCheckpointStore(artifacts.checkpointFile);
+  const chunkSessionStore = new FileChunkSessionStore(options.paths.chunkSessionsDir);
+  const chunkSessionSnapshotStore = new FileChunkSessionSnapshotStore(options.paths.chunkSessionSnapshotsDir);
   const chunkSessionRenderer = new ChunkSessionRenderer();
   const chunkSessionGc = new ChunkSessionGc({
-    sessionRoot: paths.chunkSessionsDir,
-    snapshotRoot: paths.chunkSessionSnapshotsDir,
+    sessionRoot: options.paths.chunkSessionsDir,
+    snapshotRoot: options.paths.chunkSessionSnapshotsDir,
     completedTtlMs: 24 * 60 * 60 * 1000,
     failedTtlMs: 72 * 60 * 60 * 1000,
   });
   chunkSessionGc.collect();
+
   const registry = createDefaultRegistry();
   const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
-    baseBranch,
-    branchPrefix: effectiveBranchPattern,
+    baseBranch: config.baseBranch,
+    branchPrefix: config.branchPattern,
     autoCommit: true,
-    workingDir: paths.root,
-    ...(effectiveMergeStrategy ? { mergeStrategy: effectiveMergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
+    workingDir: options.paths.root,
+    ...(config.mergeStrategy ? { mergeStrategy: config.mergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
   });
-  const resolvedProvider = registry.get(effectiveProvider);
-  const override = options.providersConfig?.[effectiveProvider];
+
+  return {
+    checkpoint,
+    chunkSessionStore,
+    chunkSessionSnapshotStore,
+    chunkSessionRenderer,
+    registry,
+    martin,
+    gitIso,
+  };
+}
+
+function createLlmDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  artifacts: SessionArtifacts,
+  observer: ObserverDepsBundle,
+  stack: ExecutionStackDeps,
+): LlmDeps {
+  const resolvedProvider = stack.registry.get(config.provider);
+  const override = options.providersConfig?.[config.provider];
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
-    workingDir: options.adapterWorkingDir ?? paths.root,
+    workingDir: options.adapterWorkingDir ?? options.paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
-    ...((effectiveModel ?? options.adapterModel) != null ? { model: (effectiveModel ?? options.adapterModel)! } : {}),
+    ...((config.model ?? options.adapterModel) != null ? { model: (config.model ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
-    replayRunId: () => observerBridge.getActiveSessionId() ?? runSessionId,
-    replayRecorder: (record) => observerBridge.recordReplay(record),
+    replayRunId: () => observer.observerBridge.getActiveSessionId() ?? observer.runSessionId,
+    replayRecorder: (record) => observer.observerBridge.recordReplay(record),
     ...(options.providers ? { providers: options.providers } : {}),
-    registry,
+    registry: stack.registry,
     ...(options.providersConfig ? { providerOverrides: options.providersConfig } : {}),
   });
 
-  const adapterLlm = new AdapterLlmClient(
+  new AdapterLlmClient(
     cliLlmAdapter,
-    observerBridge.observerDeps as never,
-    effectiveProvider,
+    observer.observerBridge.observerDeps as never,
+    config.provider,
   );
+
   const cachedLlm = new CachedCliLlmClient({
-    cacheRootDir: paths.llmCacheDir,
+    cacheRootDir: options.paths.llmCacheDir,
     cliAdapter: cliLlmAdapter,
-    projectId: paths.root,
-    provider: effectiveProvider,
-    model: override?.model ?? effectiveModel ?? options.adapterModel ?? effectiveProvider,
+    projectId: options.paths.root,
+    provider: config.provider,
+    model: override?.model ?? config.model ?? options.adapterModel ?? config.provider,
     operation: 'cli-session',
-    workId: `session:${planName}`,
+    workId: `session:${artifacts.planName}`,
     stablePrefix: 'surface:cli',
-    workPrefix: `plan:${planName}`,
-    observer: observerBridge.observerDeps as never,
+    workPrefix: `plan:${artifacts.planName}`,
+    observer: observer.observerBridge.observerDeps as never,
   });
 
-  // Critique (dynamic import — optional module)
-  let critique: ICritiqueModule = stubCritique;
-  if (modules.critique) {
-    try {
-      const critiqueModule = await import('@franken/critique');
-      const { createReviewer } = critiqueModule;
+  return { cliLlmAdapter, cachedLlm };
+}
 
-      const critiqueGuardrails = {
-        getSafetyRules: async () => [] as never[],
-        executeSandbox: async () => ({ success: true as const, output: '', exitCode: 0, timedOut: false }),
-      };
-      const critiqueMemory = {
-        searchADRs: async () => [] as never[],
-        searchEpisodic: async () => [] as never[],
-        recordLesson: async () => {},
-      };
-      const critiqueObservability = {
-        getTokenSpend: (sessionId: string) => observerBridge.getTokenSpend(sessionId),
-      };
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-      const knownPackages = discoverWorkspacePackages(paths.root);
+function errorChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  let current: unknown = error;
+  while (current !== undefined && current !== null) {
+    chain.push(current);
+    if (typeof current !== 'object' || !('cause' in current)) break;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return chain;
+}
 
-      const reviewer = createReviewer({
-        guardrails: critiqueGuardrails,
-        memory: critiqueMemory,
-        observability: critiqueObservability,
-        knownPackages,
-      });
+function errorDiagnostic(error: unknown): string {
+  return errorChain(error).map(errorMessage).join(': ');
+}
 
-      critique = new CritiquePortAdapter({
-        loop: { run: (input: never, config: never) => reviewer.review(input, config) },
-        config: {
-          maxIterations: options.critiqueMaxIterations ?? 3,
-          tokenBudget: budget,
-          consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
-          sessionId: `cli-critique-${Date.now()}`,
-          taskId: 'plan-review',
-        },
-      });
-    } catch (error) {
-      logger.warn(`Critique module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
+function isMissingOptionalModule(error: unknown, moduleName: string): boolean {
+  return errorChain(error).some((candidate) => {
+    if (typeof candidate !== 'object' || candidate === null) return false;
+    const code = 'code' in candidate ? String((candidate as { code?: unknown }).code) : undefined;
+    if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return false;
+
+    const message = errorMessage(candidate);
+    return message.includes(`'${moduleName}'`)
+      || message.includes(`"${moduleName}"`)
+      || message.includes(`Cannot find module ${moduleName}`)
+      || message.includes(`Cannot find package ${moduleName}`);
+  });
+}
+
+async function importOptionalModule<T>(moduleName: string, logger: BeastLogger): Promise<T | undefined> {
+  try {
+    return await import(moduleName) as T;
+  } catch (error) {
+    if (isMissingOptionalModule(error, moduleName)) {
+      logger.warn(`${moduleName} unavailable, using stub: ${errorDiagnostic(error)}`, 'dep-factory');
+      return undefined;
     }
+    throw new Error(`Failed to load optional module ${moduleName}: ${errorDiagnostic(error)}`, { cause: error });
+  }
+}
+
+async function createCritiqueDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  observer: ObserverDepsBundle,
+): Promise<ICritiqueModule> {
+  if (!config.modules.critique) return stubCritique;
+
+  const critiqueModule = await importOptionalModule<typeof import('@franken/critique')>(
+    '@franken/critique',
+    observer.logger,
+  );
+  if (!critiqueModule) return stubCritique;
+
+  const critiqueGuardrails = {
+    getSafetyRules: async () => [] as never[],
+    executeSandbox: async () => ({ success: true as const, output: '', exitCode: 0, timedOut: false }),
+  };
+  const critiqueMemory = {
+    searchADRs: async () => [] as never[],
+    searchEpisodic: async () => [] as never[],
+    recordLesson: async () => {},
+  };
+  const critiqueObservability = {
+    getTokenSpend: (sessionId: string) => observer.observerBridge.getTokenSpend(sessionId),
+  };
+
+  const reviewer = critiqueModule.createReviewer({
+    guardrails: critiqueGuardrails,
+    memory: critiqueMemory,
+    observability: critiqueObservability,
+    knownPackages: discoverWorkspacePackages(options.paths.root),
+  });
+
+  return new CritiquePortAdapter({
+    loop: { run: (input: never, adapterConfig: never) => reviewer.review(input, adapterConfig) },
+    config: {
+      maxIterations: options.critiqueMaxIterations ?? 3,
+      tokenBudget: config.budget,
+      consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
+      sessionId: `cli-critique-${Date.now()}`,
+      taskId: 'plan-review',
+    },
+  });
+}
+
+async function createGovernanceDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  finalize: () => Promise<void>,
+  logger: BeastLogger,
+): Promise<{ governor: IGovernorModule; finalize: () => Promise<void> }> {
+  if (!config.modules.governor) return { governor: stubGovernor, finalize };
+
+  const governorModule = await importOptionalModule<typeof import('@franken/governor')>(
+    '@franken/governor',
+    logger,
+  );
+  if (!governorModule) return { governor: stubGovernor, finalize };
+
+  const { stdin, stdout } = await import('node:process');
+  if (!stdin.isTTY) {
+    return {
+      governor: new GovernorPortAdapter({
+        gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as never,
+        projectId: basename(options.paths.root),
+        defaultDecision: process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL === '1'
+          ? ('approved' as const)
+          : ('rejected' as const),
+      }),
+      finalize,
+    };
   }
 
-  // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
-  const prDisabled = noPr || effectivePrCreation === 'disabled';
-  const prCreator = prDisabled ? undefined : new PrCreator(
-    { targetBranch: baseBranch, disabled: false, remote: 'origin' },
-    undefined,
-    cachedLlm,
-  );
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: stdin, output: stdout });
+  const cliChannel = new governorModule.CliChannel({
+    readline: { question: (prompt: string) => rl.question(prompt) },
+    operatorName: 'operator',
+  });
+  const gateway = new governorModule.ApprovalGateway({
+    channel: cliChannel,
+    auditRecorder: { record: async () => {} },
+    config: governorModule.defaultConfig(),
+  });
 
-  // Commit message generator — delegates to PrCreator's LLM prompt
+  return {
+    governor: new GovernorPortAdapter({
+      gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
+      projectId: basename(options.paths.root),
+    }),
+    finalize: async () => {
+      rl.close();
+      await finalize();
+    },
+  };
+}
+
+function createCliExecutorDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  artifacts: SessionArtifacts,
+  observer: ObserverDepsBundle,
+  stack: ExecutionStackDeps,
+  llm: LlmDeps,
+): CliExecutorDeps {
+  const prDisabled = options.noPr || config.prCreation === 'disabled';
+  const prCreator = prDisabled ? undefined : new PrCreator(
+    { targetBranch: config.baseBranch, disabled: false, remote: 'origin' },
+    undefined,
+    llm.cachedLlm,
+  );
   const commitMessageFn = prCreator
     ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective)
     : undefined;
 
-  // Recovery verify command — typecheck as a fast sanity check that
-  // dirty files from a crashed run don't break the build
-  const verifyCommand = 'npx tsc --noEmit';
-
+  const override = options.providersConfig?.[config.provider];
   const cliExecutor = new CliSkillExecutor(
-    martin, gitIso, observerBridge.observerDeps,
-    verifyCommand, commitMessageFn, logger,
+    stack.martin,
+    stack.gitIso,
+    observer.observerBridge.observerDeps,
+    'npx tsc --noEmit',
+    commitMessageFn,
+    observer.logger,
     {
-      provider: effectiveProvider,
-      planName,
-      sessionStore: chunkSessionStore,
-      snapshotStore: chunkSessionSnapshotStore,
-      renderer: chunkSessionRenderer,
+      provider: config.provider,
+      planName: artifacts.planName,
+      sessionStore: stack.chunkSessionStore,
+      snapshotStore: stack.chunkSessionSnapshotStore,
+      renderer: stack.chunkSessionRenderer,
       compactor: new ChunkSessionCompactor({
         summarize: async (prompt: string) => {
-          const response = await cachedLlm.complete(prompt, {
+          const response = await llm.cachedLlm.complete(prompt, {
             operation: 'chunk-session-compaction',
-            workId: `chunk-compactor:${planName}`,
+            workId: `chunk-compactor:${artifacts.planName}`,
             stablePrefix: 'surface:chunk-session-compactor',
-            workPrefix: `plan:${planName}`,
+            workPrefix: `plan:${artifacts.planName}`,
           });
           return response.trim();
         },
       }),
       contextUsage: (prompt: string, provider: string, maxTokens: number) =>
-        observerBridge.estimateContextWindow({
+        observer.observerBridge.estimateContextWindow({
           renderedPrompt: prompt,
           provider,
           maxTokens,
@@ -376,111 +564,52 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     },
   );
 
-  let finalize = async () => {
-    if (traceViewerHandle) {
-      await traceViewerHandle.stop();
-    }
-    // Log entries are now written incrementally by BeastLogger (crash-safe).
-    // No batch write needed here.
-  };
+  return { cliExecutor, prCreator };
+}
 
-  // Governor (dynamic import — optional module)
-  let governor: IGovernorModule = stubGovernor;
-  if (modules.governor) {
-    try {
-      const { ApprovalGateway, CliChannel, defaultConfig } = await import('@franken/governor');
-      const { createInterface } = await import('node:readline/promises');
-      const { stdin, stdout } = await import('node:process');
-
-      if (!stdin.isTTY) {
-        // Non-interactive mode fails closed (denied) unless FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1 is explicitly set.
-        // defaultDecision short-circuits before gateway is called, so gateway is a no-op placeholder.
-        governor = new GovernorPortAdapter({
-          gateway: { requestApproval: async () => ({ decision: 'APPROVE' as const }) } as never,
-          projectId: basename(paths.root),
-          defaultDecision: process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL === '1'
-            ? ('approved' as const)
-            : ('rejected' as const),
-        });
-      } else {
-        const rl = createInterface({ input: stdin, output: stdout });
-
-        const cliChannel = new CliChannel({
-          readline: { question: (prompt: string) => rl.question(prompt) },
-          operatorName: 'operator',
-        });
-
-        // No-op audit recorder — audit persistence requires episodic store bridge (future)
-        const noopAuditRecorder = {
-          record: async () => {},
-        };
-
-        const gateway = new ApprovalGateway({
-          channel: cliChannel,
-          auditRecorder: noopAuditRecorder,
-          config: defaultConfig(),
-        });
-
-        governor = new GovernorPortAdapter({
-          gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
-          projectId: basename(paths.root),
-        });
-
-        // Close readline on finalize to prevent dangling handles
-        const previousFinalize = finalize;
-        finalize = async () => {
-          rl.close();
-          await previousFinalize();
-        };
-      }
-    } catch (error) {
-      logger.warn(`Governor module unavailable, using stub: ${error instanceof Error ? error.message : String(error)}`, 'dep-factory');
-    }
-  }
-
-  // Build RunConfig overrides for downstream consumption by beast loop phases
-  // Note: mergeStrategy is wired directly via GitIsolationConfig, not through runConfigOverrides.
-  // llmOverrides and promptConfig are parsed by RunConfigSchema for forward compatibility
-  // but have no downstream consumer yet (per-phase LLM routing and prompt frontloading are future features).
+function createConsolidatedDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  observer: ObserverDepsBundle,
+  stack: ExecutionStackDeps,
+  executor: CliExecutorDeps,
+  critique: ICritiqueModule,
+  governor: IGovernorModule,
+): ConsolidatedDeps {
   const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
-    effectiveSkills?.length
-      ? { allowedSkills: effectiveSkills }
+    config.skills?.length
+      ? { allowedSkills: config.skills }
       : undefined;
 
-  // Use the new consolidated component factory for module adapters
   const beastConfig = bridgeToBeastConfig(options, options.orchestratorConfig);
   const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,
     critique,
     governor,
-    observer: observerBridge,
-    logger,
-    cliExecutor,
-    checkpoint,
-    ...(prCreator ? { prCreator } : {}),
+    observer: observer.observerBridge,
+    logger: observer.logger,
+    cliExecutor: executor.cliExecutor,
+    checkpoint: stack.checkpoint,
+    ...(executor.prCreator ? { prCreator: executor.prCreator } : {}),
     ...(runConfigOverrides ? { runConfigOverrides } : {}),
   });
 
-  let consolidated: ConsolidatedDeps;
   try {
-    consolidated = createBeastDeps(beastConfig, existingDeps);
+    return createBeastDeps(beastConfig, existingDeps);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logger.warn(`createBeastDeps failed: ${reason}`, 'dep-factory');
+    const reason = errorMessage(error);
+    observer.logger.warn(`createBeastDeps failed: ${reason}`, 'dep-factory');
     throw new Error(`createBeastDeps failed: ${reason}`);
   }
+}
 
-  // Preserve CLI skill compatibility: ChunkFileGraphBuilder emits requiredSkills: ['cli:<chunk>']
-  // which the beast loop validates via hasSkill(). SkillManagerAdapter doesn't know about cli:*
-  // skills — they're a CLI-specific convention, not real skill directory entries.
+function createSkillDeps(consolidated: ConsolidatedDeps, allowedSkills?: string[] | undefined): BeastLoopDeps['skills'] {
   const baseSkills = consolidated.skills;
   const cliSkillCompat = (id: string) => id.startsWith('cli:');
-
-  // Apply RunConfig skills filter if present, always preserving cli:* compatibility
-  const skills = effectiveSkills?.length
+  return allowedSkills?.length
     ? {
-        hasSkill: (id: string) => cliSkillCompat(id) || (effectiveSkills.includes(id) && baseSkills.hasSkill(id)),
-        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => effectiveSkills.includes(s.id)),
+        hasSkill: (id: string) => cliSkillCompat(id) || (allowedSkills.includes(id) && baseSkills.hasSkill(id)),
+        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => allowedSkills.includes(s.id)),
         execute: baseSkills.execute,
       }
     : {
@@ -488,53 +617,57 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
         getAvailableSkills: () => baseSkills.getAvailableSkills(),
         execute: baseSkills.execute,
       };
+}
 
-  const deps: BeastLoopDeps = {
-    ...consolidated,
-    skills,
+function createIssueDeps(
+  options: CliDepOptions,
+  paths: ProjectPaths,
+  stack: ExecutionStackDeps,
+  executor: CliExecutorDeps,
+  llm: LlmDeps,
+): IssueCliDeps | undefined {
+  if (!options.issueIO) return undefined;
+
+  const completeFn = (
+    prompt: string,
+    hint?: {
+      operation?: string;
+      workId?: string;
+      stablePrefix?: string;
+      workPrefix?: string;
+    },
+  ) => llm.cachedLlm.complete(prompt, {
+    operation: hint?.operation ?? 'issues',
+    workId: hint?.workId,
+    stablePrefix: hint?.stablePrefix ?? 'surface:issues',
+    workPrefix: hint?.workPrefix,
+  });
+  return {
+    fetcher: new IssueFetcher(),
+    triage: new IssueTriage(completeFn),
+    graphBuilder: new IssueGraphBuilder(completeFn),
+    review: new IssueReview(options.issueIO, { dryRun: options.dryRun }),
+    runner: new IssueRunner(),
+    executor: executor.cliExecutor,
+    git: stack.gitIso,
+    prCreator: executor.prCreator,
+    checkpoint: stack.checkpoint,
+    issueRuntime: createIssueRuntimeSupport(paths),
   };
+}
 
-  // Issue pipeline deps (only created when issueIO is provided)
-  let issueDeps: IssueCliDeps | undefined;
-  if (options.issueIO) {
-    const completeFn = (
-      prompt: string,
-      hint?: {
-        operation?: string;
-        workId?: string;
-        stablePrefix?: string;
-        workPrefix?: string;
-      },
-    ) => cachedLlm.complete(prompt, {
-      operation: hint?.operation ?? 'issues',
-      workId: hint?.workId,
-      stablePrefix: hint?.stablePrefix ?? 'surface:issues',
-      workPrefix: hint?.workPrefix,
-    });
-    const issueRuntime = createIssueRuntimeSupport(paths);
-    issueDeps = {
-      fetcher: new IssueFetcher(),
-      triage: new IssueTriage(completeFn),
-      graphBuilder: new IssueGraphBuilder(completeFn),
-      review: new IssueReview(options.issueIO, { dryRun: options.dryRun }),
-      runner: new IssueRunner(),
-      executor: cliExecutor,
-      git: gitIso,
-      prCreator,
-      checkpoint,
-      issueRuntime,
-    };
-  }
-
-  // Augment finalize to persist audit trail and close SqliteBrain
-  const previousFinalizeForBrain = finalize;
-  finalize = async () => {
-    const runId = runSessionId;
+function appendAuditFinalize(
+  finalize: () => Promise<void>,
+  observer: ObserverDepsBundle,
+  consolidated: ConsolidatedDeps,
+): () => Promise<void> {
+  return async () => {
+    const runId = observer.runSessionId;
     try {
       consolidated.persistAuditTrail?.(runId);
-      const bridgeManifest = observerBridge.getReplayManifest();
+      const bridgeManifest = observer.observerBridge.getReplayManifest();
       if (bridgeManifest.length > 0) {
-        mkdirSync(replayAuditRoot, { recursive: true });
+        mkdirSync(observer.replayAuditRoot, { recursive: true });
         const manifestsByRunId = new Map<string, Array<(typeof bridgeManifest)[number]>>();
         for (const record of bridgeManifest) {
           const records = manifestsByRunId.get(record.runId) ?? [];
@@ -542,7 +675,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
           manifestsByRunId.set(record.runId, records);
         }
         for (const [manifestRunId, records] of manifestsByRunId) {
-          const replayManifestPath = join(replayAuditRoot, `${manifestRunId}.replay.json`);
+          const replayManifestPath = join(observer.replayAuditRoot, `${manifestRunId}.replay.json`);
           let existingManifest: unknown[] = [];
           if (existsSync(replayManifestPath)) {
             const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
@@ -559,19 +692,66 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       }
     } catch { /* best-effort */ }
     try { consolidated.sqliteBrain?.close(); } catch { /* best-effort */ }
-    try { logger.close(); } catch { /* best-effort */ }
-    await previousFinalizeForBrain();
+    try { observer.logger.close(); } catch { /* best-effort */ }
+    await finalize();
   };
+}
 
-  return {
-    deps,
-    cliLlmAdapter,
-    observerBridge,
-    logger,
-    finalize,
-    issueDeps,
-    ...(consolidated.skillManager ? { skillManager: consolidated.skillManager } : {}),
-    ...(consolidated.providerRegistry ? { providerRegistry: consolidated.providerRegistry } : {}),
-    ...(consolidated.middlewareChain ? { middlewareChain: consolidated.middlewareChain } : {}),
+function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<void> {
+  return async () => {
+    if (observer.traceViewerHandle) {
+      await observer.traceViewerHandle.stop();
+    }
   };
+}
+
+export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
+  const config = resolveEffectiveConfig(options);
+  const artifacts = createSessionArtifacts(options);
+  clearSessionArtifacts(options, artifacts);
+
+  const observer = await createObserverDeps(options, config, artifacts);
+  let finalize = createObserverFinalize(observer);
+
+  try {
+    const stack = createExecutionStack(options, config, artifacts);
+    const llm = createLlmDeps(options, config, artifacts, observer, stack);
+    const critique = await createCritiqueDeps(options, config, observer);
+
+    const governance = await createGovernanceDeps(options, config, finalize, observer.logger);
+    finalize = governance.finalize;
+
+    const executor = createCliExecutorDeps(options, config, artifacts, observer, stack, llm);
+    const consolidated = createConsolidatedDeps(
+      options,
+      config,
+      observer,
+      stack,
+      executor,
+      critique,
+      governance.governor,
+    );
+    const deps: BeastLoopDeps = {
+      ...consolidated,
+      skills: createSkillDeps(consolidated, config.skills),
+    };
+    const issueDeps = createIssueDeps(options, options.paths, stack, executor, llm);
+    finalize = appendAuditFinalize(finalize, observer, consolidated);
+
+    return {
+      deps,
+      cliLlmAdapter: llm.cliLlmAdapter,
+      observerBridge: observer.observerBridge,
+      logger: observer.logger,
+      finalize,
+      issueDeps,
+      ...(consolidated.skillManager ? { skillManager: consolidated.skillManager } : {}),
+      ...(consolidated.providerRegistry ? { providerRegistry: consolidated.providerRegistry } : {}),
+      ...(consolidated.middlewareChain ? { middlewareChain: consolidated.middlewareChain } : {}),
+    };
+  } catch (error) {
+    try { await finalize(); } catch { /* best-effort */ }
+    try { observer.logger.close(); } catch { /* best-effort */ }
+    throw error;
+  }
 }
