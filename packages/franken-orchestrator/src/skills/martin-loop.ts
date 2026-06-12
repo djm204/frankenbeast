@@ -28,7 +28,7 @@ export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: 
   return parseResetTimeText(`${stderr}\n${stdout}`);
 }
 
-function defaultSleep(ms: number): Promise<void> {
+export function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -45,7 +45,8 @@ function abortError(): Error {
   return error;
 }
 
-function sleepWithAbort(
+/** Exported for tests: regression coverage that no abort listeners leak (issue #39). */
+export function sleepWithAbort(
   ms: number,
   sleepFn: (durationMs: number) => Promise<void>,
   signal?: AbortSignal,
@@ -311,15 +312,16 @@ function spawnIteration(
     });
 
     // Timeout: SIGTERM first, then SIGKILL after 5s
+    const escalationTimers: NodeJS.Timeout[] = [];
     const timer = setTimeout(() => {
       timedOut = true;
       config.onProviderTimeout?.(provider.name, config.timeoutMs);
       child.kill('SIGTERM');
-      setTimeout(() => {
+      escalationTimers.push(setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
-      }, 5_000);
+      }, 5_000));
       // Hard fail-safe: if process still hasn't closed, force resolution.
-      setTimeout(() => {
+      escalationTimers.push(setTimeout(() => {
         if (streamBuffer) {
           const remaining = streamBuffer.flush();
           for (const line of remaining) cleanParts.push(line);
@@ -331,11 +333,19 @@ function spawnIteration(
           timedOut: true,
           cleanStdout: cleanParts.join('\n'),
         });
-      }, 7_000);
+      }, 7_000));
     }, config.timeoutMs);
 
-    child.on('close', (code) => {
+    // Clear the timeout and any pending kill-escalation timers so a settled
+    // iteration does not keep the child and its buffers alive for up to 7s.
+    const clearTimers = (): void => {
       clearTimeout(timer);
+      for (const t of escalationTimers) clearTimeout(t);
+      escalationTimers.length = 0;
+    };
+
+    child.on('close', (code) => {
+      clearTimers();
       if (streamBuffer) {
         const remaining = streamBuffer.flush();
         for (const line of remaining) cleanParts.push(line);
@@ -344,7 +354,7 @@ function spawnIteration(
     });
 
     child.on('error', (err) => {
-      clearTimeout(timer);
+      clearTimers();
       reject(err);
     });
   });
