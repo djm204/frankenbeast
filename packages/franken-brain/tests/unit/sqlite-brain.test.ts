@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type { EpisodicEvent, ExecutionState, BrainSnapshot } from '@franken/types';
-import { SqliteBrain } from '../../src/sqlite-brain.js';
+import {
+  SqliteBrain,
+  WorkingMemoryLimitError,
+  DEFAULT_WORKING_MEMORY_LIMITS,
+} from '../../src/sqlite-brain.js';
 
 describe('SqliteBrain', () => {
   let brain: SqliteBrain;
@@ -57,6 +61,77 @@ describe('SqliteBrain', () => {
 
     it('delete() returns false for non-existent key', () => {
       expect(brain.working.delete('nope')).toBe(false);
+    });
+  });
+
+  describe('working memory limits (issue #37)', () => {
+    it('applies generous default limits', () => {
+      const usage = brain.working.usage();
+      expect(usage.limits).toEqual(DEFAULT_WORKING_MEMORY_LIMITS);
+      expect(usage.entries).toBe(0);
+      expect(usage.totalBytes).toBe(0);
+    });
+
+    it('rejects new keys past maxEntries', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
+      bounded.working.set('a', 1);
+      bounded.working.set('b', 2);
+      expect(() => bounded.working.set('c', 3)).toThrow(WorkingMemoryLimitError);
+      bounded.close();
+    });
+
+    it('allows overwriting an existing key at maxEntries', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
+      bounded.working.set('a', 1);
+      bounded.working.set('b', 2);
+      expect(() => bounded.working.set('a', 'updated')).not.toThrow();
+      expect(bounded.working.get('a')).toBe('updated');
+      bounded.close();
+    });
+
+    it('rejects a single value larger than maxValueBytes', () => {
+      const bounded = new SqliteBrain(':memory:', { maxValueBytes: 16 });
+      expect(() => bounded.working.set('big', 'x'.repeat(100))).toThrow(WorkingMemoryLimitError);
+      bounded.close();
+    });
+
+    it('rejects writes that would exceed maxTotalBytes', () => {
+      const bounded = new SqliteBrain(':memory:', { maxTotalBytes: 30 });
+      bounded.working.set('a', 'x'.repeat(10));
+      expect(() => bounded.working.set('b', 'y'.repeat(20))).toThrow(WorkingMemoryLimitError);
+      bounded.close();
+    });
+
+    it('frees byte budget when keys are deleted or overwritten', () => {
+      const bounded = new SqliteBrain(':memory:', { maxTotalBytes: 30 });
+      bounded.working.set('a', 'x'.repeat(10));
+      bounded.working.delete('a');
+      expect(() => bounded.working.set('b', 'y'.repeat(20))).not.toThrow();
+      bounded.working.set('b', 'z');
+      expect(() => bounded.working.set('c', 'w'.repeat(20))).not.toThrow();
+      bounded.close();
+    });
+
+    it('resets accounting on clear()', () => {
+      const bounded = new SqliteBrain(':memory:', { maxTotalBytes: 30 });
+      bounded.working.set('a', 'x'.repeat(20));
+      bounded.working.clear();
+      expect(bounded.working.usage().totalBytes).toBe(0);
+      expect(() => bounded.working.set('b', 'y'.repeat(20))).not.toThrow();
+      bounded.close();
+    });
+
+    it('enforces limits on restore()', () => {
+      const bounded = new SqliteBrain(':memory:', { maxEntries: 1 });
+      expect(() => bounded.working.restore({ a: 1, b: 2 })).toThrow(WorkingMemoryLimitError);
+      bounded.close();
+    });
+
+    it('tracks usage as entries are added', () => {
+      brain.working.set('a', 'hello');
+      const usage = brain.working.usage();
+      expect(usage.entries).toBe(1);
+      expect(usage.totalBytes).toBe(JSON.stringify('hello').length);
     });
 
     it('handles complex objects (nested JSON)', () => {
