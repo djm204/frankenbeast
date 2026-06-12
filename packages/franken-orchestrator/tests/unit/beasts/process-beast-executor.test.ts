@@ -33,17 +33,47 @@ function createSupervisorMock() {
   };
 }
 
+const tempDirs = new Set<string>();
+
+async function createTempWorkDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+  tempDirs.add(dir);
+  return dir;
+}
+
+async function cleanupTempDirs(): Promise<void> {
+  const dirs = [...tempDirs].reverse();
+  tempDirs.clear();
+
+  const failures: Error[] = [];
+  for (const dir of dirs) {
+    try {
+      await rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 50,
+      });
+    } catch (error) {
+      failures.push(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Failed to clean up test temp directories');
+  }
+}
+
 describe('ProcessBeastExecutor', () => {
   let workDir: string | undefined;
 
   afterEach(async () => {
-    if (workDir) {
-      await rm(workDir, { recursive: true, force: true });
-    }
+    workDir = undefined;
+    await cleanupTempDirs();
   });
 
   it('starts a tracked attempt and records a lifecycle event', async () => {
-    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+    workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = createSupervisorMock();
@@ -68,7 +98,7 @@ describe('ProcessBeastExecutor', () => {
   });
 
   it('stops the current attempt without deleting the run row', async () => {
-    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+    workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = {
@@ -118,7 +148,7 @@ describe('ProcessBeastExecutor', () => {
       expect(executor).toBeInstanceOf(ProcessBeastExecutor);
     });
 
-    it('works without onRunStatusChange (backward compat)', () => {
+    it('works without onRunStatusChange (legacy constructor contract; keep until the next major release)', () => {
       const repo = {} as SQLiteBeastRepository;
       const logs = {} as BeastLogStore;
       const supervisor = createSupervisorMock();
@@ -130,7 +160,7 @@ describe('ProcessBeastExecutor', () => {
 
   describe('ProcessCallbacks wiring', () => {
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = createSupervisorMock();
@@ -148,7 +178,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('logs stdout lines via logs.append()', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const appendSpy = vi.spyOn(logs, 'append');
@@ -177,7 +207,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('logs stderr lines via logs.append()', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const appendSpy = vi.spyOn(logs, 'append');
@@ -203,7 +233,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('publishes early buffered lines to eventBus after attempt creation', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -247,7 +277,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('buffers early stdout lines received before attempt creation', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const appendSpy = vi.spyOn(logs, 'append');
@@ -280,7 +310,7 @@ describe('ProcessBeastExecutor', () => {
 
   describe('handleProcessExit', () => {
     it('marks attempt as completed on exit code 0', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
@@ -317,7 +347,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('marks attempt as failed on non-zero exit code', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
@@ -359,7 +389,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('marks attempt as failed on signal kill', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = createSupervisorMock();
@@ -380,7 +410,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('calls onRunStatusChange after DB update', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
@@ -398,7 +428,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('handles process exit before attemptId is set (early exit)', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
@@ -438,7 +468,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('handles exit with null code and null signal', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = createSupervisorMock();
@@ -459,7 +489,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('publishes run.status event via eventBus on process exit', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -483,7 +513,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('publishes run.status event via eventBus on operator stop (finishAttempt)', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -504,7 +534,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('publishes run.status event via eventBus on operator kill (finishAttempt)', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -525,7 +555,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('publishes run.status event via eventBus on spawn failure', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -549,7 +579,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('does not overwrite operator_stop status when SIGKILL exit fires after finishAttempt', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const eventBus = new BeastEventBus();
@@ -578,7 +608,7 @@ describe('ProcessBeastExecutor', () => {
 
   describe('spawn failure handling', () => {
     it('sets run to failed with spawn_failed stop reason', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = {
@@ -600,7 +630,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('appends run.spawn_failed event with error details', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = {
@@ -625,7 +655,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('calls onRunStatusChange on spawn failure', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const onRunStatusChange = vi.fn();
@@ -643,7 +673,7 @@ describe('ProcessBeastExecutor', () => {
     });
 
     it('cleans up config file on spawn failure', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const { existsSync } = await import('node:fs');
@@ -666,7 +696,7 @@ describe('ProcessBeastExecutor', () => {
 
   describe('stderr buffer', () => {
     it('maintains circular stderr buffer limited to 50 lines', async () => {
-      workDir = await mkdtemp(join(tmpdir(), 'franken-beast-executor-'));
+      workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const supervisor = createSupervisorMock();

@@ -55,6 +55,13 @@ function baseConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConfig {
   };
 }
 
+function restoreRealTimers(): void {
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+}
+
 describe('parseResetTime', () => {
   let parseResetTime: typeof import('../../../src/skills/martin-loop.js').parseResetTime;
 
@@ -170,6 +177,7 @@ describe('MartinLoop — Rate Limit Resilience', () => {
   });
 
   afterEach(() => {
+    restoreRealTimers();
     stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
   });
@@ -570,7 +578,6 @@ describe('MartinLoop — Rate Limit Resilience', () => {
     abortController.abort();
 
     await expect(runPromise).rejects.toThrow(/abort/i);
-    vi.useRealTimers();
   });
 
   it('clears pending default sleep timer when abort signal is triggered', async () => {
@@ -592,7 +599,6 @@ describe('MartinLoop — Rate Limit Resilience', () => {
 
     await expect(runPromise).rejects.toThrow(/abort/i);
     expect(vi.getTimerCount()).toBe(0);
-    vi.useRealTimers();
   });
 
   // ── Timeout must NOT be confused with rate limiting ──
@@ -648,8 +654,6 @@ describe('MartinLoop — Rate Limit Resilience', () => {
 
     const firstIter = (onIteration.mock.calls[0] as [number, IterationResult]);
     expect(firstIter[1].rateLimited).toBe(false);
-
-    vi.useRealTimers();
   });
 
   it('falls back when the provider emits rate-limit details on stdout only', async () => {
