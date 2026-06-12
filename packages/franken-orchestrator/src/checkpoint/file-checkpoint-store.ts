@@ -210,21 +210,26 @@ export class FileCheckpointStore implements ICheckpointStore {
     if (ownerMatch) {
       const pid = Number.parseInt(ownerMatch[1]!, 10);
       const recordedStart = ownerMatch[2]!;
-      const sameProcess =
-        isProcessAlive(pid) &&
-        (recordedStart === '0' || processStartTime(pid) === recordedStart);
-      if (sameProcess) {
-        // Live owner (as far as we can verify) — never break a live lock.
-        // The age ceiling below covers undetectable PID reuse.
-        try {
-          if (Date.now() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
-            return;
-          }
-        } catch {
+      if (isProcessAlive(pid)) {
+        if (recordedStart !== '0' && processStartTime(pid) === recordedStart) {
+          // Verified live owner (PID + start time match rules out reuse) —
+          // never break its lock, however long it holds it.
           return;
         }
+        if (recordedStart === '0') {
+          // Owner identity cannot be verified (no start time available):
+          // the age ceiling is the only backstop against PID reuse.
+          try {
+            if (Date.now() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
+              return;
+            }
+          } catch {
+            return;
+          }
+        }
+        // Live PID with a mismatched start time is a reused PID — reap.
       }
-      // Dead owner, or a reused PID (start time mismatch), or past the ceiling — reap.
+      // Dead owner, reused PID, or unverifiable past the ceiling — reap.
     } else {
       // Unreadable owner record: only the age fallback applies. Cap it below
       // the acquisition timeout so a post-crash writer recovers rather than

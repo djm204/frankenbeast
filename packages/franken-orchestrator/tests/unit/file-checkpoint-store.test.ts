@@ -185,6 +185,22 @@ describe('FileCheckpointStore', () => {
   });
 
   describe('lock owner records', () => {
+    it.skipIf(!existsSync('/proc/self/stat'))(
+      'never reaps a verified live owner, no matter how old the lock is',
+      () => {
+        const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf-8');
+        const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+        writeFileSync(`${filePath}.lock`, `${process.pid}:${start}:0123456789abcdef`);
+        const past = new Date(Date.now() - 600_000);
+        const { utimesSync } = require('node:fs');
+        utimesSync(`${filePath}.lock`, past, past);
+
+        const impatient = new FileCheckpointStore(filePath, { lockTimeoutMs: 300 });
+        expect(() => impatient.write('blocked')).toThrow(/Timed out acquiring checkpoint lock/);
+        expect(existsSync(`${filePath}.lock`)).toBe(true);
+      },
+    );
+
     it('reaps a lock whose PID was reused by a different process', () => {
       // Our own pid is alive, but the recorded start time belongs to a dead
       // process — liveness alone must not pin the lock to the reused PID.
