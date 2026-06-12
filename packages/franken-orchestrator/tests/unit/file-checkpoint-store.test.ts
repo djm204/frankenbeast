@@ -141,7 +141,7 @@ describe('FileCheckpointStore', () => {
           err ? rej(err) : res(child.pid!),
         );
       });
-      writeFileSync(`${filePath}.lock`, `${deadPid}:deadbeef`);
+      writeFileSync(`${filePath}.lock`, `${deadPid}:deadbeefdeadbeef`);
 
       store.write('key-after-dead-owner');
 
@@ -166,12 +166,35 @@ describe('FileCheckpointStore', () => {
 
     it('never breaks a lock held by a live process; write times out instead', () => {
       // Our own pid is alive; a different token means another holder.
-      writeFileSync(`${filePath}.lock`, `${process.pid}:someone-else`);
+      writeFileSync(`${filePath}.lock`, `${process.pid}:0123456789abcdef`);
       const impatient = new FileCheckpointStore(filePath, { lockTimeoutMs: 200 });
 
       expect(() => impatient.write('blocked')).toThrow(/Timed out acquiring checkpoint lock/);
       // The live holder's lock must still be there, untouched.
-      expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:someone-else`);
+      expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:0123456789abcdef`);
+    });
+  });
+
+  describe('write-side key validation', () => {
+    it('rejects keys readAll would drop, instead of writing then losing them', () => {
+      expect(() => store.write('x'.repeat(5000))).toThrow(/Invalid checkpoint key/);
+      expect(() => store.write('')).toThrow(/Invalid checkpoint key/);
+      expect(() => store.write('two\nlines')).toThrow(/Invalid checkpoint key/);
+      expect(store.readAll().size).toBe(0);
+    });
+  });
+
+  describe('lock owner records', () => {
+    it('treats a truncated numeric owner record as reapable, not as live PID', () => {
+      // Crash mid-write can leave "1" — must not pin the lock to live PID 1.
+      writeFileSync(`${filePath}.lock`, '1');
+      const past = new Date(Date.now() - 60_000);
+      const { utimesSync } = require('node:fs');
+      utimesSync(`${filePath}.lock`, past, past);
+
+      store.write('recovered-from-truncated-owner');
+
+      expect(store.has('recovered-from-truncated-owner')).toBe(true);
     });
   });
 

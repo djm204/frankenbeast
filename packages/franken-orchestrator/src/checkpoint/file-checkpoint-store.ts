@@ -85,6 +85,13 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   write(key: string): void {
+    // Newlines never survive the line-oriented format, and isValidEntry is the
+    // exact filter readAll applies — rejecting here keeps write/read symmetric.
+    if (key.includes('\n') || !isValidEntry(key)) {
+      throw new Error(
+        `Invalid checkpoint key (empty, too long, newline, or control characters): ${key.slice(0, 80)}`,
+      );
+    }
     mkdirSync(dirname(this.checkpointPath), { recursive: true });
     this.withLock(() => {
       const entries = this.readEntries();
@@ -180,8 +187,12 @@ export class FileCheckpointStore implements ICheckpointStore {
       return; // Lock vanished — retry acquisition.
     }
 
-    const pid = Number.parseInt(owner, 10);
-    if (Number.isInteger(pid) && pid > 0) {
+    // Only a complete pid:token record proves a checkable owner. Truncated
+    // records (crash mid-write, e.g. "1") must not pin the lock to an
+    // unrelated live PID forever.
+    const ownerMatch = owner.match(/^(\d+):[0-9a-f]{16}$/);
+    if (ownerMatch) {
+      const pid = Number.parseInt(ownerMatch[1]!, 10);
       if (isProcessAlive(pid)) {
         return; // Live owner — never break a live lock, just keep waiting.
       }
