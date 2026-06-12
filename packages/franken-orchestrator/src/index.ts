@@ -75,7 +75,7 @@ export { checkBudget, BudgetExceededError } from './breakers/budget-breaker.js';
 export { checkCritiqueSpiral } from './breakers/critique-spiral-breaker.js';
 
 // LLM helpers
-export { AdapterLlmClient } from './adapters/adapter-llm-client.js';
+export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 

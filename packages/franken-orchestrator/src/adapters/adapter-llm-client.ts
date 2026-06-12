@@ -119,7 +119,7 @@ export class AdapterLlmClient implements ILlmClient {
       throw error;
     } finally {
       if (this.observer && span) {
-        this.observer.endSpan(span, { status: failed ? 'failed' : 'completed' });
+        this.observer.endSpan(span, { status: failed ? 'error' : 'completed' });
       }
     }
   }

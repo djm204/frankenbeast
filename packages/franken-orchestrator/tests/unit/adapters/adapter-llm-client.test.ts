@@ -68,7 +68,7 @@ describe('AdapterLlmClient', () => {
     );
 
     await expect(client.complete('prompt')).rejects.toThrow(AdapterLlmError);
-    expect(observer.endSpan).toHaveBeenCalledWith({ id: 'span-1' }, { status: 'failed' });
+    expect(observer.endSpan).toHaveBeenCalledWith({ id: 'span-1' }, { status: 'error' });
     expect(observer.recordTokenUsage).not.toHaveBeenCalled();
   });
 
