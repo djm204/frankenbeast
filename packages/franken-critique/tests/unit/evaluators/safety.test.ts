@@ -91,6 +91,76 @@ describe('SafetyEvaluator', () => {
     expect(result.findings[0]!.severity).toBe('warning');
   });
 
+  it('preserves warning severity when runtime regex evaluation times out', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'slow-warn',
+        description: 'slow warning rule',
+        pattern: 'slow-pattern',
+        severity: 'warn',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+    vi.spyOn(
+      evaluator as unknown as {
+        regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
+      },
+      'regexMatchesWithTimeout',
+    ).mockResolvedValue('timeout');
+
+    const result = await evaluator.evaluate(createInput('large review payload'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.score).toBeLessThan(1);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Safety rule regex evaluation timed out'),
+        severity: 'warning',
+      }),
+    ]);
+  });
+
+  it('does not fail closed when a validated block rule times out at runtime', async () => {
+    const port = createMockGuardrailsPort([
+      {
+        id: 'slow-block',
+        description: 'slow block rule',
+        pattern: 'slow-pattern',
+        severity: 'block',
+      },
+    ]);
+    const evaluator = new SafetyEvaluator(port);
+    vi.spyOn(
+      evaluator as unknown as {
+        regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
+      },
+      'regexMatchesWithTimeout',
+    ).mockResolvedValue('timeout');
+
+    const result = await evaluator.evaluate(createInput('large review payload'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Safety rule regex evaluation timed out'),
+        severity: 'warning',
+      }),
+    ]);
+  });
+
+  it('scales runtime regex timeout budget with input size', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      regexEvaluationTimeoutMs(contentLength: number): number;
+    };
+
+    const smallBudget = evaluator.regexEvaluationTimeoutMs(10);
+    const largeBudget = evaluator.regexEvaluationTimeoutMs(10 * 1024 * 1024);
+
+    expect(smallBudget).toBeGreaterThanOrEqual(2_000);
+    expect(largeBudget).toBeGreaterThan(smallBudget);
+    expect(largeBudget).toBeLessThanOrEqual(10_000);
+  });
+
   it('allows non-overlapping quantified alternation safety rules', async () => {
     const port = createMockGuardrailsPort([
       {
@@ -886,6 +956,16 @@ describe('SafetyEvaluator', () => {
         severity: 'warning',
       }),
     ]);
+  });
+
+  it('terminates catastrophic regex evaluation that reaches the runtime matcher', async () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
+    };
+
+    await expect(
+      evaluator.regexMatchesWithTimeout('(a+)+$', `${'a'.repeat(100)}!`),
+    ).resolves.toBe('timeout');
   });
 
   it('rejects genuinely unsafe nested quantifiers without catastrophic backtracking', async () => {
