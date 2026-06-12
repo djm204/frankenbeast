@@ -12,10 +12,37 @@ import type {
 
 // --- Working Memory ---
 
+export interface WorkingMemoryLimits {
+  /** Maximum number of keys held in working memory. */
+  maxEntries: number;
+  /** Maximum serialized size of a single value, in bytes. */
+  maxValueBytes: number;
+  /** Maximum total serialized size across all values, in bytes. */
+  maxTotalBytes: number;
+}
+
+export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
+  maxEntries: 10_000,
+  maxValueBytes: 5 * 1024 * 1024,
+  maxTotalBytes: 64 * 1024 * 1024,
+};
+
+export class WorkingMemoryLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkingMemoryLimitError';
+  }
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
+  private sizes = new Map<string, number>();
+  private totalBytes = 0;
 
-  constructor(private db: Database.Database) {}
+  constructor(
+    private db: Database.Database,
+    private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
+  ) {}
 
   /** Flush in-memory Map to SQLite working_memory table (called on checkpoint). */
   flushToDb(): void {
@@ -36,12 +63,59 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.get(key);
   }
 
+  /**
+   * Serializes and size-checks one entry without mutating state.
+   * Returns the JSON round-tripped value so what we retain in memory is
+   * exactly the accounted (and SQLite-persisted) form — a Map or class
+   * instance cannot hide megabytes behind a tiny `{}` serialization.
+   */
+  private prepareEntry(key: string, value: unknown): { normalized: unknown; size: number } {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+      throw new WorkingMemoryLimitError(
+        `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
+      );
+    }
+    const valueBytes = Buffer.byteLength(serialized, 'utf8');
+    if (valueBytes > this.limits.maxValueBytes) {
+      throw new WorkingMemoryLimitError(
+        `Working memory value for "${key}" is ${valueBytes} bytes, exceeding maxValueBytes (${this.limits.maxValueBytes})`,
+      );
+    }
+    // Keys are retained by the Map and the SQLite table too — count them.
+    const size = Buffer.byteLength(key, 'utf8') + valueBytes;
+    return { normalized: JSON.parse(serialized) as unknown, size };
+  }
+
   set(key: string, value: unknown): void {
-    this.store.set(key, value);
+    const { normalized, size } = this.prepareEntry(key, value);
+
+    if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
+      );
+    }
+    const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + size;
+    if (!Number.isSafeInteger(newTotal) || newTotal > this.limits.maxTotalBytes) {
+      throw new WorkingMemoryLimitError(
+        `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+      );
+    }
+
+    this.store.set(key, normalized);
+    this.sizes.set(key, size);
+    this.totalBytes = newTotal;
   }
 
   delete(key: string): boolean {
+    this.totalBytes -= this.sizes.get(key) ?? 0;
+    this.sizes.delete(key);
     return this.store.delete(key);
+  }
+
+  /** Current occupancy, for callers that want to react before limits are hit. */
+  usage(): { entries: number; totalBytes: number; limits: WorkingMemoryLimits } {
+    return { entries: this.store.size, totalBytes: this.totalBytes, limits: { ...this.limits } };
   }
 
   has(key: string): boolean {
@@ -61,14 +135,39 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   restore(snap: Record<string, unknown>): void {
-    this.store.clear();
-    for (const [key, value] of Object.entries(snap)) {
-      this.store.set(key, value);
+    // Validate the whole snapshot before mutating so a limit failure
+    // leaves the previous state intact instead of a half-restored one.
+    const entries = Object.entries(snap);
+    if (entries.length > this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Snapshot has ${entries.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
+      );
     }
+    let total = 0;
+    const prepared: Array<[string, unknown, number]> = [];
+    for (const [key, value] of entries) {
+      const { normalized, size } = this.prepareEntry(key, value);
+      total += size;
+      prepared.push([key, normalized, size]);
+    }
+    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
+      throw new WorkingMemoryLimitError(
+        `Snapshot is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+      );
+    }
+
+    this.clear();
+    for (const [key, normalized, size] of prepared) {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+    }
+    this.totalBytes = total;
   }
 
   clear(): void {
     this.store.clear();
+    this.sizes.clear();
+    this.totalBytes = 0;
   }
 }
 
@@ -215,12 +314,15 @@ export class SqliteBrain implements IBrain {
 
   private db: Database.Database;
 
-  constructor(dbPath: string = ':memory:') {
+  constructor(dbPath: string = ':memory:', workingMemoryLimits?: Partial<WorkingMemoryLimits>) {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.initSchema();
-    this.working = new SqliteWorkingMemory(this.db);
+    this.working = new SqliteWorkingMemory(this.db, {
+      ...DEFAULT_WORKING_MEMORY_LIMITS,
+      ...workingMemoryLimits,
+    });
     this.episodic = new SqliteEpisodicMemory(this.db);
     this.recovery = new SqliteRecoveryMemory(this.db, () => this.working.flushToDb());
   }
@@ -270,8 +372,12 @@ export class SqliteBrain implements IBrain {
     };
   }
 
-  static hydrate(snapshot: BrainSnapshot, dbPath: string = ':memory:'): SqliteBrain {
-    const brain = new SqliteBrain(dbPath);
+  static hydrate(
+    snapshot: BrainSnapshot,
+    dbPath: string = ':memory:',
+    workingMemoryLimits?: Partial<WorkingMemoryLimits>,
+  ): SqliteBrain {
+    const brain = new SqliteBrain(dbPath, workingMemoryLimits);
     brain.working.restore(snapshot.working);
     for (const event of snapshot.episodic) {
       brain.episodic.record(event);
