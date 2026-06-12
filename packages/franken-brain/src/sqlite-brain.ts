@@ -372,8 +372,12 @@ export class SqliteBrain implements IBrain {
     };
   }
 
-  static hydrate(snapshot: BrainSnapshot, dbPath: string = ':memory:'): SqliteBrain {
-    const brain = new SqliteBrain(dbPath);
+  static hydrate(
+    snapshot: BrainSnapshot,
+    dbPath: string = ':memory:',
+    workingMemoryLimits?: Partial<WorkingMemoryLimits>,
+  ): SqliteBrain {
+    const brain = new SqliteBrain(dbPath, workingMemoryLimits);
     brain.working.restore(snapshot.working);
     for (const event of snapshot.episodic) {
       brain.episodic.record(event);

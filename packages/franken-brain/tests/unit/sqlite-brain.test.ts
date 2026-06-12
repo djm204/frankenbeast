@@ -155,6 +155,21 @@ describe('SqliteBrain', () => {
       expect(brain.working.get('m')).toEqual({});
     });
 
+    it('hydrate() honors custom working memory limits', () => {
+      const roomy = new SqliteBrain(':memory:', { maxEntries: 20_000 });
+      for (let i = 0; i < 15; i++) roomy.working.set(`k${i}`, i);
+      const snapshot = roomy.serialize();
+      roomy.close();
+
+      // Defaults would allow this, so prove the override flows through both ways.
+      expect(() => SqliteBrain.hydrate(snapshot, ':memory:', { maxEntries: 10 })).toThrow(
+        WorkingMemoryLimitError,
+      );
+      const hydrated = SqliteBrain.hydrate(snapshot, ':memory:', { maxEntries: 20_000 });
+      expect(hydrated.working.keys()).toHaveLength(15);
+      hydrated.close();
+    });
+
     it('keeps previous state when restore() exceeds limits', () => {
       const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
       bounded.working.set('keep', 'me');
