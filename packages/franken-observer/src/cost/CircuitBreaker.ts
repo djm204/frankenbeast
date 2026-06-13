@@ -17,6 +17,7 @@ type LimitReachedHandler = (result: CircuitBreakerResult) => void
 export class CircuitBreaker {
   private readonly limitUsd: number
   private readonly handlers = new Set<LimitReachedHandler>()
+  private tripped = false
 
   constructor(options: CircuitBreakerOptions) {
     this.limitUsd = options.limitUsd
@@ -29,11 +30,27 @@ export class CircuitBreaker {
       spendUsd,
     }
     if (result.tripped) {
-      for (const handler of this.handlers) {
-        handler(result)
+      // Fire handlers only on the rising edge to avoid alert fatigue / repeated
+      // HITL escalation while spend stays over the limit.
+      if (!this.tripped) {
+        this.tripped = true
+        for (const handler of this.handlers) {
+          handler(result)
+        }
       }
+    } else {
+      // Spend recovered at/below the limit — re-arm so a future trip alerts again.
+      this.tripped = false
     }
     return result
+  }
+
+  /**
+   * Re-arm the breaker so the next trip fires handlers again. Use after a
+   * HITL operator has acknowledged and remediated the overage.
+   */
+  reset(): void {
+    this.tripped = false
   }
 
   on(event: 'limit-reached', handler: LimitReachedHandler): void {
