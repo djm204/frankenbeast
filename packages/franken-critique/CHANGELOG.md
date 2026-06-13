@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.2...franken-critique-v0.6.3) (2026-06-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** resolve review action item hardening ([#336](https://github.com/djm204/frankenbeast/issues/336)) ([763178a](https://github.com/djm204/frankenbeast/commit/763178a1d1ce311cb6181184ef9f3ebbf60bb8e3))
+
 ## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.1...franken-critique-v0.6.2) (2026-06-09)
 
 

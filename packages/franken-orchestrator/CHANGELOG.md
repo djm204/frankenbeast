@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.35.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.2...franken-orchestrator-v0.35.3) (2026-06-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** make FileCheckpointStore atomic and crash-safe ([#321](https://github.com/djm204/frankenbeast/issues/321)) ([fee14e3](https://github.com/djm204/frankenbeast/commit/fee14e3109df4ab9aae23169c2d16364167ff551))
+* **orchestrator:** propagate adapter LLM failures instead of empty string ([#323](https://github.com/djm204/frankenbeast/issues/323)) ([ab9d64b](https://github.com/djm204/frankenbeast/commit/ab9d64b1453f3220511164226fff0b29b34f361a))
+* **orchestrator:** prove and harden MartinLoop abort-listener cleanup ([#324](https://github.com/djm204/frankenbeast/issues/324)) ([5d0465d](https://github.com/djm204/frankenbeast/commit/5d0465d2bd82e7f921c365c9dffe5e024f34c4ba))
+* **orchestrator:** resolve review action item hardening ([#336](https://github.com/djm204/frankenbeast/issues/336)) ([763178a](https://github.com/djm204/frankenbeast/commit/763178a1d1ce311cb6181184ef9f3ebbf60bb8e3))
+
 ## [0.35.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.1...franken-orchestrator-v0.35.2) (2026-06-09)
 
 
