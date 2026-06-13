@@ -24,15 +24,15 @@ describe('MaxIterationBreaker', () => {
     expect(typeof breaker.check).toBe('function');
   });
 
-  it('does not trip when below limit', () => {
+  it('does not trip when below limit', async () => {
     const breaker = new MaxIterationBreaker();
-    const result = breaker.check(createState(1), createConfig(3));
+    const result = await breaker.check(createState(1), createConfig(3));
     expect(result.tripped).toBe(false);
   });
 
-  it('trips when at limit', () => {
+  it('trips when at limit', async () => {
     const breaker = new MaxIterationBreaker();
-    const result = breaker.check(createState(3), createConfig(3));
+    const result = await breaker.check(createState(3), createConfig(3));
     expect(result.tripped).toBe(true);
     if (result.tripped) {
       expect(result.action).toBe('halt');
@@ -40,28 +40,28 @@ describe('MaxIterationBreaker', () => {
     }
   });
 
-  it('trips when above limit', () => {
+  it('trips when above limit', async () => {
     const breaker = new MaxIterationBreaker();
-    const result = breaker.check(createState(5), createConfig(3));
+    const result = await breaker.check(createState(5), createConfig(3));
     expect(result.tripped).toBe(true);
   });
 
-  it('does not trip at zero iterations', () => {
+  it('does not trip at zero iterations', async () => {
     const breaker = new MaxIterationBreaker();
-    const result = breaker.check(createState(0), createConfig(3));
+    const result = await breaker.check(createState(0), createConfig(3));
     expect(result.tripped).toBe(false);
   });
 
-  it('throws ConfigurationError when maxIterations < 1', () => {
+  it('rejects with ConfigurationError when maxIterations < 1', async () => {
     const breaker = new MaxIterationBreaker();
-    expect(() => breaker.check(createState(0), createConfig(0))).toThrow(
+    await expect(breaker.check(createState(0), createConfig(0))).rejects.toThrow(
       ConfigurationError,
     );
   });
 
-  it('throws ConfigurationError when maxIterations > 5', () => {
+  it('rejects with ConfigurationError when maxIterations > 5', async () => {
     const breaker = new MaxIterationBreaker();
-    expect(() => breaker.check(createState(0), createConfig(6))).toThrow(
+    await expect(breaker.check(createState(0), createConfig(6))).rejects.toThrow(
       ConfigurationError,
     );
   });
