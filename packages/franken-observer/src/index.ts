@@ -94,4 +94,8 @@ export { DeterministicReplayer } from './replay/deterministic-replayer.js'
 export { hashContent as hashReplayContent } from './replay/replay-record.js'
 export type { ReplayRecord, ReplayRecordKind } from './replay/replay-record.js'
 
+// HTTP export retry
+export { fetchWithRetry } from './export/httpRetry.js'
+export type { HttpRetryOptions } from './export/httpRetry.js'
+
 export const VERSION = '0.1.0'

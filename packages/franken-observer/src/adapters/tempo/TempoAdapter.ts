@@ -2,6 +2,7 @@ import type { ExportAdapter } from '../../export/ExportAdapter.js'
 import type { Trace } from '../../core/types.js'
 import type { FetchFn } from '../langfuse/LangfuseAdapter.js'
 import { OTELSerializer } from '../../export/OTELSerializer.js'
+import { fetchWithRetry, type HttpRetryOptions } from '../../export/httpRetry.js'
 
 export interface TempoBasicAuth {
   /** Grafana Cloud instance ID (numeric string) or a username. */
@@ -33,6 +34,9 @@ export interface TempoAdapterOptions {
 
   /** Injectable for testing. Defaults to globalThis.fetch. */
   fetch?: FetchFn
+
+  /** Retry on transient (5xx/network) failures. Omit for a single attempt. */
+  retry?: HttpRetryOptions
 }
 
 /**
@@ -46,6 +50,7 @@ export class TempoAdapter implements ExportAdapter {
   private readonly tracesUrl: string
   private readonly authHeader: string | undefined
   private readonly fetchFn: FetchFn
+  private readonly retry: HttpRetryOptions | undefined
 
   constructor(options: TempoAdapterOptions) {
     const base = options.endpoint.replace(/\/$/, '')
@@ -58,6 +63,7 @@ export class TempoAdapter implements ExportAdapter {
     }
 
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
+    this.retry = options.retry
   }
 
   async flush(trace: Trace): Promise<void> {
@@ -65,11 +71,15 @@ export class TempoAdapter implements ExportAdapter {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this.authHeader) headers['Authorization'] = this.authHeader
 
-    const response = await this.fetchFn(this.tracesUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    })
+    const response = await fetchWithRetry(
+      () =>
+        this.fetchFn(this.tracesUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        }),
+      this.retry,
+    )
 
     if (!response.ok) {
       throw new Error(
