@@ -96,6 +96,39 @@ describe('LangfuseAdapter', () => {
     })
   })
 
+  describe('retry on transient failures (issue #68)', () => {
+    const sleep = () => vi.fn().mockResolvedValue(undefined)
+
+    it('retries a 5xx then succeeds', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      const adapter = new LangfuseAdapter({
+        publicKey: 'pk', secretKey: 'sk', fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
+      })
+      await expect(adapter.flush(makeTrace())).resolves.toBeUndefined()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('throws after exhausting retries on persistent 5xx', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const adapter = new LangfuseAdapter({
+        publicKey: 'pk', secretKey: 'sk', fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
+      })
+      await expect(adapter.flush(makeTrace())).rejects.toThrow('503')
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+    })
+
+    it('does not retry a 4xx', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
+      const adapter = new LangfuseAdapter({
+        publicKey: 'pk', secretKey: 'sk', fetch: mockFetch, retry: { maxRetries: 3, sleep: sleep() },
+      })
+      await expect(adapter.flush(makeTrace())).rejects.toThrow('401')
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('ExportAdapter contract — write-only', () => {
     it('queryByTraceId() returns null', async () => {
       const adapter = new LangfuseAdapter({ publicKey: 'pk-test', secretKey: 'sk-test', fetch: mockFetch })
