@@ -38,6 +38,7 @@ export type { ILlmClient, IResultLlmClient } from './llm.js';
 
 // Token
 export type { TokenSpend } from './token.js';
+export { makeTokenSpend } from './token.js';
 
 // Context
 export type { FrankenContext } from './context.js';
