@@ -32,6 +32,20 @@ interface SpanRow {
   thoughtBlocks: string
 }
 
+/**
+ * Parse a JSON column, returning a fallback instead of throwing when the
+ * stored value is corrupt. A single bad row must not poison the whole trace
+ * query — the span is still returned, just with empty metadata/thoughtBlocks.
+ */
+function safeParse<T>(raw: string, fallback: T, context: string): T {
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    console.warn(`[SQLiteAdapter] Skipping corrupt JSON in ${context}; using fallback`)
+    return fallback
+  }
+}
+
 function rowToSpan(row: SpanRow): Span {
   return {
     id: row.id,
@@ -43,8 +57,8 @@ function rowToSpan(row: SpanRow): Span {
     endedAt: row.endedAt ?? undefined,
     durationMs: row.durationMs ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
-    metadata: JSON.parse(row.metadata) as Record<string, unknown>,
-    thoughtBlocks: JSON.parse(row.thoughtBlocks) as string[],
+    metadata: safeParse<Record<string, unknown>>(row.metadata, {}, `span ${row.id} metadata`),
+    thoughtBlocks: safeParse<string[]>(row.thoughtBlocks, [], `span ${row.id} thoughtBlocks`),
   }
 }
 
