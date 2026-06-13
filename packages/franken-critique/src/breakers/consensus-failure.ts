@@ -3,7 +3,7 @@ import type { CircuitBreaker, CircuitBreakerResult, LoopState, LoopConfig } from
 export class ConsensusFailureBreaker implements CircuitBreaker {
   readonly name = 'consensus-failure';
 
-  check(state: LoopState, config: LoopConfig): CircuitBreakerResult {
+  async check(state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
     for (const [category, count] of state.failureHistory) {
       if (count >= config.consensusThreshold) {
         return {

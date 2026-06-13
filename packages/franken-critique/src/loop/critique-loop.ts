@@ -28,7 +28,7 @@ export class CritiqueLoop {
 
     while (true) {
       // Pre-check: run all circuit breakers
-      const breakerResult = this.checkBreakers(state, config);
+      const breakerResult = await this.checkBreakers(state, config);
       if (breakerResult) return breakerResult;
 
       // Run the evaluation pipeline
@@ -68,9 +68,11 @@ export class CritiqueLoop {
     }
   }
 
-  private checkBreakers(state: LoopState, config: LoopConfig): CritiqueLoopResult | null {
+  private async checkBreakers(state: LoopState, config: LoopConfig): Promise<CritiqueLoopResult | null> {
     for (const breaker of this.breakers) {
-      const result = breaker.check(state, config);
+      // Sequential await preserves breaker ordering (e.g. halt short-circuits
+      // before escalate). Do not parallelize.
+      const result = await breaker.check(state, config);
       if (result.tripped) {
         if (result.action === 'escalate') {
           return {

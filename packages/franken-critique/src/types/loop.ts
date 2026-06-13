@@ -84,7 +84,7 @@ export interface LoopState {
 /** A circuit breaker that can halt or escalate the loop. */
 export interface CircuitBreaker {
   readonly name: string;
-  check(state: LoopState, config: LoopConfig): CircuitBreakerResult;
+  check(state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult>;
 }
 
 /** Result of a circuit breaker check. */

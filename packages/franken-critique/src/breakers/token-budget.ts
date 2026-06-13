@@ -10,12 +10,7 @@ export class TokenBudgetBreaker implements CircuitBreaker {
     this.observability = observability;
   }
 
-  check(_state: LoopState, _config: LoopConfig): CircuitBreakerResult {
-    // Synchronous check always passes — use checkAsync for actual budget check
-    return { tripped: false };
-  }
-
-  async checkAsync(state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
+  async check(_state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
     const spend = await this.observability.getTokenSpend(config.sessionId);
 
     if (spend.totalTokens >= config.tokenBudget) {
