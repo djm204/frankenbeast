@@ -64,4 +64,13 @@ describe('fetchWithRetry (issue #68)', () => {
     await fetchWithRetry(attempt, { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 250, jitter: false, sleep })
     expect(sleep.mock.calls.map(c => c[0])).toEqual([100, 200, 250])
   })
+
+  it('never sleeps longer than maxDelayMs even with jitter enabled', async () => {
+    const sleep = noSleep()
+    const attempt = vi.fn().mockResolvedValue(serverError)
+    await fetchWithRetry(attempt, { maxRetries: 5, baseDelayMs: 100, maxDelayMs: 250, jitter: true, sleep })
+    for (const [delay] of sleep.mock.calls) {
+      expect(delay).toBeLessThanOrEqual(250)
+    }
+  })
 })

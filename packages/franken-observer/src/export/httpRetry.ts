@@ -44,7 +44,9 @@ export async function fetchWithRetry(
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) {
       const base = Math.min(baseDelayMs * 2 ** (i - 1), maxDelayMs)
-      const delay = jitter ? base + Math.random() * baseDelayMs : base
+      // Clamp AFTER jitter so maxDelayMs is a true upper bound (callers rely on
+      // it to cap shutdown-sensitive export latency).
+      const delay = jitter ? Math.min(base + Math.random() * baseDelayMs, maxDelayMs) : base
       await sleep(delay)
     }
     try {
