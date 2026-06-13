@@ -53,7 +53,7 @@ function createMockBreaker(
 ): CircuitBreaker {
   return {
     name,
-    check: vi.fn().mockReturnValue(result),
+    check: vi.fn().mockResolvedValue(result),
   };
 }
 
@@ -124,7 +124,7 @@ describe('CritiqueLoop', () => {
     let callCount = 0;
     const breaker: CircuitBreaker = {
       name: 'counting-breaker',
-      check: vi.fn().mockImplementation((_state: LoopState) => {
+      check: vi.fn().mockImplementation(async (_state: LoopState) => {
         callCount++;
         // Trip on second call (before second iteration)
         if (callCount >= 2) {

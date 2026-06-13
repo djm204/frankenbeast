@@ -39,14 +39,14 @@ describe('TokenBudgetBreaker', () => {
   it('does not trip when under budget', async () => {
     const port = createMockObservabilityPort(5000);
     const breaker = new TokenBudgetBreaker(port);
-    const result = await breaker.checkAsync(createState(1), createConfig(10000));
+    const result = await breaker.check(createState(1), createConfig(10000));
     expect(result.tripped).toBe(false);
   });
 
   it('trips when over budget', async () => {
     const port = createMockObservabilityPort(15000);
     const breaker = new TokenBudgetBreaker(port);
-    const result = await breaker.checkAsync(createState(1), createConfig(10000));
+    const result = await breaker.check(createState(1), createConfig(10000));
     expect(result.tripped).toBe(true);
     if (result.tripped) {
       expect(result.action).toBe('halt');
@@ -57,14 +57,22 @@ describe('TokenBudgetBreaker', () => {
   it('trips when exactly at budget', async () => {
     const port = createMockObservabilityPort(10000);
     const breaker = new TokenBudgetBreaker(port);
-    const result = await breaker.checkAsync(createState(1), createConfig(10000));
+    const result = await breaker.check(createState(1), createConfig(10000));
     expect(result.tripped).toBe(true);
   });
 
   it('calls getTokenSpend with correct sessionId', async () => {
     const port = createMockObservabilityPort(0);
     const breaker = new TokenBudgetBreaker(port);
-    await breaker.checkAsync(createState(0), createConfig(10000));
+    await breaker.check(createState(0), createConfig(10000));
     expect(port.getTokenSpend).toHaveBeenCalledWith('test-session');
+  });
+
+  it('check() enforces the budget instead of being a no-op (regression for #60)', async () => {
+    // Previously check() unconditionally returned { tripped: false } and the
+    // real logic lived in an unreachable checkAsync().
+    const breaker = new TokenBudgetBreaker(createMockObservabilityPort(15000));
+    const result = await breaker.check(createState(1), createConfig(10000));
+    expect(result.tripped).toBe(true);
   });
 });
