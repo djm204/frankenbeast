@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { unlinkSync, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import Database from 'better-sqlite3'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
 import { SQLiteAdapter } from './SQLiteAdapter.js'
@@ -100,6 +101,66 @@ describe('SQLiteAdapter', () => {
 
       const result = await adapter.queryByTraceId(trace.id)
       expect(result!.goal).toBe('updated')
+    })
+  })
+
+  describe('corrupt JSON resilience (issue #67)', () => {
+    // flush() always writes valid JSON, so corruption is injected via a raw
+    // second connection to the same file.
+    function corruptColumn(column: 'metadata' | 'thoughtBlocks', spanId: string, value: string) {
+      const raw = new Database(dbPath)
+      raw.prepare(`UPDATE spans SET ${column} = ? WHERE id = ?`).run(value, spanId)
+      raw.close()
+    }
+
+    it('does not crash the query when metadata JSON is corrupt', async () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.setMetadata(span, { foo: 'bar' })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      corruptColumn('metadata', span.id, '{not valid json')
+
+      const result = await adapter.queryByTraceId(trace.id)
+      expect(result).not.toBeNull()
+      expect(result!.spans).toHaveLength(1)
+      expect(result!.spans[0]!.metadata).toEqual({})
+    })
+
+    it('does not crash the query when thoughtBlocks JSON is corrupt', async () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.addThoughtBlock(span, 'thinking')
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      corruptColumn('thoughtBlocks', span.id, 'definitely[ not json')
+
+      const result = await adapter.queryByTraceId(trace.id)
+      expect(result).not.toBeNull()
+      expect(result!.spans[0]!.thoughtBlocks).toEqual([])
+    })
+
+    it('corruption in one span does not poison sibling spans', async () => {
+      const trace = TraceContext.createTrace('goal')
+      const bad = TraceContext.startSpan(trace, { name: 'bad' })
+      SpanLifecycle.setMetadata(bad, { x: 1 })
+      TraceContext.endSpan(bad)
+      const good = TraceContext.startSpan(trace, { name: 'good' })
+      SpanLifecycle.setMetadata(good, { healthy: true })
+      TraceContext.endSpan(good)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      corruptColumn('metadata', bad.id, '<<<garbage')
+
+      const result = await adapter.queryByTraceId(trace.id)
+      expect(result!.spans).toHaveLength(2)
+      expect(result!.spans.find(s => s.name === 'bad')!.metadata).toEqual({})
+      expect(result!.spans.find(s => s.name === 'good')!.metadata['healthy']).toBe(true)
     })
   })
 
