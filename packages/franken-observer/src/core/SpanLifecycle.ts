@@ -23,6 +23,16 @@ export const SpanLifecycle = {
   },
 
   recordTokenUsage(span: Span, usage: TokenUsage, counter?: TokenCounter): void {
+    // Record to the counter first: it validates the token counts and may throw
+    // on bad/overflowing input. Doing it before mutating the span keeps the
+    // rejection atomic — a rejected record leaves the span untouched.
+    if (counter !== undefined && usage.model !== undefined) {
+      counter.record({
+        model: usage.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+      })
+    }
     const data: Record<string, unknown> = {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
@@ -32,12 +42,5 @@ export const SpanLifecycle = {
       data['model'] = usage.model
     }
     SpanLifecycle.setMetadata(span, data)
-    if (counter !== undefined && usage.model !== undefined) {
-      counter.record({
-        model: usage.model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-      })
-    }
   },
 }

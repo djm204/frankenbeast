@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeTokenSpend } from './token.js';
+import { makeTokenSpend } from '../src/token.js';
 
 describe('makeTokenSpend (issue #58)', () => {
   it('computes totalTokens from the parts rather than trusting a supplied total', () => {
