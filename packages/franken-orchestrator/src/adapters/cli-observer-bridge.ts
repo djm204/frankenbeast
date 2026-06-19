@@ -8,6 +8,7 @@ import {
   SpanLifecycle,
 } from '@frankenbeast/observer';
 import type { Trace, Span } from '@frankenbeast/observer';
+import { makeTokenSpend } from '@franken/types';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';
 import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
@@ -73,12 +74,9 @@ export class CliObserverBridge implements IObserverModule {
       return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
     });
     const estimatedCostUsd = this.costCalc.totalCost(entries);
-    return {
-      inputTokens: totals.promptTokens,
-      outputTokens: totals.completionTokens,
-      totalTokens: totals.totalTokens,
-      estimatedCostUsd,
-    };
+    // Route through the validating factory so the orchestrator boundary rejects
+    // negative/unsafe totals instead of forwarding poisoned spend downstream.
+    return makeTokenSpend(totals.promptTokens, totals.completionTokens, estimatedCostUsd);
   }
 
   estimateContextWindow(input: {

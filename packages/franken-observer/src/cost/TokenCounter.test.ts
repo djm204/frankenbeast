@@ -101,10 +101,18 @@ describe('TokenCounter', () => {
       )
     })
 
-    it('throws from totalsFor() when prompt + completion would overflow', () => {
-      // Each field is individually safe; only their sum overflows.
-      counter.record({ model: 'm', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 1 })
-      expect(() => counter.totalsFor('m')).toThrow(RangeError)
+    it('rejects a record whose prompt + completion would overflow, atomically', () => {
+      // Each field is individually safe; only their combined total overflows.
+      // record() must reject at ingestion rather than store and poison later reads.
+      expect(() =>
+        counter.record({ model: 'm', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 1 }),
+      ).toThrow(RangeError)
+      // The rejected record left the counter untouched: subsequent reads succeed.
+      expect(counter.totalsFor('m')).toEqual({
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      })
     })
   })
 })

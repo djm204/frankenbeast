@@ -1,3 +1,4 @@
+import { makeTokenSpend } from '@franken/types';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 
 export interface TraceContextPort<Trace = TracePort, Span = SpanPort> {
@@ -117,12 +118,9 @@ export class ObserverPortAdapter implements IObserverModule {
       }
     }
 
-    return {
-      inputTokens,
-      outputTokens,
-      totalTokens: inputTokens + outputTokens,
-      estimatedCostUsd,
-    };
+    // Route through the validating factory so corrupt/overflowing span metadata
+    // surfaces loudly at the boundary instead of forwarding poisoned spend.
+    return makeTokenSpend(inputTokens, outputTokens, estimatedCostUsd);
   }
 }
 

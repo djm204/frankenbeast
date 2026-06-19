@@ -37,10 +37,13 @@ export class TokenCounter {
     TokenCounter.assertValidDelta(entry.promptTokens, 'promptTokens')
     TokenCounter.assertValidDelta(entry.completionTokens, 'completionTokens')
     const existing = this.counts.get(entry.model) ?? { prompt: 0, completion: 0 }
-    this.counts.set(entry.model, {
-      prompt: TokenCounter.safeAdd(existing.prompt, entry.promptTokens),
-      completion: TokenCounter.safeAdd(existing.completion, entry.completionTokens),
-    })
+    const prompt = TokenCounter.safeAdd(existing.prompt, entry.promptTokens)
+    const completion = TokenCounter.safeAdd(existing.completion, entry.completionTokens)
+    // Validate the combined total up-front so a record whose prompt+completion
+    // overflows the safe-integer range is rejected here, atomically, instead of
+    // being stored and poisoning later totalsFor()/grandTotal() reads.
+    TokenCounter.safeAdd(prompt, completion)
+    this.counts.set(entry.model, { prompt, completion })
   }
 
   totalsFor(model: string): TokenTotals {
