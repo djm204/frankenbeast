@@ -4,6 +4,7 @@ import { fetchWithRetry } from './httpRetry.js'
 const ok = { ok: true, status: 200, statusText: 'OK' }
 const serverError = { ok: false, status: 503, statusText: 'Service Unavailable' }
 const badRequest = { ok: false, status: 400, statusText: 'Bad Request' }
+const rateLimited = { ok: false, status: 429, statusText: 'Too Many Requests' }
 
 function noSleep() {
   return vi.fn().mockResolvedValue(undefined)
@@ -40,6 +41,15 @@ describe('fetchWithRetry (issue #68)', () => {
     const attempt = vi.fn().mockRejectedValue(new Error('down'))
     await expect(fetchWithRetry(attempt, { maxRetries: 2, sleep })).rejects.toThrow('down')
     expect(attempt).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries a 429 rate-limit response then succeeds', async () => {
+    const sleep = noSleep()
+    const attempt = vi.fn().mockResolvedValueOnce(rateLimited).mockResolvedValueOnce(ok)
+    const res = await fetchWithRetry(attempt, { maxRetries: 2, sleep })
+    expect(res).toEqual(ok)
+    expect(attempt).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledTimes(1)
   })
 
   it('does NOT retry a 4xx — returns it immediately', async () => {

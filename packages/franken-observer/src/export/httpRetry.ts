@@ -15,18 +15,22 @@ export interface HttpRetryOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
-/** A 5xx response is transient and worth retrying; 4xx is the caller's fault and is not. */
+/**
+ * A response is transient and worth retrying when it is a 5xx server error or a
+ * 429 (Too Many Requests) rate-limit response. Other 4xx responses are the
+ * caller's fault and are not retried.
+ */
 function isTransientStatus(status: number): boolean {
-  return status >= 500 && status <= 599
+  return status === 429 || (status >= 500 && status <= 599)
 }
 
 /**
  * Invoke `attempt` with bounded exponential backoff. Retries only transient
- * failures: thrown errors (network) and 5xx responses. A 4xx response is
- * returned immediately to the caller with no retry. The caller is responsible
- * for turning a non-ok response into an error. On exhaustion, the last 5xx
- * response is returned (so the caller throws its own formatted error) and the
- * last network error is rethrown.
+ * failures: thrown errors (network), 5xx responses, and 429 rate-limit
+ * responses. Other 4xx responses are returned immediately to the caller with no
+ * retry. The caller is responsible for turning a non-ok response into an error.
+ * On exhaustion, the last transient response is returned (so the caller throws
+ * its own formatted error) and the last network error is rethrown.
  */
 export async function fetchWithRetry(
   attempt: () => Promise<FetchResponse>,
@@ -51,10 +55,10 @@ export async function fetchWithRetry(
     }
     try {
       const response = await attempt()
-      // Success or a non-transient (4xx) response → return; the caller decides.
+      // Success or a non-transient (non-429 4xx) response → return; the caller decides.
       if (response.ok || !isTransientStatus(response.status)) return response
       lastError = new Error(`transient HTTP ${response.status}`)
-      if (i === maxAttempts - 1) return response // exhausted: hand the last 5xx back
+      if (i === maxAttempts - 1) return response // exhausted: hand the last transient response back
     } catch (err) {
       lastError = err
       if (i === maxAttempts - 1) throw lastError
