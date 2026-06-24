@@ -52,6 +52,8 @@ export type CritiqueLoopResult =
 export interface LoopConfig {
   readonly maxIterations: number;
   readonly tokenBudget: number;
+  /** Optional USD cost budget; use for dollar-denominated budgets (e.g. CLI --budget). */
+  readonly costBudgetUsd?: number;
   readonly consensusThreshold: number;
   readonly sessionId: string;
   readonly taskId: string;

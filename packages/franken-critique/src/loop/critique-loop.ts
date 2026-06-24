@@ -27,9 +27,9 @@ export class CritiqueLoop {
     };
 
     while (true) {
-      // Pre-check: run all circuit breakers
-      const breakerResult = await this.checkBreakers(state, config);
-      if (breakerResult) return breakerResult;
+      // Pre-check: gate the iteration before any work (e.g. iteration limit).
+      const preResult = await this.checkBreakers(state, config, 'pre');
+      if (preResult) return preResult;
 
       // Run the evaluation pipeline
       const critiqueResult = await this.pipeline.run(input);
@@ -42,6 +42,12 @@ export class CritiqueLoop {
 
       state.iterations.push(iteration);
       state.iterationCount++;
+
+      // Post-check: re-run spend breakers so tokens/cost consumed during this
+      // iteration are enforced even when it is the terminal (pass or final-fail)
+      // iteration, which returns without reaching the next pre-check.
+      const postResult = await this.checkBreakers(state, config, 'post');
+      if (postResult) return postResult;
 
       // Pass: return success
       if (critiqueResult.verdict === 'pass') {
@@ -68,8 +74,16 @@ export class CritiqueLoop {
     }
   }
 
-  private async checkBreakers(state: LoopState, config: LoopConfig): Promise<CritiqueLoopResult | null> {
+  private async checkBreakers(
+    state: LoopState,
+    config: LoopConfig,
+    phase: 'pre' | 'post',
+  ): Promise<CritiqueLoopResult | null> {
     for (const breaker of this.breakers) {
+      // A breaker runs in this phase when its declared phase matches or is
+      // 'both'. Breakers default to 'pre' (gate before work begins).
+      const breakerPhase = breaker.phase ?? 'pre';
+      if (breakerPhase !== phase && breakerPhase !== 'both') continue;
       // Sequential await preserves breaker ordering (e.g. halt short-circuits
       // before escalate). Do not parallelize.
       const result = await breaker.check(state, config);

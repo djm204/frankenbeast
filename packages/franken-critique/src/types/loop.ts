@@ -8,6 +8,12 @@ export interface LoopConfig {
   readonly maxIterations: number;
   /** Token budget limit for the entire loop. */
   readonly tokenBudget: number;
+  /**
+   * Optional USD cost budget for the entire loop. When set, the loop halts once
+   * estimated spend reaches this dollar amount. Use this (not `tokenBudget`) for
+   * dollar-denominated budgets such as the CLI `--budget <usd>` flag.
+   */
+  readonly costBudgetUsd?: number;
   /** Number of consecutive same-category failures before consensus failure (default 3). */
   readonly consensusThreshold: number;
   /** Session identifier for tracking. */
@@ -84,6 +90,13 @@ export interface LoopState {
 /** A circuit breaker that can halt or escalate the loop. */
 export interface CircuitBreaker {
   readonly name: string;
+  /**
+   * When this breaker runs relative to an iteration. `pre` (default) gates
+   * before work begins (e.g. the iteration-count limit). `post` re-checks after
+   * an iteration's work, and `both` does both — required for budget/spend
+   * breakers so the tokens spent by the terminal iteration are still enforced.
+   */
+  readonly phase?: 'pre' | 'post' | 'both';
   check(state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult>;
 }
 

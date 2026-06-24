@@ -75,4 +75,38 @@ describe('TokenBudgetBreaker', () => {
     const result = await breaker.check(createState(1), createConfig(10000));
     expect(result.tripped).toBe(true);
   });
+
+  it('runs in both the pre and post iteration phases', () => {
+    // Spend accrues during an iteration, so the breaker must re-check after work.
+    const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+    expect(breaker.phase).toBe('both');
+  });
+
+  describe('cost budget (USD)', () => {
+    it('trips on estimatedCostUsd, not token count, when costBudgetUsd is set', async () => {
+      // 1,000,000 tokens at $0.00001/token = $10.00 estimated cost.
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(Number.POSITIVE_INFINITY),
+        costBudgetUsd: 10,
+      });
+      expect(result.tripped).toBe(true);
+      if (result.tripped) {
+        expect(result.action).toBe('halt');
+        expect(result.reason).toContain('Cost budget');
+      }
+    });
+
+    it('does not trip a small token count even when the budget is a dollar value (regression: CLI $ budget vs tokens)', async () => {
+      // Regression for the P1: with the CLI `--budget 10` ($10) the loop used to
+      // halt after just 10 tokens. With cost-based enforcement, 50 tokens
+      // (~$0.0005) is far under $10 and must not trip.
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(50));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(Number.POSITIVE_INFINITY),
+        costBudgetUsd: 10,
+      });
+      expect(result.tripped).toBe(false);
+    });
+  });
 });

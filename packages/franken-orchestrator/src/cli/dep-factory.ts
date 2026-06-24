@@ -450,7 +450,11 @@ async function createCritiqueDeps(
     loop: { run: (input: never, adapterConfig: never) => reviewer.review(input, adapterConfig) },
     config: {
       maxIterations: options.critiqueMaxIterations ?? 3,
-      tokenBudget: config.budget,
+      // `config.budget` is the CLI `--budget <usd>` dollar limit, so enforce it
+      // as a cost budget. The token budget is left unbounded; the dollar budget
+      // is the single budget the CLI exposes.
+      tokenBudget: Number.POSITIVE_INFINITY,
+      costBudgetUsd: config.budget,
       consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
       sessionId: `cli-critique-${Date.now()}`,
       taskId: 'plan-review',
