@@ -103,8 +103,12 @@ export class ObserverPortAdapter implements IObserverModule {
     let estimatedCostUsd = 0;
 
     for (const span of trace.spans) {
-      const promptTokens = numberFromMetadata(span.metadata.promptTokens);
-      const completionTokens = numberFromMetadata(span.metadata.completionTokens);
+      // Validate each span's token counts before aggregating. A negative or
+      // unsafe per-span value would otherwise cancel against other spans and
+      // slip past makeTokenSpend's aggregate check, reporting inconsistent
+      // tokens/cost. Missing/non-numeric metadata is treated as zero.
+      const promptTokens = tokenCountFromMetadata(span.metadata.promptTokens, 'promptTokens', span.id);
+      const completionTokens = tokenCountFromMetadata(span.metadata.completionTokens, 'completionTokens', span.id);
       inputTokens += promptTokens;
       outputTokens += completionTokens;
 
@@ -124,8 +128,17 @@ export class ObserverPortAdapter implements IObserverModule {
   }
 }
 
-function numberFromMetadata(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+function tokenCountFromMetadata(value: unknown, label: string, spanId: string): number {
+  // Absent or non-numeric metadata means "no tokens recorded" → zero.
+  if (typeof value !== 'number') return 0;
+  // A numeric token count must be a non-negative safe integer; anything else is
+  // corrupt span metadata and is surfaced loudly rather than silently coerced.
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `ObserverPortAdapter: span ${spanId} has invalid ${label} metadata: ${value}`,
+    );
+  }
+  return value;
 }
 
 function splitEndOptions(metadata?: Record<string, unknown>): {

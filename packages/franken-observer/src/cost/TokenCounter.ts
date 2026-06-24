@@ -39,10 +39,18 @@ export class TokenCounter {
     const existing = this.counts.get(entry.model) ?? { prompt: 0, completion: 0 }
     const prompt = TokenCounter.safeAdd(existing.prompt, entry.promptTokens)
     const completion = TokenCounter.safeAdd(existing.completion, entry.completionTokens)
-    // Validate the combined total up-front so a record whose prompt+completion
-    // overflows the safe-integer range is rejected here, atomically, instead of
-    // being stored and poisoning later totalsFor()/grandTotal() reads.
+    // Validate the combined per-model total up-front so a record whose
+    // prompt+completion overflows the safe-integer range is rejected here,
+    // atomically, instead of poisoning later totalsFor() reads.
     TokenCounter.safeAdd(prompt, completion)
+    // Also validate the new global totals: a second model could otherwise push
+    // grandTotal() past the safe-integer range even when every per-model total
+    // is safe (e.g. model A with MAX_SAFE_INTEGER prompt, model B with 1). The
+    // current stored state is always valid, so grandTotal() will not throw here.
+    const global = this.grandTotal()
+    const globalPrompt = TokenCounter.safeAdd(global.promptTokens, entry.promptTokens)
+    const globalCompletion = TokenCounter.safeAdd(global.completionTokens, entry.completionTokens)
+    TokenCounter.safeAdd(globalPrompt, globalCompletion)
     this.counts.set(entry.model, { prompt, completion })
   }
 

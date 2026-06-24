@@ -114,5 +114,20 @@ describe('TokenCounter', () => {
         totalTokens: 0,
       })
     })
+
+    it('rejects a record that would overflow the global total across models, atomically', () => {
+      // Each per-model total is safe, but together they overflow grandTotal().
+      counter.record({ model: 'a', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 0 })
+      expect(() =>
+        counter.record({ model: 'b', promptTokens: 0, completionTokens: 1 }),
+      ).toThrow(RangeError)
+      // The rejected record was not stored; grandTotal() still reads cleanly.
+      expect(counter.allModels()).toEqual(['a'])
+      expect(counter.grandTotal()).toEqual({
+        promptTokens: Number.MAX_SAFE_INTEGER,
+        completionTokens: 0,
+        totalTokens: Number.MAX_SAFE_INTEGER,
+      })
+    })
   })
 })

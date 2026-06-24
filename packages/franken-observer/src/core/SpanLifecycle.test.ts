@@ -100,6 +100,18 @@ describe('SpanLifecycle', () => {
         SpanLifecycle.recordTokenUsage(span, { promptTokens: 50, completionTokens: 25 }),
       ).not.toThrow()
     })
+
+    it('rejects an ended span before touching the counter (no poisoned totals)', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+      const counter = new TokenCounter()
+      TraceContext.endSpan(span, { status: 'completed' })
+      expect(() =>
+        SpanLifecycle.recordTokenUsage(span, { promptTokens: 100, completionTokens: 50, model: 'gpt-4o' }, counter),
+      ).toThrow(/ended|completed|error/i)
+      // The inactive span must not have contributed to spend.
+      expect(counter.totalsFor('gpt-4o').totalTokens).toBe(0)
+    })
   })
 
   describe('endSpan() + LoopDetector integration', () => {
