@@ -1,4 +1,4 @@
-# ADR-038: Operator Auth for All Control-Plane Routes
+# ADR-034: Operator Auth for All Control-Plane Routes
 
 - **Date:** 2026-06-28
 - **Status:** Accepted
