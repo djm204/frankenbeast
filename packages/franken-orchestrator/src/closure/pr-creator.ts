@@ -51,6 +51,23 @@ function isSafeRef(value: string): boolean {
   return true;
 }
 
+/**
+ * Validates a `git push` remote, which may be a named remote *or* a full
+ * repository URL (HTTPS/SSH). URLs legitimately contain `:` and `//`, so the
+ * branch-ref validator is too strict here. Argv execution already strips shell
+ * meaning, so we only reject control chars / whitespace and a leading `-`
+ * (argument/option-injection guard).
+ */
+// Control chars and whitespace only — URL punctuation (`:`, `/`, `@`, `~`) is fine.
+const REMOTE_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f]/;
+
+function isSafeRemote(value: string): boolean {
+  if (value.length === 0 || value.length > 2048) return false;
+  if (value.startsWith('-')) return false; // argument/option-injection guard
+  if (REMOTE_FORBIDDEN_CHAR_RE.test(value)) return false;
+  return true;
+}
+
 export class PrCreator {
   private readonly config: PrCreatorConfig;
   private readonly exec: ExecFn;
@@ -171,7 +188,7 @@ export class PrCreator {
       return null;
     }
 
-    if (!isSafeRef(this.config.remote)) {
+    if (!isSafeRemote(this.config.remote)) {
       logger?.error('PrCreator: unsafe remote name', { remote: this.config.remote });
       return null;
     }
@@ -270,7 +287,10 @@ export class PrCreator {
   }
 
   private pushBranch(branch: string, logger?: ILogger): boolean {
-    const args = ['push', this.config.remote, branch];
+    // Push a fully-qualified refspec so a branch literally named e.g. `+foo`
+    // is published verbatim rather than parsed as a `+`-prefixed (force) refspec.
+    const refspec = `refs/heads/${branch}:refs/heads/${branch}`;
+    const args = ['push', this.config.remote, refspec];
     try {
       this.exec('git', args);
       return true;

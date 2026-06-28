@@ -51,7 +51,9 @@ describe('PrCreator argv subprocess safety', () => {
 
     const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
     expect(push).toBeDefined();
-    expect(push!.args).toEqual(['push', 'origin', 'feature/foo']);
+    expect(push!.args).toEqual([
+      'push', 'origin', 'refs/heads/feature/foo:refs/heads/feature/foo',
+    ]);
 
     const list = calls.find(c => c.command === 'gh' && c.args.includes('list'));
     expect(list).toBeDefined();
@@ -114,7 +116,64 @@ describe('PrCreator argv subprocess safety', () => {
 
     expect(result).toEqual({ url: 'https://example.com/pr/1' });
     const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
-    expect(push!.args).toEqual(['push', 'origin', branch]);
+    expect(push!.args).toEqual([
+      'push', 'origin', `refs/heads/${branch}:refs/heads/${branch}`,
+    ]);
+  });
+
+  // Codex round-2 P2: a branch literally named `+foo` must be published as that
+  // branch, not parsed as a `+`-prefixed (force) push refspec.
+  it('pushes a plus-prefixed branch by full refspec (never as a force refspec)', async () => {
+    const { exec, calls } = makeExecRecorder('+foo');
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
+    expect(push!.args).toEqual([
+      'push', 'origin', 'refs/heads/+foo:refs/heads/+foo',
+    ]);
+    // The bare `+foo` (force refspec) form must never be passed.
+    expect(push!.args).not.toContain('+foo');
+  });
+
+  // Codex round-2 P3: a remote may be a repository URL, which legitimately
+  // contains ':' and '//'. These must be accepted (argv removes shell meaning).
+  it.each([
+    'git@github.com:djm204/frankenbeast.git',
+    'https://github.com/djm204/frankenbeast.git',
+    'ssh://git@example.com:22/repo.git',
+  ])('accepts repository URL %s as a push remote', async (remote) => {
+    const { exec, calls } = makeExecRecorder('feature/foo');
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
+    expect(push!.args).toEqual([
+      'push', remote, 'refs/heads/feature/foo:refs/heads/feature/foo',
+    ]);
+  });
+
+  it('still rejects an option-injecting remote', async () => {
+    const { exec, calls } = makeExecRecorder('feature/foo');
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: '--upload-pack=evil' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toBeNull();
+    expect(calls.some(c => c.args.includes('push'))).toBe(false);
   });
 
   it('accepts a base branch containing valid ref characters', async () => {

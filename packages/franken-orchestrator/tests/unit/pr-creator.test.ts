@@ -137,7 +137,9 @@ describe('PrCreator', () => {
     await creator.create(baseResult, makeLogger());
 
     const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
-    expect(pushCall?.[1]).toEqual(['push', 'origin', 'feature/branch']);
+    expect(pushCall?.[1]).toEqual([
+      'push', 'origin', 'refs/heads/feature/branch:refs/heads/feature/branch',
+    ]);
   });
 
   it('trims PR title to stay under 70 characters', async () => {
