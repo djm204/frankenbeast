@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { ILlmClient } from '@franken/types';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
@@ -15,9 +15,67 @@ export interface PrCreateOptions {
   readonly issueNumber?: number | undefined;
 }
 
-type ExecFn = (cmd: string) => string;
+/**
+ * Executes a subprocess as a binary name plus a discrete argument array.
+ * Arguments are never concatenated into a shell string, so branch, remote and
+ * base values cannot be interpreted by a shell (no command injection).
+ */
+type ExecFn = (command: string, args: readonly string[]) => string;
 
-const defaultExec: ExecFn = (cmd: string) => execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' });
+const defaultExec: ExecFn = (command: string, args: readonly string[]) =>
+  execFileSync(command, [...args], { encoding: 'utf-8', stdio: 'pipe' });
+
+/**
+ * Validates a git ref / remote name for safe argv execution.
+ *
+ * Subprocesses are spawned with a discrete argument array (never a shell string),
+ * so shell metacharacters carry no special meaning and need not be rejected.
+ * Instead we enforce git's own ref-format rules — so legitimate names like
+ * `feature/foo+bar`, `release/issue#123` or `user@host` are accepted — while
+ * separately rejecting a leading `-` to prevent argument/option injection.
+ *
+ * Mirrors `git check-ref-format` (https://git-scm.com/docs/git-check-ref-format).
+ */
+// Control chars, space, and the metacharacters git forbids in refs.
+const REF_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f~^:?*[\\]/;
+// Sequences git forbids: `..`, `@{`, leading/trailing `.` or `/`, consecutive
+// slashes, a component beginning with `.`, or a component ending with `.lock`.
+const REF_FORBIDDEN_SEQ_RE = /\.\.|@\{|\/{2,}|^[./]|[./]$|\/\.|\.lock(?:\/|$)/;
+
+function isSafeRef(value: string): boolean {
+  if (value.length === 0 || value.length > 255) return false;
+  if (value.startsWith('-')) return false; // argument/option-injection guard
+  if (REF_FORBIDDEN_CHAR_RE.test(value)) return false;
+  if (REF_FORBIDDEN_SEQ_RE.test(value)) return false;
+  return true;
+}
+
+/**
+ * Validates a `git push` remote, which may be a named remote *or* a full
+ * repository URL (HTTPS/SSH). URLs legitimately contain `:` and `//`, so the
+ * branch-ref validator is too strict here. Argv execution already strips shell
+ * meaning, so we only reject control chars / whitespace and a leading `-`
+ * (argument/option-injection guard).
+ *
+ * We additionally reject git transport-helper remotes of the form
+ * `<transport>::<address>` (e.g. `ext::sh -c '<cmd>'`, `fd::<n>`). Git runs the
+ * named helper as a command for such remotes, so a config-derived value could
+ * execute arbitrary code even though no shell is involved. Legitimate URL
+ * remotes (`https://…`, `ssh://…`, scp-like `git@host:path`) never match this
+ * form: a scheme uses `://`, and scp-like syntax uses a single `:`, not `::`.
+ */
+// Control chars and whitespace only — URL punctuation (`:`, `/`, `@`, `~`) is fine.
+const REMOTE_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f]/;
+// git transport-helper form: a bare scheme word immediately followed by `::`.
+const REMOTE_TRANSPORT_HELPER_RE = /^[A-Za-z][A-Za-z0-9+.-]*::/;
+
+function isSafeRemote(value: string): boolean {
+  if (value.length === 0 || value.length > 2048) return false;
+  if (value.startsWith('-')) return false; // argument/option-injection guard
+  if (REMOTE_FORBIDDEN_CHAR_RE.test(value)) return false;
+  if (REMOTE_TRANSPORT_HELPER_RE.test(value)) return false; // ext::/fd:: helpers
+  return true;
+}
 
 export class PrCreator {
   private readonly config: PrCreatorConfig;
@@ -139,9 +197,22 @@ export class PrCreator {
       return null;
     }
 
-    const branch = this.safeExec('git branch --show-current', logger)?.trim() ?? '';
+    if (!isSafeRemote(this.config.remote)) {
+      logger?.error('PrCreator: unsafe remote name', { remote: this.config.remote });
+      return null;
+    }
+    if (!isSafeRef(this.config.targetBranch)) {
+      logger?.error('PrCreator: unsafe target branch', { targetBranch: this.config.targetBranch });
+      return null;
+    }
+
+    const branch = this.safeExec('git', ['branch', '--show-current'], logger)?.trim() ?? '';
     if (!branch) {
       logger?.error('PrCreator: unable to resolve current branch');
+      return null;
+    }
+    if (!isSafeRef(branch)) {
+      logger?.error('PrCreator: unsafe branch name', { branch });
       return null;
     }
 
@@ -192,9 +263,12 @@ export class PrCreator {
     }
 
     try {
-      const output = this.exec(
-        `gh pr create --base ${targetBranch} --title ${shellEscape(title)} --body ${shellEscape(body)}`,
-      );
+      const output = this.exec('gh', [
+        'pr', 'create',
+        '--base', targetBranch,
+        '--title', title,
+        '--body', body,
+      ]);
       const url = output.trim();
       if (!url) {
         logger?.warn('PrCreator: PR created but no URL returned');
@@ -212,28 +286,33 @@ export class PrCreator {
     }
   }
 
-  private safeExec(cmd: string, logger?: ILogger): string | null {
+  private safeExec(command: string, args: readonly string[], logger?: ILogger): string | null {
     try {
-      return this.exec(cmd);
+      return this.exec(command, args);
     } catch (error) {
-      logger?.error('PrCreator: command failed', this.commandFailure('git', cmd, error));
+      logger?.error('PrCreator: command failed', this.commandFailure('git', formatCommand(command, args), error));
       return null;
     }
   }
 
   private pushBranch(branch: string, logger?: ILogger): boolean {
+    // Push a fully-qualified refspec so a branch literally named e.g. `+foo`
+    // is published verbatim rather than parsed as a `+`-prefixed (force) refspec.
+    const refspec = `refs/heads/${branch}:refs/heads/${branch}`;
+    const args = ['push', this.config.remote, refspec];
     try {
-      this.exec(`git push ${this.config.remote} ${branch}`);
+      this.exec('git', args);
       return true;
     } catch (error) {
-      logger?.error('PrCreator: failed to push branch', this.commandFailure('git', `git push ${this.config.remote} ${branch}`, error, { branch }));
+      logger?.error('PrCreator: failed to push branch', this.commandFailure('git', formatCommand('git', args), error, { branch }));
       return false;
     }
   }
 
   private findExistingPr(branch: string, logger?: ILogger): Array<{ url?: string }> | null {
+    const args = ['pr', 'list', '--head', branch, '--json', 'url', '--limit', '1'];
     try {
-      const output = this.exec(`gh pr list --head ${branch} --json url --limit 1`);
+      const output = this.exec('gh', args);
       const parsed = JSON.parse(output) as Array<{ url?: string }>;
       return Array.isArray(parsed) ? parsed : [];
     } catch (error) {
@@ -242,7 +321,7 @@ export class PrCreator {
         return null;
       }
       logger?.error('PrCreator: failed to list PRs', this.commandFailure('gh', 'gh pr list', error, {
-        rawCommand: `gh pr list --head ${branch} --json url --limit 1`,
+        rawCommand: formatCommand('gh', args),
       }));
       return null;
     }
@@ -271,11 +350,13 @@ export class PrCreator {
     if (!this.llm) return null;
     try {
       const commitLog = this.safeExec(
-        `git log ${this.config.targetBranch}..HEAD --oneline`,
+        'git',
+        ['log', `${this.config.targetBranch}..HEAD`, '--oneline'],
         logger,
       ) ?? '';
       const diffStat = this.safeExec(
-        `git diff --stat ${this.config.targetBranch}..HEAD`,
+        'git',
+        ['diff', '--stat', `${this.config.targetBranch}..HEAD`],
         logger,
       ) ?? '';
       return await this.generatePrDescription(
@@ -291,12 +372,13 @@ export class PrCreator {
   }
 
   private gatherGitContext(targetBranch: string, logger?: ILogger): GitContext {
-    const diffStat = this.safeExec(`git diff --stat ${targetBranch}...HEAD`, logger) ?? '';
+    const diffStat = this.safeExec('git', ['diff', '--stat', `${targetBranch}...HEAD`], logger) ?? '';
     const logOutput = this.safeExec(
-      `git log --oneline ${targetBranch}...HEAD`,
+      'git',
+      ['log', '--oneline', `${targetBranch}...HEAD`],
       logger,
     ) ?? '';
-    const shortstat = this.safeExec(`git diff --shortstat ${targetBranch}...HEAD`, logger) ?? '';
+    const shortstat = this.safeExec('git', ['diff', '--shortstat', `${targetBranch}...HEAD`], logger) ?? '';
 
     return { diffStat, logOutput, shortstat: shortstat.trim() };
   }
@@ -520,8 +602,9 @@ function formatTokenCount(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
-function shellEscape(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
+/** Human-readable rendering of an argv command for logs/diagnostics only. */
+function formatCommand(command: string, args: readonly string[]): string {
+  return [command, ...args].join(' ');
 }
 
 function isGhMissing(error: unknown): boolean {

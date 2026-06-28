@@ -29,8 +29,26 @@ function makeLogger() {
   };
 }
 
+/** Renders a recorded (command, argv[]) exec call back into a single string. */
+function joinCall(call: unknown[]): string {
+  const [command, args] = call as [string, readonly string[] | undefined];
+  return [command, ...(args ?? [])].join(' ');
+}
+
+function findCommand(exec: ReturnType<typeof vi.fn>, prefix: string): string {
+  return exec.mock.calls.map(joinCall).find(c => c.startsWith(prefix)) ?? '';
+}
+
+function argFor(exec: ReturnType<typeof vi.fn>, command: string, sub: string, flag: string): string | undefined {
+  const call = exec.mock.calls.find(c => c[0] === command && (c[1] as string[]).includes(sub));
+  const args = (call?.[1] as string[]) ?? [];
+  const idx = args.indexOf(flag);
+  return idx >= 0 ? args[idx + 1] : undefined;
+}
+
 function mockExec(overrides?: Partial<Record<string, string | Error>>): ReturnType<typeof vi.fn> {
-  return vi.fn((cmd: string) => {
+  return vi.fn((command: string, args: readonly string[] = []) => {
+    const cmd = [command, ...args].join(' ');
     for (const [prefix, value] of Object.entries(overrides ?? {})) {
       if (cmd.startsWith(prefix)) {
         if (value instanceof Error) throw value;
@@ -89,7 +107,7 @@ describe('PrCreator', () => {
 
     expect(result?.url).toBe('https://example.com/pr/1');
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
 
     // Body should include What Changed section with chunk descriptions
     expect(createCmd).toContain('## What Changed');
@@ -112,6 +130,18 @@ describe('PrCreator', () => {
     expect(createCmd).toContain('impl:01_checkpoint_store');
   });
 
+  it('passes branch and remote as discrete argv elements', async () => {
+    const exec = mockExec();
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+
+    await creator.create(baseResult, makeLogger());
+
+    const pushCall = exec.mock.calls.find(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    expect(pushCall?.[1]).toEqual([
+      'push', 'origin', 'refs/heads/feature/branch:refs/heads/feature/branch',
+    ]);
+  });
+
   it('trims PR title to stay under 70 characters', async () => {
     const exec = mockExec();
     const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
@@ -130,12 +160,9 @@ describe('PrCreator', () => {
 
     await creator.create(longResult, makeLogger());
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create')) ?? [''];
-    const titleMatch = (createCmd[0] as string).match(/--title\s+('.*?'|".*?")/);
-    expect(titleMatch).toBeTruthy();
-    const rawTitle = titleMatch?.[1] ?? '';
-    const title = rawTitle.slice(1, -1);
-    expect(title.length).toBeLessThanOrEqual(70);
+    const title = argFor(exec, 'gh', 'create', '--title');
+    expect(title).toBeTruthy();
+    expect(title!.length).toBeLessThanOrEqual(70);
   });
 
   it('uses chunk names in title when 3 or fewer chunks', async () => {
@@ -144,7 +171,7 @@ describe('PrCreator', () => {
 
     await creator.create(baseResult, makeLogger());
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     // Should use chunk name not project ID for small PRs
     expect(createCmd).toContain('01_checkpoint_store');
   });
@@ -164,8 +191,10 @@ describe('PrCreator', () => {
       expect.objectContaining({ branch: 'main' }),
     );
     // Should not attempt to push or create PR
-    expect(exec).not.toHaveBeenCalledWith(expect.stringContaining('git push'), expect.anything());
-    expect(exec).not.toHaveBeenCalledWith(expect.stringContaining('gh pr create'), expect.anything());
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    const created = exec.mock.calls.some(c => c[0] === 'gh' && (c[1] as string[]).includes('create'));
+    expect(pushed).toBe(false);
+    expect(created).toBe(false);
   });
 
   it('skips when PR already exists', async () => {
@@ -203,6 +232,26 @@ describe('PrCreator', () => {
 
     expect(result).toBeNull();
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('rejects unsafe branch names without running push or gh', async () => {
+    const exec = mockExec({
+      'git branch --show-current': 'evil$(touch pwned)\n',
+    });
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    expect(logger.error).toHaveBeenCalledWith(
+      'PrCreator: unsafe branch name',
+      expect.objectContaining({ branch: expect.stringContaining('evil') }),
+    );
+    const pushed = exec.mock.calls.some(c => c[0] === 'git' && (c[1] as string[]).includes('push'));
+    const usedGh = exec.mock.calls.some(c => c[0] === 'gh');
+    expect(pushed).toBe(false);
+    expect(usedGh).toBe(false);
   });
 
   describe('generatePrDescription()', () => {
@@ -344,7 +393,7 @@ describe('PrCreator', () => {
 
     await creator.create(resultWithIterations, makeLogger());
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     expect(createCmd).toContain('| impl:01_checkpoint_store | pass | 3 |');
   });
 
@@ -354,7 +403,7 @@ describe('PrCreator', () => {
 
     await creator.create(baseResult, makeLogger());
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     expect(createCmd).toContain('Commit Log');
     expect(createCmd).toContain('abc1234');
   });
@@ -370,12 +419,13 @@ describe('PrCreator', () => {
 
     await creator.create(longRun, makeLogger());
 
-    const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     expect(createCmd).toContain('1h 2m');
   });
 
   it('gracefully handles missing git context', async () => {
-    const exec = vi.fn((cmd: string) => {
+    const exec = vi.fn((command: string, args: readonly string[] = []) => {
+      const cmd = [command, ...args].join(' ');
       if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
       if (cmd.startsWith('git push')) return '';
       if (cmd.startsWith('gh pr list')) return '[]';
@@ -402,9 +452,8 @@ describe('PrCreator', () => {
       '- `src/skills/cli-skill-executor.ts`',
     ].join('\n');
     const llm = { complete: vi.fn().mockResolvedValue(llmResponse) };
-    const calls: string[] = [];
-    const exec = vi.fn((cmd: string) => {
-      calls.push(cmd);
+    const exec = vi.fn((command: string, args: readonly string[] = []) => {
+      const cmd = [command, ...args].join(' ');
       if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
       if (cmd.startsWith('git push')) return '';
       if (cmd.startsWith('gh pr list')) return '[]';
@@ -418,15 +467,14 @@ describe('PrCreator', () => {
     const result = await creator.create(baseResult, makeLogger());
 
     expect(result?.url).toBe('https://example.com/pr/5');
-    const createCmd = calls.find(c => c.startsWith('gh pr create')) ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     expect(createCmd).toContain('feat(cli): implement Martin loop execution pipeline');
   });
 
   it('falls back to static title/body when LLM generation fails', async () => {
     const llm = { complete: vi.fn().mockRejectedValue(new Error('rate limited')) };
-    const calls: string[] = [];
-    const exec = vi.fn((cmd: string) => {
-      calls.push(cmd);
+    const exec = vi.fn((command: string, args: readonly string[] = []) => {
+      const cmd = [command, ...args].join(' ');
       if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
       if (cmd.startsWith('git push')) return '';
       if (cmd.startsWith('gh pr list')) return '[]';
@@ -440,7 +488,7 @@ describe('PrCreator', () => {
     const result = await creator.create(baseResult, makeLogger());
 
     expect(result?.url).toBe('https://example.com/pr/6');
-    const createCmd = calls.find(c => c.startsWith('gh pr create')) ?? '';
+    const createCmd = findCommand(exec, 'gh pr create');
     // Falls back to static buildTitle (uses chunk names for small PRs)
     expect(createCmd).toContain('feat: 01_checkpoint_store');
   });

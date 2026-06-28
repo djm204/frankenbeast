@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PrCreator } from '../../../src/closure/pr-creator.js';
-import type { BeastResult, TaskOutcome } from '../../../src/types.js';
+import type { BeastResult } from '../../../src/types.js';
 
 const baseResult: BeastResult = {
   sessionId: 'issue-42',
@@ -28,8 +28,19 @@ function makeLogger() {
   };
 }
 
+/** Renders a recorded (command, argv[]) exec call back into a single string. */
+function joinCall(call: unknown[]): string {
+  const [command, args] = call as [string, readonly string[] | undefined];
+  return [command, ...(args ?? [])].join(' ');
+}
+
+function findCommand(exec: ReturnType<typeof vi.fn>, prefix: string): string {
+  return exec.mock.calls.map(joinCall).find(c => c.startsWith(prefix)) ?? '';
+}
+
 function mockExec(overrides?: Partial<Record<string, string | Error>>): ReturnType<typeof vi.fn> {
-  return vi.fn((cmd: string) => {
+  return vi.fn((command: string, args: readonly string[] = []) => {
+    const cmd = [command, ...args].join(' ');
     for (const [prefix, value] of Object.entries(overrides ?? {})) {
       if (cmd.startsWith(prefix)) {
         if (value instanceof Error) throw value;
@@ -180,7 +191,7 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger(), { issueNumber: 42 });
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+      const createCmd = findCommand(exec, 'gh pr create');
       expect(createCmd).toContain('Fixes #42');
     });
 
@@ -190,11 +201,10 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger(), { issueNumber: 42 });
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
-      // Extract the body from the gh pr create command
-      const bodyMatch = createCmd.match(/--body\s+'([\s\S]*?)'\s*$/);
-      expect(bodyMatch).toBeTruthy();
-      const body = bodyMatch![1] as string;
+      // Read the body argv element directly (it is the last argument).
+      const createCall = exec.mock.calls.find(c => c[0] === 'gh' && (c[1] as string[]).includes('create'));
+      const args = (createCall?.[1] as string[]) ?? [];
+      const body = args[args.indexOf('--body') + 1] ?? '';
       // Fixes #42 must appear on its own line (preceded by newline or start of string)
       expect(body).toMatch(/(?:^|\n)Fixes #42(?:\n|$)/);
     });
@@ -205,7 +215,7 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger());
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+      const createCmd = findCommand(exec, 'gh pr create');
       expect(createCmd).not.toMatch(/Fixes #\d+/);
     });
 
@@ -222,7 +232,7 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger(), { issueNumber: 42 });
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+      const createCmd = findCommand(exec, 'gh pr create');
       expect(createCmd).toContain('Fixes #42');
     });
 
@@ -241,37 +251,28 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger(), { issueNumber: 42 });
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+      const createCmd = findCommand(exec, 'gh pr create');
       // Count occurrences of "Fixes #42" — should be exactly 1
       const matches = createCmd.match(/Fixes #42/g);
       expect(matches).toHaveLength(1);
     });
 
     it('does not change PR title when issueNumber is provided', async () => {
-      const exec = mockExec();
-      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+      const titleOf = (exec: ReturnType<typeof vi.fn>): string | undefined => {
+        const call = exec.mock.calls.find(c => c[0] === 'gh' && (c[1] as string[]).includes('create'));
+        const args = (call?.[1] as string[]) ?? [];
+        return args[args.indexOf('--title') + 1];
+      };
 
-      // Create without issue number
-      await creator.create(baseResult, makeLogger());
-      const cmdWithout = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
-      const titleWithout = cmdWithout.match(/--title\s+'([^']*?)'/)?.[1];
+      const execWithout = mockExec();
+      const creatorWithout = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, execWithout);
+      await creatorWithout.create(baseResult, makeLogger());
+      const titleWithout = titleOf(execWithout);
 
-      // Reset and create with issue number
-      exec.mockClear();
-      exec.mockImplementation((cmd: string) => {
-        if (cmd.startsWith('git branch --show-current')) return 'fix/issue-42\n';
-        if (cmd.startsWith('git push')) return '';
-        if (cmd.startsWith('gh pr list')) return '[]';
-        if (cmd.startsWith('gh pr create')) return 'https://example.com/pr/42\n';
-        if (cmd.startsWith('git diff --stat')) return ' src/auth.ts | 10 ++++\n 1 file changed, 10 insertions(+)\n';
-        if (cmd.startsWith('git diff --shortstat')) return ' 1 file changed, 10 insertions(+)';
-        if (cmd.startsWith('git log --oneline')) return 'abc1234 fix(auth): patch null check\n';
-        return '';
-      });
-
-      await creator.create(baseResult, makeLogger(), { issueNumber: 42 });
-      const cmdWith = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
-      const titleWith = cmdWith.match(/--title\s+'([^']*?)'/)?.[1];
+      const execWith = mockExec();
+      const creatorWith = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, execWith);
+      await creatorWith.create(baseResult, makeLogger(), { issueNumber: 42 });
+      const titleWith = titleOf(execWith);
 
       expect(titleWith).toBe(titleWithout);
     });
@@ -317,7 +318,7 @@ describe('PrCreator issue reference integration', () => {
 
       await creator.create(baseResult, makeLogger());
 
-      const createCmd = exec.mock.calls.find((c: string[]) => c[0].startsWith('gh pr create'))?.[0] ?? '';
+      const createCmd = findCommand(exec, 'gh pr create');
       expect(createCmd).toContain('--base main');
     });
 
@@ -346,10 +347,11 @@ describe('PrCreator issue reference integration', () => {
       await creator.create(baseResult, makeLogger());
 
       // git diff/log commands should reference main, not feat/my-feature
-      const diffCalls = exec.mock.calls.filter((c: string[]) => c[0].startsWith('git diff --stat'));
-      const logCalls = exec.mock.calls.filter((c: string[]) => c[0].startsWith('git log --oneline'));
+      const joined = exec.mock.calls.map(joinCall);
+      const diffCalls = joined.filter(c => c.startsWith('git diff --stat'));
+      const logCalls = joined.filter(c => c.startsWith('git log --oneline'));
       for (const call of [...diffCalls, ...logCalls]) {
-        expect(call[0]).toContain('main');
+        expect(call).toContain('main');
       }
     });
   });
