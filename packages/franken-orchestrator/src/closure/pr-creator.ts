@@ -56,14 +56,24 @@ function isSafeRef(value: string): boolean {
  * branch-ref validator is too strict here. Argv execution already strips shell
  * meaning, so we only reject control chars / whitespace and a leading `-`
  * (argument/option-injection guard).
+ *
+ * We additionally reject git transport-helper remotes of the form
+ * `<transport>::<address>` (e.g. `ext::sh -c '<cmd>'`, `fd::<n>`). Git runs the
+ * named helper as a command for such remotes, so a config-derived value could
+ * execute arbitrary code even though no shell is involved. Legitimate URL
+ * remotes (`https://…`, `ssh://…`, scp-like `git@host:path`) never match this
+ * form: a scheme uses `://`, and scp-like syntax uses a single `:`, not `::`.
  */
 // Control chars and whitespace only — URL punctuation (`:`, `/`, `@`, `~`) is fine.
 const REMOTE_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f]/;
+// git transport-helper form: a bare scheme word immediately followed by `::`.
+const REMOTE_TRANSPORT_HELPER_RE = /^[A-Za-z][A-Za-z0-9+.-]*::/;
 
 function isSafeRemote(value: string): boolean {
   if (value.length === 0 || value.length > 2048) return false;
   if (value.startsWith('-')) return false; // argument/option-injection guard
   if (REMOTE_FORBIDDEN_CHAR_RE.test(value)) return false;
+  if (REMOTE_TRANSPORT_HELPER_RE.test(value)) return false; // ext::/fd:: helpers
   return true;
 }
 

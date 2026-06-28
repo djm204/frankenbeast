@@ -182,6 +182,27 @@ describe('PrCreator argv subprocess safety', () => {
     ]);
   });
 
+  // Codex round-4 P2: git runs a transport-helper command for remotes of the
+  // form `<transport>::<address>` (e.g. `ext::`, `fd::`). A config-derived value
+  // of this shape is a command-injection vector and must be rejected, while
+  // legitimate URL/named remotes (no `::`) keep working.
+  it.each([
+    "ext::sh -c 'touch pwned'",
+    'ext::git-upload-pack /evil',
+    'fd::17',
+  ])('refuses to run for a transport-helper remote %s', async (remote) => {
+    const { exec, calls } = makeExecRecorder('feature/foo');
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toBeNull();
+    expect(calls.some(c => c.args.includes('push'))).toBe(false);
+  });
+
   it('still rejects an option-injecting remote', async () => {
     const { exec, calls } = makeExecRecorder('feature/foo');
     const creator = new PrCreator(
