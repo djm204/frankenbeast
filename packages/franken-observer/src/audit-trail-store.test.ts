@@ -92,8 +92,11 @@ describe('AuditTrailStore', () => {
 
   it('rejects run IDs containing path traversal segments on save', () => {
     expect(() => store.save('../../etc/passwd', sampleTrail())).toThrow(/invalid run id/i);
-    // Confirm nothing escaped the audit directory.
-    expect(existsSync(join(tempDir, '..', '..', 'etc', 'passwd.json'))).toBe(false);
+    // Confirm nothing escaped the audit directory. A naive
+    // join(auditDir, '../../etc/passwd.json') would normalize to
+    // <tempDir>/etc/passwd.json, so assert against that hermetic target
+    // rather than a path that escapes tempDir into the real filesystem.
+    expect(existsSync(join(tempDir, 'etc', 'passwd.json'))).toBe(false);
   });
 
   it('rejects run IDs containing slashes or path separators', () => {
