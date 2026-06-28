@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.4](https://github.com/djm204/frankenbeast/compare/v0.38.3...v0.38.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **critique:** make TokenBudgetBreaker actually enforce the budget ([#343](https://github.com/djm204/frankenbeast/issues/343)) ([b878f5f](https://github.com/djm204/frankenbeast/commit/b878f5f82700e3917e16da6c447cfa094b392595))
+
 ## [0.38.3](https://github.com/djm204/frankenbeast/compare/v0.38.2...v0.38.3) (2026-06-13)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.1...franken-types-v0.6.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **observer,types:** guard token counters against overflow & bad input ([#341](https://github.com/djm204/frankenbeast/issues/341)) ([0a7c6b4](https://github.com/djm204/frankenbeast/commit/0a7c6b4852e959489fbb389971b56f0c64278e5b))
+
 ## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.0...franken-types-v0.6.1) (2026-06-09)
 
 

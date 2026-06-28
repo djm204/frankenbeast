@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.2...franken-observer-v0.7.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **observer,types:** guard token counters against overflow & bad input ([#341](https://github.com/djm204/frankenbeast/issues/341)) ([0a7c6b4](https://github.com/djm204/frankenbeast/commit/0a7c6b4852e959489fbb389971b56f0c64278e5b))
+* **observer:** add bounded retry with backoff to HTTP export adapters ([#342](https://github.com/djm204/frankenbeast/issues/342)) ([a11f472](https://github.com/djm204/frankenbeast/commit/a11f472d957ea6a61e97b054bc5c6f166ac8e7cd))
+* **observer:** fire CircuitBreaker handler on rising edge; add reset() ([#339](https://github.com/djm204/frankenbeast/issues/339)) ([0522411](https://github.com/djm204/frankenbeast/commit/052241139cf7fe4f009ca8ad4dcde2908ce5fdeb))
+* **observer:** tolerate corrupt JSON columns in SQLiteAdapter reads ([#340](https://github.com/djm204/frankenbeast/issues/340)) ([343cf52](https://github.com/djm204/frankenbeast/commit/343cf52486b1b723f97141d07f8449ec69c8d880))
+
 ## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.1...franken-observer-v0.7.2) (2026-06-09)
 
 
