@@ -19,14 +19,62 @@ const LOOP_EXIT_KEYWORDS = ['break', 'return', 'throw', 'await', 'yield'];
  * keyword detection operates on real code, not on prose or data. Without this,
  * `// break down the problem` or `"break the ice"` would be mistaken for a real
  * `break` statement.
+ *
+ * Implemented as a single left-to-right scan so that whichever construct opens
+ * first wins. A naive replace-comments-then-strings ordering would treat the
+ * `//` inside `log("http://x"); break;` as a line comment and delete the real
+ * `break`, producing a false infinite-loop finding.
  */
 function stripCommentsAndStrings(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
-    .replace(/\/\/[^\n]*/g, ' ') // line comments
-    .replace(/`(?:\\.|[^`\\])*`/g, ' ') // template literals
-    .replace(/"(?:\\.|[^"\\])*"/g, ' ') // double-quoted strings
-    .replace(/'(?:\\.|[^'\\])*'/g, ' '); // single-quoted strings
+  let out = '';
+  let i = 0;
+  const n = code.length;
+
+  while (i < n) {
+    const c = code[i];
+    const next = code[i + 1];
+
+    // Line comment: skip to end of line.
+    if (c === '/' && next === '/') {
+      i += 2;
+      while (i < n && code[i] !== '\n') i++;
+      out += ' ';
+      continue;
+    }
+
+    // Block comment: skip to closing */.
+    if (c === '/' && next === '*') {
+      i += 2;
+      while (i < n && !(code[i] === '*' && code[i + 1] === '/')) i++;
+      i += 2;
+      out += ' ';
+      continue;
+    }
+
+    // String / template literal: skip to matching unescaped quote.
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      i++;
+      while (i < n) {
+        if (code[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (code[i] === quote) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += ' ';
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
+
+  return out;
 }
 
 /**
@@ -35,6 +83,60 @@ function stripCommentsAndStrings(code: string): string {
  */
 function hasKeyword(code: string, keyword: string): boolean {
   return new RegExp(`\\b${keyword}\\b`).test(code);
+}
+
+/**
+ * Detects whether a loop body contains a real loop-level exit/suspend keyword.
+ *
+ * A bare keyword match anywhere in the body is not enough: `await`/`yield`/etc.
+ * only suspend or exit the *outer* loop when they execute as part of its direct
+ * control flow. This scan rejects matches that are:
+ *   - member accesses (`timer.await()` — `await` is a method name),
+ *   - the concise body of a nested arrow function (`() => await work()` — the
+ *     keyword runs when the function is called, not by the loop), or
+ *   - nested inside another block such as a nested function (brace depth > 0).
+ *
+ * The body is assumed to already have comments and strings stripped.
+ */
+function hasLoopExit(body: string, keywords: ReadonlyArray<string>): boolean {
+  const keywordSet = new Set(keywords);
+  // Tokens we care about: braces, arrow, member access (`.name`), identifiers.
+  const tokenPattern = /=>|[{}]|\.\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*/g;
+  let braceDepth = 0;
+  let prevWasArrow = false;
+
+  for (const match of body.matchAll(tokenPattern)) {
+    const token = match[0];
+
+    if (token === '{') {
+      braceDepth++;
+      prevWasArrow = false;
+      continue;
+    }
+    if (token === '}') {
+      if (braceDepth > 0) braceDepth--;
+      prevWasArrow = false;
+      continue;
+    }
+    if (token === '=>') {
+      prevWasArrow = true;
+      continue;
+    }
+
+    const isMemberAccess = token.startsWith('.');
+    if (
+      !isMemberAccess &&
+      braceDepth === 0 &&
+      !prevWasArrow &&
+      keywordSet.has(token)
+    ) {
+      return true;
+    }
+
+    prevWasArrow = false;
+  }
+
+  return false;
 }
 
 export class LogicLoopEvaluator implements Evaluator {
@@ -61,7 +163,7 @@ export class LogicLoopEvaluator implements Evaluator {
     for (const pattern of INFINITE_LOOP_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
         const body = stripCommentsAndStrings(match[1] ?? '');
-        const hasExit = LOOP_EXIT_KEYWORDS.some((kw) => hasKeyword(body, kw));
+        const hasExit = hasLoopExit(body, LOOP_EXIT_KEYWORDS);
         if (!hasExit) {
           findings.push({
             message: 'Potential infinite loop detected: loop has no break or return statement',

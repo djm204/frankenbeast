@@ -124,6 +124,45 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  // Regression for PR #385 (Codex): a `//` inside a string literal must not be
+  // treated as a line comment that swallows a real exit on the same line.
+  it('does not flag a loop whose break follows a URL-like string on one line', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { log("http://x"); break; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  // Regression for PR #385 (Codex): exit/suspend keywords must apply to the
+  // loop itself, not to nested functions or member names.
+  it('flags an infinite loop whose only await is inside a nested arrow function', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { const f = async () => await work(); doWork(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('flags an infinite loop whose only await is a member/method name', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { timer.await(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('flags an infinite loop whose only return is inside a nested callback', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { items.forEach(() => { return; }); doWork(); `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('does not treat a "returnValue" identifier as a recursion base case', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `function loop() { const returnValue = 1; loop(); }`;
