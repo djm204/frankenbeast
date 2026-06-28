@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { ILlmClient } from '@franken/types';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
@@ -15,9 +15,26 @@ export interface PrCreateOptions {
   readonly issueNumber?: number | undefined;
 }
 
-type ExecFn = (cmd: string) => string;
+/**
+ * Executes a subprocess as a binary name plus a discrete argument array.
+ * Arguments are never concatenated into a shell string, so branch, remote and
+ * base values cannot be interpreted by a shell (no command injection).
+ */
+type ExecFn = (command: string, args: readonly string[]) => string;
 
-const defaultExec: ExecFn = (cmd: string) => execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' });
+const defaultExec: ExecFn = (command: string, args: readonly string[]) =>
+  execFileSync(command, [...args], { encoding: 'utf-8', stdio: 'pipe' });
+
+/**
+ * Safe git ref / remote pattern: alphanumerics plus `._/-`, no leading `-`
+ * (which would otherwise be parsed as a flag — argument injection). Rejects
+ * shell metacharacters, whitespace, and empty values.
+ */
+const SAFE_REF_RE = /^(?!-)[A-Za-z0-9._/-]+$/;
+
+function isSafeRef(value: string): boolean {
+  return value.length > 0 && value.length <= 255 && SAFE_REF_RE.test(value);
+}
 
 export class PrCreator {
   private readonly config: PrCreatorConfig;
@@ -139,9 +156,22 @@ export class PrCreator {
       return null;
     }
 
-    const branch = this.safeExec('git branch --show-current', logger)?.trim() ?? '';
+    if (!isSafeRef(this.config.remote)) {
+      logger?.error('PrCreator: unsafe remote name', { remote: this.config.remote });
+      return null;
+    }
+    if (!isSafeRef(this.config.targetBranch)) {
+      logger?.error('PrCreator: unsafe target branch', { targetBranch: this.config.targetBranch });
+      return null;
+    }
+
+    const branch = this.safeExec('git', ['branch', '--show-current'], logger)?.trim() ?? '';
     if (!branch) {
       logger?.error('PrCreator: unable to resolve current branch');
+      return null;
+    }
+    if (!isSafeRef(branch)) {
+      logger?.error('PrCreator: unsafe branch name', { branch });
       return null;
     }
 
@@ -192,9 +222,12 @@ export class PrCreator {
     }
 
     try {
-      const output = this.exec(
-        `gh pr create --base ${targetBranch} --title ${shellEscape(title)} --body ${shellEscape(body)}`,
-      );
+      const output = this.exec('gh', [
+        'pr', 'create',
+        '--base', targetBranch,
+        '--title', title,
+        '--body', body,
+      ]);
       const url = output.trim();
       if (!url) {
         logger?.warn('PrCreator: PR created but no URL returned');
@@ -212,28 +245,30 @@ export class PrCreator {
     }
   }
 
-  private safeExec(cmd: string, logger?: ILogger): string | null {
+  private safeExec(command: string, args: readonly string[], logger?: ILogger): string | null {
     try {
-      return this.exec(cmd);
+      return this.exec(command, args);
     } catch (error) {
-      logger?.error('PrCreator: command failed', this.commandFailure('git', cmd, error));
+      logger?.error('PrCreator: command failed', this.commandFailure('git', formatCommand(command, args), error));
       return null;
     }
   }
 
   private pushBranch(branch: string, logger?: ILogger): boolean {
+    const args = ['push', this.config.remote, branch];
     try {
-      this.exec(`git push ${this.config.remote} ${branch}`);
+      this.exec('git', args);
       return true;
     } catch (error) {
-      logger?.error('PrCreator: failed to push branch', this.commandFailure('git', `git push ${this.config.remote} ${branch}`, error, { branch }));
+      logger?.error('PrCreator: failed to push branch', this.commandFailure('git', formatCommand('git', args), error, { branch }));
       return false;
     }
   }
 
   private findExistingPr(branch: string, logger?: ILogger): Array<{ url?: string }> | null {
+    const args = ['pr', 'list', '--head', branch, '--json', 'url', '--limit', '1'];
     try {
-      const output = this.exec(`gh pr list --head ${branch} --json url --limit 1`);
+      const output = this.exec('gh', args);
       const parsed = JSON.parse(output) as Array<{ url?: string }>;
       return Array.isArray(parsed) ? parsed : [];
     } catch (error) {
@@ -242,7 +277,7 @@ export class PrCreator {
         return null;
       }
       logger?.error('PrCreator: failed to list PRs', this.commandFailure('gh', 'gh pr list', error, {
-        rawCommand: `gh pr list --head ${branch} --json url --limit 1`,
+        rawCommand: formatCommand('gh', args),
       }));
       return null;
     }
@@ -271,11 +306,13 @@ export class PrCreator {
     if (!this.llm) return null;
     try {
       const commitLog = this.safeExec(
-        `git log ${this.config.targetBranch}..HEAD --oneline`,
+        'git',
+        ['log', `${this.config.targetBranch}..HEAD`, '--oneline'],
         logger,
       ) ?? '';
       const diffStat = this.safeExec(
-        `git diff --stat ${this.config.targetBranch}..HEAD`,
+        'git',
+        ['diff', '--stat', `${this.config.targetBranch}..HEAD`],
         logger,
       ) ?? '';
       return await this.generatePrDescription(
@@ -291,12 +328,13 @@ export class PrCreator {
   }
 
   private gatherGitContext(targetBranch: string, logger?: ILogger): GitContext {
-    const diffStat = this.safeExec(`git diff --stat ${targetBranch}...HEAD`, logger) ?? '';
+    const diffStat = this.safeExec('git', ['diff', '--stat', `${targetBranch}...HEAD`], logger) ?? '';
     const logOutput = this.safeExec(
-      `git log --oneline ${targetBranch}...HEAD`,
+      'git',
+      ['log', '--oneline', `${targetBranch}...HEAD`],
       logger,
     ) ?? '';
-    const shortstat = this.safeExec(`git diff --shortstat ${targetBranch}...HEAD`, logger) ?? '';
+    const shortstat = this.safeExec('git', ['diff', '--shortstat', `${targetBranch}...HEAD`], logger) ?? '';
 
     return { diffStat, logOutput, shortstat: shortstat.trim() };
   }
@@ -520,8 +558,9 @@ function formatTokenCount(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
-function shellEscape(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
+/** Human-readable rendering of an argv command for logs/diagnostics only. */
+function formatCommand(command: string, args: readonly string[]): string {
+  return [command, ...args].join(' ');
 }
 
 function isGhMissing(error: unknown): boolean {
