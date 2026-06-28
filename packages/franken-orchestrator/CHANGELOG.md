@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.35.5](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.4...franken-orchestrator-v0.35.5) (2026-06-28)
+
+
+### Bug Fixes
+
+* **orchestrator:** reject stale Discord interaction signatures ([#386](https://github.com/djm204/frankenbeast/issues/386)) ([3890e8d](https://github.com/djm204/frankenbeast/commit/3890e8d90c5db9f93449d7760aa8bda27a5f08db)), closes [#352](https://github.com/djm204/frankenbeast/issues/352)
+* **orchestrator:** use argv subprocess calls for PR/git commands ([#388](https://github.com/djm204/frankenbeast/issues/388)) ([2a9098e](https://github.com/djm204/frankenbeast/commit/2a9098eda6beeb8ccdc612b2bcaca7e9fdc0fb76))
+
 ## [0.35.4](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.3...franken-orchestrator-v0.35.4) (2026-06-28)
 
 

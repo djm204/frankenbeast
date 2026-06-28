@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.2...franken-planner-v0.4.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **franken-planner:** error on cyclic sub-graph instead of dropping tasks ([#384](https://github.com/djm204/frankenbeast/issues/384)) ([06f7b19](https://github.com/djm204/frankenbeast/commit/06f7b19125900b832da8ab44fb1ce2470191ac7d)), closes [#54](https://github.com/djm204/frankenbeast/issues/54)
+* **planner:** guard insertFixItTask against duplicate task IDs ([#379](https://github.com/djm204/frankenbeast/issues/379)) ([5d222cc](https://github.com/djm204/frankenbeast/commit/5d222cc5d68a5ed70edf65c8aa1d3a5e8481944b)), closes [#358](https://github.com/djm204/frankenbeast/issues/358)
+
 ## [0.4.2](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.1...franken-planner-v0.4.2) (2026-06-09)
 
 

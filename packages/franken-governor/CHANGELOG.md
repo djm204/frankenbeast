@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.2...franken-governor-v0.5.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **governor:** authenticate Slack callbacks and resolve pending approvals ([#387](https://github.com/djm204/frankenbeast/issues/387)) ([f717767](https://github.com/djm204/frankenbeast/commit/f71776791c86ea293bcecb8aa744abc6c884042e))
+* **governor:** validate approval decision against allowed response codes ([#380](https://github.com/djm204/frankenbeast/issues/380)) ([722f963](https://github.com/djm204/frankenbeast/commit/722f963c18ba37f3402e99dc1d92c47b390b253e)), closes [#350](https://github.com/djm204/frankenbeast/issues/350)
+
 ## [0.5.2](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.1...franken-governor-v0.5.2) (2026-06-09)
 
 
