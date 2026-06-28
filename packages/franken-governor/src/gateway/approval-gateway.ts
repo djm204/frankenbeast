@@ -4,7 +4,11 @@ import type { ApprovalChannel } from './approval-channel.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
 import { createSessionToken } from '../security/session-token.js';
-import { ApprovalTimeoutError, SignatureVerificationError } from '../errors/index.js';
+import {
+  ApprovalTimeoutError,
+  SignatureVerificationError,
+  ApprovalMismatchError,
+} from '../errors/index.js';
 
 export interface AuditRecorder {
   record(request: ApprovalRequest, response: ApprovalResponse): Promise<void>;
@@ -42,6 +46,13 @@ export class ApprovalGateway {
       this.channel.requestApproval(request),
       request.requestId,
     );
+
+    // Bind the response to the active request: a stale, replayed, or misrouted
+    // response for a different request must never resolve this one, even if it is
+    // validly signed for its own requestId.
+    if (response.requestId !== request.requestId) {
+      throw new ApprovalMismatchError(request.requestId, response.requestId);
+    }
 
     if (this.config.requireSignedApprovals && this.signatureVerifier) {
       this.verifySignature(response);

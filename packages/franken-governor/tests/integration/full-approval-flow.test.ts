@@ -18,13 +18,15 @@ function makeFakeMemoryPort(): GovernorMemoryPort & { traces: EpisodicTraceRecor
 function makeFakeChannel(decision: ApprovalResponse['decision'], feedback?: string): ApprovalChannel {
   return {
     channelId: 'fake',
-    requestApproval: vi.fn<[ApprovalRequest], Promise<ApprovalResponse>>().mockResolvedValue({
-      requestId: 'req-001',
-      decision,
-      feedback,
-      respondedBy: 'human',
-      respondedAt: new Date(),
-    }),
+    requestApproval: vi
+      .fn<[ApprovalRequest], Promise<ApprovalResponse>>()
+      .mockImplementation(async (request: ApprovalRequest) => ({
+        requestId: request.requestId,
+        decision,
+        feedback,
+        respondedBy: 'human',
+        respondedAt: new Date(),
+      })),
   };
 }
 

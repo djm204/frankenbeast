@@ -27,13 +27,13 @@ function makeRationale(overrides: Partial<RationaleBlock> = {}): RationaleBlock 
 function makeFakeChannel(decision: ApprovalOutcome['decision'] = 'APPROVE'): ApprovalChannel {
   return {
     channelId: 'fake',
-    requestApproval: vi.fn().mockResolvedValue({
-      requestId: 'req-001',
+    requestApproval: vi.fn().mockImplementation(async (request: ApprovalRequest) => ({
+      requestId: request.requestId,
       decision,
       feedback: decision === 'REGEN' ? 'Try another approach' : undefined,
       respondedBy: 'human',
       respondedAt: new Date(),
-    }),
+    })),
   };
 }
 
