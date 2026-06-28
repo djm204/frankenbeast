@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.4...franken-critique-v0.6.5) (2026-06-28)
+
+
+### Bug Fixes
+
+* **critique:** token-aware loop detection (closes [#69](https://github.com/djm204/frankenbeast/issues/69)) ([#385](https://github.com/djm204/frankenbeast/issues/385)) ([6d5701f](https://github.com/djm204/frankenbeast/commit/6d5701fa702ebb4cbcd4a8b437e3e2907312fdaa))
+
 ## [0.6.4](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.3...franken-critique-v0.6.4) (2026-06-28)
 
 

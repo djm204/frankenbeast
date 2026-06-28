@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.4](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.3...franken-observer-v0.7.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **franken-observer:** handle PostMortemGenerator file write errors gracefully ([#383](https://github.com/djm204/frankenbeast/issues/383)) ([7146e62](https://github.com/djm204/frankenbeast/commit/7146e626c49b8a20c510847d0f8f2a34843603b8)), closes [#72](https://github.com/djm204/frankenbeast/issues/72)
+* **observer:** escape trace IDs in trace viewer to prevent XSS ([#382](https://github.com/djm204/frankenbeast/issues/382)) ([8662ef3](https://github.com/djm204/frankenbeast/commit/8662ef33505f724e7fff4f68d6e2d3f9caf2b01b))
+* **observer:** validate audit trail run IDs before filesystem access ([#381](https://github.com/djm204/frankenbeast/issues/381)) ([4f486b7](https://github.com/djm204/frankenbeast/commit/4f486b7f987ef6fe3d346a1555f21c7bcc8e837a))
+
 ## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.2...franken-observer-v0.7.3) (2026-06-28)
 
 
