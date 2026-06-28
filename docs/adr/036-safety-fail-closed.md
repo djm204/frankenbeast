@@ -1,4 +1,4 @@
-# ADR-038: Fail Closed When Safety-Critical Modules Are Absent
+# ADR-036: Fail Closed When Safety-Critical Modules Are Absent
 
 - **Date:** 2026-06-28
 - **Status:** Accepted
