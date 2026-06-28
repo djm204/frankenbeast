@@ -136,6 +136,15 @@ export interface CritiqueResult {
   readonly verdict: 'pass' | 'fail';
   readonly findings: readonly CritiqueFinding[];
   readonly score: number;
+  /**
+   * True when the critique loop stopped because a halt-action breaker tripped
+   * (e.g. the token/cost budget). A halt is terminal — the orchestrator must
+   * not replan, since replanning would issue further (billable) planner calls
+   * after the budget is already exhausted.
+   */
+  readonly halted?: boolean;
+  /** Human-readable reason for the halt, when `halted` is true. */
+  readonly haltReason?: string;
 }
 
 export interface CritiqueFinding {

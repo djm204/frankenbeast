@@ -146,4 +146,47 @@ describe('CritiquePortAdapter', () => {
       findings: [{ evaluator: 'critique-loop', severity: 'medium', message: 'Missing coverage' }],
     });
   });
+
+  it('flags halted loop results as terminal (regression: PR #343 P1)', async () => {
+    const loop = {
+      run: vi.fn().mockResolvedValue({
+        verdict: 'halted',
+        reason: 'Cost budget exceeded: $10.50 > $10.00',
+        iterations: [
+          {
+            index: 0,
+            input: { content: 'plan', metadata: {} },
+            result: {
+              verdict: 'fail',
+              overallScore: 0.5,
+              shortCircuited: true,
+              results: [],
+            },
+            completedAt: '2026-03-05T00:00:00.000Z',
+          },
+        ],
+      }),
+    };
+
+    const adapter = new CritiquePortAdapter({
+      loop,
+      config: {
+        maxIterations: 3,
+        tokenBudget: 1000,
+        consensusThreshold: 2,
+        sessionId: 'sess-1',
+        taskId: 'plan-review',
+      },
+    });
+
+    const result = await adapter.reviewPlan(plan);
+
+    expect(result).toEqual({
+      verdict: 'fail',
+      score: 0.5,
+      findings: [{ evaluator: 'critique-loop', severity: 'high', message: 'Cost budget exceeded: $10.50 > $10.00' }],
+      halted: true,
+      haltReason: 'Cost budget exceeded: $10.50 > $10.00',
+    });
+  });
 });

@@ -60,7 +60,7 @@ export { createContext } from './context/context-factory.js';
 // Phases
 export { runIngestion, InjectionDetectedError } from './phases/ingestion.js';
 export { runHydration } from './phases/hydration.js';
-export { runPlanning, CritiqueSpiralError } from './phases/planning.js';
+export { runPlanning, CritiqueSpiralError, CritiqueBudgetHaltError } from './phases/planning.js';
 export { runExecution, HitlRejectedError } from './phases/execution.js';
 export { runClosure } from './phases/closure.js';
 export { PrCreator } from './closure/pr-creator.js';

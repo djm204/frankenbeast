@@ -84,8 +84,8 @@ describe('TokenBudgetBreaker', () => {
 
   describe('cost budget (USD)', () => {
     it('trips on estimatedCostUsd, not token count, when costBudgetUsd is set', async () => {
-      // 1,000,000 tokens at $0.00001/token = $10.00 estimated cost.
-      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000));
+      // 1,500,000 tokens at $0.00001/token = $15.00 estimated cost, over the $10 budget.
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_500_000));
       const result = await breaker.check(createState(1), {
         ...createConfig(Number.POSITIVE_INFINITY),
         costBudgetUsd: 10,
@@ -95,6 +95,28 @@ describe('TokenBudgetBreaker', () => {
         expect(result.action).toBe('halt');
         expect(result.reason).toContain('Cost budget');
       }
+    });
+
+    it('does not trip when spend exactly equals the budget (matches observer CircuitBreaker `>`)', async () => {
+      // 1,000,000 tokens at $0.00001/token = exactly $10.00. The observer cost
+      // breaker treats equality as within budget; the critique breaker must too.
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(Number.POSITIVE_INFINITY),
+        costBudgetUsd: 10,
+      });
+      expect(result.tripped).toBe(false);
+    });
+
+    it('does not halt a zero-dollar budget before any spend', async () => {
+      // Regression for the P3: with `>=`, a $0 budget halted at $0 spend before
+      // any critique work could run.
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(Number.POSITIVE_INFINITY),
+        costBudgetUsd: 0,
+      });
+      expect(result.tripped).toBe(false);
     });
 
     it('does not trip a small token count even when the budget is a dollar value (regression: CLI $ budget vs tokens)', async () => {

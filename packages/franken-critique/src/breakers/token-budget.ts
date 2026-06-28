@@ -18,11 +18,14 @@ export class TokenBudgetBreaker implements CircuitBreaker {
     const spend = await this.observability.getTokenSpend(config.sessionId);
 
     // A dollar-denominated budget (e.g. the CLI `--budget <usd>` flag) must be
-    // compared against estimated cost, not the raw token count.
-    if (config.costBudgetUsd !== undefined && spend.estimatedCostUsd >= config.costBudgetUsd) {
+    // compared against estimated cost, not the raw token count. Use strict
+    // over-limit (`>`) to match the observer `CircuitBreaker`, which is fed the
+    // same CLI `--budget` value and trips only when spend exceeds the limit
+    // (equality is within budget — a $0 budget with $0 spend must not halt).
+    if (config.costBudgetUsd !== undefined && spend.estimatedCostUsd > config.costBudgetUsd) {
       return {
         tripped: true,
-        reason: `Cost budget exceeded: $${spend.estimatedCostUsd.toFixed(4)} >= $${config.costBudgetUsd.toFixed(4)} (${spend.totalTokens} tokens)`,
+        reason: `Cost budget exceeded: $${spend.estimatedCostUsd.toFixed(4)} > $${config.costBudgetUsd.toFixed(4)} (${spend.totalTokens} tokens)`,
         action: 'halt',
       };
     }
