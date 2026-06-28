@@ -58,7 +58,7 @@ npx frankenbeast interview
 npx frankenbeast plan --design-doc docs/my-feature-design.md
 
 # Execute chunks from .fbeast/plans/ or a supplied plan directory
-npx frankenbeast run --plan-dir .fbeast/plans/my-plan/chunks
+npx frankenbeast run --plan-dir .fbeast/plans/my-plan/
 
 # Preview GitHub issue triage without executing fixes
 npx frankenbeast issues --repo owner/repo --dry-run
@@ -70,16 +70,16 @@ npx frankenbeast issues --repo owner/repo --dry-run
 
 ```bash
 # Standard MCP registration
-npx fbeast init
+npx fbeast mcp init
 
 # Lower-context proxy registration
-npx fbeast init --mode=proxy
+npx fbeast mcp init --mode=proxy
 
 # Add generated pre/post-tool hooks
-npx fbeast init --hooks
+npx fbeast mcp init --hooks
 ```
 
-The `fbeast` CLI in this repo exposes `init`, `uninstall`, and `beast` directly. MCP data is stored in `.fbeast/beast.db`.
+The `fbeast` CLI in this repo exposes MCP operations (`init`, `uninstall`, `beast`) under the `mcp` subcommand; any other command is forwarded to `frankenbeast`. MCP data is stored in `.fbeast/beast.db`.
 
 ## Project structure
 

@@ -6,8 +6,8 @@ Frankenbeast's current provider extension points live in `franken-orchestrator`,
 
 | Surface | Location | Use for |
 |---------|----------|---------|
-| CLI execution providers | `packages/franken-orchestrator/src/skills/providers/` | Child-process agents used by chunk execution (`claude`, `codex`, `gemini`, `aider`). |
-| API/chat providers | `packages/franken-orchestrator/src/providers/` | Provider clients used by chat/dashboard and API-backed runtime flows. |
+| CLI execution providers | `packages/franken-orchestrator/src/skills/providers/` | Child-process agents used by chunk execution (`claude`, `codex`, `gemini`, `aider`). Also back `frankenbeast chat` and dashboard chat: both resolve a provider from `createDefaultRegistry()` and wrap it with `CliLlmAdapter`. |
+| API provider registry | `packages/franken-orchestrator/src/providers/` | API-backed provider clients/registry (`ProviderRegistry`) used by beast-mode deps and HTTP skill/provider routes. Adding a client here does **not** wire it into chat — chat turns run through the CLI providers above. |
 | Config schema/loading | `packages/franken-orchestrator/src/config/` | Provider defaults, fallback chains, model/command overrides, and secret references. |
 
 The root CLI flags are `--provider <name>` for the primary provider and `--providers <list>` for fallback chains.
@@ -25,7 +25,9 @@ npm --workspace franken-orchestrator run typecheck
 npm --workspace franken-orchestrator test -- tests/unit/skills
 ```
 
-## Adding an API/chat provider
+## Adding an API provider
+
+> To add a provider for `frankenbeast chat`/dashboard chat, follow "Adding a CLI execution provider" above — chat is driven by the CLI provider registry through `CliLlmAdapter`.
 
 1. Add the provider implementation under `packages/franken-orchestrator/src/providers/` following the existing provider registry/client patterns.
 2. Add config schema support under `packages/franken-orchestrator/src/config/` if the provider needs new settings.

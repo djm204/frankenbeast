@@ -48,18 +48,19 @@ const related = brain.episodic.recall('package inventory', 5);
 
 // Recovery memory stores execution checkpoints and flushes working memory.
 const checkpoint = brain.recovery.checkpoint({
+  runId: 'run-001',
   phase: 'docs-refresh',
-  step: 'after-readme',
+  step: 1,
+  context: { goal },
   timestamp: new Date().toISOString(),
-  data: { goal },
 });
 const last = brain.recovery.lastCheckpoint();
 
-// Snapshot/hydrate is useful for process handoff and tests.
-const snapshot = brain.snapshot();
-brain.clear();
-brain.hydrate(snapshot);
+// serialize/hydrate is useful for process handoff and tests.
+const snapshot = brain.serialize();
 brain.close();
+const restored = SqliteBrain.hydrate(snapshot);
+restored.close();
 ```
 
 ## Current architecture
@@ -78,7 +79,7 @@ The package creates the required SQLite schema in its constructor and enables WA
 ```text
 src/
   index.ts          Public barrel export (`SqliteBrain`)
-  sqlite-brain.ts   Working, episodic, recovery, snapshot/hydrate implementation
+  sqlite-brain.ts   Working, episodic, recovery, serialize/hydrate implementation
 
 tests/
   *.test.ts         Unit/integration coverage for SqliteBrain behavior
