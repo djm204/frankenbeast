@@ -199,31 +199,157 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/webhook/slack', () => {
-    it('processes Slack interactive action', async () => {
+    const SLACK_SECRET = 'slack-signing-secret';
+
+    function slackHeaders(rawBody: string, secret = SLACK_SECRET, timestamp?: string) {
+      const ts = timestamp ?? Math.floor(Date.now() / 1000).toString();
+      const base = `v0:${ts}:${rawBody}`;
+      const sig = `v0=${createHmac('sha256', secret).update(base).digest('hex')}`;
+      return {
+        'Content-Type': 'application/json',
+        'X-Slack-Request-Timestamp': ts,
+        'X-Slack-Signature': sig,
+      };
+    }
+
+    async function seedApproval(app: ReturnType<typeof createGovernorApp>, requestId: string) {
+      await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+      });
+    }
+
+    it('rejects an unauthenticated (unsigned) Slack callback', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-1');
+
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] }),
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a forged Slack callback with an invalid signature', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-1');
+
+      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: {
+          ...slackHeaders(rawBody, 'wrong-secret'),
+        },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a stale Slack timestamp (replay protection)', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-1');
+
+      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] });
+      const staleTs = (Math.floor(Date.now() / 1000) - 60 * 10).toString();
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody, SLACK_SECRET, staleTs) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('fails closed when no Slack signing secret is configured', async () => {
       const app = createGovernorApp();
       const res = await app.request('/v1/webhook/slack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          actions: [{ action_id: 'approve', value: 'req-1' }],
-        }),
+        body: JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] }),
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('resolves the pending approval on a valid signed callback', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-1');
+
+      // Health shows one pending approval before the callback
+      const before = await (await app.request('/health')).json();
+      expect(before.pendingApprovals).toBe(1);
+
+      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
       });
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.source).toBe('slack');
-      expect(body.decision).toBe('approve');
+      expect(body.decision).toBe('APPROVE');
+      expect(body.status).toBe('resolved');
+
+      // Pending approval is cleared after resolution
+      const after = await (await app.request('/health')).json();
+      expect(after.pendingApprovals).toBe(0);
     });
 
-    it('returns 400 for missing actions', async () => {
-      const app = createGovernorApp();
+    it('returns 404 for a signed callback referencing an unknown request', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+
+      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'nope' }] });
       const res = await app.request('/v1/webhook/slack', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actions: [] }),
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 400 for missing actions on a signed request', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      const rawBody = JSON.stringify({ actions: [] });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
       });
 
       expect(res.status).toBe(400);
+    });
+
+    it('parses Slack form-encoded payloads and normalizes reject', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-9');
+
+      const payloadJson = JSON.stringify({ actions: [{ action_id: 'reject', value: 'req-9' }] });
+      const rawBody = `payload=${encodeURIComponent(payloadJson)}`;
+      const ts = Math.floor(Date.now() / 1000).toString();
+      const base = `v0:${ts}:${rawBody}`;
+      const sig = `v0=${createHmac('sha256', SLACK_SECRET).update(base).digest('hex')}`;
+
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Slack-Request-Timestamp': ts,
+          'X-Slack-Signature': sig,
+        },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.decision).toBe('ABORT');
+      expect(body.status).toBe('resolved');
     });
   });
 });
