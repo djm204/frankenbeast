@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { TraceContext } from '../core/TraceContext.js'
 import { SpanLifecycle } from '../core/SpanLifecycle.js'
@@ -131,7 +131,53 @@ describe('PostMortemGenerator', () => {
       const gen = new PostMortemGenerator({ outputDir: nested })
       const trace = makeTrace()
       const filePath = await gen.generate(trace, makeSignal(trace.id))
-      expect(existsSync(filePath)).toBe(true)
+      expect(existsSync(filePath!)).toBe(true)
+    })
+  })
+
+  describe('generate() error handling (disk full / read-only)', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('does not throw and returns null when the directory cannot be created', async () => {
+      // Make the parent of outputDir a regular file, so recursive mkdir fails
+      // with ENOTDIR — the same unrecoverable class as a read-only filesystem.
+      const blocker = join(tmpdir(), `pm-block-${randomUUID()}`)
+      writeFileSync(blocker, 'not a directory')
+      const gen = new PostMortemGenerator({ outputDir: join(blocker, 'reports') })
+      const trace = makeTrace()
+
+      let result: string | null
+      try {
+        result = await gen.generate(trace, makeSignal(trace.id))
+      } finally {
+        rmSync(blocker, { force: true })
+      }
+
+      expect(result).toBeNull()
+      expect(warnSpy).toHaveBeenCalled()
+    })
+
+    it('does not throw and returns null when the file cannot be written', async () => {
+      // Pre-create a *directory* at the exact target file path so writeFile
+      // fails with EISDIR — mimics a disk-full / unwritable target without mocks.
+      const trace = makeTrace()
+      const sig = makeSignal(trace.id)
+      const filename = `post-mortem-${trace.id}-${sig.timestamp}.md`
+      mkdirSync(join(outputDir, filename), { recursive: true })
+
+      const gen = new PostMortemGenerator({ outputDir })
+      const result = await gen.generate(trace, sig)
+
+      expect(result).toBeNull()
+      expect(warnSpy).toHaveBeenCalled()
     })
   })
 
