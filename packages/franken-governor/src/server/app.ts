@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { createHmac } from 'node:crypto';
+import { RESPONSE_CODES } from '../core/types.js';
+
+const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
 export interface GovernorAppOptions {
   signingSecret?: string;
@@ -77,6 +80,17 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     if (!body.requestId || !body.decision) {
       return c.json(
         { error: { message: 'Missing required fields: requestId, decision' } },
+        400,
+      );
+    }
+
+    if (!VALID_DECISIONS.has(body.decision)) {
+      return c.json(
+        {
+          error: {
+            message: `Invalid decision: must be one of ${RESPONSE_CODES.join(', ')}`,
+          },
+        },
         400,
       );
     }

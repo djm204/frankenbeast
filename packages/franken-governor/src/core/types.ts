@@ -1,6 +1,7 @@
 import type { TriggerSeverity } from '@franken/types';
 
-export type ResponseCode = 'APPROVE' | 'REGEN' | 'ABORT' | 'DEBUG';
+export const RESPONSE_CODES = ['APPROVE', 'REGEN', 'ABORT', 'DEBUG'] as const;
+export type ResponseCode = (typeof RESPONSE_CODES)[number];
 
 // Canonicalized: the governor severity scale is the shared `@franken/types`
 // `TriggerSeverity` (see docs/CONTRACT_MATRIX.md §2), re-exported here so the
