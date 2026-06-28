@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.5](https://github.com/djm204/frankenbeast/compare/v0.38.4...v0.38.5) (2026-06-28)
+
+
+### Miscellaneous
+
+* release main ([#389](https://github.com/djm204/frankenbeast/issues/389)) ([24e5428](https://github.com/djm204/frankenbeast/commit/24e5428cc009a1ed497e25a94c0a0911b45eb8e0))
+
 ## [0.38.4](https://github.com/djm204/frankenbeast/compare/v0.38.3...v0.38.4) (2026-06-28)
 
 
