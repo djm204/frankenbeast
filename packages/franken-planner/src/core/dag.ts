@@ -116,6 +116,9 @@ export class PlanGraph {
     if (!this._nodes.has(failedTaskId)) {
       throw new TaskNotFoundError(failedTaskId);
     }
+    if (this._nodes.has(fixTask.id)) {
+      throw new DuplicateTaskError(fixTask.id);
+    }
     const failedDeps = this._edges.get(failedTaskId) ?? new Set<TaskId>();
 
     const newNodes = new Map(this._nodes);
