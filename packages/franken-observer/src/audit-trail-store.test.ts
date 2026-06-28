@@ -90,6 +90,31 @@ describe('AuditTrailStore', () => {
     expect(() => store.load('missing')).toThrow('Audit trail not found');
   });
 
+  it('rejects run IDs containing path traversal segments on save', () => {
+    expect(() => store.save('../../etc/passwd', sampleTrail())).toThrow(/invalid run id/i);
+    // Confirm nothing escaped the audit directory. A naive
+    // join(auditDir, '../../etc/passwd.json') would normalize to
+    // <tempDir>/etc/passwd.json, so assert against that hermetic target
+    // rather than a path that escapes tempDir into the real filesystem.
+    expect(existsSync(join(tempDir, 'etc', 'passwd.json'))).toBe(false);
+  });
+
+  it('rejects run IDs containing slashes or path separators', () => {
+    expect(() => store.save('foo/bar', sampleTrail())).toThrow(/invalid run id/i);
+    expect(() => store.save('foo\\bar', sampleTrail())).toThrow(/invalid run id/i);
+  });
+
+  it('rejects empty and dot run IDs', () => {
+    expect(() => store.save('', sampleTrail())).toThrow(/invalid run id/i);
+    expect(() => store.save('.', sampleTrail())).toThrow(/invalid run id/i);
+    expect(() => store.save('..', sampleTrail())).toThrow(/invalid run id/i);
+  });
+
+  it('rejects invalid run IDs on load and exists without filesystem access', () => {
+    expect(() => store.load('../secret')).toThrow(/invalid run id/i);
+    expect(() => store.exists('../secret')).toThrow(/invalid run id/i);
+  });
+
   it('replayer can load and replay a persisted artifact', () => {
     store.save('run-1', sampleTrail());
     const loaded = store.load('run-1');
