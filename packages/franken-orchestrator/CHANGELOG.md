@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.35.4](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.3...franken-orchestrator-v0.35.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **critique:** make TokenBudgetBreaker actually enforce the budget ([#343](https://github.com/djm204/frankenbeast/issues/343)) ([b878f5f](https://github.com/djm204/frankenbeast/commit/b878f5f82700e3917e16da6c447cfa094b392595))
+* **observer,types:** guard token counters against overflow & bad input ([#341](https://github.com/djm204/frankenbeast/issues/341)) ([0a7c6b4](https://github.com/djm204/frankenbeast/commit/0a7c6b4852e959489fbb389971b56f0c64278e5b))
+
 ## [0.35.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.2...franken-orchestrator-v0.35.3) (2026-06-13)
 
 
