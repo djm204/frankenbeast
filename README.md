@@ -24,7 +24,9 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is organized as 13 packages: 8 core modules plus `franken-types`, `franken-mcp`, `franken-orchestrator`, `franken-comms`, and `franken-web`. Most module boundaries are expressed as typed ports/adapters, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
+Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `franken-orchestrator` and `@fbeast/mcp-suite`, not standalone package directories.
+
+The diagrams below describe the Beast-loop model and still use MOD labels as capability names. For the exact current package map, treat the package inventory table as authoritative.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
@@ -283,23 +285,22 @@ graph TB
     class User,LLM,MCP_SERVERS external
 ```
 
-## Modules
+## Current workspace packages
 
-| # | Module | Role |
-|---|--------|------|
-| 01 | [frankenfirewall](https://github.com/djm204/franken-firewall) | Model-agnostic proxy — PII masking, injection scanning, schema enforcement. Claude, OpenAI, and Ollama adapters. |
-| 02 | [franken-skills](https://github.com/djm204/franken-skills) | Skill registry — discovery, validation, and loading of tool definitions. |
-| 03 | [franken-brain](https://github.com/djm204/franken-brain) | Three-tier memory — working (in-process), episodic (SQLite), semantic (ChromaDB). |
-| 04 | [franken-planner](https://github.com/djm204/franken-planner) | Intent → DAG task graphs. Linear, Parallel, and Recursive planning strategies. |
-| 05 | [franken-observer](https://github.com/djm204/franken-observer) | Flight data recorder — tracing, cost tracking, evals, export to OTEL/Langfuse/Prometheus/Tempo. |
-| 06 | [franken-critique](https://github.com/djm204/franken-critique) | Plan validation — 8 evaluators (deterministic first), circuit breakers, lesson recorder. |
-| 07 | [franken-governor](https://github.com/djm204/franken-governor) | Human-in-the-loop — trigger evaluators, approval channels (CLI/Slack), HMAC-signed approvals. |
-| 08 | [franken-heartbeat](https://github.com/djm204/franken-heartbeat) | Proactive reflection — scheduled pulse checks, self-improvement task injection. |
-| — | [franken-types](https://github.com/djm204/franken-types) | Shared type definitions — TaskId, Severity, Result, RationaleBlock, TokenSpend. |
-| — | [franken-orchestrator](https://github.com/djm204/franken-orchestrator) | The Beast Loop — wires all modules into a 4-phase agent pipeline with circuit breakers. |
-| — | [franken-mcp](https://github.com/djm204/franken-mcp) | MCP (Model Context Protocol) server — tool discovery, constraint resolution, JSON-RPC transport. |
-| — | franken-comms | External communications gateway — Slack, Discord, Telegram, WhatsApp adapters with signature verification. |
-| — | franken-web | React web dashboard — chat UI, configuration, metrics visualization (dev tool, not published). |
+| Package | Current role |
+|---------|--------------|
+| `franken-brain` | SQLite-backed working memory, episodic event recall, recovery checkpoints, serialization/hydration. |
+| `franken-planner` | Intent-to-DAG planning primitives, linear/parallel/recursive strategies, HITL plan export, recovery task insertion. |
+| `@frankenbeast/observer` | Trace/span lifecycle, token and cost tracking, circuit breaker, loop detection, export adapters, local trace viewing. |
+| `@franken/critique` | Deterministic/heuristic critique pipeline and correction-request loop; it evaluates and returns feedback for callers to apply. |
+| `@franken/governor` | Trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers for HITL decisions. |
+| `@franken/types` | Shared TypeScript types plus runtime Zod schemas. |
+| `franken-orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@fbeast/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@frankenbeast/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@fbeast/live-bench` | Live CLI benchmark tooling. |
+
+Historical docs and ADRs may still mention removed packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Current code paths for those capabilities live in the packages above.
 
 ### Core Principles
 
@@ -309,20 +310,13 @@ graph TB
 - **Human-in-the-loop as a first-class primitive.** High-stakes actions require cryptographically signed human approval.
 - **Full auditability.** Every decision is traced, costed, and exportable.
 
-## HTTP Services
+## HTTP surface
 
-Four modules expose standalone Hono HTTP servers for use as independent microservices:
-
-| Service | Endpoints |
-|---------|-----------|
-| Firewall | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
-| Critique | `POST /v1/review`, `GET /health` |
-| Governor | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
-| Chat Server | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
+The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). It mounts chat, tracked Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes, with WebSocket chat on `/v1/chat/ws`. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
 
 ## Prerequisites
 
-- **Node.js** >= 20.0.0
+- **Node.js** >= 20.0.0 for root package metadata; orchestrator/dashboard runtime workflows require Node.js >= 22.0.0
 - **npm** >= 10.0.0
 
 ### Optional
@@ -347,8 +341,8 @@ npm run build
 # Run root-level integration tests
 npm test
 
-# Run all tests (per-module + root)
-npm run test:all
+# Run root-level Vitest tests only
+npm run test:root
 ```
 
 See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup guide including Docker services.
@@ -494,7 +488,7 @@ your-project/
 ## Running Tests
 
 ```bash
-# All tests across all packages (2,937 tests)
+# All package tests through Turborepo
 npm test
 
 # Per-package tests via Turborepo
@@ -603,13 +597,8 @@ All modules use **dependency injection** — configuration is passed via constru
 // Orchestrator — via config file or CLI flags
 frankenbeast plan --design-doc docs/my-feature-design.md --config frankenbeast.config.json
 
-// Firewall — standalone service
-import { createFirewallApp } from 'frankenfirewall/server';
-const app = createFirewallApp({ port: 9090 });
-
-// Critique — standalone service
-import { createCritiqueApp } from 'franken-critique/server';
-const app = createCritiqueApp({ pipeline, bearerToken: 'secret' });
+// Orchestrator chat/dashboard HTTP server
+npm --workspace franken-orchestrator run chat-server -- --port 3737
 ```
 
 ## The Beast Loop
@@ -656,41 +645,15 @@ The trace is closed and token spend summarised. In the current local CLI path, h
 
 ## Adding a New LLM Provider
 
-Frankenbeast is LLM-agnostic. The firewall includes Claude, OpenAI, and Ollama adapters. To add a new provider:
-
-1. **Implement `IAdapter`** — see [docs/guides/add-llm-provider.md](docs/guides/add-llm-provider.md)
-2. **Run conformance tests** — `runAdapterConformance(factory, fixtures)` validates all 4 `IAdapter` methods
-3. **Register** the adapter in `AdapterRegistry`
+Frankenbeast is LLM-agnostic through the orchestrator provider registry. CLI providers live under `packages/franken-orchestrator/src/skills/providers`, API providers live under `packages/franken-orchestrator/src/providers`, and configuration schemas live under `packages/franken-orchestrator/src/config`. See [docs/guides/add-llm-provider.md](docs/guides/add-llm-provider.md) for the current extension points.
 
 ## Wrapping External Agents
 
-The firewall can wrap *any* agent framework as a standalone governance layer:
-
-```
-Your Agent → Frankenbeast Firewall Proxy → LLM Provider
-```
-
-Safety constraints live in the proxy pipeline, not in the agent's prompt — so they survive context-window compression. See [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) and the [OpenClaw integration example](examples/openclaw-integration/).
+The currently shipped integration path is to call the orchestrator runtime, use `@fbeast/mcp-suite` tools/hooks, or implement BeastLoop dependencies around your agent components. The old standalone firewall HTTP proxy guide is historical; see [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) for current options and caveats.
 
 ## Examples
 
-The [examples/](examples/) directory contains working integrations organized by complexity:
-
-**Quickstart** — minimal hello-world for each provider:
-- [claude-hello](examples/quickstart/claude-hello/) — Anthropic Claude via `@anthropic-ai/sdk`
-- [openai-hello](examples/quickstart/openai-hello/) — OpenAI via `openai` SDK
-- [ollama-hello](examples/quickstart/ollama-hello/) — Local Ollama models
-
-**Patterns** — production-ready integration patterns:
-- [cost-aware-routing](examples/patterns/cost-aware-routing/) — complexity-based provider selection
-- [multi-provider-fallback](examples/patterns/multi-provider-fallback/) — automatic failover between providers
-- [tool-calling](examples/patterns/tool-calling/) — structured tool use with validation
-- [local-model-gallery](examples/patterns/local-model-gallery/) — running local models through the firewall
-
-**Scenarios** — complete agent setups:
-- [code-review-agent](examples/scenarios/code-review-agent/) — automated code review with HITL gates
-- [research-agent-hitl](examples/scenarios/research-agent-hitl/) — research agent with human approval checkpoints
-- [privacy-first-local](examples/scenarios/privacy-first-local/) — fully local pipeline with PII masking
+There is no current top-level `examples/` directory in this repo. Use the package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, `docs/guides/run-dashboard-chat.md`, and implementation-adjacent tests as runnable examples. Older references to provider quickstarts or an OpenClaw/firewall-proxy example are pre-consolidation documentation.
 
 ## Martin Loop Build System
 
@@ -719,9 +682,9 @@ The `frankenbeast chat` REPL provides a two-tier interactive experience:
 
 The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket for the `franken-web` dashboard.
 
-## Communications Gateway (franken-comms)
+## Communications Gateway
 
-Multi-channel external communications with deterministic session mapping:
+External communications are implemented in `franken-orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
 
 | Channel | Transport | Security |
 |---------|-----------|----------|
@@ -730,7 +693,7 @@ Multi-channel external communications with deterministic session mapping:
 | Telegram | Webhook | Token-based authentication |
 | WhatsApp | Cloud API | SHA256 signature verification |
 
-All channels route through a unified `ChatGateway` → `SocketBridge` → `SessionMapper` pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md).
+Channels route through the orchestrator comms pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md) for the original gateway decision and the orchestrator comms source for current implementation details.
 
 ## Project Status
 
@@ -749,13 +712,13 @@ All channels route through a unified `ChatGateway` → `SocketBridge` → `Sessi
 | 11 | External Comms (Slack/Discord/Telegram/WhatsApp) | Complete |
 | 12 | GitHub Issues Pipeline | Complete |
 
-**2,937 tests across 13 packages, all passing.**
+Run `npm test`, `npm run typecheck`, and `npm run build` for the current baseline. The workspace currently contains 10 package manifests under `packages/*`; avoid relying on stale static test-count claims in older docs.
 
 See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
 
 ### In Progress
 
-- **Web Dashboard** — React-based UI (`franken-web`) for chat, configuration, and metrics visualization. Scaffold in place, integration ongoing.
+- **Web Dashboard** — React-based UI (`franken-web`) for chat, tracked Beast agents, network control, analytics/cost/safety views, and settings.
 - **Escalation Policy Hardening** — Refining intent routing and tier escalation logic for the chat REPL.
 
 ## Development
@@ -804,24 +767,16 @@ frankenbeast/
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
-├── examples/
-│   ├── quickstart/              # claude-hello, openai-hello, ollama-hello
-│   ├── patterns/                # cost-aware-routing, tool-calling, fallback
-│   ├── scenarios/               # code-review-agent, research-agent-hitl
-│   └── openclaw-integration/    # External agent wrapping example
 ├── packages/
-│   ├── frankenfirewall/         # MOD-01: Firewall/Guardrails
-│   ├── franken-skills/          # MOD-02: Skill Registry
 │   ├── franken-brain/           # MOD-03: Memory Systems
 │   ├── franken-planner/         # MOD-04: Planning & Decomposition
 │   ├── franken-observer/        # MOD-05: Observability
 │   ├── franken-critique/        # MOD-06: Self-Critique & Reflection
 │   ├── franken-governor/        # MOD-07: HITL & Governance
-│   ├── franken-heartbeat/       # MOD-08: Proactive Reflection
 │   ├── franken-types/           # Shared type definitions
 │   ├── franken-orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
-│   ├── franken-mcp/             # MCP server (Model Context Protocol)
-│   ├── franken-comms/           # External comms (Slack/Discord/Telegram/WhatsApp)
+│   ├── franken-mcp-suite/       # MCP suite CLI, servers, hooks, proxy
+│   ├── live-bench/              # Live CLI benchmark tooling
 │   └── franken-web/             # React web dashboard (dev tool)
 └── .fbeast/               # Project-scoped runtime state (gitignored)
 ```

@@ -1,78 +1,42 @@
 # Wrapping an External Agent with Frankenbeast
 
-Frankenbeast can wrap any AI agent framework (LangChain, CrewAI, AutoGen, etc.) to add deterministic guardrails. This guide shows how.
+The current repo does not ship a `firewall` Docker Compose service or a standalone `frankenfirewall` HTTP proxy on port 9090. External-agent integration should use one of the current surfaces below.
 
-## Approach: Firewall-as-a-Proxy
+## Option 1: Use MCP mode for tool governance
 
-The simplest integration is running Frankenfirewall as an HTTP proxy between your agent and the LLM:
-
-```
-Your Agent  →  Frankenfirewall (port 9090)  →  LLM Provider
-```
-
-### Step 1: Start the firewall server
+Install the MCP suite in the project you want to govern:
 
 ```bash
-docker compose up firewall
+npx fbeast init
+npx fbeast init --hooks     # optional: pre/post-tool governance and audit logs
 ```
 
-### Step 2: Point your agent at the proxy
+This creates `.fbeast/beast.db`, registers MCP servers with the detected client (Claude Code, Gemini CLI, or Codex CLI), and optionally installs generated hook scripts. MCP tools, hooks, Beast runs, and the dashboard can share the same project database.
 
-Instead of calling the LLM directly, point your agent's API base URL to the firewall:
+## Option 2: Call the orchestrator runtime
 
-```python
-# LangChain example
-from langchain_openai import ChatOpenAI
+Use `frankenbeast` when you want Frankenbeast to own the interview/plan/run loop:
 
-llm = ChatOpenAI(
-    model="gpt-4",
-    openai_api_base="http://localhost:9090/v1",  # Firewall proxy
-    openai_api_key="your-real-key",
-)
+```bash
+frankenbeast interview
+frankenbeast plan --design-doc path/to/design.md
+frankenbeast run --plan-dir .fbeast/plans/my-plan/chunks
 ```
 
-```typescript
-// OpenAI SDK example
-const openai = new OpenAI({
-  baseURL: 'http://localhost:9090/v1',
-  apiKey: 'your-real-key',
-});
+For browser or service integration, run the orchestrator chat/dashboard backend:
+
+```bash
+npm --workspace franken-orchestrator run chat-server -- --port 3737
 ```
 
-### Step 3: Configure guardrails
+The integrated Hono app mounts chat, Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes. WebSocket chat is available at `/v1/chat/ws`.
 
-Create `guardrails.config.json`:
+## Option 3: Implement BeastLoop dependencies around your agent
 
-```json
-{
-  "project_name": "my-agent",
-  "security_tier": "STRICT",
-  "agnostic_settings": {
-    "redact_pii": true,
-    "max_token_spend_per_call": 10000,
-    "allowed_providers": ["openai"]
-  }
-}
-```
-
-## Approach: Full Orchestration
-
-For deeper integration, implement `BeastLoopDeps` ports to connect your agent's components:
+For deeper integration, wire your agent components into the orchestrator's ports instead of routing through a standalone proxy:
 
 ```typescript
 import { BeastLoop } from 'franken-orchestrator';
-
-const deps: BeastLoopDeps = {
-  firewall: myFirewallAdapter,
-  skills: mySkillRegistry,
-  memory: myMemoryStore,
-  planner: myPlannerAdapter,
-  observer: myTracingAdapter,
-  critique: myCritiqueAdapter,
-  governor: myApprovalAdapter,
-  heartbeat: myHeartbeatAdapter,
-  clock: () => new Date(),
-};
 
 const loop = new BeastLoop(deps, { maxTotalTokens: 50_000 });
 const result = await loop.run({
@@ -81,13 +45,16 @@ const result = await loop.run({
 });
 ```
 
-Each port is a minimal interface — implement only what you need.
+`deps` should provide the capabilities your integration needs: LLM/provider calls, planning, execution, memory, observer, critique, governor, and checkpointing. See `packages/franken-orchestrator/src/beast-loop.ts` and neighboring tests for the current constructor and dependency shape before implementing against it.
 
-## What you get
+## Historical proxy docs
 
-- **Injection detection** — blocks prompt injection attempts
-- **PII redaction** — strips sensitive data before it reaches the LLM
-- **Cost tracking** — token budget enforcement
-- **Audit trail** — every action recorded
-- **Human-in-the-loop** — governor gates for sensitive operations
-- **Self-critique** — plan review before execution
+If you see older examples like this, treat them as historical:
+
+```text
+Your Agent -> Frankenfirewall (port 9090) -> LLM Provider
+docker compose up firewall
+guardrails.config.json
+```
+
+Those commands and files do not match the current repo. The current `docker-compose.yml` only defines ChromaDB, Grafana, and Tempo.

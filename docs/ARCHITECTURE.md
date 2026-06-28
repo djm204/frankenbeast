@@ -2,30 +2,29 @@
 
 ## System Overview
 
-Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. All 13 packages live under `packages/`. See [ADR-011](adr/011-monorepo-migration.md).
+Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. The current repo has 10 package manifests under `packages/*`. See [ADR-011](adr/011-monorepo-migration.md) for the monorepo migration and [ADR-031](adr/031-architecture-consolidation-provider-agnostic.md) for the package consolidation that absorbed several earlier standalone packages.
 
 This document mixes two views:
 
-- **Current local CLI path**: what is actually wired in `franken-orchestrator` today
-- **Target architecture**: the broader end-state diagrams for the full Frankenbeast system
+- **Current implementation**: what is actually wired in `franken-orchestrator`, `@fbeast/mcp-suite`, and the current workspaces today
+- **Target / historical architecture**: broader MOD diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
 
 Unless a section explicitly says otherwise, diagrams should be read as target architecture and the prose should call out current local limitations where they matter.
 
 | Package | Role |
 |---------|------|
-| `frankenfirewall` | MOD-01: LLM proxy with injection detection, PII masking, and response validation |
-| `franken-skills` | MOD-02: Skill registry and discovery |
-| `franken-brain` | MOD-03: Working + Episodic + Semantic memory |
-| `franken-planner` | MOD-04: DAG-based task planning with CoT gates |
-| `franken-observer` | MOD-05: Tracing, cost tracking, and eval framework |
-| `franken-critique` | MOD-06: Self-critique pipeline with deterministic + heuristic evaluators |
-| `franken-governor` | MOD-07: Human-in-the-loop governance and approval gating |
-| `franken-heartbeat` | MOD-08: Continuous improvement, reflection, and morning briefs |
-| `franken-mcp` | MCP server registry — stdio transport, tool discovery, constraint-aware tool execution |
-| `franken-types` | Shared type definitions (TaskId, Severity, Result, TokenSpend, etc.) |
-| `franken-orchestrator` | The Beast Loop — wires all modules into a 4-phase agent pipeline |
-| `franken-comms` | External communications gateway — Slack, Discord, Telegram, WhatsApp with signature verification |
-| `franken-web` | React web dashboard — chat UI, tracked-agent launch/detail flow, configuration, metrics visualization (dev tool) |
+| `franken-brain` | SQLite-backed working memory, episodic recall, recovery checkpoints, serialization/hydration. |
+| `franken-planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
+| `@frankenbeast/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
+| `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
+| `@franken/governor` | HITL trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers. |
+| `@franken/types` | Shared type definitions and runtime Zod schemas. |
+| `franken-orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@fbeast/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@frankenbeast/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@fbeast/live-bench` | Live CLI benchmark tooling. |
+
+Removed package directories from the pre-consolidation architecture include `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Their capabilities now live mostly inside `franken-orchestrator` or `@fbeast/mcp-suite`.
 
 ## The Beast Loop (franken-orchestrator)
 
@@ -384,7 +383,7 @@ All project state lives in `.fbeast/` at the project root.
 
 ## Issues Pipeline
 
-The `frankenbeast issues` subcommand fetches GitHub issues and executes fixes autonomously. It runs as a separate pipeline from the chunk-based BeastLoop, reusing the same `CliSkillExecutor`, `GitBranchIsolator`, and `PrCreator` infrastructure.
+The `frankenbeast issues` subcommand fetches GitHub issues and executes fixes autonomously. It now builds issue-specific graphs and invokes the shared `BeastLoop` path through `IssueRunner`, reusing `CliSkillExecutor`, `GitBranchIsolator`, checkpointing, and PR creation infrastructure.
 
 ### Pipeline Flow
 
@@ -439,7 +438,7 @@ flowchart TD
 
 ### Interaction with Existing Infrastructure
 
-The issues pipeline does not run through `BeastLoop`. Instead, `Session.runIssues()` directly orchestrates the pipeline and reuses shared components:
+The issues pipeline runs through `IssueRunner`, which imports `BeastLoop`, builds per-issue `PlanGraph` instances, and executes through the same shared execution infrastructure:
 
 - **`CliSkillExecutor`** — spawns CLI agents via `MartinLoop` with the provider fallback chain
 - **`GitBranchIsolator`** — creates `issue-{number}` branches, merges back on success
@@ -448,14 +447,15 @@ The issues pipeline does not run through `BeastLoop`. Instead, `Session.runIssue
 
 ## HTTP Services (Hono)
 
-Four modules expose HTTP servers:
+The shipped HTTP server is integrated in `franken-orchestrator`:
 
-| Service | Port | Endpoints |
-|---------|------|-----------|
-| Firewall | 9090 | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
-| Critique | — | `POST /v1/review`, `GET /health` |
-| Governor | — | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
-| Chat Server | 3737 | `GET /v1/chat/ws` (WebSocket), `POST /v1/chat/message`, `GET /health` |
+| Surface | Location | Notes |
+|---------|----------|-------|
+| Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
+| Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Mounts chat, tracked Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes. |
+| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @frankenbeast/web run dev:chat`. |
+
+The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
 
 ## Shared Types (@franken/types)
 
@@ -732,18 +732,17 @@ Most inter-module communication uses typed port interfaces defined in each modul
 
 | Port | Defined In | Consumed By |
 |------|-----------|-------------|
-| `IAdapter` | frankenfirewall | Orchestrator (ingestion) |
-| `ISkillRegistry` | franken-skills | Planner, Orchestrator (execution) |
-| `IMemoryOrchestrator` | franken-brain | Planner, Orchestrator (hydration) |
+| `ICliProvider` / provider registry | `franken-orchestrator/src/skills/providers` | CLI LLM execution and fallback chains |
+| API provider registry | `franken-orchestrator/src/providers` | Chat/dashboard/API-backed provider calls |
+| `SqliteBrain` / brain interfaces | franken-brain, @franken/types | Working/episodic/recovery memory |
 | `GuardrailsPort` | franken-critique | Critique evaluators |
 | `MemoryPort` | franken-critique | Critique evaluators |
 | `ObservabilityPort` | franken-critique | Critique circuit breakers |
 | `EscalationPort` | franken-critique | Critique loop |
 | `ApprovalChannel` | franken-governor | Orchestrator (execution) |
 | `TriggerEvaluator` | franken-governor | Governor gateway |
-| `ILlmClient` | @franken/types | Brain, Heartbeat |
-| `IMcpRegistry` | franken-mcp | Orchestrator (execution), Skills |
-| `IMcpTransport` | franken-mcp | McpClient (internal) |
+| `ILlmClient` | @franken/types | Provider-facing abstractions |
+| MCP tool registry | @fbeast/mcp-suite | MCP servers, proxy dispatch, hooks, shared `.fbeast/beast.db` |
 
 ## Deployment Modes
 
@@ -754,40 +753,39 @@ Most inter-module communication uses typed port interfaces defined in each modul
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│  Mode 2: Firewall-as-Proxy                          │
-│  External Agent → Firewall HTTP → LLM Provider      │
-│  (standalone safety layer, no orchestrator needed)   │
+│  Mode 2: MCP + Hook Governance                      │
+│  Client tools → @fbeast/mcp-suite → shared DB       │
+│  (optional pre/post-tool hook enforcement)           │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│  Mode 3: Critique-as-a-Service                      │
-│  Any client → POST /v1/review → evaluation results  │
+│  Mode 3: Integrated HTTP/Dashboard                  │
+│  frankenbeast chat-server → chat/beasts/network/... │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│  Mode 4: MCP Tool Bridge                            │
-│  Orchestrator → McpRegistry → MCP Servers (stdio)   │
-│  (constraint-aware external tool execution)         │
+│  Mode 4: Package-level libraries                    │
+│  Import planner/observer/critique/governor/brain    │
 └─────────────────────────────────────────────────────┘
 ```
 
-## franken-mcp (MCP Server Registry)
+## @fbeast/mcp-suite
 
-Standalone MCP (Model Context Protocol) client library. Manages persistent connections to MCP servers via stdio transport, discovers their tools, and exposes a constraint-aware interface for calling them.
+The current MCP implementation is `@fbeast/mcp-suite`, not a standalone `franken-mcp` workspace. It provides the `fbeast` CLI, individual MCP servers, the combined/proxy server modes, generated hooks, and shared `.fbeast/beast.db` adapters.
 
-MCP servers are **not** skills — they are the execution substrate that skills and workflows leverage for deterministic interaction with the environment (VSCode, filesystem, databases, etc.).
+The current exact MCP tool names are defined in `packages/franken-mcp-suite/src/shared/tool-registry.ts`; docs should use those names rather than shorthand aliases.
 
 ### Architecture
 
 ```
-Config (mcp-servers.json)
+fbeast init / client config
     │
     ▼
 ┌──────────────────────────────────────────┐
-│  McpRegistry (IMcpRegistry)              │
+│  @fbeast/mcp-suite tool registry        │
 │  ┌─────────────┐  ┌─────────────┐       │
-│  │  McpClient   │  │  McpClient   │ ...  │
-│  │  (server A)  │  │  (server B)  │      │
+│  │ fbeast-*     │  │ fbeast-mcp   │ ...  │
+│  │ server       │  │ / proxy      │      │
 │  └──────┬───────┘  └──────┬───────┘      │
 │         │                 │              │
 │  ┌──────┴───────┐  ┌──────┴───────┐      │
@@ -811,11 +809,10 @@ Three-level cascade (most conservative defaults):
 
 | Type | Purpose |
 |------|---------|
-| `McpToolDefinition` | Tool metadata: name, serverId, description, inputSchema, merged constraints |
-| `McpToolConstraints` | `is_destructive`, `requires_hitl`, `sandbox_type` (DOCKER / WASM / LOCAL) |
-| `McpToolResult` | Content array (text / image / resource_link) + isError flag |
-| `McpServerInfo` | Server id, connection status, tool count, version info |
-| `McpRegistryError` | Error with code: CONFIG_INVALID, TOOL_NOT_FOUND, CALL_FAILED, etc. |
+| `TOOL_REGISTRY` | Map of exact MCP tool names to schemas and handlers |
+| `TOOL_STUBS` | Lightweight proxy/search metadata |
+| `createAdapterSet(dbPath)` | Shared brain/observer/governor/planner/critique/firewall/skills adapters |
+| `searchTools()` | Proxy-mode tool discovery helper |
 
 ### Resilience
 
@@ -825,28 +822,7 @@ Three-level cascade (most conservative defaults):
 
 ## Examples
 
-The `examples/` directory provides quickstart guides and integration patterns.
-
-### Quickstart Examples
-
-| Example | Provider | Key Pattern |
-|---------|----------|-------------|
-| `quickstart/claude-hello` | Claude (`claude-sonnet-4-6`) | ClaudeAdapter → UnifiedRequest/Response |
-| `quickstart/openai-hello` | OpenAI (`gpt-4o`) | OpenAIAdapter → same unified interface |
-| `quickstart/ollama-hello` | Ollama (`llama3.2`, local) | OllamaAdapter → zero-cost, offline capable |
-| `quickstart/custom-adapter` | Groq (test-only) | Template for building new adapters |
-
-All quickstarts follow the same adapter flow:
-
-```
-Create Adapter → Build UnifiedRequest → transformRequest() → execute() → transformResponse() → UnifiedResponse
-```
-
-### Integration Examples
-
-| Example | Purpose |
-|---------|---------|
-| `openclaw-integration` | Docker Compose: Frankenbeast firewall as proxy for OpenClaw agent framework |
+There is no current top-level `examples/` directory in this repo. For runnable usage examples, prefer the package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
 
 ## Chat System Architecture
 

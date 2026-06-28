@@ -1,93 +1,43 @@
 # Adding an LLM Provider
 
-Frankenfirewall's adapter layer lets you plug in any LLM provider. This guide walks through creating a new adapter.
+Frankenbeast's current provider extension points live in `franken-orchestrator`, not in the deleted pre-consolidation `frankenfirewall` package.
 
-## Architecture
+## Current provider surfaces
 
-All LLM communication goes through the `IAdapter` interface:
+| Surface | Location | Use for |
+|---------|----------|---------|
+| CLI execution providers | `packages/franken-orchestrator/src/skills/providers/` | Child-process agents used by chunk execution (`claude`, `codex`, `gemini`, `aider`). |
+| API/chat providers | `packages/franken-orchestrator/src/providers/` | Provider clients used by chat/dashboard and API-backed runtime flows. |
+| Config schema/loading | `packages/franken-orchestrator/src/config/` | Provider defaults, fallback chains, model/command overrides, and secret references. |
 
-```typescript
-interface IAdapter {
-  transformRequest(unified: UnifiedRequest): ProviderRequest;
-  execute(request: ProviderRequest): Promise<ProviderResponse>;
-  transformResponse(response: ProviderResponse): UnifiedResponse;
-  validateCapabilities(config: AdapterConfig): ValidationResult;
-}
+The root CLI flags are `--provider <name>` for the primary provider and `--providers <list>` for fallback chains.
+
+## Adding a CLI execution provider
+
+1. Add a provider class under `packages/franken-orchestrator/src/skills/providers/` that implements `ICliProvider` from `cli-provider.ts`.
+2. Define argument construction, output normalization, token estimation, rate-limit detection, retry-after parsing, environment filtering, stream-json/native-session capabilities, and default context-window size.
+3. Register it in `createDefaultRegistry()` in `cli-provider.ts`.
+4. Add focused tests near the existing provider tests.
+5. Verify from the repo root:
+
+```bash
+npm --workspace franken-orchestrator run typecheck
+npm --workspace franken-orchestrator test -- tests/unit/skills
 ```
 
-## Step 1: Create the adapter file
+## Adding an API/chat provider
 
-```
-frankenfirewall/src/adapters/your-provider/your-adapter.ts
-```
+1. Add the provider implementation under `packages/franken-orchestrator/src/providers/` following the existing provider registry/client patterns.
+2. Add config schema support under `packages/franken-orchestrator/src/config/` if the provider needs new settings.
+3. Keep secrets referenced through the configured secret backend or environment variables; do not hard-code tokens in config examples.
+4. Add unit tests for request construction, error handling, and config parsing.
+5. Verify from the repo root:
 
-Extend `BaseAdapter`:
-
-```typescript
-import { BaseAdapter } from '../base-adapter.js';
-
-export class YourAdapter extends BaseAdapter {
-  readonly provider = 'your-provider';
-
-  transformRequest(unified: UnifiedRequest): YourProviderRequest {
-    return {
-      model: unified.model,
-      messages: unified.messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-    };
-  }
-
-  async execute(request: YourProviderRequest): Promise<YourProviderResponse> {
-    const response = await fetch('https://api.your-provider.com/v1/chat', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${this.apiKey}` },
-      body: JSON.stringify(request),
-    });
-    return response.json();
-  }
-
-  transformResponse(response: YourProviderResponse): UnifiedResponse {
-    return {
-      content: response.choices[0].message.content,
-      finish_reason: response.choices[0].finish_reason,
-      usage: {
-        prompt_tokens: response.usage.prompt_tokens,
-        completion_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens,
-      },
-    };
-  }
-
-  validateCapabilities(config: AdapterConfig): ValidationResult {
-    return { valid: true, errors: [] };
-  }
-}
+```bash
+npm --workspace franken-orchestrator run typecheck
+npm --workspace franken-orchestrator test
 ```
 
-## Step 2: Add conformance tests
+## What not to follow
 
-Run your adapter against the conformance suite:
-
-```typescript
-import { runAdapterConformance } from '../conformance/index.js';
-import { YourAdapter } from './your-adapter.js';
-
-runAdapterConformance(
-  () => new YourAdapter({ model: 'your-model' }),
-  yourFixtures,
-);
-```
-
-## Step 3: Register in the adapter factory
-
-Add your adapter to the factory in `src/adapters/index.ts`.
-
-## Step 4: Update allowed providers
-
-In your `guardrails.config.json`, add `'your-provider'` to `allowed_providers`.
-
-## Local providers (Ollama pattern)
-
-For local models, set `cost_usd: 0` in the response since there's no API cost. See `OllamaAdapter` for reference.
+Older docs may mention `frankenfirewall/src/adapters`, `BaseAdapter`, `guardrails.config.json`, or a standalone firewall proxy. Those were pre-consolidation surfaces and are not the current provider extension path in this repo.

@@ -122,4 +122,4 @@ A shared secret that authenticates the web dashboard to the Beast control API (`
    ```
 4. Ensure the orchestrator (`frankenbeast chat-server` or `frankenbeast network`) resolves the same token — it reads it from the secret store configured via `network.secureBackend` in your config file.
 
-If you lose the token, run `frankenbeast init --regenerate-token` to rotate it (updates both the secret store and prints the new value).
+There is no dedicated `frankenbeast init --regenerate-token` flag in the current CLI. If you lose the token, rerun the supported init/repair flow for your configured secret backend or generate a new strong local development token (for example with `openssl rand -hex 32`) and update both the orchestrator-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` and the dashboard-side `VITE_BEAST_OPERATOR_TOKEN`/root `.env` value so they match.

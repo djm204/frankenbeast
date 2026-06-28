@@ -74,13 +74,13 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_query`, `store`, `frontload`, `forget` | Key-value and episodic memory via SqliteBrain |
-| `fbeast-observer` | `fbeast_observer_log`, `cost`, `trail` | Audit trail with chained hashes, cost tracking |
-| `fbeast-governor` | `fbeast_governor_check`, `budget_status` | Action safety assessment via trigger evaluation |
-| `fbeast-planner` | `fbeast_plan_decompose`, `visualize`, `validate` | Task DAG planning with cycle detection |
-| `fbeast-critique` | `fbeast_critique_evaluate`, `compare` | Content evaluation (logic, complexity, conciseness) |
-| `fbeast-firewall` | `fbeast_firewall_scan`, `scan_file` | Prompt injection detection (standard/strict tiers) |
-| `fbeast-skills` | `fbeast_skills_list`, `discover`, `info` | Skill registry discovery |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget` | Key-value and episodic memory via SqliteBrain |
+| `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail` | Audit trail with chained hashes, token/cost logging and summaries |
+| `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
+| `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
+| `fbeast-critique` | `fbeast_critique_evaluate`, `fbeast_critique_compare` | Content evaluation and revision comparison |
+| `fbeast-firewall` | `fbeast_firewall_scan`, `fbeast_firewall_scan_file` | Prompt injection detection (standard/strict tiers) |
+| `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode).
 
@@ -99,7 +99,7 @@ All three clients are supported:
 
 | Client | Hook mechanism |
 |--------|---------------|
-| Claude Code | `preToolCall` / `postToolCall` command strings in `settings.json` |
+| Claude Code | `PreToolUse` / `PostToolUse` entries in `settings.json` that call generated shell scripts under `.fbeast/hooks/` |
 | Gemini CLI | `BeforeTool` / `AfterTool` shell scripts in `.fbeast/hooks/` |
 | Codex CLI | `PreToolUse` / `PostToolUse` shell scripts in `.codex/hooks/`, referenced by `.codex/hooks.json` |
 

@@ -4,7 +4,7 @@ fbeast works with any MCP-compatible AI assistant client. Currently supported:
 
 | Client | Config dir | Hooks |
 |--------|-----------|-------|
-| Claude Code | `.claude/` | ✅ preToolCall / postToolCall |
+| Claude Code | `.claude/` | ✅ PreToolUse / PostToolUse (generated shell scripts) |
 | Gemini CLI | `.gemini/` | ✅ BeforeTool / AfterTool (shell scripts) |
 | Codex CLI | `codex mcp add` | ✅ PreToolUse / PostToolUse (shell scripts) |
 
@@ -14,7 +14,7 @@ Beast mode (`fbeast beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, 
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20+ for package tasks; Node.js 22+ for orchestrator/dashboard runtime workflows
 - npm workspaces (installed at repo root)
 - At least one of: Claude Code CLI, Gemini CLI, or Codex CLI
 - Codex CLI (`codex --version`) — required for full-cycle integration tests
@@ -39,8 +39,7 @@ npm run build
 npm test
 ```
 
-Runs `turbo run test` across all 11 packages in dependency order.
-Current baseline: **~2100 tests, 18 suites, all green**.
+Runs `turbo run test` across the current npm workspaces in dependency order. Avoid hard-coding static test totals in this walkthrough; use the command output as the current baseline.
 
 ### MCP suite only
 
@@ -163,15 +162,15 @@ fbeast init --client=gemini --hooks      # Gemini CLI
 fbeast init --client=codex --hooks       # Codex CLI
 ```
 
-**Claude Code** — inline command strings in `settings.json`:
+**Claude Code** — generated shell scripts under `.fbeast/hooks/`, referenced by `PreToolUse` / `PostToolUse` entries in `settings.json`:
 
 ```json
 "hooks": {
-  "preToolCall": [
-    { "command": "fbeast-hook pre-tool --db \"/your/project/.fbeast/beast.db\" $TOOL_NAME" }
+  "PreToolUse": [
+    { "matcher": "*", "hooks": [{ "type": "command", "command": "'/your/project/.fbeast/hooks/fbeast-claude-pre-tool.sh'" }] }
   ],
-  "postToolCall": [
-    { "command": "fbeast-hook post-tool --db \"/your/project/.fbeast/beast.db\" $TOOL_NAME $RESULT" }
+  "PostToolUse": [
+    { "matcher": "*", "hooks": [{ "type": "command", "command": "'/your/project/.fbeast/hooks/fbeast-claude-post-tool.sh'" }] }
   ]
 }
 ```
@@ -275,19 +274,20 @@ Once installed, Claude Code has access to these tools:
 | `fbeast_critique_evaluate` | critique | Score output quality (0–1), suggest improvements |
 | `fbeast_firewall_scan` | firewall | Scan input for prompt injection |
 | `fbeast_observer_log` | observer | Log a tool call event to the audit trail |
+| `fbeast_observer_log_cost` | observer | Record LLM token usage and cost for a call |
 | `fbeast_observer_cost` | observer | Get cost summary by model |
 | `fbeast_observer_trail` | observer | Retrieve audit trail for a session |
 | `fbeast_governor_check` | governor | Check whether an action should proceed |
 | `fbeast_governor_budget` | governor | Get current spend against budget |
 | `fbeast_skills_list` | skills | List available skills |
+| `fbeast_skills_discover` | skills | Search skills by keyword or capability |
 | `fbeast_skills_load` | skills | Load a skill by name |
 
 ---
 
 ## Switching to Beast Mode
 
-Beast mode hands control to a standalone LLM process (codex, claude-cli, etc.)
-instead of MCP tool calls. Claude Code config is left intact.
+Beast mode is a configuration activation/handoff command. It writes `.fbeast/config.json` with `mode: "beast"`, records the provider choice, and invokes `frankenbeast beasts catalog` so the operator can launch the actual Beast loop through the orchestrator CLI/dashboard. Claude Code config is left intact.
 
 ```sh
 # Default provider (anthropic-api)
