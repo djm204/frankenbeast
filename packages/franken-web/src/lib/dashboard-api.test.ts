@@ -115,6 +115,50 @@ describe('DashboardApiClient', () => {
     });
   });
 
+  describe('operator token', () => {
+    it('attaches a bearer header to fetchSnapshot/toggleSkill/updateSecurityProfile when configured', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => makeMockSnapshot() });
+      globalThis.fetch = fetchMock;
+
+      const client = new DashboardApiClient(BASE_URL, 'op-token');
+      await client.fetchSnapshot();
+      await client.toggleSkill('code-review', false);
+      await client.updateSecurityProfile('strict');
+
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        `${BASE_URL}/api/dashboard`,
+        expect.objectContaining({ headers: { authorization: 'Bearer op-token' } }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        `${BASE_URL}/api/skills/code-review`,
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
+        }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        3,
+        `${BASE_URL}/api/security`,
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
+        }),
+      );
+    });
+
+    it('omits the authorization header when no token is configured', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => makeMockSnapshot() });
+      globalThis.fetch = fetchMock;
+
+      const client = new DashboardApiClient(BASE_URL);
+      await client.fetchSnapshot();
+
+      expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/dashboard`);
+    });
+  });
+
   describe('subscribeToDashboard', () => {
     it('creates EventSource and returns unsubscribe function', () => {
       const closeFn = vi.fn();

@@ -1,3 +1,5 @@
+import { withOperatorAuth } from './network-api';
+
 export interface DashboardSkill {
   name: string;
   enabled: boolean;
@@ -27,32 +29,44 @@ export interface DashboardSnapshot {
 }
 
 export class DashboardApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly operatorToken?: string,
+  ) {}
 
   async fetchSnapshot(): Promise<DashboardSnapshot> {
-    const res = await fetch(`${this.baseUrl}/api/dashboard`);
+    const res = this.operatorToken
+      ? await fetch(`${this.baseUrl}/api/dashboard`, withOperatorAuth({}, this.operatorToken))
+      : await fetch(`${this.baseUrl}/api/dashboard`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as DashboardSnapshot;
   }
 
   async toggleSkill(name: string, enabled: boolean): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(name)}`, {
+    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(name)}`, withOperatorAuth({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
-    });
+    }, this.operatorToken));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
   async updateSecurityProfile(profile: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/security`, {
+    const res = await fetch(`${this.baseUrl}/api/security`, withOperatorAuth({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile }),
-    });
+    }, this.operatorToken));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
+  // NOTE: EventSource cannot attach an Authorization header, so this stream is
+  // not yet usable behind the operator-token gate. The repo's SSE-compatible
+  // auth is the short-lived ticket pattern (SseConnectionTicketStore +
+  // `/v1/beasts/events/ticket`, see beast-sse-routes.ts), NOT the raw
+  // long-lived operator token in the URL (which would leak the secret into
+  // access logs). The dashboard page is not currently mounted in the live
+  // shell (not in ChatShell ROUTES); wire ticket-based auth here when it is.
   subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): () => void {
     const eventSource = new EventSource(`${this.baseUrl}/api/dashboard/events`);
     eventSource.addEventListener('snapshot', (event) => {

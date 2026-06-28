@@ -138,14 +138,17 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     () => new ChatApiClient(baseUrl, beastOperatorToken),
     [baseUrl, beastOperatorToken],
   );
-  const analyticsClient = useMemo(() => new AnalyticsApiClient(baseUrl), [baseUrl]);
+  const analyticsClient = useMemo(
+    () => new AnalyticsApiClient(baseUrl, beastOperatorToken),
+    [baseUrl, beastOperatorToken],
+  );
   const beastClient = useMemo(
     () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),
     [baseUrl, beastOperatorToken],
   );
 
   useEffect(() => {
-    const client = new NetworkApiClient(baseUrl);
+    const client = new NetworkApiClient(baseUrl, beastOperatorToken);
     void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
       if (statusResult.status === 'fulfilled') {
         setNetworkStatus(statusResult.value);
@@ -154,7 +157,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
         setNetworkConfig(configResult.value);
       }
     });
-  }, [baseUrl]);
+  }, [baseUrl, beastOperatorToken]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -523,23 +526,23 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             config={networkConfig}
             logs={networkLogs}
             onRefresh={() => {
-              const client = new NetworkApiClient(baseUrl);
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.getStatus().then(setNetworkStatus).catch(() => undefined);
             }}
             onRestart={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl);
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.restart(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             onSaveConfig={(assignments) => {
-              const client = new NetworkApiClient(baseUrl);
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.updateConfig(assignments).then(setNetworkConfig).catch(() => undefined);
             }}
             onStart={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl);
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.start(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             onStop={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl);
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.stop(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             services={networkStatus.services}
