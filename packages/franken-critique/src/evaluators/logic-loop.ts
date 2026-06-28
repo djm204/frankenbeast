@@ -10,6 +10,33 @@ const INFINITE_LOOP_PATTERNS = [
 const SELF_RECURSION_PATTERN =
   /function\s+(\w+)\s*\([^)]*\)\s*\{([\s\S]*?)\}/g;
 
+// Keywords that legitimately exit (or suspend) a loop. `await`/`yield` cover
+// intentional async event loops such as `while (true) { await queue.next(); }`.
+const LOOP_EXIT_KEYWORDS = ['break', 'return', 'throw', 'await', 'yield'];
+
+/**
+ * Removes comments and string/template literals from a code snippet so that
+ * keyword detection operates on real code, not on prose or data. Without this,
+ * `// break down the problem` or `"break the ice"` would be mistaken for a real
+ * `break` statement.
+ */
+function stripCommentsAndStrings(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
+    .replace(/\/\/[^\n]*/g, ' ') // line comments
+    .replace(/`(?:\\.|[^`\\])*`/g, ' ') // template literals
+    .replace(/"(?:\\.|[^"\\])*"/g, ' ') // double-quoted strings
+    .replace(/'(?:\\.|[^'\\])*'/g, ' '); // single-quoted strings
+}
+
+/**
+ * Word-boundary keyword check. Matches `break` but not `breakPoint`, and
+ * `return` but not `returnValue`, eliminating identifier-based false matches.
+ */
+function hasKeyword(code: string, keyword: string): boolean {
+  return new RegExp(`\\b${keyword}\\b`).test(code);
+}
+
 export class LogicLoopEvaluator implements Evaluator {
   readonly name = 'logic-loop';
   readonly category = 'deterministic' as const;
@@ -33,8 +60,9 @@ export class LogicLoopEvaluator implements Evaluator {
   private checkInfiniteLoops(content: string, findings: EvaluationFinding[]): void {
     for (const pattern of INFINITE_LOOP_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
-        const body = match[1] ?? '';
-        if (!body.includes('break') && !body.includes('return')) {
+        const body = stripCommentsAndStrings(match[1] ?? '');
+        const hasExit = LOOP_EXIT_KEYWORDS.some((kw) => hasKeyword(body, kw));
+        if (!hasExit) {
           findings.push({
             message: 'Potential infinite loop detected: loop has no break or return statement',
             severity: 'critical',
@@ -48,17 +76,24 @@ export class LogicLoopEvaluator implements Evaluator {
   private checkUnguardedRecursion(content: string, findings: EvaluationFinding[]): void {
     for (const match of content.matchAll(SELF_RECURSION_PATTERN)) {
       const fnName = match[1];
-      const body = match[2] ?? '';
+      const rawBody = match[2] ?? '';
 
       if (!fnName) continue;
+
+      const body = stripCommentsAndStrings(rawBody);
 
       // Check if the function calls itself
       const callPattern = new RegExp(`\\b${fnName}\\s*\\(`, 'g');
       if (!callPattern.test(body)) continue;
 
-      // Check if there's a guard (if/return before the recursive call)
+      // Check if there's a guard: a conditional, or a return before the
+      // recursive call. Word-boundary matching avoids treating identifiers like
+      // `notify` or `returnValue` as guards.
+      const returnIdx = body.search(/\breturn\b/);
+      const recursiveCallIdx = body.search(new RegExp(`\\b${fnName}\\s*\\(`));
       const hasGuard =
-        body.includes('if') || body.includes('return') && body.indexOf('return') < body.indexOf(`${fnName}(`);
+        hasKeyword(body, 'if') ||
+        (returnIdx !== -1 && recursiveCallIdx !== -1 && returnIdx < recursiveCallIdx);
 
       if (!hasGuard) {
         findings.push({

@@ -77,6 +77,62 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  // Regression tests for issue #69: substring matching produced false matches.
+  it('flags infinite loop whose only "break" is inside a comment', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while(true) {
+      // break down the problem into steps
+      doWork();
+    }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('flags infinite loop whose only "break" is inside a string literal', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while(true) { log("break the ice"); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('flags infinite loop where "break"/"return" appear only inside identifiers', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while(true) { breakPoint = computeReturnValue(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('does not flag a real break that is preceded by a break-like identifier', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while(true) { breakPoint = 1; if (done) break; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('treats await-based event loops as intentional (no finding)', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { const msg = await queue.next(); handle(msg); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('does not treat a "returnValue" identifier as a recursion base case', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { const returnValue = 1; loop(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('handles empty content', async () => {
     const evaluator = new LogicLoopEvaluator();
     const result = await evaluator.evaluate(createInput(''));
