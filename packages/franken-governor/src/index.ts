@@ -18,6 +18,7 @@ export {
   ApprovalTimeoutError,
   ChannelUnavailableError,
   SignatureVerificationError,
+  ApprovalMismatchError,
   TriggerEvaluationError,
 } from './errors/index.js';
 
