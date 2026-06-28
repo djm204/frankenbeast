@@ -1,4 +1,4 @@
-import { RecursionDepthExceededError } from '../core/errors.js';
+import { CyclicDependencyError, RecursionDepthExceededError } from '../core/errors.js';
 import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, TaskResult, Task } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
@@ -79,7 +79,15 @@ export class RecursivePlanner implements PlanningStrategy {
           remaining.splice(i, 1);
         }
       }
-      if (remaining.length === prevLen) break; // cycle guard — avoid infinite loop
+      if (remaining.length === prevLen) {
+        // No progress this pass: the remaining tasks have unresolvable
+        // dependencies (a cycle, or a dependency on a task not in this set).
+        // Surface a clear error instead of silently dropping the tasks.
+        const stuck = remaining.map((t) => t.id).join(', ');
+        throw new CyclicDependencyError(
+          `Cannot build sub-graph — ${remaining.length} task(s) have unresolvable dependencies (cycle): ${stuck}`
+        );
+      }
     }
 
     let graph = PlanGraph.empty();
