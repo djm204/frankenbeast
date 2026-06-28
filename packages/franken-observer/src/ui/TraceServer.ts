@@ -182,7 +182,7 @@ async function loadTraces(){
   const {traces} = await fetch('/api/traces').then(r=>r.json())
   if(!traces.length){sidebar.innerHTML='<p class="empty" style="padding:1rem;font-size:.8rem">No traces yet.</p>';return}
   sidebar.innerHTML = traces.map(t=>\`
-    <div class="trace-item" data-id="\${t.id}" onclick="loadDetail('\${t.id}')">
+    <div class="trace-item" data-id="\${esc(t.id)}">
       <div class="trace-goal">\${esc(t.goal)}</div>
       <div class="trace-meta">
         \${badge(t.status)}
@@ -192,13 +192,18 @@ async function loadTraces(){
     </div>\`).join('')
 }
 
+sidebar.addEventListener('click', e=>{
+  const item = e.target.closest && e.target.closest('.trace-item')
+  if(item) loadDetail(item.dataset.id)
+})
+
 async function loadDetail(id){
   document.querySelectorAll('.trace-item').forEach(el=>el.classList.toggle('active',el.dataset.id===id))
-  const t = await fetch('/api/traces/'+id).then(r=>r.json())
+  const t = await fetch('/api/traces/'+encodeURIComponent(id)).then(r=>r.json())
   const totalTokens = t.spans.reduce((n,s)=>(n+(s.metadata.totalTokens??0)),0)
   panel.innerHTML = \`
     <h2>\${esc(t.goal)}</h2>
-    <div class="trace-id">\${t.id}</div>
+    <div class="trace-id">\${esc(t.id)}</div>
     <div style="display:flex;gap:2rem;font-size:.8rem;color:#666;margin-bottom:1rem">
       <span>Status: \${badge(t.status)}</span>
       <span>Spans: \${t.spans.length}</span>
