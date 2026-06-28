@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RecursivePlanner } from '../../../src/planners/recursive';
-import { RecursionDepthExceededError } from '../../../src/core/errors';
+import { RecursionDepthExceededError, CyclicDependencyError } from '../../../src/core/errors';
 import { PlanGraph } from '../../../src/core/dag';
 import { createTaskId } from '../../../src/core/types';
 import type { Task, TaskResult } from '../../../src/core/types';
@@ -195,6 +195,40 @@ describe('RecursivePlanner — failure handling', () => {
     expect(result.status).toBe('failed');
     if (result.status !== 'failed') throw new Error('unexpected');
     expect(result.error.message).toBe('sub exploded');
+  });
+
+  it('throws CyclicDependencyError when expanded sub-tasks form a cycle (no silent drop)', async () => {
+    // sub-1 ↔ sub-2 form a dependency cycle; neither can ever be scheduled.
+    const sub1: Task = { ...makeTask('sub-1'), dependsOn: [createTaskId('sub-2')] };
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [sub1, sub2]))
+      .mockResolvedValue(success('sub-1'));
+
+    await expect(
+      new RecursivePlanner().execute(graph, { executor })
+    ).rejects.toThrowError(CyclicDependencyError);
+
+    // The cyclic sub-tasks must NOT be silently executed as a partial plan.
+    expect(executor).toHaveBeenCalledTimes(1); // only the parent
+  });
+
+  it('CyclicDependencyError names the unresolvable tasks in the cycle', async () => {
+    const sub1: Task = { ...makeTask('sub-1'), dependsOn: [createTaskId('sub-2')] };
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [sub1, sub2]))
+      .mockResolvedValue(success('sub-1'));
+
+    await expect(
+      new RecursivePlanner().execute(graph, { executor })
+    ).rejects.toThrowError(/sub-1|sub-2/);
   });
 
   it('throws RecursionDepthExceededError when maxDepth exceeded', async () => {
