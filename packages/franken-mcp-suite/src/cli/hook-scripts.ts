@@ -55,27 +55,27 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
 
+# Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
-  exit 0
+  printf '{"decision":"deny","reason":%s}\\n' '"fbeast governor: missing tool name (fail closed)"' >&1
+  exit 2
 fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 fi
 set -e
 
-case "$STATUS" in
-  124)
-    exit 0
-    ;;
-esac
-
+# Fail closed: any non-zero status denies the call. This includes governor
+# denial, timeout (124), timeout-internal failure (125/126), kill (137), and
+# missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
   SAFE_RESULT=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"decision":"deny","reason":%s}\\n' "$SAFE_RESULT" >&1
@@ -137,27 +137,27 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
 
+# Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
-  exit 0
+  printf 'fbeast governor blocked: %s\n' "missing tool name (fail closed)" >&2
+  exit 2
 fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 fi
 set -e
 
-case "$STATUS" in
-  124)
-    exit 0
-    ;;
-esac
-
+# Fail closed: any non-zero status denies the call. This includes governor
+# denial, timeout (124), timeout-internal failure (125/126), kill (137), and
+# missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
   printf 'fbeast governor blocked: %s\n' "$RESULT" >&2
   exit 2
@@ -218,27 +218,27 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
 
+# Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
-  exit 0
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' '"fbeast governor: missing tool name (fail closed)"' >&1
+  exit 2
 fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" 2>&1)
+  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
   STATUS=$?
 fi
 set -e
 
-case "$STATUS" in
-  124)
-    exit 0
-    ;;
-esac
-
+# Fail closed: any non-zero status denies the call. This includes governor
+# denial, timeout (124), timeout-internal failure (125/126), kill (137), and
+# missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
   SAFE_REASON=$(printf '%s' "$RESULT" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$SAFE_REASON" >&1

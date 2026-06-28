@@ -42,6 +42,7 @@ function installFakeHook(root: string): string {
     '',
     'if [ "$PHASE" = "pre-tool" ]; then',
     '  TOOL_NAME="${3:-}"',
+    '  TOOL_INPUT="${4:-}"',
     '  if [ "$TOOL_NAME" = "hang" ]; then',
     '    sleep 10',
     '    exit 0',
@@ -50,6 +51,12 @@ function installFakeHook(root: string): string {
     "    printf 'destructive action blocked\\n' >&2",
     '    exit 1',
     '  fi',
+    '  case "$TOOL_INPUT" in',
+    '    *"rm -rf"*)',
+    "      printf 'destructive payload blocked\\n' >&2",
+    '      exit 1',
+    '      ;;',
+    '  esac',
     '',
     `  printf '{"allowed":true,"decision":"approved"}\\n'`,
     '  exit 0',
@@ -174,6 +181,38 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('destructive action blocked');
   });
 
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { command: 'rm -rf /important-dir' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('fails closed (denies) when the pre-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+  });
+
   it('keeps allowed pre-tool hooks silent for Codex', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -246,7 +285,7 @@ describe('Codex hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when pre-tool governance times out', () => {
+  it('fails closed (denies) when pre-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -262,8 +301,8 @@ describe('Codex hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
@@ -445,6 +484,38 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toContain('destructive action blocked');
   });
 
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf /important-dir' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive payload blocked');
+  });
+
+  it('fails closed (denies) when the pre-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+  });
+
   it('keeps allowed pre-tool hooks silent for Claude Code', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -481,7 +552,7 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when pre-tool governance times out', () => {
+  it('fails closed (denies) when pre-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -497,8 +568,8 @@ describe('Claude Code hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
@@ -658,7 +729,37 @@ describe('Gemini hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when before-tool governance times out', () => {
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'run_shell_command',
+      tool_input: { command: 'rm -rf /important-dir' },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('fails closed (denies) when the before-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+  });
+
+  it('fails closed (denies) when before-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -673,8 +774,8 @@ describe('Gemini hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
