@@ -39,6 +39,32 @@ export interface FbeastMcpServer {
   start(): Promise<void>;
 }
 
+export interface GovernanceDecision {
+  decision: 'approved' | 'review_recommended' | 'denied';
+  reason: string;
+}
+
+/**
+ * Central, in-process governance gate consulted on every dispatched tool call.
+ * This is the server-side enforcement point that does NOT depend on external
+ * client hooks being installed (see ADR-038).
+ */
+export interface GovernanceGate {
+  check(input: {
+    tool: string;
+    args: Record<string, unknown>;
+  }): Promise<GovernanceDecision> | GovernanceDecision;
+}
+
+export interface CreateMcpServerOptions {
+  /**
+   * When set, every tool call dispatched through this server is checked by the
+   * gate after argument validation and before the handler runs. A `denied`
+   * decision short-circuits the handler; a gate error fails closed (denied).
+   */
+  governance?: GovernanceGate;
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -76,6 +102,7 @@ async function dispatchTool(
   toolMap: Map<string, ToolDef>,
   toolName: string,
   args: unknown,
+  governance?: GovernanceGate,
 ): Promise<ToolResult> {
   const tool = toolMap.get(toolName);
   if (!tool) {
@@ -86,6 +113,25 @@ async function dispatchTool(
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
+  }
+  // Central governance gate: enforced server-side regardless of client hooks.
+  // Fails closed — a denied decision or a gate error blocks the handler.
+  if (governance) {
+    let decision: GovernanceDecision;
+    try {
+      decision = await governance.check({ tool: toolName, args: validated.value });
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Denied by governance (fail-closed): ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+    if (decision.decision === 'denied') {
+      return {
+        content: [{ type: 'text' as const, text: `Denied by governance: ${decision.reason}` }],
+        isError: true,
+      };
+    }
   }
   try {
     return await tool.handler(validated.value);
@@ -101,9 +147,11 @@ export function createMcpServer(
   name: string,
   version: string,
   tools: ToolDef[],
+  options: CreateMcpServerOptions = {},
 ): FbeastMcpServer {
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
+  const { governance } = options;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((t) => ({
@@ -115,13 +163,13 @@ export function createMcpServer(
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
     const { name: toolName, arguments: args } = request.params;
-    return { ...(await dispatchTool(toolMap, toolName, args)) };
+    return { ...(await dispatchTool(toolMap, toolName, args, governance)) };
   });
 
   return {
     name,
     tools,
-    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args),
+    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, governance),
     async start() {
       const transport = new StdioServerTransport();
       await server.connect(transport);

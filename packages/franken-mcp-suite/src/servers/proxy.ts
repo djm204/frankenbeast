@@ -2,6 +2,7 @@
 import { createMcpServer, validateToolArguments, type FbeastMcpServer, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
+import { createGovernanceGate } from '../shared/governance-gate.js';
 import { parseArgs } from 'node:util';
 
 export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
@@ -63,7 +64,12 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-proxy', '0.1.0', tools);
+  // The proxy can execute any registry tool, so it is the highest-risk dispatch
+  // surface. Enforce governance centrally (ARCH-003 / ADR-038). The gate creates
+  // its governor lazily on first check, preserving the proxy's lazy-DB behavior.
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, {
+    governance: createGovernanceGate(dbPath),
+  });
 }
 
 // CLI entry point

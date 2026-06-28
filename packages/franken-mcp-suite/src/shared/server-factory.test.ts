@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMcpServer, validateToolArguments, type ToolDef } from './server-factory.js';
+import { createMcpServer, validateToolArguments, type ToolDef, type GovernanceGate } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -142,6 +142,71 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
 
     expect(validateToolArguments(tool, { type: 'working' }).ok).toBe(true);
+  });
+
+  describe('central governance enforcement', () => {
+    function makeGovernedServer(gate: GovernanceGate) {
+      const calls: unknown[] = [];
+      const tool: ToolDef = {
+        name: 'delete_database',
+        description: 'destructive op',
+        inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
+        handler: async (args) => { calls.push(args); return { content: [{ type: 'text' as const, text: 'deleted' }] }; },
+      };
+      const srv = createMcpServer('t', '1', [tool], { governance: gate });
+      return { srv, calls };
+    }
+
+    it('denies a dangerous tool call at dispatch without running the handler (hooks disabled)', async () => {
+      const gate: GovernanceGate = {
+        check: async () => ({ decision: 'denied', reason: 'destructive action blocked' }),
+      };
+      const { srv, calls } = makeGovernedServer(gate);
+      const res = await srv.callTool('delete_database', { target: 'prod' });
+      expect(res.isError).toBe(true);
+      expect(res.content[0]!.text).toContain('destructive action blocked');
+      expect(calls).toHaveLength(0);
+    });
+
+    it('forwards the tool name and validated args to the gate', async () => {
+      const seen: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const gate: GovernanceGate = {
+        check: async (input) => { seen.push(input); return { decision: 'approved', reason: 'ok' }; },
+      };
+      const { srv } = makeGovernedServer(gate);
+      await srv.callTool('delete_database', { target: 'staging' });
+      expect(seen).toEqual([{ tool: 'delete_database', args: { target: 'staging' } }]);
+    });
+
+    it('fails closed when the gate throws (denies, handler not run)', async () => {
+      const gate: GovernanceGate = {
+        check: async () => { throw new Error('governor unavailable'); },
+      };
+      const { srv, calls } = makeGovernedServer(gate);
+      const res = await srv.callTool('delete_database', { target: 'prod' });
+      expect(res.isError).toBe(true);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('allows approved and review_recommended decisions through to the handler', async () => {
+      for (const decision of ['approved', 'review_recommended'] as const) {
+        const gate: GovernanceGate = { check: async () => ({ decision, reason: 'r' }) };
+        const { srv, calls } = makeGovernedServer(gate);
+        const res = await srv.callTool('delete_database', { target: 'x' });
+        expect(res.isError).toBeFalsy();
+        expect(calls).toEqual([{ target: 'x' }]);
+      }
+    });
+
+    it('runs the gate before argument validation rejects nothing it should not', async () => {
+      // invalid args must still be rejected by validation, gate not consulted
+      let gateCalled = false;
+      const gate: GovernanceGate = { check: async () => { gateCalled = true; return { decision: 'approved', reason: 'ok' }; } };
+      const { srv } = makeGovernedServer(gate);
+      const res = await srv.callTool('delete_database', {});
+      expect(res.isError).toBe(true);
+      expect(gateCalled).toBe(false);
+    });
   });
 
   it('handler returns correct format', async () => {

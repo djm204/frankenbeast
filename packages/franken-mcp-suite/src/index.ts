@@ -1,7 +1,16 @@
 // Shared
 export { createSqliteStore, type SqliteStore } from './shared/sqlite-store.js';
 export { FbeastConfig, type FbeastServer } from './shared/config.js';
-export { createMcpServer, type FbeastMcpServer, type ToolDef, type ToolResult } from './shared/server-factory.js';
+export {
+  createMcpServer,
+  type FbeastMcpServer,
+  type ToolDef,
+  type ToolResult,
+  type GovernanceGate,
+  type GovernanceDecision,
+  type CreateMcpServerOptions,
+} from './shared/server-factory.js';
+export { createGovernanceGate } from './shared/governance-gate.js';
 
 // Adapters
 export { createBrainAdapter, type BrainAdapter } from './adapters/brain-adapter.js';
