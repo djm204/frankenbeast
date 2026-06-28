@@ -76,4 +76,58 @@ describe('TokenCounter', () => {
       expect(counter.allModels()).toHaveLength(0)
     })
   })
+
+  describe('overflow & validation (issue #58)', () => {
+    it('accepts a zero-token record (no false positive)', () => {
+      expect(() => counter.record({ model: 'm', promptTokens: 0, completionTokens: 0 })).not.toThrow()
+    })
+
+    it('throws on negative promptTokens', () => {
+      expect(() => counter.record({ model: 'm', promptTokens: -1, completionTokens: 0 })).toThrow(
+        RangeError,
+      )
+    })
+
+    it('throws on non-integer completionTokens', () => {
+      expect(() => counter.record({ model: 'm', promptTokens: 0, completionTokens: 1.5 })).toThrow(
+        RangeError,
+      )
+    })
+
+    it('throws when a cumulative sum would cross the safe-integer boundary', () => {
+      counter.record({ model: 'm', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 0 })
+      expect(() => counter.record({ model: 'm', promptTokens: 1, completionTokens: 0 })).toThrow(
+        RangeError,
+      )
+    })
+
+    it('rejects a record whose prompt + completion would overflow, atomically', () => {
+      // Each field is individually safe; only their combined total overflows.
+      // record() must reject at ingestion rather than store and poison later reads.
+      expect(() =>
+        counter.record({ model: 'm', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 1 }),
+      ).toThrow(RangeError)
+      // The rejected record left the counter untouched: subsequent reads succeed.
+      expect(counter.totalsFor('m')).toEqual({
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      })
+    })
+
+    it('rejects a record that would overflow the global total across models, atomically', () => {
+      // Each per-model total is safe, but together they overflow grandTotal().
+      counter.record({ model: 'a', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 0 })
+      expect(() =>
+        counter.record({ model: 'b', promptTokens: 0, completionTokens: 1 }),
+      ).toThrow(RangeError)
+      // The rejected record was not stored; grandTotal() still reads cleanly.
+      expect(counter.allModels()).toEqual(['a'])
+      expect(counter.grandTotal()).toEqual({
+        promptTokens: Number.MAX_SAFE_INTEGER,
+        completionTokens: 0,
+        totalTokens: Number.MAX_SAFE_INTEGER,
+      })
+    })
+  })
 })

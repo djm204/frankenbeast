@@ -23,6 +23,22 @@ export const SpanLifecycle = {
   },
 
   recordTokenUsage(span: Span, usage: TokenUsage, counter?: TokenCounter): void {
+    // Guard span state up front: an ended/error span must not contribute to
+    // spend. Checking before touching the counter prevents inactive spans from
+    // poisoning totals even though their metadata write would be rejected.
+    if (span.status !== 'active') {
+      throw new Error(`Cannot record token usage on a ${span.status} span (id: ${span.id})`)
+    }
+    // Record to the counter next: it validates the token counts and may throw
+    // on bad/overflowing input. Doing it before mutating the span keeps the
+    // rejection atomic — a rejected record leaves the span untouched.
+    if (counter !== undefined && usage.model !== undefined) {
+      counter.record({
+        model: usage.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+      })
+    }
     const data: Record<string, unknown> = {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
@@ -32,12 +48,5 @@ export const SpanLifecycle = {
       data['model'] = usage.model
     }
     SpanLifecycle.setMetadata(span, data)
-    if (counter !== undefined && usage.model !== undefined) {
-      counter.record({
-        model: usage.model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-      })
-    }
   },
 }

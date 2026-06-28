@@ -83,6 +83,32 @@ describe('ObserverPortAdapter', () => {
     });
   });
 
+  it('rejects a span with negative token metadata instead of letting it cancel', async () => {
+    const trace = makeTrace();
+    const traceContext = {
+      createTrace: vi.fn().mockReturnValue(trace),
+      startSpan: vi.fn().mockImplementation((_trace: any, options: any) => {
+        const span = makeSpan(trace.id, options.name);
+        trace.spans.push(span);
+        return span;
+      }),
+      endSpan: vi.fn(),
+    };
+
+    const adapter = new ObserverPortAdapter({
+      traceContext,
+      costCalculator: { calculate: vi.fn().mockReturnValue(0) },
+    });
+    adapter.startTrace('session-1');
+
+    // One span with -10 prompt tokens and a later span with +20 would aggregate
+    // to a valid 10 and slip past makeTokenSpend — the negative span must throw.
+    adapter.startSpan('task:1').end({ promptTokens: -10, completionTokens: 0, model: 'gpt-4o' });
+    adapter.startSpan('task:2').end({ promptTokens: 20, completionTokens: 0, model: 'gpt-4o' });
+
+    await expect(adapter.getTokenSpend('session-1')).rejects.toThrow(RangeError);
+  });
+
   it('wraps trace errors', () => {
     const traceContext = {
       createTrace: vi.fn().mockReturnValue(makeTrace()),

@@ -81,12 +81,36 @@ describe('SpanLifecycle', () => {
       expect(counter.totalsFor('claude-sonnet-4-6').totalTokens).toBe(400)
     })
 
+    it('rejects atomically: a counter validation throw leaves the span unmutated', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+      const counter = new TokenCounter()
+      expect(() =>
+        SpanLifecycle.recordTokenUsage(span, { promptTokens: -1, completionTokens: 0, model: 'gpt-4o' }, counter),
+      ).toThrow(RangeError)
+      // Span metadata must not carry the rejected token values.
+      expect(span.metadata['promptTokens']).toBeUndefined()
+      expect(span.metadata['totalTokens']).toBeUndefined()
+    })
+
     it('does not require a TokenCounter — existing behaviour is unchanged', () => {
       const trace = TraceContext.createTrace('goal')
       const span = TraceContext.startSpan(trace, { name: 'llm-call' })
       expect(() =>
         SpanLifecycle.recordTokenUsage(span, { promptTokens: 50, completionTokens: 25 }),
       ).not.toThrow()
+    })
+
+    it('rejects an ended span before touching the counter (no poisoned totals)', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+      const counter = new TokenCounter()
+      TraceContext.endSpan(span, { status: 'completed' })
+      expect(() =>
+        SpanLifecycle.recordTokenUsage(span, { promptTokens: 100, completionTokens: 50, model: 'gpt-4o' }, counter),
+      ).toThrow(/ended|completed|error/i)
+      // The inactive span must not have contributed to spend.
+      expect(counter.totalsFor('gpt-4o').totalTokens).toBe(0)
     })
   })
 
