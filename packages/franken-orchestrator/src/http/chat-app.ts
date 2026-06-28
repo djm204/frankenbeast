@@ -108,11 +108,37 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   // `startChatServer` separately fails closed when chat is exposed without a
   // token (managed mode or non-loopback host).
   const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken;
+  const operatorSecurity = opts.beastControl?.security ?? transportSecurity;
+  // Gate the chat plane and every sensitive control-plane route group behind the
+  // same operator token whenever one is configured. Each group mutates process
+  // state, security config, skills, or exposes operational/analytics data, so it
+  // shares the chat trust boundary. Registered before the routes are mounted so
+  // the middleware runs ahead of the handlers (Hono matches in registration
+  // order). The generic comms ingress (`/v1/comms/inbound`, `/v1/comms/action`)
+  // is included here; provider webhook routes (`/webhooks/*`) keep their own
+  // per-channel signature verification and the public `/comms/health` probe is
+  // intentionally left open. `startChatServer` separately fails closed when an
+  // exposed server has no operator token configured.
   if (effectiveOperatorToken) {
-    app.use('/v1/chat/*', requireOperatorAuth({
+    const requireAuth = () => requireOperatorAuth({
       operatorToken: effectiveOperatorToken,
-      security: opts.beastControl?.security ?? transportSecurity,
-    }));
+      security: operatorSecurity,
+    });
+    // Register both the exact base path and the wildcard: Hono's `/base/*` does
+    // not match the base path itself (e.g. `/api/skills`), so collection roots
+    // would otherwise slip past auth. This mirrors the beast/agent route guard.
+    for (const base of [
+      '/v1/chat',
+      '/v1/network',
+      '/v1/comms',
+      '/api/security',
+      '/api/skills',
+      '/api/dashboard',
+      '/api/analytics',
+    ]) {
+      app.use(base, requireAuth());
+      app.use(`${base}/*`, requireAuth());
+    }
   }
   app.onError(errorHandler);
 
