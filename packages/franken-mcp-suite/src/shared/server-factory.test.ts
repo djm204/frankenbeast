@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMcpServer, validateToolArguments, type ToolDef, type GovernanceGate } from './server-factory.js';
+import { createMcpServer, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -188,14 +188,84 @@ describe('createMcpServer', () => {
       expect(calls).toHaveLength(0);
     });
 
-    it('allows approved and review_recommended decisions through to the handler', async () => {
-      for (const decision of ['approved', 'review_recommended'] as const) {
-        const gate: GovernanceGate = { check: async () => ({ decision, reason: 'r' }) };
-        const { srv, calls } = makeGovernedServer(gate);
-        const res = await srv.callTool('delete_database', { target: 'x' });
-        expect(res.isError).toBeFalsy();
-        expect(calls).toEqual([{ target: 'x' }]);
-      }
+    it('allows only approved decisions through to the handler', async () => {
+      const gate: GovernanceGate = { check: async () => ({ decision: 'approved', reason: 'r' }) };
+      const { srv, calls } = makeGovernedServer(gate);
+      const res = await srv.callTool('delete_database', { target: 'x' });
+      expect(res.isError).toBeFalsy();
+      expect(calls).toEqual([{ target: 'x' }]);
+    });
+
+    it('fails closed on review_recommended (parity with hook path, never runs handler)', async () => {
+      const gate: GovernanceGate = {
+        check: async () => ({ decision: 'review_recommended', reason: 'needs human review' }),
+      };
+      const { srv, calls } = makeGovernedServer(gate);
+      const res = await srv.callTool('delete_database', { target: 'prod' });
+      expect(res.isError).toBe(true);
+      expect(res.content[0]!.text).toContain('review_recommended');
+      expect(res.content[0]!.text).toContain('needs human review');
+      expect(calls).toHaveLength(0);
+    });
+
+    it('records the dispatched tool and result status in the audit sink', async () => {
+      const recorded: Array<{ tool: string; ok: boolean }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const tool: ToolDef = {
+        name: 'echo',
+        description: 'echo',
+        inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      await srv.callTool('echo', { msg: 'hi' });
+      expect(recorded).toEqual([{ tool: 'echo', ok: true }]);
+    });
+
+    it('audits failed handler results as ok=false', async () => {
+      const recorded: Array<{ tool: string; ok: boolean }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const tool: ToolDef = {
+        name: 'boom',
+        description: 'boom',
+        inputSchema: { type: 'object', properties: {} },
+        handler: async () => { throw new Error('kaboom'); },
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      const res = await srv.callTool('boom', {});
+      expect(res.isError).toBe(true);
+      expect(recorded).toEqual([{ tool: 'boom', ok: false }]);
+    });
+
+    it('does not audit when the gate denies (handler never ran)', async () => {
+      const recorded: unknown[] = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const gate: GovernanceGate = { check: async () => ({ decision: 'denied', reason: 'no' }) };
+      const { srv } = (() => {
+        const tool: ToolDef = {
+          name: 'delete_database',
+          description: 'd',
+          inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
+          handler: async () => ({ content: [{ type: 'text' as const, text: 'deleted' }] }),
+        };
+        return { srv: createMcpServer('t', '1', [tool], { governance: gate, audit }) };
+      })();
+      await srv.callTool('delete_database', { target: 'x' });
+      expect(recorded).toHaveLength(0);
+    });
+
+    it('audit failures never fail the tool call', async () => {
+      const audit: AuditSink = { record: async () => { throw new Error('audit down'); } };
+      const tool: ToolDef = {
+        name: 'echo',
+        description: 'echo',
+        inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      const res = await srv.callTool('echo', { msg: 'hi' });
+      expect(res.isError).toBeFalsy();
+      expect(res.content[0]!.text).toBe('ok');
     });
 
     it('runs the gate before argument validation rejects nothing it should not', async () => {

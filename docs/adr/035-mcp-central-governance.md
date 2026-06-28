@@ -32,18 +32,33 @@ tool calls are checked regardless of whether client hooks are installed. We
   **after** argument validation and **before** the handler runs. The gate is the
   single enforcement point shared by both the MCP `CallTool` handler and the
   in-process `callTool` method.
-- Enforcement **fails closed**: a `denied` decision short-circuits the handler
-  with an `isError` result, and any error thrown by the gate is treated as a
-  denial.
+- Enforcement **fails closed**: any decision other than `approved` (i.e.
+  `denied` **or** `review_recommended`) short-circuits the handler with an
+  `isError` result, and any error thrown by the gate is treated as a denial.
+  This matches the hook path (`cli/hook.ts`), which rejects every non-`approved`
+  decision — important because the default governor maps high-severity
+  destructive matches to `review_recommended`, not `denied`.
 - A new `shared/governance-gate.ts` exposes `createGovernanceGate(dbPath | GovernorAdapter)`,
   which wraps the **same** `GovernorAdapter` the hook path uses
   (`adapters/governor-adapter.ts`), so server-side and hook-based enforcement
   apply identical policy. The governor is created lazily on first check to
   preserve the proxy's lazy-DB semantics.
-- The two aggregate, user-facing runtime entry points are wired to inject the
-  gate by default: `beast.ts` (the `fbeast` all-in-one server, reusing its
-  already-constructed governor adapter) and `servers/proxy.ts` (the
-  `fbeast-proxy` server).
+- `server-factory.ts` also gains an `AuditSink` (`CreateMcpServerOptions.audit`):
+  after every dispatched call `dispatchTool` records the tool + result status,
+  mirroring the post-tool hook's observer logging so the central path yields an
+  `audit_trail` record even with hooks absent. Audit is best-effort and never
+  fails the tool call. `shared/central-enforcement.ts` provides
+  `createAuditSink` and `createCentralOptions(dbPath)` (governance + audit).
+- **Every** runtime MCP server entry point injects the central enforcement by
+  default, not just the aggregate ones: `beast.ts` (`fbeast`, reusing its
+  governor/observer), and each standalone single-purpose server
+  (`fbeast-memory`, `fbeast-planner`, …) via `createCentralOptions(dbPath)` in
+  its CLI entry. This closes the gap where the default `fbeast init` standard
+  mode (`hooks=false`) registered ungoverned standalone binaries.
+- `servers/proxy.ts` applies the gate and audit to the **resolved target tool**
+  inside the `execute_tool` handler (after registry lookup), not to the
+  `execute_tool` meta-tool, so policy and audit are keyed by the real high-risk
+  action (e.g. `fbeast_memory_forget`) rather than the generic wrapper.
 
 ### Relationship to hooks
 
@@ -68,12 +83,29 @@ absent. The two are complementary and share the same governor policy.
 
 ### Risks
 - A future server constructed via `createMcpServer` without passing
-  `governance` would not be governed. Mitigation: the gate is injected at the
-  aggregate entry points users actually run (`fbeast`, `fbeast-proxy`).
-  Individual standalone single-purpose servers can opt in by passing the same
-  gate; the central mechanism is in place for them.
+  `governance`/`audit` would not be governed/audited. Mitigation: every runtime
+  entry point (`fbeast`, `fbeast-proxy`, and all standalone `fbeast-*` servers)
+  now injects `createCentralOptions(dbPath)`; the `.tools`-only consumers (e.g.
+  `beast.ts` reading a factory's tool list) intentionally pass nothing.
 - Over-broad denials are possible if governor patterns are too aggressive; the
-  governor's existing pattern set is reused unchanged.
+  governor's existing pattern set is reused unchanged. Because the gate now
+  blocks `review_recommended` server-side, destructive-pattern calls are denied
+  rather than allowed-with-a-note when hooks are absent.
+- When hooks **are** installed, fbeast tool calls are audited at both the client
+  boundary (post-tool hook) and the server boundary (central audit). The
+  central record is tagged `source: "central-dispatch"` to keep the two
+  distinguishable; the redundancy is accepted as the central path's value is
+  precisely the hooks-absent default.
+
+### Out of scope
+- Firewall (prompt-injection) scanning is **not** added to the dispatch gate.
+  The hook path does not firewall-scan either (`cli/hook.ts pre-tool` only runs
+  the governor); the firewall is an agent-invoked tool (`fbeast_firewall_scan` /
+  `_scan_file`) for vetting untrusted input before acting. Making it a blocking
+  per-dispatch gate would self-block those scan tools (it would refuse to scan
+  the very content meant to be scanned) and cause false-positive denials on
+  legitimate stores. Defense-in-depth firewall integration, if desired, belongs
+  in a separate decision rather than bolted onto the governor gate.
 
 ## Alternatives Considered
 

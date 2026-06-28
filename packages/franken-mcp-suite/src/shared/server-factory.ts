@@ -56,13 +56,29 @@ export interface GovernanceGate {
   }): Promise<GovernanceDecision> | GovernanceDecision;
 }
 
+/**
+ * Best-effort, server-side audit sink invoked after every dispatched tool call
+ * (success or failure). Mirrors the post-tool hook's observer logging so the
+ * central dispatch path produces an audit record even when client hooks are
+ * absent (see ADR-035). Audit failures never fail the tool call.
+ */
+export interface AuditSink {
+  record(input: { tool: string; ok: boolean }): Promise<void> | void;
+}
+
 export interface CreateMcpServerOptions {
   /**
    * When set, every tool call dispatched through this server is checked by the
-   * gate after argument validation and before the handler runs. A `denied`
-   * decision short-circuits the handler; a gate error fails closed (denied).
+   * gate after argument validation and before the handler runs. Any decision
+   * other than `approved` short-circuits the handler (matching the hook path's
+   * fail-closed enforcement); a gate error also fails closed (denied).
    */
   governance?: GovernanceGate;
+  /**
+   * When set, each dispatched tool call is recorded after the handler runs,
+   * giving the central path a server-side audit trail independent of hooks.
+   */
+  audit?: AuditSink;
 }
 
 export function validateToolArguments(
@@ -102,8 +118,9 @@ async function dispatchTool(
   toolMap: Map<string, ToolDef>,
   toolName: string,
   args: unknown,
-  governance?: GovernanceGate,
+  options: CreateMcpServerOptions = {},
 ): Promise<ToolResult> {
+  const { governance, audit } = options;
   const tool = toolMap.get(toolName);
   if (!tool) {
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
@@ -115,7 +132,9 @@ async function dispatchTool(
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
   // Central governance gate: enforced server-side regardless of client hooks.
-  // Fails closed — a denied decision or a gate error blocks the handler.
+  // Fails closed — any non-`approved` decision (denied OR review_recommended)
+  // or a gate error blocks the handler, matching the hook path's enforcement
+  // (`cli/hook.ts` rejects every decision other than `approved`).
   if (governance) {
     let decision: GovernanceDecision;
     try {
@@ -126,21 +145,31 @@ async function dispatchTool(
         isError: true,
       };
     }
-    if (decision.decision === 'denied') {
+    if (decision.decision !== 'approved') {
       return {
-        content: [{ type: 'text' as const, text: `Denied by governance: ${decision.reason}` }],
+        content: [{ type: 'text' as const, text: `Denied by governance (${decision.decision}): ${decision.reason}` }],
         isError: true,
       };
     }
   }
+  let result: ToolResult;
   try {
-    return await tool.handler(validated.value);
+    result = await tool.handler(validated.value);
   } catch (err) {
-    return {
+    result = {
       content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
       isError: true,
     };
   }
+  // Best-effort server-side audit (never fails the tool call).
+  if (audit) {
+    try {
+      await audit.record({ tool: toolName, ok: !result.isError });
+    } catch (err) {
+      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+  return result;
 }
 
 export function createMcpServer(
@@ -151,7 +180,6 @@ export function createMcpServer(
 ): FbeastMcpServer {
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
-  const { governance } = options;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((t) => ({
@@ -163,13 +191,13 @@ export function createMcpServer(
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
     const { name: toolName, arguments: args } = request.params;
-    return { ...(await dispatchTool(toolMap, toolName, args, governance)) };
+    return { ...(await dispatchTool(toolMap, toolName, args, options)) };
   });
 
   return {
     name,
     tools,
-    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, governance),
+    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, options),
     async start() {
       const transport = new StdioServerTransport();
       await server.connect(transport);

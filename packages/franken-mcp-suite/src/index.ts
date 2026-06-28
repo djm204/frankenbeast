@@ -9,8 +9,10 @@ export {
   type GovernanceGate,
   type GovernanceDecision,
   type CreateMcpServerOptions,
+  type AuditSink,
 } from './shared/server-factory.js';
 export { createGovernanceGate } from './shared/governance-gate.js';
+export { createAuditSink, createCentralOptions } from './shared/central-enforcement.js';
 
 // Adapters
 export { createBrainAdapter, type BrainAdapter } from './adapters/brain-adapter.js';

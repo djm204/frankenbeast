@@ -44,13 +44,23 @@ describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
   let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
+  let gateCheck: ReturnType<typeof vi.fn>;
+  let auditRecord: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearchTools.mockReturnValue(FAKE_STUBS);
     mockCreateAdapterSet.mockReturnValue({} as ReturnType<typeof registry.createAdapterSet>);
 
-    server = createProxyServer({ dbPath: ':memory:' });
+    // Inject spy gate/audit so tests don't touch sqlite and can assert that the
+    // *resolved* target tool (not the execute_tool wrapper) is governed/audited.
+    gateCheck = vi.fn().mockResolvedValue({ decision: 'approved', reason: 'ok' });
+    auditRecord = vi.fn().mockResolvedValue(undefined);
+    server = createProxyServer({
+      dbPath: ':memory:',
+      governance: { check: gateCheck },
+      audit: { record: auditRecord },
+    });
     searchToolsDef = server.tools.find((t) => t.name === 'search_tools')!;
     executeToolDef = server.tools.find((t) => t.name === 'execute_tool')!;
   });
@@ -113,6 +123,53 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('governs the RESOLVED target tool, not the execute_tool wrapper (finding round-1)', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
+      expect(gateCheck).toHaveBeenCalledWith({ tool: 'test_tool', args: { key: 'val' } });
+    });
+
+    it('fails closed and skips the handler when the gate denies the target', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: {} }) as { isError: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('destructive');
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on review_recommended for the target', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockResolvedValue({ decision: 'review_recommended', reason: 'needs review' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: {} }) as { isError: boolean };
+      expect(result.isError).toBe(true);
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the gate throws', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockRejectedValue(new Error('governor down'));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: {} }) as { isError: boolean };
+      expect(result.isError).toBe(true);
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('audits the resolved target tool after dispatch', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: {} });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true });
     });
   });
 });
