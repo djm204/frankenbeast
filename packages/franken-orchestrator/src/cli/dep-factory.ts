@@ -406,11 +406,39 @@ async function importOptionalModule<T>(moduleName: string, logger: BeastLogger):
     return await import(moduleName) as T;
   } catch (error) {
     if (isMissingOptionalModule(error, moduleName)) {
-      logger.warn(`${moduleName} unavailable, using stub: ${errorDiagnostic(error)}`, 'dep-factory');
+      logger.warn(`${moduleName} not installed: ${errorDiagnostic(error)}`, 'dep-factory');
       return undefined;
     }
     throw new Error(`Failed to load optional module ${moduleName}: ${errorDiagnostic(error)}`, { cause: error });
   }
+}
+
+/**
+ * Decide what to do when a safety-critical module (critique/governor) is
+ * *enabled* but its package is not installed.
+ *
+ * Safety default: fail CLOSED. A missing safety module must not silently
+ * degrade into all-pass / all-approve semantics (see ADR-038, issue #364).
+ *
+ * Explicit opt-out: set `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` to
+ * retain the passthrough stub. This is unsafe and emits a loud warning so the
+ * degraded posture is recorded in logs/audit.
+ */
+function resolveMissingSafetyModule<T>(moduleName: string, stub: T, logger: BeastLogger): T {
+  if (process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES === '1') {
+    logger.warn(
+      `SAFETY DEGRADED: ${moduleName} is enabled but not installed; falling back to an ` +
+        `all-pass stub because FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1. ` +
+        `Plan critique / approval gating is DISABLED for this run.`,
+      'dep-factory',
+    );
+    return stub;
+  }
+  throw new Error(
+    `Safety-critical module ${moduleName} is enabled but not installed — refusing to run ` +
+      `with safety gating disabled (fail-closed). Install ${moduleName}, disable the module ` +
+      `in config, or set FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1 to explicitly opt out (unsafe).`,
+  );
 }
 
 async function createCritiqueDeps(
@@ -424,7 +452,7 @@ async function createCritiqueDeps(
     '@franken/critique',
     observer.logger,
   );
-  if (!critiqueModule) return stubCritique;
+  if (!critiqueModule) return resolveMissingSafetyModule('@franken/critique', stubCritique, observer.logger);
 
   const critiqueGuardrails = {
     getSafetyRules: async () => [] as never[],
@@ -474,7 +502,7 @@ async function createGovernanceDeps(
     '@franken/governor',
     logger,
   );
-  if (!governorModule) return { governor: stubGovernor, finalize };
+  if (!governorModule) return { governor: resolveMissingSafetyModule('@franken/governor', stubGovernor, logger), finalize };
 
   const { stdin, stdout } = await import('node:process');
   if (!stdin.isTTY) {

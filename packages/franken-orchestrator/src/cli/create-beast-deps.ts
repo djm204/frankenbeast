@@ -20,7 +20,12 @@ import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js
 import { McpSdkAdapter } from '../adapters/mcp-sdk-adapter.js';
 import { ProviderRegistryIAdapter } from '../adapters/provider-registry-adapter.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
-import { ReflectionEvaluator } from '@franken/critique';
+// NOTE: `@franken/critique` is imported lazily inside `reflectionFn` (see below).
+// A top-level static import would make this module — and everything that
+// statically imports it (e.g. dep-factory) — fail to evaluate when the
+// optional `@franken/critique` package is absent. That would short-circuit the
+// fail-closed / config-disable / FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES
+// opt-out handling in dep-factory before it can run (issue #364, ADR-036).
 
 import { ClaudeCliAdapter } from '../providers/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../providers/codex-cli-adapter.js';
@@ -153,6 +158,7 @@ export function createBeastDeps(
   const registryLlmClient = new AdapterLlmClient(registryAdapter);
   const reflectionFn = config.reflection !== false
     ? async () => {
+        const { ReflectionEvaluator } = await import('@franken/critique');
         const evaluator = new ReflectionEvaluator({ llmClient: registryLlmClient });
         const result = await evaluator.evaluate({
           content: 'Current execution state',

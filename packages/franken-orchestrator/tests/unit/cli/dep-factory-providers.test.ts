@@ -461,7 +461,22 @@ describe('dep-factory provider wiring', () => {
     expect(existsSync(chunkSession)).toBe(false);
   });
 
-  it('uses critique stub when the optional critique module is truly missing', async () => {
+  it('fails closed when an enabled critique module is truly missing', async () => {
+    delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
+    optionalModuleMocks.critiqueError = Object.assign(
+      new Error("Cannot find package '@franken/critique' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      enabledModules: { critique: true, governor: false },
+    }))).rejects.toThrow(/@franken\/critique.*fail-closed/i);
+  });
+
+  it('uses critique stub when explicitly disabled via config', async () => {
+    delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
     optionalModuleMocks.critiqueError = Object.assign(
       new Error("Cannot find package '@franken/critique' imported from dep-factory.ts"),
       { code: 'ERR_MODULE_NOT_FOUND' },
@@ -470,7 +485,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
 
     const result = await createCliDeps(makeOpts({
-      enabledModules: { critique: true, governor: false },
+      enabledModules: { critique: false, governor: false },
     }));
 
     await expect(result.deps.critique.reviewPlan({ tasks: [] })).resolves.toEqual({
@@ -478,6 +493,30 @@ describe('dep-factory provider wiring', () => {
       findings: [],
       score: 1.0,
     });
+  });
+
+  it('retains critique stub for a missing module when the unsafe opt-out is set', async () => {
+    process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES = '1';
+    optionalModuleMocks.critiqueError = Object.assign(
+      new Error("Cannot find package '@franken/critique' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    try {
+      const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+      const result = await createCliDeps(makeOpts({
+        enabledModules: { critique: true, governor: false },
+      }));
+
+      await expect(result.deps.critique.reviewPlan({ tasks: [] })).resolves.toEqual({
+        verdict: 'pass',
+        findings: [],
+        score: 1.0,
+      });
+    } finally {
+      delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
+    }
   });
 
   it('fails loudly when the optional critique module exists but is broken', async () => {
@@ -503,7 +542,22 @@ describe('dep-factory provider wiring', () => {
     expect(traceViewerMocks.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('uses governor stub when the optional governor module is truly missing', async () => {
+  it('fails closed when an enabled governor module is truly missing', async () => {
+    delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
+    optionalModuleMocks.governorError = Object.assign(
+      new Error("Cannot find package '@franken/governor' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await expect(createCliDeps(makeOpts({
+      enabledModules: { critique: false, governor: true },
+    }))).rejects.toThrow(/@franken\/governor.*fail-closed/i);
+  });
+
+  it('uses governor stub when explicitly disabled via config', async () => {
+    delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
     optionalModuleMocks.governorError = Object.assign(
       new Error("Cannot find package '@franken/governor' imported from dep-factory.ts"),
       { code: 'ERR_MODULE_NOT_FOUND' },
@@ -512,7 +566,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
 
     const result = await createCliDeps(makeOpts({
-      enabledModules: { critique: false, governor: true },
+      enabledModules: { critique: false, governor: false },
     }));
 
     await expect(result.deps.governor.requestApproval({
@@ -520,6 +574,30 @@ describe('dep-factory provider wiring', () => {
       summary: 'test',
       requiresHitl: true,
     })).resolves.toEqual({ decision: 'approved' });
+  });
+
+  it('retains governor stub for a missing module when the unsafe opt-out is set', async () => {
+    process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES = '1';
+    optionalModuleMocks.governorError = Object.assign(
+      new Error("Cannot find package '@franken/governor' imported from dep-factory.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    vi.resetModules();
+    try {
+      const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+      const result = await createCliDeps(makeOpts({
+        enabledModules: { critique: false, governor: true },
+      }));
+
+      await expect(result.deps.governor.requestApproval({
+        taskId: 'test',
+        summary: 'test',
+        requiresHitl: true,
+      })).resolves.toEqual({ decision: 'approved' });
+    } finally {
+      delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
+    }
   });
 
   it('fails loudly when the optional governor module exists but is broken', async () => {
