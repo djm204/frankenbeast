@@ -72,6 +72,43 @@ describe('Governor Hono Server', () => {
       expect(body.status).toBe('resolved');
     });
 
+    it('returns 400 for an invalid decision value and preserves the pending request', async () => {
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+
+      // Create approval
+      await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: 'req-invalid',
+          taskId: 'task-1',
+          summary: 'Deploy',
+        }),
+      });
+
+      // Respond with an impossible decision value
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'req-invalid', decision: 'YOLO' }),
+      });
+
+      expect(res.status).toBe(400);
+
+      // The pending request must NOT have been consumed by the invalid attempt.
+      const health = await app.request('/health');
+      const healthBody = await health.json();
+      expect(healthBody.pendingApprovals).toBe(1);
+
+      // A subsequent valid decision should still resolve it.
+      const valid = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'req-invalid', decision: 'APPROVE' }),
+      });
+      expect(valid.status).toBe(200);
+    });
+
     it('returns 404 for unknown request', async () => {
       const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
       const res = await app.request('/v1/approval/respond', {
