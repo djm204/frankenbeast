@@ -221,6 +221,16 @@ describe('PlanGraph — insertFixItTask', () => {
     ).toThrowError(TaskNotFoundError);
   });
 
+  it('throws DuplicateTaskError when fix task id already exists', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    // 'a' already exists — inserting a fix-it with the same id must not silently overwrite it.
+    expect(() => g.insertFixItTask(createTaskId('b'), makeTask('a'))).toThrowError(
+      DuplicateTaskError
+    );
+  });
+
   it('fix task result is sorted before the failed task', () => {
     const g = PlanGraph.empty()
       .addTask(makeTask('a'))
