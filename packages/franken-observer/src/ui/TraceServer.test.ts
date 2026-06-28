@@ -67,13 +67,58 @@ describe('TraceServer', () => {
       const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
       expect(script).toBeDefined()
 
-      const context = createContext({ document: { getElementById: () => ({}) } }) as { esc?: (s: string) => string }
+      const context = createContext({ document: { getElementById: () => ({ addEventListener: () => {} }) } }) as { esc?: (s: string) => string }
       new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
 
       const escaped = context.esc!('goal`);globalThis.__xss=1;//${alert(1)}<img src=x onerror=alert(2)>')
       expect(escaped).not.toContain('`')
       expect(escaped).not.toContain('${')
       expect(escaped).toContain('&lt;img src=x onerror=alert(2)&gt;')
+    })
+
+    it('escapes trace IDs when rendering sidebar and detail (XSS via t.id)', async () => {
+      const html = await fetch(server.url + '/').then(r => r.text())
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+      expect(script).toBeDefined()
+
+      const maliciousId = '"><img src=x onerror=alert(1)>'
+      const sidebar = { innerHTML: '', addEventListener: () => {} }
+      const panel = { innerHTML: '', addEventListener: () => {} }
+      const elements: Record<string, unknown> = { sidebar, panel }
+
+      const fetchMock = (url: string) => {
+        if (url.endsWith('/api/traces')) {
+          return Promise.resolve({
+            json: () => Promise.resolve({
+              traces: [{ id: maliciousId, goal: 'g', status: 'completed', spanCount: 0, startedAt: Date.now() }],
+            }),
+          })
+        }
+        return Promise.resolve({
+          json: () => Promise.resolve({ id: maliciousId, goal: 'g', status: 'completed', spans: [] }),
+        })
+      }
+
+      const context = createContext({
+        document: {
+          getElementById: (id: string) => elements[id],
+          querySelectorAll: () => [] as unknown[],
+        },
+        fetch: fetchMock,
+        Date,
+      }) as {
+        loadTraces?: () => Promise<void>
+        loadDetail?: (id: string) => Promise<void>
+      }
+      new Script(script!.replace(/loadTraces\(\)\s*$/, '')).runInContext(context)
+
+      await context.loadTraces!()
+      expect(sidebar.innerHTML).not.toContain('<img')
+      expect(sidebar.innerHTML).toContain('&lt;img')
+
+      await context.loadDetail!(maliciousId)
+      expect(panel.innerHTML).not.toContain('<img')
+      expect(panel.innerHTML).toContain('&lt;img')
     })
   })
 
@@ -144,6 +189,23 @@ describe('TraceServer', () => {
 
     it('returns 404 JSON for an unknown trace id', async () => {
       const res = await fetch(`${server.url}/api/traces/nonexistent-id`)
+      expect(res.status).toBe(404)
+      const body = await res.json() as Record<string, unknown>
+      expect(body).toHaveProperty('error')
+    })
+
+    it('decodes percent-encoded trace ids so they round-trip encodeURIComponent', async () => {
+      const trace = makeTrace('Special id')
+      trace.id = 'run:42@host+a&b=c;d,e'
+      await adapter.flush(trace)
+      const res = await fetch(`${server.url}/api/traces/${encodeURIComponent(trace.id)}`)
+      expect(res.status).toBe(200)
+      const body = await res.json() as { id: string }
+      expect(body.id).toBe(trace.id)
+    })
+
+    it('returns 404 JSON (not 500) for malformed percent-encoding', async () => {
+      const res = await fetch(`${server.url}/api/traces/%E0%A4%A`)
       expect(res.status).toBe(404)
       const body = await res.json() as Record<string, unknown>
       expect(body).toHaveProperty('error')
