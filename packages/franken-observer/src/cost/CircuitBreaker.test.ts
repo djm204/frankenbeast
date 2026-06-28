@@ -49,12 +49,34 @@ describe('CircuitBreaker', () => {
       expect(handler).not.toHaveBeenCalled()
     })
 
-    it('emits on every call that exceeds the limit (not just the first)', () => {
+    it('fires the handler only once while continuously tripped (no alert fatigue)', () => {
       const handler = vi.fn()
       breaker.on('limit-reached', handler)
       breaker.check(0.51)
       breaker.check(0.60)
+      expect(handler).toHaveBeenCalledOnce()
+    })
+
+    it('re-arms and fires again after spend recovers below the limit', () => {
+      const handler = vi.fn()
+      breaker.on('limit-reached', handler)
+      breaker.check(0.51) // trips, fires
+      breaker.check(0.25) // recovers, re-arms
+      breaker.check(0.60) // trips again, fires
       expect(handler).toHaveBeenCalledTimes(2)
+    })
+
+    it('reset() re-arms so the next trip fires again', () => {
+      const handler = vi.fn()
+      breaker.on('limit-reached', handler)
+      breaker.check(0.51) // fires once
+      breaker.reset()
+      breaker.check(0.60) // fires again after acknowledge
+      expect(handler).toHaveBeenCalledTimes(2)
+    })
+
+    it('reset() does not throw when never tripped', () => {
+      expect(() => breaker.reset()).not.toThrow()
     })
 
     it('supports removing a listener with off()', () => {
