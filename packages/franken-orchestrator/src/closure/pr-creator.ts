@@ -44,7 +44,6 @@ const REF_FORBIDDEN_SEQ_RE = /\.\.|@\{|\/{2,}|^[./]|[./]$|\/\.|\.lock(?:\/|$)/;
 
 function isSafeRef(value: string): boolean {
   if (value.length === 0 || value.length > 255) return false;
-  if (value === '@') return false; // git disallows the single-character ref `@`
   if (value.startsWith('-')) return false; // argument/option-injection guard
   if (REF_FORBIDDEN_CHAR_RE.test(value)) return false;
   if (REF_FORBIDDEN_SEQ_RE.test(value)) return false;

@@ -141,6 +141,25 @@ describe('PrCreator argv subprocess safety', () => {
     expect(push!.args).not.toContain('+foo');
   });
 
+  // Codex round-3 P3: a branch literally named `@` is a valid git ref
+  // (`git check-ref-format --branch '@'` exits 0) and pushBranch already
+  // qualifies it as `refs/heads/@`, so it must not be special-cased away.
+  it('creates a PR for a branch literally named @', async () => {
+    const { exec, calls } = makeExecRecorder('@');
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
+    expect(push!.args).toEqual([
+      'push', 'origin', 'refs/heads/@:refs/heads/@',
+    ]);
+  });
+
   // Codex round-2 P3: a remote may be a repository URL, which legitimately
   // contains ':' and '//'. These must be accepted (argv removes shell meaning).
   it.each([
