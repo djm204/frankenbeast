@@ -26,14 +26,29 @@ const defaultExec: ExecFn = (command: string, args: readonly string[]) =>
   execFileSync(command, [...args], { encoding: 'utf-8', stdio: 'pipe' });
 
 /**
- * Safe git ref / remote pattern: alphanumerics plus `._/-`, no leading `-`
- * (which would otherwise be parsed as a flag — argument injection). Rejects
- * shell metacharacters, whitespace, and empty values.
+ * Validates a git ref / remote name for safe argv execution.
+ *
+ * Subprocesses are spawned with a discrete argument array (never a shell string),
+ * so shell metacharacters carry no special meaning and need not be rejected.
+ * Instead we enforce git's own ref-format rules — so legitimate names like
+ * `feature/foo+bar`, `release/issue#123` or `user@host` are accepted — while
+ * separately rejecting a leading `-` to prevent argument/option injection.
+ *
+ * Mirrors `git check-ref-format` (https://git-scm.com/docs/git-check-ref-format).
  */
-const SAFE_REF_RE = /^(?!-)[A-Za-z0-9._/-]+$/;
+// Control chars, space, and the metacharacters git forbids in refs.
+const REF_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f~^:?*[\\]/;
+// Sequences git forbids: `..`, `@{`, leading/trailing `.` or `/`, consecutive
+// slashes, a component beginning with `.`, or a component ending with `.lock`.
+const REF_FORBIDDEN_SEQ_RE = /\.\.|@\{|\/{2,}|^[./]|[./]$|\/\.|\.lock(?:\/|$)/;
 
 function isSafeRef(value: string): boolean {
-  return value.length > 0 && value.length <= 255 && SAFE_REF_RE.test(value);
+  if (value.length === 0 || value.length > 255) return false;
+  if (value === '@') return false; // git disallows the single-character ref `@`
+  if (value.startsWith('-')) return false; // argument/option-injection guard
+  if (REF_FORBIDDEN_CHAR_RE.test(value)) return false;
+  if (REF_FORBIDDEN_SEQ_RE.test(value)) return false;
+  return true;
 }
 
 export class PrCreator {

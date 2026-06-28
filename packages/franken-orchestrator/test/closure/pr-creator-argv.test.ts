@@ -94,4 +94,67 @@ describe('PrCreator argv subprocess safety', () => {
     expect(result).toBeNull();
     expect(calls.some(c => c.args.includes('push'))).toBe(false);
   });
+
+  // Codex P2: the previous whitelist rejected valid git refs (e.g. `+`, `@`,
+  // `#`), silently aborting PR creation for legitimately-named branches. Because
+  // execution is argv-based, these characters carry no shell meaning.
+  it.each([
+    'feature/foo+bar',
+    'feature/foo@bar',
+    'release/issue#123',
+    'feat/=value',
+  ])('creates a PR for valid git ref %s', async (branch) => {
+    const { exec, calls } = makeExecRecorder(branch);
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const push = calls.find(c => c.command === 'git' && c.args.includes('push'));
+    expect(push!.args).toEqual(['push', 'origin', branch]);
+  });
+
+  it('accepts a base branch containing valid ref characters', async () => {
+    const { exec, calls } = makeExecRecorder('feature/work');
+    const creator = new PrCreator(
+      { targetBranch: 'release/v1.0+stable', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const create = calls.find(c => c.command === 'gh' && c.args.includes('create'));
+    expect(create!.args.slice(0, 4)).toEqual(['pr', 'create', '--base', 'release/v1.0+stable']);
+  });
+
+  // Argument-injection and invalid-ref guards must still hold.
+  it.each([
+    '-evil',
+    'foo..bar',
+    'foo~1',
+    'foo^bar',
+    'foo:bar',
+    'foo bar',
+    'foo@{0}',
+    'foo/',
+    '/foo',
+    'foo//bar',
+    'foo.lock',
+  ])('refuses to run for invalid/unsafe ref %s', async (branch) => {
+    const { exec, calls } = makeExecRecorder(branch);
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult());
+
+    expect(result).toBeNull();
+    expect(calls.some(c => c.args.includes('push'))).toBe(false);
+    expect(calls.some(c => c.command === 'gh')).toBe(false);
+  });
 });
