@@ -326,6 +326,26 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(400);
     });
 
+    it('rejects an unknown action_id without consuming the pending approval', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
+      await seedApproval(app, 'req-unknown');
+
+      const rawBody = JSON.stringify({
+        actions: [{ action_id: 'launch_nukes', value: 'req-unknown' }],
+      });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(400);
+
+      // Pending approval must survive an unknown action so a valid callback can still resolve it.
+      const after = await (await app.request('/health')).json();
+      expect(after.pendingApprovals).toBe(1);
+    });
+
     it('parses Slack form-encoded payloads and normalizes reject', async () => {
       const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET });
       await seedApproval(app, 'req-9');

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { RESPONSE_CODES } from '../core/types.js';
+import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -23,8 +23,12 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
-/** Map a raw Slack action_id into a domain decision (ResponseCode). */
-function normalizeSlackDecision(actionId: unknown): string {
+/**
+ * Map a raw Slack action_id into a domain decision (ResponseCode).
+ * Returns `null` for unrecognized actions so the caller can reject the
+ * callback instead of consuming the pending approval with a bogus decision.
+ */
+function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
   switch (String(actionId).toLowerCase()) {
     case 'approve':
       return 'APPROVE';
@@ -38,7 +42,7 @@ function normalizeSlackDecision(actionId: unknown): string {
     case 'debug':
       return 'DEBUG';
     default:
-      return String(actionId).toUpperCase();
+      return null;
   }
 }
 
@@ -201,10 +205,16 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     }
 
     const requestId = action.value;
-    const decision = normalizeSlackDecision(action.action_id);
 
     if (!requestId) {
       return c.json({ error: { message: 'Missing request identifier in action' } }, 400);
+    }
+
+    // Reject unknown action IDs before touching the pending approval so a typo
+    // or renamed button cannot consume the request with a bogus decision.
+    const decision = normalizeSlackDecision(action.action_id);
+    if (decision === null) {
+      return c.json({ error: { message: 'Unknown Slack action' } }, 400);
     }
 
     // Look up the pending approval; unknown requests are rejected.
