@@ -5,7 +5,7 @@ import { defaultConfig } from './config/orchestrator-config.js';
 import { createContext } from './context/context-factory.js';
 import { runIngestion, InjectionDetectedError } from './phases/ingestion.js';
 import { runHydration } from './phases/hydration.js';
-import { runPlanning, CritiqueSpiralError } from './phases/planning.js';
+import { runPlanning, CritiqueSpiralError, CritiqueBudgetHaltError } from './phases/planning.js';
 import { runExecution } from './phases/execution.js';
 import { runClosure } from './phases/closure.js';
 import { StateSnapshotStore } from './context/state-snapshot-store.js';
@@ -139,6 +139,20 @@ export class BeastLoop {
       }
 
       if (error instanceof CritiqueSpiralError) {
+        logger.error('BeastLoop: error', { error: error.message });
+        return {
+          sessionId: ctx.sessionId,
+          projectId: ctx.projectId,
+          phase: ctx.phase,
+          status: 'aborted',
+          tokenSpend: ctx.tokenSpend,
+          abortReason: error.message,
+          error,
+          durationMs: ctx.elapsedMs(),
+        };
+      }
+
+      if (error instanceof CritiqueBudgetHaltError) {
         logger.error('BeastLoop: error', { error: error.message });
         return {
           sessionId: ctx.sessionId,

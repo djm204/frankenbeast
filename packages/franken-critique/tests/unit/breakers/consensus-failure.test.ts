@@ -30,24 +30,24 @@ describe('ConsensusFailureBreaker', () => {
     expect(typeof breaker.check).toBe('function');
   });
 
-  it('does not trip when no failures', () => {
+  it('does not trip when no failures', async () => {
     const breaker = new ConsensusFailureBreaker();
-    const result = breaker.check(createState(0, {}), createConfig(3));
+    const result = await breaker.check(createState(0, {}), createConfig(3));
     expect(result.tripped).toBe(false);
   });
 
-  it('does not trip when failures are below threshold', () => {
+  it('does not trip when failures are below threshold', async () => {
     const breaker = new ConsensusFailureBreaker();
-    const result = breaker.check(
+    const result = await breaker.check(
       createState(2, { safety: 2 }),
       createConfig(3),
     );
     expect(result.tripped).toBe(false);
   });
 
-  it('trips when a category reaches the threshold', () => {
+  it('trips when a category reaches the threshold', async () => {
     const breaker = new ConsensusFailureBreaker();
-    const result = breaker.check(
+    const result = await breaker.check(
       createState(3, { safety: 3 }),
       createConfig(3),
     );
@@ -58,9 +58,9 @@ describe('ConsensusFailureBreaker', () => {
     }
   });
 
-  it('trips when any one category exceeds threshold', () => {
+  it('trips when any one category exceeds threshold', async () => {
     const breaker = new ConsensusFailureBreaker();
-    const result = breaker.check(
+    const result = await breaker.check(
       createState(4, { safety: 1, complexity: 4 }),
       createConfig(3),
     );
@@ -70,9 +70,9 @@ describe('ConsensusFailureBreaker', () => {
     }
   });
 
-  it('does not trip when multiple categories are below threshold', () => {
+  it('does not trip when multiple categories are below threshold', async () => {
     const breaker = new ConsensusFailureBreaker();
-    const result = breaker.check(
+    const result = await breaker.check(
       createState(3, { safety: 1, complexity: 2, factuality: 1 }),
       createConfig(3),
     );

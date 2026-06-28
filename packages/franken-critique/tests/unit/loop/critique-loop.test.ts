@@ -53,7 +53,7 @@ function createMockBreaker(
 ): CircuitBreaker {
   return {
     name,
-    check: vi.fn().mockReturnValue(result),
+    check: vi.fn().mockResolvedValue(result),
   };
 }
 
@@ -124,7 +124,7 @@ describe('CritiqueLoop', () => {
     let callCount = 0;
     const breaker: CircuitBreaker = {
       name: 'counting-breaker',
-      check: vi.fn().mockImplementation((_state: LoopState) => {
+      check: vi.fn().mockImplementation(async (_state: LoopState) => {
         callCount++;
         // Trip on second call (before second iteration)
         if (callCount >= 2) {
@@ -141,6 +141,41 @@ describe('CritiqueLoop', () => {
     // First call: before iteration 0, passes. Second call: before iteration 1, trips.
     expect(callCount).toBe(2);
     expect(result.iterations).toHaveLength(1);
+  });
+
+  it('re-checks spend breakers after the terminal iteration (post phase)', async () => {
+    // A phase:'both' breaker that is under budget before the iteration but trips
+    // once the iteration's spend is recorded. Without the post-iteration check a
+    // passing terminal iteration would return 'pass' and never see the overage.
+    const breaker: CircuitBreaker = {
+      name: 'spend-breaker',
+      phase: 'both',
+      check: vi.fn().mockImplementation(async (state: LoopState) =>
+        state.iterations.length >= 1
+          ? { tripped: true, reason: 'over budget', action: 'halt' as const }
+          : { tripped: false },
+      ),
+    };
+    const loop = new CritiqueLoop(createPassingPipeline(), [breaker]);
+    const result = await loop.run(createInput('code'), createConfig());
+
+    expect(result.verdict).toBe('halted');
+    if (result.verdict === 'halted') {
+      expect(result.reason).toContain('over budget');
+    }
+    expect(result.iterations).toHaveLength(1);
+  });
+
+  it('does not consult a pre-only breaker after the iteration', async () => {
+    // Default-phase (pre) breakers must not run in the post phase.
+    const check = vi.fn().mockResolvedValue({ tripped: false });
+    const breaker: CircuitBreaker = { name: 'pre-only', check };
+    const loop = new CritiqueLoop(createPassingPipeline(), [breaker]);
+    const result = await loop.run(createInput('code'), createConfig());
+
+    expect(result.verdict).toBe('pass');
+    // One pre-check before the single (passing) iteration, none in the post phase.
+    expect(check).toHaveBeenCalledTimes(1);
   });
 
   it('builds correction request from failed evaluation findings', async () => {

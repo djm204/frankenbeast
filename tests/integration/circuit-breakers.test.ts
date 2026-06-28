@@ -65,9 +65,8 @@ describe('Circuit Breaker: MaxIteration (MOD-06)', () => {
 
 describe('Circuit Breaker: TokenBudget (MOD-06)', () => {
   it('token budget breaker can detect budget overruns', async () => {
-    // TokenBudgetBreaker's sync check() always returns { tripped: false }
-    // The async checkAsync() does the real budget checking.
-    // Test the breaker directly to verify the detection logic.
+    // TokenBudgetBreaker.check() is now async and performs the real budget
+    // check directly (the old sync check()/checkAsync() split was removed).
     const observability: ObservabilityPort = {
       getTokenSpend: vi.fn(async () => ({
         inputTokens: 80_000,
@@ -88,13 +87,9 @@ describe('Circuit Breaker: TokenBudget (MOD-06)', () => {
       taskId: 'task-001',
     };
 
-    // Sync check always passes
-    const syncResult = breaker.check(state, config);
-    expect(syncResult.tripped).toBe(false);
-
-    // Async check detects the overrun
-    const asyncResult = await breaker.checkAsync(state, config);
-    expect(asyncResult.tripped).toBe(true);
+    // The async check detects the overrun
+    const result = await breaker.check(state, config);
+    expect(result.tripped).toBe(true);
   });
 });
 

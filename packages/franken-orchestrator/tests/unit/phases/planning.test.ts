@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runPlanning, CritiqueSpiralError } from '../../../src/phases/planning.js';
+import { runPlanning, CritiqueSpiralError, CritiqueBudgetHaltError } from '../../../src/phases/planning.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
 import { makePlanner, makeCritique, makeLogger } from '../../helpers/stubs.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -162,6 +162,49 @@ describe('runPlanning', () => {
       expect(e).toBeInstanceOf(CritiqueSpiralError);
       expect((e as CritiqueSpiralError).iterations).toBe(3);
       expect((e as CritiqueSpiralError).lastScore).toBe(0.4);
+    }
+  });
+
+  it('halts terminally on a budget halt without replanning (regression: PR #343 P1)', async () => {
+    const c = ctx();
+    const planner = makePlanner();
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [{ evaluator: 'critique-loop', severity: 'high', message: 'Cost budget exceeded: $10.50 > $10.00' }],
+        score: 0,
+        halted: true,
+        haltReason: 'Cost budget exceeded: $10.50 > $10.00',
+      })),
+    });
+    const config = { ...defaultConfig(), maxCritiqueIterations: 3 };
+
+    await expect(runPlanning(c, planner, critique, config)).rejects.toThrow(CritiqueBudgetHaltError);
+
+    // The halt is terminal: exactly one plan was created, not one per iteration.
+    expect(planner.createPlan).toHaveBeenCalledTimes(1);
+    expect(critique.reviewPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it('CritiqueBudgetHaltError carries iteration and reason', async () => {
+    const c = ctx();
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [],
+        score: 0,
+        halted: true,
+        haltReason: 'Cost budget exceeded',
+      })),
+    });
+
+    try {
+      await runPlanning(c, makePlanner(), critique, { ...defaultConfig(), maxCritiqueIterations: 3 });
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(CritiqueBudgetHaltError);
+      expect((e as CritiqueBudgetHaltError).iterations).toBe(1);
+      expect((e as CritiqueBudgetHaltError).reason).toBe('Cost budget exceeded');
     }
   });
 

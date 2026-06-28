@@ -15,6 +15,21 @@ export class CritiqueSpiralError extends Error {
 }
 
 /**
+ * Thrown when the critique loop halts on a budget (or other halt-action) breaker.
+ * Distinct from CritiqueSpiralError: a halt is terminal and must stop planning
+ * immediately, not trigger another planner call.
+ */
+export class CritiqueBudgetHaltError extends Error {
+  constructor(
+    public readonly iterations: number,
+    public readonly reason: string,
+  ) {
+    super(`Critique halted at iteration ${iterations}: ${reason}`);
+    this.name = 'CritiqueBudgetHaltError';
+  }
+}
+
+/**
  * Beast Loop Phase 2: Planning + Critique Review
  * Creates a plan from the sanitized intent, then runs critique loop.
  * If critique fails after maxCritiqueIterations, throws CritiqueSpiralError.
@@ -106,6 +121,16 @@ export async function runPlanning(
       score: critiqueResult.score,
     });
     logger.debug('Planning: critique findings', { findings: critiqueResult.findings });
+
+    // A halt (e.g. the cost/token budget breaker) is terminal: stop here rather
+    // than looping into another planner.createPlan call, which would keep
+    // spending after the budget is already exhausted.
+    if (critiqueResult.halted) {
+      const reason = critiqueResult.haltReason ?? 'critique halted';
+      ctx.addAudit('critique', 'plan:halted', { iteration: i + 1, reason });
+      logger.warn('Planning: critique halted', { iteration: i + 1, reason });
+      throw new CritiqueBudgetHaltError(i + 1, reason);
+    }
 
     if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
       return; // Plan approved

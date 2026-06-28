@@ -52,6 +52,8 @@ export type CritiqueLoopResult =
 export interface LoopConfig {
   readonly maxIterations: number;
   readonly tokenBudget: number;
+  /** Optional USD cost budget; use for dollar-denominated budgets (e.g. CLI --budget). */
+  readonly costBudgetUsd?: number;
   readonly consensusThreshold: number;
   readonly sessionId: string;
   readonly taskId: string;
@@ -124,10 +126,14 @@ export class CritiquePortAdapter implements ICritiqueModule {
     }
 
     if (loopResult.verdict === 'halted') {
+      // A halt (e.g. budget breaker) is terminal: surface it so runPlanning can
+      // stop instead of treating it as ordinary critique feedback and replanning.
       return {
         verdict: 'fail',
         findings: [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.reason }],
         score: lastResult?.overallScore ?? 0,
+        halted: true,
+        haltReason: loopResult.reason,
       };
     }
 
