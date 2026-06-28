@@ -3,7 +3,16 @@ import type { Context, Next } from 'hono';
 
 export interface DiscordSignatureOptions {
   publicKey: string;
+  /**
+   * Maximum age (in seconds) an interaction timestamp may have, in either
+   * direction, before it is rejected as stale or excessively future-skewed.
+   * Defaults to 300 seconds (5 minutes).
+   */
+  toleranceSeconds?: number;
 }
+
+/** Default freshness window for Discord interaction timestamps (5 minutes). */
+const DEFAULT_TOLERANCE_SECONDS = 300;
 
 /**
  * Middleware for verifying Discord interaction signatures.
@@ -11,7 +20,7 @@ export interface DiscordSignatureOptions {
  * Follows: https://discord.com/developers/docs/interactions/receiving-and-responding#security-and-authorization
  */
 export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
-  const { publicKey } = options;
+  const { publicKey, toleranceSeconds = DEFAULT_TOLERANCE_SECONDS } = options;
 
   // Prepare the public key object once (Discord public keys are 32-byte hex strings)
   let keyObject: KeyObject | undefined;
@@ -33,6 +42,17 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
 
     if (!timestamp || !signature || !keyObject) {
       return c.json({ error: 'Missing security headers or invalid server config' }, 401);
+    }
+
+    // Reject stale or future-skewed timestamps to prevent replay of captured
+    // interactions. Discord sends X-Signature-Timestamp as seconds since epoch.
+    const timestampSeconds = Number(timestamp);
+    if (!Number.isFinite(timestampSeconds)) {
+      return c.json({ error: 'Invalid signature timestamp' }, 401);
+    }
+    const nowSeconds = Date.now() / 1000;
+    if (Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds) {
+      return c.json({ error: 'Stale signature timestamp' }, 401);
     }
 
     try {

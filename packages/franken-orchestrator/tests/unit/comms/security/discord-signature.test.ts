@@ -40,6 +40,80 @@ describe('discordSignatureMiddleware', () => {
     expect(res.status).toBe(200);
   });
 
+  it('rejects requests with a stale (expired) timestamp', async () => {
+    const keys = generateKeyPairSync('ed25519');
+    const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
+
+    const localApp = new Hono();
+    localApp.use('/discord/*', discordSignatureMiddleware({ publicKey: rawPublicKey }));
+    localApp.post('/discord/interactions', (c) => c.json({ ok: true }));
+
+    // Timestamp 10 minutes in the past — outside the default 5 minute window.
+    const timestamp = (Math.floor(Date.now() / 1000) - 600).toString();
+    const body = JSON.stringify({ type: 1 });
+    const message = Buffer.from(timestamp + body);
+    const signature = sign(null, message, keys.privateKey).toString('hex');
+
+    const res = await localApp.request('/discord/interactions', {
+      method: 'POST',
+      headers: {
+        'X-Signature-Ed25519': signature,
+        'X-Signature-Timestamp': timestamp,
+      },
+      body,
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects requests with a timestamp too far in the future', async () => {
+    const keys = generateKeyPairSync('ed25519');
+    const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
+
+    const localApp = new Hono();
+    localApp.use('/discord/*', discordSignatureMiddleware({ publicKey: rawPublicKey }));
+    localApp.post('/discord/interactions', (c) => c.json({ ok: true }));
+
+    // Timestamp 10 minutes in the future — excessive skew.
+    const timestamp = (Math.floor(Date.now() / 1000) + 600).toString();
+    const body = JSON.stringify({ type: 1 });
+    const message = Buffer.from(timestamp + body);
+    const signature = sign(null, message, keys.privateKey).toString('hex');
+
+    const res = await localApp.request('/discord/interactions', {
+      method: 'POST',
+      headers: {
+        'X-Signature-Ed25519': signature,
+        'X-Signature-Timestamp': timestamp,
+      },
+      body,
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects requests with a non-numeric timestamp', async () => {
+    const keys = generateKeyPairSync('ed25519');
+    const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
+
+    const localApp = new Hono();
+    localApp.use('/discord/*', discordSignatureMiddleware({ publicKey: rawPublicKey }));
+    localApp.post('/discord/interactions', (c) => c.json({ ok: true }));
+
+    const timestamp = 'not-a-timestamp';
+    const body = JSON.stringify({ type: 1 });
+    const message = Buffer.from(timestamp + body);
+    const signature = sign(null, message, keys.privateKey).toString('hex');
+
+    const res = await localApp.request('/discord/interactions', {
+      method: 'POST',
+      headers: {
+        'X-Signature-Ed25519': signature,
+        'X-Signature-Timestamp': timestamp,
+      },
+      body,
+    });
+    expect(res.status).toBe(401);
+  });
+
   it('rejects requests with invalid signatures', async () => {
     const keys = generateKeyPairSync('ed25519');
     const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
