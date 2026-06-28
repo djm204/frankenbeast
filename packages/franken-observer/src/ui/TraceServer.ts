@@ -93,7 +93,17 @@ export class TraceServer {
 
       const traceMatch = /^\/api\/traces\/([^/]+)$/.exec(path)
       if (traceMatch) {
-        const trace = await this.adapter.queryByTraceId(traceMatch[1])
+        // The client encodes the id with encodeURIComponent; pathname keeps it
+        // percent-encoded, so decode it back before lookup. Malformed encodings
+        // (e.g. a lone "%") throw URIError — treat those as "not found".
+        let traceId: string
+        try {
+          traceId = decodeURIComponent(traceMatch[1])
+        } catch {
+          json(res, 404, { error: 'trace not found' })
+          return
+        }
+        const trace = await this.adapter.queryByTraceId(traceId)
         if (!trace) { json(res, 404, { error: 'trace not found' }); return }
         json(res, 200, trace)
         return

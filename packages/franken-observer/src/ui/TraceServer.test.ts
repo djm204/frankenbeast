@@ -193,6 +193,23 @@ describe('TraceServer', () => {
       const body = await res.json() as Record<string, unknown>
       expect(body).toHaveProperty('error')
     })
+
+    it('decodes percent-encoded trace ids so they round-trip encodeURIComponent', async () => {
+      const trace = makeTrace('Special id')
+      trace.id = 'run:42@host+a&b=c;d,e'
+      await adapter.flush(trace)
+      const res = await fetch(`${server.url}/api/traces/${encodeURIComponent(trace.id)}`)
+      expect(res.status).toBe(200)
+      const body = await res.json() as { id: string }
+      expect(body.id).toBe(trace.id)
+    })
+
+    it('returns 404 JSON (not 500) for malformed percent-encoding', async () => {
+      const res = await fetch(`${server.url}/api/traces/%E0%A4%A`)
+      expect(res.status).toBe(404)
+      const body = await res.json() as Record<string, unknown>
+      expect(body).toHaveProperty('error')
+    })
   })
 
   describe('GET /unknown-path', () => {
