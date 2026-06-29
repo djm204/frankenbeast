@@ -85,7 +85,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         input: metadata,
       });
 
-      const baseHash = buildEventBaseHash(input.event, metadata, auditEvent.inputHash);
+      const baseHash = buildEventBaseHash(input.sessionId, input.event, metadata, auditEvent.inputHash);
       const hash = buildAuditHash(baseHash, lastRow?.hash);
       const result = store.db.prepare(`
         INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
@@ -176,8 +176,12 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     },
 
     async verify(sessionId) {
-      const rows = await this.trail(sessionId);
+      const rows = store.db.prepare(
+        'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+      ).all(sessionId) as AuditTrailRow[];
       let expectedParentHash: string | undefined;
+      let expectedUnboundParentHash: string | undefined;
+      let expectedLegacy16ParentHash: string | undefined;
 
       for (const [index, row] of rows.entries()) {
         const payload = parseMetadata(row.payload);
@@ -187,11 +191,18 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
           provider: 'fbeast-mcp',
           input: metadata,
         });
-        const baseHash = buildEventBaseHash(row.eventType, metadata, auditEvent.inputHash);
+        const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
+        const unboundBaseHash = buildLegacyEventBaseHash(row.eventType, metadata, auditEvent.inputHash);
+        const expectedUnboundHash = buildAuditHash(unboundBaseHash, expectedUnboundParentHash);
+        const legacy16BaseHash = buildLegacy16EventBaseHash(row.eventType, metadata, auditEvent.inputHash);
+        const expectedLegacy16Hash = buildLegacy16AuditHash(legacy16BaseHash, expectedLegacy16ParentHash);
         const actualParentHash = row.parentHash ?? undefined;
+        const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
+        const matchesUnboundLegacy = actualParentHash === expectedUnboundParentHash && row.hash === expectedUnboundHash;
+        const matchesLegacy16 = actualParentHash === expectedLegacy16ParentHash && row.hash === expectedLegacy16Hash;
 
-        if (actualParentHash !== expectedParentHash || row.hash !== expectedHash) {
+        if (!matchesCurrent && !matchesUnboundLegacy && !matchesLegacy16) {
           return {
             ok: false,
             checked: index,
@@ -205,12 +216,22 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
           };
         }
 
-        expectedParentHash = row.hash;
+        if (!matchesCurrent) {
+          migrateAuditRow(store, row.id, expectedHash, expectedParentHash);
+        }
+
+        expectedParentHash = expectedHash;
+        expectedUnboundParentHash = expectedUnboundHash;
+        expectedLegacy16ParentHash = expectedLegacy16Hash;
       }
 
       return { ok: true, checked: rows.length };
     },
   };
+}
+
+interface AuditTrailRow extends ObserverTrailEntry {
+  id: number;
 }
 
 function buildAuditHash(baseHash: string, parentHash?: string): string {
@@ -221,8 +242,32 @@ function buildAuditHash(baseHash: string, parentHash?: string): string {
   return hashContent(`${parentHash}:${baseHash}`);
 }
 
-function buildEventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
+function buildEventBaseHash(sessionId: string, eventType: string, metadata: string, inputHash?: string): string {
+  return hashContent(`${sessionId}:${eventType}:${inputHash ?? ''}:${metadata}`);
+}
+
+function buildLegacyEventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
   return hashContent(`${eventType}:${inputHash ?? ''}:${metadata}`);
+}
+
+function buildLegacy16AuditHash(baseHash: string, parentHash?: string): string {
+  if (!parentHash) {
+    return baseHash;
+  }
+
+  return toLegacy16Hash(`${parentHash}:${baseHash}`);
+}
+
+function buildLegacy16EventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
+  return toLegacy16Hash(`${eventType}:${inputHash ?? ''}:${metadata}`);
+}
+
+function toLegacy16Hash(content: string): string {
+  return hashContent(content).replace(/^sha256:/, '').slice(0, 16);
+}
+
+function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {
+  store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
 }
 
 function parseMetadata(metadata: string): unknown {

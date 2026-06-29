@@ -110,20 +110,28 @@ async function dispatchTool(
   });
   try {
     const result = await tool.handler(validated.value);
-    await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
-      ok: !result.isError,
-      durationMs: Date.now() - startedAt,
-      outputSummary: summarizeResult(result),
-      outputHash: hashJson(result),
-    });
+    try {
+      await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
+        ok: !result.isError,
+        durationMs: Date.now() - startedAt,
+        outputSummary: summarizeResult(result),
+        outputHash: hashJson(result),
+      });
+    } catch {
+      // Audit persistence must not turn an otherwise successful tool call into an error.
+    }
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
-      ok: false,
-      durationMs: Date.now() - startedAt,
-      error: message,
-    });
+    try {
+      await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        error: message,
+      });
+    } catch {
+      // Preserve the tool handler failure instead of replacing it with an audit failure.
+    }
     return {
       content: [{ type: 'text' as const, text: `Error: ${message}` }],
       isError: true,
