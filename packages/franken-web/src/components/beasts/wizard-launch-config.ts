@@ -11,5 +11,14 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
     }
   }
 
+  const workflow = config.workflow as Record<string, unknown> | undefined;
+  if (workflow?.workflowType === 'chunk-plan' && typeof workflow.docPath === 'string') {
+    config.designDocPath = workflow.docPath;
+  }
+
+  if (workflow?.workflowType === 'chunk-plan' && typeof workflow.outputDir === 'string') {
+    config.outputDir = workflow.outputDir;
+  }
+
   return config;
 }

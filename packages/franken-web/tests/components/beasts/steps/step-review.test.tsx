@@ -29,12 +29,14 @@ describe('StepReview', () => {
 
   it('launches with the shared wizard config shape for non-default workflows', () => {
     const onLaunch = vi.fn();
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md' });
     useBeastStore.getState().setStepValues(2, { defaultProvider: 'codex', defaultModel: 'gpt-5.1' });
     render(<StepReview onLaunch={onLaunch} />);
     fireEvent.click(screen.getByText('Launch'));
     expect(onLaunch).toHaveBeenCalledWith({
       identity: { name: 'Test Agent', description: 'A test agent' },
-      workflow: { workflowType: 'design-interview' },
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md' },
+      designDocPath: 'docs/design.md',
       llm: { defaultProvider: 'codex', defaultModel: 'gpt-5.1' },
     });
     expect(onLaunch.mock.calls[0]?.[0]).not.toHaveProperty('workflow_type');
