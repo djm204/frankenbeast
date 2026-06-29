@@ -640,8 +640,12 @@ function createSkillDeps(consolidated: ConsolidatedDeps, allowedSkills?: string[
   const cliSkillCompat = (id: string) => id.startsWith('cli:');
   return allowedSkills?.length
     ? {
-        hasSkill: (id: string) => cliSkillCompat(id) || (allowedSkills.includes(id) && baseSkills.hasSkill(id)),
-        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => allowedSkills.includes(s.id)),
+        hasSkill: (id: string) => cliSkillCompat(id) || baseSkills.getAvailableSkills().some((s) => (
+          s.id === id && (allowedSkills.includes(s.id) || Boolean(s.parentSkillId && allowedSkills.includes(s.parentSkillId)))
+        )),
+        getAvailableSkills: () => baseSkills.getAvailableSkills().filter((s) => (
+          allowedSkills.includes(s.id) || Boolean(s.parentSkillId && allowedSkills.includes(s.parentSkillId))
+        )),
         execute: baseSkills.execute,
       }
     : {

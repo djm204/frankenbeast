@@ -34,7 +34,7 @@ import { AnthropicApiAdapter } from '../providers/anthropic-api-adapter.js';
 import { OpenAiApiAdapter } from '../providers/openai-api-adapter.js';
 import { GeminiApiAdapter } from '../providers/gemini-api-adapter.js';
 
-import type { BeastLoopDeps, IObserverModule } from '../deps.js';
+import type { BeastLoopDeps, IObserverModule, McpToolInfo } from '../deps.js';
 import type { ILlmProvider } from '@franken/types';
 import type { AggregatedTokenUsage } from '../providers/token-aggregator.js';
 
@@ -81,6 +81,7 @@ export interface ExistingDeps {
   graphBuilder?: BeastLoopDeps['graphBuilder'];
   prCreator?: BeastLoopDeps['prCreator'];
   cliExecutor?: BeastLoopDeps['cliExecutor'];
+  mcp?: BeastLoopDeps['mcp'];
   checkpoint?: BeastLoopDeps['checkpoint'];
   refreshPlanTasks?: BeastLoopDeps['refreshPlanTasks'];
   runConfigOverrides?: BeastLoopDeps['runConfigOverrides'];
@@ -182,7 +183,7 @@ export function createBeastDeps(
     'unknown',
     replayStore,
   );
-  const mcp = new McpSdkAdapter();
+  const mcp = existingDeps.mcp ?? new McpSdkAdapter(collectEnabledMcpTools(skillManager));
 
   return {
     firewall,
@@ -227,6 +228,18 @@ export function createBeastDeps(
     ...(existingDeps.refreshPlanTasks ? { refreshPlanTasks: existingDeps.refreshPlanTasks } : {}),
     ...(existingDeps.runConfigOverrides ? { runConfigOverrides: existingDeps.runConfigOverrides } : {}),
   } as ConsolidatedDeps;
+}
+
+function collectEnabledMcpTools(skillManager: SkillManager): McpToolInfo[] {
+  return skillManager.getEnabledSkills().flatMap((skillName) => {
+    const tools = skillManager.readTools(skillName);
+    return tools.map((tool) => ({
+      name: tool.name,
+      serverId: skillName,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
+  });
 }
 
 function buildProviderList(

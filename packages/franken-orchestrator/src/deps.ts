@@ -44,6 +44,7 @@ export interface SkillDescriptor {
   readonly name: string;
   readonly requiresHitl: boolean;
   readonly executionType: 'llm' | 'function' | 'mcp' | 'cli';
+  readonly parentSkillId?: string | undefined;
 }
 
 export interface SkillInput {
@@ -182,7 +183,7 @@ export interface HeartbeatPulseResult {
 }
 
 export interface IMcpModule {
-  callTool(name: string, args: unknown): Promise<McpToolCallResult>;
+  callTool(name: string, args: unknown, serverId?: string | undefined): Promise<McpToolCallResult>;
   getAvailableTools(): readonly McpToolInfo[];
 }
 
@@ -195,6 +196,7 @@ export interface McpToolInfo {
   readonly name: string;
   readonly serverId: string;
   readonly description: string;
+  readonly inputSchema?: Record<string, unknown> | undefined;
 }
 
 /** Checkpoint persistence for crash recovery. */

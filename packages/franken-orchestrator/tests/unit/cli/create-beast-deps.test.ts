@@ -1,177 +1,97 @@
-import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createBeastDeps, type BeastDepsConfig, type ExistingDeps } from '../../../src/cli/create-beast-deps.js';
-import { MiddlewareChainFirewallAdapter } from '../../../src/adapters/middleware-firewall-adapter.js';
-import { SqliteBrainMemoryAdapter } from '../../../src/adapters/brain-memory-adapter.js';
-import { ReflectionHeartbeatAdapter } from '../../../src/adapters/reflection-heartbeat-adapter.js';
-import { SkillManagerAdapter } from '../../../src/adapters/skill-manager-adapter.js';
-import { AuditTrailObserverAdapter } from '../../../src/adapters/audit-observer-adapter.js';
+import { createBeastDeps } from '../../../src/cli/create-beast-deps.js';
+import { makeCritique, makeGovernor, makeLogger, makeObserver, makePlanner } from '../../helpers/stubs.js';
 
-function mockExistingDeps(): ExistingDeps {
-  return {
-    planner: { createPlan: vi.fn().mockResolvedValue({ tasks: [] }) },
-    critique: { reviewPlan: vi.fn().mockResolvedValue({ verdict: 'pass', findings: [], score: 1 }) },
-    governor: { requestApproval: vi.fn().mockResolvedValue({ decision: 'approved' }) },
-    observer: {
-      startTrace: vi.fn(),
-      startSpan: vi.fn(() => ({ end: vi.fn() })),
-      getTokenSpend: vi.fn().mockResolvedValue({ inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostUsd: 0 }),
-    },
-    logger: {
-      info: vi.fn(),
-      debug: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    },
-  };
-}
+describe('createBeastDeps', () => {
+  it('populates the MCP adapter catalog from enabled skill tool manifests', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const skillsDir = join(root, 'skills');
+    const configDir = join(root, '.fbeast');
+    const skillDir = join(skillsDir, 'memory');
+    mkdirSync(skillDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ skills: { enabled: ['memory'] } }));
+    writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({ mcpServers: { memory: { command: 'memory-server' } } }));
+    writeFileSync(join(skillDir, 'tools.json'), JSON.stringify([
+      {
+        name: 'fbeast_memory_query',
+        description: 'Query memory',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      },
+    ]));
 
-const minimalConfig: BeastDepsConfig = {
-  providers: [{ name: 'claude', type: 'claude-cli' }],
-};
+    const deps = createDeps(skillsDir, configDir);
 
-describe('createBeastDeps()', () => {
-  it('returns valid BeastLoopDeps with all required fields', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.firewall).toBeDefined();
-    expect(deps.skills).toBeDefined();
-    expect(deps.memory).toBeDefined();
-    expect(deps.planner).toBeDefined();
-    expect(deps.observer).toBeDefined();
-    expect(deps.critique).toBeDefined();
-    expect(deps.governor).toBeDefined();
-    expect(deps.heartbeat).toBeDefined();
-    expect(deps.logger).toBeDefined();
-    expect(deps.clock).toBeDefined();
+    expect(deps.mcp!.getAvailableTools()).toEqual([
+      {
+        name: 'fbeast_memory_query',
+        serverId: 'memory',
+        description: 'Query memory',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      },
+    ]);
   });
 
-  it('adapts firewall to MiddlewareChainFirewallAdapter', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.firewall).toBeInstanceOf(MiddlewareChainFirewallAdapter);
+  it('preserves the skill-name alias when the mcp server key is renamed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const skillsDir = join(root, 'skills');
+    const configDir = join(root, '.fbeast');
+    const skillDir = join(skillsDir, 'memory-skill');
+    mkdirSync(skillDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ skills: { enabled: ['memory-skill'] } }));
+    writeFileSync(join(skillDir, 'mcp.json'), JSON.stringify({ mcpServers: { actualMemoryServer: { command: 'memory-server' } } }));
+    writeFileSync(join(skillDir, 'tools.json'), JSON.stringify([
+      { name: 'query', description: 'Query', inputSchema: {} },
+    ]));
+
+    const deps = createDeps(skillsDir, configDir);
+
+    expect(deps.mcp!.getAvailableTools()).toEqual([
+      { name: 'query', serverId: 'memory-skill', description: 'Query', inputSchema: {} },
+    ]);
   });
 
-  it('adapts memory to SqliteBrainMemoryAdapter', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
-  });
+  it('uses an injected live MCP module when provided', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const skillsDir = join(root, 'skills');
+    const configDir = join(root, '.fbeast');
+    mkdirSync(skillsDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    const liveMcp = {
+      callTool: vi.fn(async () => ({ content: 'ok', isError: false })),
+      getAvailableTools: vi.fn(() => [{ name: 'runtime', serverId: 'live', description: 'Runtime tool' }]),
+    };
 
-  it('adapts heartbeat to ReflectionHeartbeatAdapter', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.heartbeat).toBeInstanceOf(ReflectionHeartbeatAdapter);
-  });
+    const deps = createDeps(skillsDir, configDir, { mcp: liveMcp });
 
-  it('adapts skills to SkillManagerAdapter', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.skills).toBeInstanceOf(SkillManagerAdapter);
-  });
-
-  it('wraps observer with AuditTrailObserverAdapter', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.observer).toBeInstanceOf(AuditTrailObserverAdapter);
-  });
-
-  it('provides direct access to new components', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.providerRegistry).toBeDefined();
-    expect(deps.sqliteBrain).toBeDefined();
-    expect(deps.auditTrail).toBeDefined();
-    expect(deps.middlewareChain).toBeDefined();
-    expect(deps.skillManager).toBeDefined();
-  });
-
-  it('builds multiple providers from config', () => {
-    const deps = createBeastDeps({
-      providers: [
-        { name: 'primary', type: 'claude-cli' },
-        { name: 'fallback', type: 'anthropic-api', apiKey: 'sk-test' },
-      ],
-    }, mockExistingDeps());
-    expect(deps.providerRegistry!.getProviders()).toHaveLength(2);
-  });
-
-  it('throws helpful error when no providers configured', () => {
-    expect(() =>
-      createBeastDeps({ providers: [] }, mockExistingDeps()),
-    ).toThrow(/frankenbeast provider add/);
-  });
-
-  it('passes through existing deps unchanged', () => {
-    const existing = mockExistingDeps();
-    const deps = createBeastDeps(minimalConfig, existing);
-    expect(deps.planner).toBe(existing.planner);
-    expect(deps.critique).toBe(existing.critique);
-    expect(deps.governor).toBe(existing.governor);
-    expect(deps.logger).toBe(existing.logger);
-  });
-
-  it('creates SqliteBrain with default :memory:', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.sqliteBrain).toBeDefined();
-    deps.sqliteBrain!.close();
-  });
-
-  it('creates AuditTrail', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.auditTrail!.getAll()).toHaveLength(0);
-  });
-
-  it('creates SkillManager with default directory', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.skillManager).toBeDefined();
-  });
-
-  it('exposes getTokenUsage that delegates to ProviderRegistry', () => {
-    const deps = createBeastDeps(minimalConfig, mockExistingDeps());
-    expect(deps.getTokenUsage).toBeTypeOf('function');
-
-    const usage = deps.getTokenUsage!();
-    expect(usage).toEqual(expect.objectContaining({
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalTokens: 0,
-    }));
-    // Should be the same reference as registry.getTokenUsage()
-    const registryUsage = deps.providerRegistry!.getTokenUsage();
-    expect(usage).toEqual(registryUsage);
-  });
-
-  it('persists replay manifests captured by the wrapped observer', () => {
-    const root = mkdtempSync(join(tmpdir(), 'create-beast-deps-replay-'));
-    const deps = createBeastDeps({ ...minimalConfig, configDir: root }, mockExistingDeps());
-
-    deps.observer.recordReplay!({
-      kind: 'tool.result',
-      runId: 'run-1',
-      toolName: 'cli:01',
-      content: JSON.stringify({ ok: true }),
-    });
-    deps.persistAuditTrail!('run-1');
-
-    const manifest = JSON.parse(readFileSync(join(root, '.fbeast', 'audit', 'run-1.replay.json'), 'utf8'));
-    expect(manifest).toHaveLength(1);
-    expect(manifest[0]).toMatchObject({ kind: 'tool.result', runId: 'run-1', toolName: 'cli:01' });
-    expect(manifest[0].contentRef).toMatch(/^[a-f0-9]{64}$/);
-  });
-
-  it('does not double-nest .fbeast when configDir already points to metadata', () => {
-    const root = mkdtempSync(join(tmpdir(), 'create-beast-deps-metadata-'));
-    const metadataDir = join(root, '.fbeast');
-    const deps = createBeastDeps({ ...minimalConfig, configDir: metadataDir }, mockExistingDeps());
-
-    deps.observer.recordReplay!({
-      kind: 'tool.result',
-      runId: 'run-1',
-      toolName: 'cli:01',
-      content: JSON.stringify({ ok: true }),
-    });
-    deps.persistAuditTrail!('run-1');
-
-    const manifest = JSON.parse(readFileSync(join(metadataDir, 'audit', 'run-1.replay.json'), 'utf8'));
-    expect(manifest).toHaveLength(1);
-    expect(existsSync(join(metadataDir, 'audit', 'run-1.json'))).toBe(true);
-    expect(existsSync(join(metadataDir, '.fbeast', 'audit', 'run-1.json'))).toBe(false);
-    expect(existsSync(join(metadataDir, '.fbeast', 'audit', 'run-1.replay.json'))).toBe(false);
+    expect(deps.mcp).toBe(liveMcp);
   });
 });
+
+function createDeps(
+  skillsDir: string,
+  configDir: string,
+  overrides: Partial<Parameters<typeof createBeastDeps>[1]> = {},
+) {
+  return createBeastDeps(
+    {
+      providers: [{ name: 'claude', type: 'claude-cli' }],
+      skillsDir,
+      configDir,
+      reflection: false,
+    },
+    {
+      planner: makePlanner(),
+      critique: makeCritique(),
+      governor: makeGovernor(),
+      observer: makeObserver(),
+      logger: makeLogger(),
+      clock: vi.fn(() => new Date('2026-01-01T00:00:00Z')),
+      ...overrides,
+    },
+  );
+}

@@ -7,6 +7,7 @@ import type {
   PlanTask,
   SkillInput,
   IMcpModule,
+  McpToolInfo,
   MemoryContext,
   ILogger,
   ICheckpointStore,
@@ -158,7 +159,7 @@ async function executeTask(
   observer: IObserverModule,
   ctx: BeastContext,
   completedOutputs: ReadonlyMap<string, unknown>,
-  _mcp?: IMcpModule,
+  mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
@@ -211,7 +212,7 @@ async function executeTask(
       }
     }
 
-    // Execute (placeholder — real execution calls skill registry)
+    // Execute through the concrete path declared by each skill descriptor.
     ctx.addAudit('executor', 'task:start', { taskId: task.id, objective: task.objective });
 
     const dependencyOutputs = new Map<string, unknown>();
@@ -277,7 +278,8 @@ async function executeTask(
 
     for (const skillId of task.requiredSkills) {
       const descriptor = availableSkills.find(sk => sk.id === skillId);
-      const isCli = descriptor?.executionType === 'cli';
+      const isCli = descriptor?.executionType === 'cli' || (!descriptor && skillId.startsWith('cli:'));
+      const isMcp = descriptor?.executionType === 'mcp';
 
       let result;
       if (isCli) {
@@ -285,6 +287,8 @@ async function executeTask(
           throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
         }
         result = await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
+      } else if (isMcp) {
+        result = await executeMcpSkill(skillId, baseInput, mcp);
       } else {
         result = await skills.execute(skillId, baseInput);
       }
@@ -336,6 +340,132 @@ async function executeTask(
   } finally {
     span.end({ taskId: task.id });
   }
+}
+
+async function executeMcpSkill(
+  skillId: string,
+  input: SkillInput,
+  mcp?: IMcpModule,
+): Promise<{ output: unknown; tokensUsed: number }> {
+  if (!mcp) {
+    throw new Error(
+      `MCP skill '${skillId}' requires an IMcpModule but none was provided. ` +
+        'Wire a live MCP module into runExecution/createBeastDeps or disable the MCP skill.',
+    );
+  }
+
+  const tool = resolveMcpTool(skillId, mcp.getAvailableTools());
+  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input, tool.inputSchema), tool.serverId);
+
+  if (result.isError) {
+    throw new Error(`MCP skill '${skillId}' failed via tool '${tool.name}': ${String(result.content)}`);
+  }
+
+  return { output: result.content, tokensUsed: 0 };
+}
+
+function resolveMcpTool(
+  skillId: string,
+  tools: ReturnType<IMcpModule['getAvailableTools']>,
+): McpToolInfo {
+  const namespaced = parseNamespacedToolId(skillId);
+  if (namespaced) {
+    const matches = tools.filter(tool => tool.serverId === namespaced.serverId && tool.name === namespaced.toolName);
+    if (matches.length === 1) return matches[0]!;
+    if (matches.length > 1) {
+      throw new Error(`MCP skill '${skillId}' is ambiguous: multiple MCP tools match that namespaced id.`);
+    }
+  }
+
+  const byName = tools.filter(tool => tool.name === skillId);
+  const byServer = tools.filter(tool => tool.serverId === skillId);
+
+  if (byName.length > 1) {
+    throw new Error(
+      `MCP skill '${skillId}' is ambiguous: multiple MCP servers expose a tool named '${skillId}' ` +
+        `(${byName.map(tool => tool.serverId).join(', ')}). Use an unambiguous server/tool id.`,
+    );
+  }
+
+  const exactTool = byName[0];
+  if (exactTool && exactTool.serverId === skillId) return exactTool;
+
+  if (exactTool && byServer.length > 0) {
+    throw new Error(
+      `MCP skill '${skillId}' is ambiguous: it matches tool '${exactTool.name}' from server '${exactTool.serverId}' ` +
+        `and server '${skillId}' tools (${byServer.map(tool => tool.name).join(', ')}). ` +
+        'Use an unambiguous tool id or server id.',
+    );
+  }
+
+  if (exactTool) return exactTool;
+  if (byServer.length === 1) return byServer[0]!;
+
+  if (byServer.length > 1) {
+    throw new Error(
+      `MCP skill '${skillId}' maps to multiple MCP tools (${byServer.map(tool => tool.name).join(', ')}). ` +
+        'Use a required skill id that matches the intended MCP tool name, or expose exactly one tool for this skill server.',
+    );
+  }
+
+  const available = tools.map(tool => `${tool.serverId}/${tool.name}`).join(', ') || 'none';
+  throw new Error(
+    `MCP skill '${skillId}' is enabled but no matching MCP tool/server is available. ` +
+      `Expected a tool named '${skillId}' or exactly one tool from server '${skillId}'. Available MCP tools: ${available}. ` +
+      'Start/configure the MCP server or disable the skill.',
+  );
+}
+
+function parseNamespacedToolId(skillId: string): { serverId: string; toolName: string } | undefined {
+  const separator = skillId.indexOf('/');
+  if (separator <= 0 || separator === skillId.length - 1) return undefined;
+  return {
+    serverId: skillId.slice(0, separator),
+    toolName: skillId.slice(separator + 1),
+  };
+}
+
+function serializeMcpSkillInput(input: SkillInput, inputSchema?: Record<string, unknown>): Record<string, unknown> {
+  const genericInput = {
+    objective: input.objective,
+    context: input.context,
+    dependencyOutputs: Object.fromEntries(input.dependencyOutputs),
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+  };
+
+  const properties = getSchemaProperties(inputSchema);
+  if (!properties) return genericInput;
+
+  const schemaInput: Record<string, unknown> = {};
+  for (const key of Object.keys(properties)) {
+    if (key in genericInput) {
+      schemaInput[key] = genericInput[key as keyof typeof genericInput];
+    }
+  }
+
+  if ('query' in properties && !('query' in schemaInput)) {
+    schemaInput.query = input.objective;
+  }
+  if ('prompt' in properties && !('prompt' in schemaInput)) {
+    schemaInput.prompt = input.objective;
+  }
+  if ('input' in properties && !('input' in schemaInput)) {
+    schemaInput.input = input.objective;
+  }
+  if ('content' in properties && !('content' in schemaInput)) {
+    schemaInput.content = input.objective;
+  }
+
+  return schemaInput;
+}
+
+function getSchemaProperties(inputSchema: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const properties = inputSchema?.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return undefined;
+  }
+  return properties as Record<string, unknown>;
 }
 
 function resolveMemoryContext(

@@ -13,25 +13,62 @@ export class SkillManagerAdapter implements ISkillsModule {
   constructor(private readonly manager: SkillManager) {}
 
   hasSkill(skillId: string): boolean {
-    return this.manager.getEnabledSkills().includes(skillId);
+    return this.manager.getEnabledSkills().some((enabledSkill) => {
+      const tools = this.manager.readTools(enabledSkill);
+      return (
+        (enabledSkill === skillId && isServerAliasExecutable(enabledSkill, tools)) ||
+        tools.some(tool => tool.name === skillId || namespacedToolId(enabledSkill, tool.name) === skillId)
+      );
+    });
   }
 
   getAvailableSkills(): readonly SkillDescriptor[] {
-    return this.manager.getEnabledSkills().map((name) => ({
-      id: name,
-      name,
-      requiresHitl: false,
-      executionType: 'mcp' as const,
-    }));
+    return this.manager.getEnabledSkills().flatMap((name) => {
+      const tools = this.manager.readTools(name);
+      const descriptors: SkillDescriptor[] = [];
+
+      if (isServerAliasExecutable(name, tools)) {
+        descriptors.push(createDescriptor(name, name));
+      }
+
+      for (const tool of tools) {
+        if (tool.name !== name) {
+          descriptors.push(createDescriptor(tool.name, tool.name, name));
+        }
+        descriptors.push(createDescriptor(namespacedToolId(name, tool.name), tool.name, name));
+      }
+
+      return descriptors;
+    });
   }
 
   async execute(skillId: string, input: SkillInput): Promise<SkillResult> {
-    // SkillManager manages directory config, not direct execution.
-    // Skill execution happens through CliSkillExecutor or MCP SDK.
-    // This adapter provides the metadata layer; execution is delegated.
-    return {
-      output: `Skill ${skillId} executed for: ${input.objective}`,
-      tokensUsed: 0,
-    };
+    void input;
+    throw new Error(
+      `MCP skill '${skillId}' cannot be executed by SkillManagerAdapter directly. ` +
+        'Provide an IMcpModule to runExecution so executionType=mcp skills can be dispatched to a real MCP tool/server, ' +
+        'or configure the skill as executionType=cli/function/llm with an executor that implements that path.',
+    );
   }
+}
+
+function createDescriptor(id: string, name: string, parentSkillId?: string): SkillDescriptor {
+  return {
+    id,
+    name,
+    ...(parentSkillId ? { parentSkillId } : {}),
+    requiresHitl: false,
+    executionType: 'mcp',
+  };
+}
+
+function namespacedToolId(skillName: string, toolName: string): string {
+  return `${skillName}/${toolName}`;
+}
+
+function isServerAliasExecutable(
+  skillName: string,
+  tools: ReturnType<SkillManager['readTools']>,
+): boolean {
+  return tools.length === 0 || tools.length === 1 || tools.some(tool => tool.name === skillName);
 }
