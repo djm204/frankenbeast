@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { useBeastStore } from '../../../stores/beast-store';
-
-const SECTION_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git'];
+import { buildWizardLaunchConfig } from '../wizard-launch-config';
 
 interface StepReviewProps {
   onLaunch: (config: Record<string, unknown>) => void;
@@ -11,13 +10,7 @@ export function StepReview({ onLaunch }: StepReviewProps) {
   const { stepValues, setWizardStep } = useBeastStore();
 
   function handleLaunch() {
-    const config: Record<string, unknown> = {};
-    for (let i = 0; i < SECTION_LABELS.length; i++) {
-      if (stepValues[i]) {
-        config[SECTION_LABELS[i]!.toLowerCase().replace(/ /g, '_')] = stepValues[i];
-      }
-    }
-    onLaunch(config);
+    onLaunch(buildWizardLaunchConfig(stepValues));
   }
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;

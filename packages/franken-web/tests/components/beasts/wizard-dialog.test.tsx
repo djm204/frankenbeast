@@ -29,4 +29,19 @@ describe('WizardDialog', () => {
     const toggle = screen.getByText(/form view/i) || screen.getByText(/form/i);
     expect(toggle).toBeTruthy();
   });
+
+  it('footer launch uses the shared config shape for non-default workflows', () => {
+    const onLaunch = vi.fn();
+    useBeastStore.getState().setStepValues(0, { name: 'Footer Agent' });
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md' });
+    useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
+
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={onLaunch} />);
+    fireEvent.click(screen.getByText('Launch Agent'));
+
+    expect(onLaunch).toHaveBeenCalledWith({
+      identity: { name: 'Footer Agent' },
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md' },
+    });
+  });
 });
