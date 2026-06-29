@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { runUninstall } from './uninstall.js';
 import { runInit } from './init.js';
 import { confirmYesNo } from './prompt.js';
+import { codexServerName, codexServerNames } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -241,9 +242,13 @@ describe('fbeast uninstall', () => {
 
     await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
 
-    // Each server gets a remove call (7 individual + fbeast-proxy = 8)
+    // Each namespaced server gets a remove call (7 individual + project proxy = 8)
     expect(spawnCalls.length).toBe(8);
     expect(spawnCalls.every((c) => c.args[1] === 'remove')).toBe(true);
+    expect(spawnCalls.map((c) => c.args[2])).toEqual([
+      ...codexServerNames(root, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
+      codexServerName(root, 'proxy'),
+    ]);
 
     // hooks.json has no fbeast entries left
     const hooksPath = join(root, '.codex', 'hooks.json');
@@ -283,7 +288,7 @@ describe('fbeast uninstall', () => {
     expect(existsSync(legacyPostScript)).toBe(false);
   });
 
-  it('codex uninstall runs codex mcp remove fbeast-proxy', async () => {
+  it('codex uninstall runs codex mcp remove for the project namespaced fbeast-proxy', async () => {
     const root = tmpDir();
     dirs.push(root);
     const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
@@ -297,7 +302,37 @@ describe('fbeast uninstall', () => {
     const removedNames = spawnCalls
       .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
       .map((c) => c.args[2]);
-    expect(removedNames).toContain('fbeast-proxy');
+    expect(removedNames).toContain(codexServerName(root, 'proxy'));
+    expect(removedNames).not.toContain('fbeast-proxy');
+  });
+
+  it('codex uninstall removes only this project names and does not target another project', async () => {
+    const rootA = tmpDir();
+    const rootB = tmpDir();
+    dirs.push(rootA, rootB);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return { status: 0 };
+    };
+
+    await runUninstall({ root: rootA, claudeDir: join(rootA, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    const projectANames = [
+      ...codexServerNames(rootA, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
+      codexServerName(rootA, 'proxy'),
+    ];
+    const projectBNames = [
+      ...codexServerNames(rootB, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
+      codexServerName(rootB, 'proxy'),
+    ];
+
+    expect(removedNames).toEqual(projectANames);
+    expect(removedNames.some((name) => projectBNames.includes(name))).toBe(false);
+    expect(removedNames).not.toContain('fbeast-memory');
   });
 
   it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {

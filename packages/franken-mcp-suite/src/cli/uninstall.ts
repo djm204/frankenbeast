@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
+import { codexServerNames } from './codex-server-names.js';
+import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
   root: string;
@@ -103,9 +105,8 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
 
-const ALL_SERVER_NAMES = [
-  'fbeast-memory', 'fbeast-planner', 'fbeast-critique', 'fbeast-firewall',
-  'fbeast-observer', 'fbeast-governor', 'fbeast-skills', 'fbeast-proxy',
+const ALL_SERVERS: FbeastServer[] = [
+  'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
 ];
 
 const AGENTS_MD_START = '<!-- fbeast-start -->';
@@ -117,8 +118,10 @@ function uninstallCodex(options: {
 }): void {
   const { root, spawnFn } = options;
 
-  // Remove MCP servers via codex mcp remove
-  for (const name of ALL_SERVER_NAMES) {
+  // Remove only this project's namespaced MCP servers. Codex MCP server names
+  // are global, so fixed legacy names such as `fbeast-memory` may belong to a
+  // different checkout and must not be blindly removed.
+  for (const name of [...codexServerNames(root, ALL_SERVERS, 'standard'), ...codexServerNames(root, ALL_SERVERS, 'proxy')]) {
     spawnFn('codex', ['mcp', 'remove', name]);
   }
 

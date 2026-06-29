@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
+import { codexServerName } from './codex-server-names.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -140,14 +141,15 @@ function initCodex(options: {
 
   // Register MCP servers via codex mcp add
   if (mode === 'proxy') {
-    const result = spawnFn('codex', ['mcp', 'add', 'fbeast-proxy', '--', 'fbeast-proxy', '--db', dbPath]);
+    const name = codexServerName(root, 'proxy');
+    const result = spawnFn('codex', ['mcp', 'add', name, '--', 'fbeast-proxy', '--db', dbPath]);
     if (result.status !== 0) {
-      throw new Error(`fbeast init: failed to register fbeast-proxy with codex: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
+      throw new Error(`fbeast init: failed to register ${name} with codex: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
     }
   } else {
     const failed: string[] = [];
     for (const srv of servers) {
-      const name = `fbeast-${srv}`;
+      const name = codexServerName(root, srv);
       const result = spawnFn('codex', ['mcp', 'add', name, '--', SERVER_BIN_MAP[srv], '--db', dbPath]);
       if (result.status !== 0) {
         failed.push(name);
@@ -175,7 +177,7 @@ function initCodex(options: {
   console.log(`  Config:   ${config.configPath}`);
   console.log(`  Database: ${config.dbPath}`);
   console.log(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
-  console.log(`  Servers:  ${mode === 'proxy' ? 'fbeast-proxy (proxy mode, registered via codex mcp add)' : `${servers.join(', ')} (registered via codex mcp add)`}`);
+  console.log(`  Servers:  ${mode === 'proxy' ? `${codexServerName(root, 'proxy')} (proxy mode, registered via codex mcp add)` : `${servers.map((srv) => codexServerName(root, srv)).join(', ')} (registered via codex mcp add)`}`);
   if (hooks) console.log(`  Hooks:    enabled (codex hooks.json)`);
 }
 
