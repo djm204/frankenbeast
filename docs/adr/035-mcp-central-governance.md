@@ -59,28 +59,45 @@ tool calls are checked regardless of whether client hooks are installed. We
   inside the `execute_tool` handler (after registry lookup), not to the
   `execute_tool` meta-tool, so policy and audit are keyed by the real high-risk
   action (e.g. `fbeast_memory_forget`) rather than the generic wrapper.
-- The gate classifies tools by **actual risk**, not just payload text
-  (`shared/governance-gate.ts`):
-  - Read-only safety/meta tools (`fbeast_firewall_scan`,
-    `fbeast_firewall_scan_file`, `fbeast_governor_check`, `search_tools`) are
-    **exempt** — their input is the thing being vetted, so routing the payload
-    through the destructive-pattern governor would self-block the very
-    scan/check they exist to perform (e.g. scanning the text "delete all files").
-  - Known-destructive fbeast tools the word heuristic misses
-    (`fbeast_memory_forget`) are **escalated** to at-least-`review_recommended`
-    when the governor would otherwise approve, so a benign payload cannot
-    auto-approve a mutating call. A stricter governor decision is never
-    downgraded.
+- The gate classifies tools by **behavior**, not by payload keywords
+  (`shared/governance-gate.ts`). The governor's destructive-word heuristic is
+  correct for shell/CLI actions, but for fbeast tools the dangerous word
+  normally appears in the tool's *data payload* (the text being critiqued, the
+  value being stored, the event being logged), not in the operation itself.
+  Scanning that payload only yields false-positive denials, so:
+  - **Non-executing tools** (`NON_EXECUTING_TOOLS`) — every read/analyze/store/
+    log tool across the registry (`search_tools`, the firewall scanners,
+    `fbeast_governor_check`/`_budget`, `fbeast_memory_store`/`_query`/
+    `_frontload`, the planner tools, `fbeast_critique_evaluate`/`_compare`, the
+    observer tools, the skills tools) — are **exempt** and approved. Their
+    payload is data, not an operation to authorize; governing it would break
+    legitimate critique/audit/store workflows on risky content (e.g. critiquing
+    code containing `DROP TABLE`, or logging an event mentioning `rm -rf`).
+  - **Destructive tools** (`DESTRUCTIVE_TOOLS`, e.g. `fbeast_memory_forget`)
+    whose name the word heuristic misses are **escalated** to at-least-
+    `review_recommended` when the governor would otherwise approve, so a benign
+    payload cannot auto-approve a mutating call. A stricter governor decision is
+    never downgraded.
+  - **Unclassified/unknown tools** fall through to the governor with their
+    payload — fail-closed by default for any tool we have not vetted.
 - The central audit records **what was attempted**, not just success/failure:
-  `dispatchTool` and the proxy record the validated `args` and, for blocked
-  calls, the governance `decision` (`denied`/`review_recommended`/`error`).
-  Crucially, **denials and fail-closed gate errors are audited too** (with
-  `ok: false`) — the highest-risk events — rather than vanishing because the
-  handler never ran.
-- `createAuditSink` resolves the fallback session id **once per sink/process**
-  (when neither `FBEAST_SESSION_ID` nor `CLAUDE_SESSION_ID` is set), so a single
-  long-running server's events share one session and `fbeast_observer_trail`
-  can reconstruct the run instead of scattering each record under a fresh UUID.
+  `dispatchTool` and the proxy record the `args` and a `decision` classifier for
+  every non-success path — governance `denied`/`review_recommended`, a
+  fail-closed gate `error`, an `unknown_tool` probe, and a `validation_error`
+  (malformed payload). Crucially, **rejected probes, denials, and gate errors
+  are all audited** (with `ok: false`) — the highest-risk events — rather than
+  vanishing because the handler never ran. Pre-validation rejections record the
+  raw (possibly malformed) payload so the attempt is still reconstructable.
+- `createAuditSink` resolves the session id **once per sink/process**: an
+  explicit `FBEAST_SESSION_ID`/`CLAUDE_SESSION_ID` is preferred for real
+  per-run correlation, but when neither is set (the default `fbeast init`
+  standard install) it falls back to a **documented constant**
+  (`DEFAULT_AUDIT_SESSION_ID = 'fbeast-central-dispatch'`) rather than a random
+  UUID. `fbeast_observer_trail` requires the caller to supply a session id, so a
+  random fallback would be unretrievable; the constant means the central trail
+  is always queryable via
+  `fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })` and every
+  standalone server on the same DB writes under that one id.
 
 ### Relationship to hooks
 

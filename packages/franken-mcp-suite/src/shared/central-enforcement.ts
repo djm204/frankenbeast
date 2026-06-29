@@ -1,7 +1,21 @@
-import { randomUUID } from 'node:crypto';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createGovernanceGate } from './governance-gate.js';
 import type { AuditSink, CreateMcpServerOptions } from './server-factory.js';
+
+/**
+ * Stable, well-known session id used for central audit records when neither
+ * `FBEAST_SESSION_ID` nor `CLAUDE_SESSION_ID` is set. The default `fbeast init`
+ * standard install registers standalone servers without those env vars, so a
+ * random UUID fallback would be unretrievable: `fbeast_observer_trail` requires
+ * the caller to supply the session id. Using a documented constant means a
+ * user can always retrieve the central trail via
+ * `fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })`, and every
+ * standalone server on the same DB writes under the same queryable id.
+ *
+ * An explicit `FBEAST_SESSION_ID`/`CLAUDE_SESSION_ID` still takes precedence so
+ * real per-run correlation works when the host provides it.
+ */
+export const DEFAULT_AUDIT_SESSION_ID = 'fbeast-central-dispatch';
 
 /**
  * Builds the server-side audit sink used by the central dispatch path. It logs
@@ -15,17 +29,17 @@ import type { AuditSink, CreateMcpServerOptions } from './server-factory.js';
 export function createAuditSink(source: string | ObserverAdapter): AuditSink {
   let observer: ObserverAdapter | undefined = typeof source === 'string' ? undefined : source;
   const dbPath = typeof source === 'string' ? source : undefined;
-  // Resolve the fallback session id once per sink (process), not per record:
-  // the default `fbeast init` registrations set neither FBEAST_SESSION_ID nor
-  // CLAUDE_SESSION_ID, so a fresh UUID per record would scatter a single
-  // server's events across many sessions and break `fbeast_observer_trail`.
+  // Resolve the session id once per sink (process). Prefer an explicit env id
+  // for real per-run correlation; otherwise fall back to a documented constant
+  // (not a random UUID) so the records stay retrievable via
+  // `fbeast_observer_trail` (see DEFAULT_AUDIT_SESSION_ID).
   let sessionId: string | undefined;
   function resolveSessionId(): string {
     if (!sessionId) {
       sessionId =
         process.env['FBEAST_SESSION_ID']
         ?? process.env['CLAUDE_SESSION_ID']
-        ?? randomUUID();
+        ?? DEFAULT_AUDIT_SESSION_ID;
     }
     return sessionId;
   }

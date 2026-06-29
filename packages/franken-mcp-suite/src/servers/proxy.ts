@@ -60,8 +60,19 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
       async handler(args) {
         const toolName = String(args['tool']);
         const toolArgs = (args['args'] ?? {}) as Record<string, unknown>;
+        // Best-effort audit of the resolved target, including its args and any
+        // governance denial or rejected probe (mirrors dispatchTool); never
+        // fails the call.
+        const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
+          try {
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: toolArgs });
+          } catch (err) {
+            process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        };
         const entry = TOOL_REGISTRY.get(toolName);
         if (!entry) {
+          await recordAudit({ ok: false, decision: 'unknown_tool' });
           return {
             content: [{ type: 'text', text: `Unknown tool: ${toolName}. Call search_tools to list available tools.` }],
             isError: true,
@@ -70,17 +81,9 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // Validate the resolved target's args before governing/running it.
         const validated = validateToolArguments(entry, toolArgs);
         if (!validated.ok) {
+          await recordAudit({ ok: false, decision: 'validation_error' });
           return { content: [{ type: 'text', text: `Error: ${validated.message}` }], isError: true };
         }
-        // Best-effort audit of the resolved target, including its args and any
-        // governance denial (mirrors dispatchTool); never fails the call.
-        const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
-          try {
-            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: toolArgs });
-          } catch (err) {
-            process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
-          }
-        };
         // Central governance on the resolved target — fails closed on any
         // non-`approved` decision or gate error (mirrors dispatchTool).
         let decision;

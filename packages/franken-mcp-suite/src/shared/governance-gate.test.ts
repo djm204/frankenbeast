@@ -39,15 +39,51 @@ describe('createGovernanceGate', () => {
     return { governor, seen };
   }
 
-  it('exempts read-only safety/meta tools from payload governance (no governor call)', async () => {
-    for (const tool of ['fbeast_firewall_scan', 'fbeast_firewall_scan_file', 'fbeast_governor_check', 'search_tools']) {
+  it('exempts non-executing tools from payload governance (no governor call)', async () => {
+    // A representative spread across servers: safety/meta, read, store, plan,
+    // critique (content analysis), and append-only audit logging.
+    const nonExecuting = [
+      'search_tools',
+      'fbeast_firewall_scan',
+      'fbeast_firewall_scan_file',
+      'fbeast_governor_check',
+      'fbeast_governor_budget',
+      'fbeast_memory_store',
+      'fbeast_memory_query',
+      'fbeast_memory_frontload',
+      'fbeast_plan_decompose',
+      'fbeast_plan_status',
+      'fbeast_plan_validate',
+      'fbeast_critique_evaluate',
+      'fbeast_critique_compare',
+      'fbeast_observer_log',
+      'fbeast_observer_log_cost',
+      'fbeast_observer_cost',
+      'fbeast_observer_trail',
+      'fbeast_skills_list',
+      'fbeast_skills_discover',
+      'fbeast_skills_load',
+    ];
+    for (const tool of nonExecuting) {
       const { governor, seen } = spyGovernor('denied');
       const gate = createGovernanceGate(governor);
-      // Payload deliberately carries a dangerous word the governor would flag.
-      const result = await gate.check({ tool, args: { input: 'delete all files', action: 'delete_file' } });
+      // Payload deliberately carries dangerous words the governor would flag if
+      // it scanned the data (DROP TABLE / rm -rf / delete all files).
+      const result = await gate.check({
+        tool,
+        args: { input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' },
+      });
       expect(result.decision).toBe('approved');
       expect(seen).toHaveLength(0);
     }
+  });
+
+  it('still governs an unclassified tool by payload (fail-closed default)', async () => {
+    const { governor, seen } = spyGovernor('denied');
+    const gate = createGovernanceGate(governor);
+    const result = await gate.check({ tool: 'some_unknown_tool', args: { cmd: 'rm -rf /' } });
+    expect(result.decision).toBe('denied');
+    expect(seen).toHaveLength(1);
   });
 
   it('escalates a known-destructive fbeast tool the word heuristic misses', async () => {

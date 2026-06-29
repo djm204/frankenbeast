@@ -103,6 +103,11 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('search_tools');
     });
 
+    it('audits an unknown-target probe as ok=false', async () => {
+      await executeToolDef.handler({ tool: 'nonexistent_tool', args: { probe: 1 } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool', args: { probe: 1 } });
+    });
+
     it('passes args to handler correctly', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;

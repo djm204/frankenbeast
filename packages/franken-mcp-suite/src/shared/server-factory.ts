@@ -132,30 +132,42 @@ async function dispatchTool(
   options: CreateMcpServerOptions = {},
 ): Promise<ToolResult> {
   const { governance, audit } = options;
+  // Best-effort server-side audit (never fails the tool call). Records the
+  // attempted args so the trail captures *what* was attempted — including
+  // rejected probes and governance denials, the highest-risk events to
+  // reconstruct. `args` carries the validated payload once available, or the
+  // raw (possibly malformed) payload for pre-validation rejections.
+  const recordAudit = async (input: {
+    ok: boolean;
+    decision?: string;
+    args: Record<string, unknown>;
+  }): Promise<void> => {
+    if (!audit) return;
+    try {
+      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: input.args });
+    } catch (err) {
+      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  };
+  // Normalize the raw payload to an object so a malformed (null/array/scalar)
+  // probe is still captured in the audit record rather than dropped.
+  const rawArgs: Record<string, unknown> =
+    args !== null && typeof args === 'object' && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : { invalid: args };
+
   const tool = toolMap.get(toolName);
   if (!tool) {
+    await recordAudit({ ok: false, decision: 'unknown_tool', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
   // Only an *absent* argument object defaults to {}; an explicit `null` (or any
   // non-object) on the wire must reach the validator and be rejected.
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
+    await recordAudit({ ok: false, decision: 'validation_error', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
-  // Best-effort server-side audit (never fails the tool call). Records the
-  // validated args so the trail captures *what* was attempted — including
-  // governance denials, the highest-risk events to reconstruct.
-  const recordAudit = async (input: {
-    ok: boolean;
-    decision?: string;
-  }): Promise<void> => {
-    if (!audit) return;
-    try {
-      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: validated.value });
-    } catch (err) {
-      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  };
   // Central governance gate: enforced server-side regardless of client hooks.
   // Fails closed — any non-`approved` decision (denied OR review_recommended)
   // or a gate error blocks the handler, matching the hook path's enforcement
@@ -165,14 +177,14 @@ async function dispatchTool(
     try {
       decision = await governance.check({ tool: toolName, args: validated.value });
     } catch (err) {
-      await recordAudit({ ok: false, decision: 'error' });
+      await recordAudit({ ok: false, decision: 'error', args: validated.value });
       return {
         content: [{ type: 'text' as const, text: `Denied by governance (fail-closed): ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }
     if (decision.decision !== 'approved') {
-      await recordAudit({ ok: false, decision: decision.decision });
+      await recordAudit({ ok: false, decision: decision.decision, args: validated.value });
       return {
         content: [{ type: 'text' as const, text: `Denied by governance (${decision.decision}): ${decision.reason}` }],
         isError: true,
@@ -188,7 +200,7 @@ async function dispatchTool(
       isError: true,
     };
   }
-  await recordAudit({ ok: !result.isError });
+  await recordAudit({ ok: !result.isError, args: validated.value });
   return result;
 }
 

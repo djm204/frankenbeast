@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createAuditSink, createCentralOptions } from './central-enforcement.js';
+import { createAuditSink, createCentralOptions, DEFAULT_AUDIT_SESSION_ID } from './central-enforcement.js';
 import type { ObserverAdapter, ObserverLogInput } from '../adapters/observer-adapter.js';
 
 describe('createAuditSink', () => {
@@ -54,7 +54,7 @@ describe('createAuditSink', () => {
     });
   });
 
-  it('reuses a single fallback session id across records when no env var is set', async () => {
+  it('falls back to the retrievable constant session id when no env var is set', async () => {
     delete process.env['FBEAST_SESSION_ID'];
     delete process.env['CLAUDE_SESSION_ID'];
     const logged: ObserverLogInput[] = [];
@@ -70,8 +70,10 @@ describe('createAuditSink', () => {
     await sink.record({ tool: 'b', ok: true });
 
     expect(logged).toHaveLength(2);
-    expect(logged[0]!.sessionId).toBe(logged[1]!.sessionId);
-    expect(logged[0]!.sessionId).toMatch(/[0-9a-f-]{36}/);
+    // Both records land under the same documented, queryable session id so
+    // `fbeast_observer_trail` can retrieve the central trail.
+    expect(logged[0]!.sessionId).toBe(DEFAULT_AUDIT_SESSION_ID);
+    expect(logged[1]!.sessionId).toBe(DEFAULT_AUDIT_SESSION_ID);
   });
 
   it('does not open a database until first record (lazy from dbPath)', () => {

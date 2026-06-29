@@ -269,6 +269,48 @@ describe('createMcpServer', () => {
       expect(recorded).toEqual([{ tool: 'delete_database', ok: false, decision: 'error', args: { target: 'x' } }]);
     });
 
+    it('audits a validation failure as ok=false with the raw args (handler never ran)', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+      let handlerRan = false;
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const tool: ToolDef = {
+        name: 'delete_database',
+        description: 'd',
+        inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
+        handler: async () => { handlerRan = true; return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      // Missing required `target` + unknown property `evil`.
+      const res = await srv.callTool('delete_database', { evil: 'rm -rf /' });
+      expect(res.isError).toBe(true);
+      expect(handlerRan).toBe(false);
+      expect(recorded).toEqual([{ tool: 'delete_database', ok: false, decision: 'validation_error', args: { evil: 'rm -rf /' } }]);
+    });
+
+    it('audits a non-object payload probe (wraps the raw value)', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const tool: ToolDef = {
+        name: 'cfg',
+        description: 'cfg',
+        inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      const res = await srv.callTool('cfg', null);
+      expect(res.isError).toBe(true);
+      expect(recorded).toEqual([{ tool: 'cfg', ok: false, decision: 'validation_error', args: { invalid: null } }]);
+    });
+
+    it('audits an unknown-tool probe as ok=false', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const srv = createMcpServer('t', '1', [], { audit });
+      const res = await srv.callTool('ghost_tool', { probe: 1 });
+      expect(res.isError).toBe(true);
+      expect(recorded).toEqual([{ tool: 'ghost_tool', ok: false, decision: 'unknown_tool', args: { probe: 1 } }]);
+    });
+
     it('audit failures never fail the tool call', async () => {
       const audit: AuditSink = { record: async () => { throw new Error('audit down'); } };
       const tool: ToolDef = {

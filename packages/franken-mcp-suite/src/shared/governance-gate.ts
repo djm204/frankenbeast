@@ -10,19 +10,54 @@ function stringifyArgs(args: Record<string, unknown>): string {
 }
 
 /**
- * Read-only safety/meta tools whose *purpose* is to inspect untrusted or
- * risky-looking input. Routing their payload through the destructive-pattern
- * governor self-blocks them: `fbeast_firewall_scan` on the text "delete all
- * files", or `fbeast_governor_check` with action "delete_file", legitimately
- * carry dangerous words in their arguments. They perform no mutating action of
- * their own, so they are exempt from payload-based governance (the gate would
- * otherwise refuse the very scan/check they exist to perform).
+ * Behavioral classification of fbeast MCP tools for the central gate.
+ *
+ * The governor's heuristic flags destructive *words* (delete/drop/rm -rf/…).
+ * That is correct for shell/CLI actions, but for fbeast tools the dangerous
+ * word usually appears in the tool's **data payload** (the text being critiqued,
+ * the value being stored, the event being logged), not in the operation itself.
+ * Scanning that payload produces false-positive denials that break legitimate
+ * read/analyze/store/log workflows on risky content.
+ *
+ * We therefore classify by what the tool *does*, not what its payload says:
+ *
+ * - {@link NON_EXECUTING_TOOLS}: the payload is data to query/analyze/store/log;
+ *   the tool performs no destructive operation, so it is exempt from
+ *   payload-keyword governance and approved.
+ * - {@link DESTRUCTIVE_TOOLS}: the tool performs a destructive/irreversible
+ *   operation whose name the word heuristic misses (e.g. `forget`); it is
+ *   escalated to at-least-`review_recommended`.
+ * - Anything else (an unclassified/unknown tool) falls through to the governor
+ *   with its payload — fail-closed by default for tools we have not vetted.
  */
-const SAFE_READONLY_TOOLS: ReadonlySet<string> = new Set([
+const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
+  // proxy meta
+  'search_tools',
+  // safety/meta (their input is the very thing being vetted)
   'fbeast_firewall_scan',
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
-  'search_tools',
+  'fbeast_governor_budget',
+  // memory: read + content-agnostic store (storing text is not executing it)
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
+  // planner: describing/inspecting a plan is not executing its steps
+  'fbeast_plan_decompose',
+  'fbeast_plan_status',
+  'fbeast_plan_validate',
+  // critique: analyzes content; the content under review is the payload
+  'fbeast_critique_evaluate',
+  'fbeast_critique_compare',
+  // observer: read + append-only audit (logging risky content must not block)
+  'fbeast_observer_log',
+  'fbeast_observer_log_cost',
+  'fbeast_observer_cost',
+  'fbeast_observer_trail',
+  // skills: read-only listing/discovery/loading
+  'fbeast_skills_list',
+  'fbeast_skills_discover',
+  'fbeast_skills_load',
 ]);
 
 /**
@@ -52,12 +87,13 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
 
   return {
     async check({ tool, args }) {
-      // Exempt read-only safety/meta tools: their input is the thing being
-      // vetted, so payload-based governance would deny the scan/check itself.
-      if (SAFE_READONLY_TOOLS.has(tool)) {
+      // Exempt non-executing tools: their payload is data to query/analyze/
+      // store/log, not an operation to authorize, so payload-keyword governance
+      // would only produce false-positive denials on legitimate risky content.
+      if (NON_EXECUTING_TOOLS.has(tool)) {
         return {
           decision: 'approved',
-          reason: `Tool "${tool}" is a read-only safety/meta tool; exempt from payload governance.`,
+          reason: `Tool "${tool}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
         };
       }
       if (!governor) {
