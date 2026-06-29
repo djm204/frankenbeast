@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CliArgs } from '../../../src/cli/args.js';
 import { runNetworkCommand } from '../../../src/cli/run.js';
@@ -41,6 +44,14 @@ function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
   };
 }
 
+function makePaths(root = '/repo/frankenbeast'): { frankenbeastDir: string; configFile: string } {
+  const frankenbeastDir = join(root, '.fbeast');
+  return {
+    frankenbeastDir,
+    configFile: join(frankenbeastDir, 'config.json'),
+  };
+}
+
 function makeService(id: ResolvedNetworkService['id']): ResolvedNetworkService {
   return {
     id,
@@ -75,9 +86,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'up', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      {
-        frankenbeastDir: '/repo/frankenbeast/.fbeast',
-      },
+      makePaths(),
       {
         resolveServices: vi.fn(() => services),
         createSupervisor: vi.fn(() => ({
@@ -110,7 +119,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'up', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
+      makePaths(),
       {
         resolveServices: vi.fn(() => services),
         createSupervisor: vi.fn(() => ({
@@ -145,7 +154,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'up', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
+      makePaths(),
       {
         resolveServices: vi.fn(() => [makeService('chat-server')]),
         createSupervisor: vi.fn(() => ({
@@ -174,9 +183,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'down' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      {
-        frankenbeastDir: '/repo/frankenbeast/.fbeast',
-      },
+      makePaths(),
       {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
@@ -208,9 +215,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'status' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      {
-        frankenbeastDir: '/repo/frankenbeast/.fbeast',
-      },
+      makePaths(),
       {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
@@ -261,21 +266,21 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'start', networkTarget: 'dashboard-web', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
+      makePaths(),
       deps,
     );
     await runNetworkCommand(
       makeArgs({ networkAction: 'stop', networkTarget: 'dashboard-web' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
+      makePaths(),
       deps,
     );
     await runNetworkCommand(
       makeArgs({ networkAction: 'restart', networkTarget: 'all', networkDetached: true }),
       defaultConfig(),
       '/repo/frankenbeast',
-      { frankenbeastDir: '/repo/frankenbeast/.fbeast' },
+      makePaths(),
       deps,
     );
 
@@ -292,9 +297,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'logs', networkTarget: 'chat-server' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      {
-        frankenbeastDir: '/repo/frankenbeast/.fbeast',
-      },
+      makePaths(),
       {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
@@ -315,6 +318,57 @@ describe('runNetworkCommand', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/tmp/chat-server.log'));
   });
 
+  it('persists config --set changes to the operator config file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-config-'));
+    const configFile = join(root, 'custom-config.json');
+    try {
+      await writeFile(configFile, JSON.stringify({
+        chat: { model: 'old-model' },
+        dashboard: { port: 5173 },
+      }, null, 2) + '\n', 'utf-8');
+
+      const config = defaultConfig();
+      config.chat.model = 'new-model';
+      config.dashboard.port = 6000;
+      const print = vi.fn();
+
+      await runNetworkCommand(
+        makeArgs({
+          networkAction: 'config',
+          networkSet: ['chat.model=new-model', 'dashboard.port=6000'],
+          config: configFile,
+        }),
+        config,
+        root,
+        makePaths(root),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+
+      const saved = JSON.parse(await readFile(configFile, 'utf-8')) as {
+        chat: { model: string };
+        dashboard: { port: number };
+      };
+      expect(saved.chat.model).toBe('new-model');
+      expect(saved.dashboard.port).toBe(6000);
+      expect(print).toHaveBeenCalledWith(`Saved network config to ${configFile}.`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('help prints a man-style command reference', async () => {
     const print = vi.fn();
 
@@ -322,9 +376,7 @@ describe('runNetworkCommand', () => {
       makeArgs({ networkAction: 'help' }),
       defaultConfig(),
       '/repo/frankenbeast',
-      {
-        frankenbeastDir: '/repo/frankenbeast/.fbeast',
-      },
+      makePaths(),
       {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(),

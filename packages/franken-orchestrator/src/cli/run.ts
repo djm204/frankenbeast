@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { open, readFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -27,7 +27,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
@@ -40,6 +40,8 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { applyNetworkConfigSets } from '../network/network-config-paths.js';
+import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -510,7 +512,7 @@ export async function main(): Promise<void> {
   }
 }
 
-type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir'>;
+type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir' | 'configFile'>;
 
 export interface NetworkCommandSupervisorLike {
   up(options: {
@@ -532,6 +534,26 @@ export interface NetworkCommandDeps {
   printError: (message: string) => void;
   renderHelp: () => string;
   waitForShutdown: () => Promise<void>;
+}
+
+async function persistNetworkConfigSets(args: CliArgs, paths: NetworkPaths): Promise<string> {
+  const configFile = args.config ?? paths.configFile;
+  let fileConfig: Partial<OrchestratorConfig> = {};
+
+  try {
+    fileConfig = JSON.parse(await readFile(configFile, 'utf-8')) as Partial<OrchestratorConfig>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const updatedFileConfig = applyNetworkConfigSets(fileConfig, args.networkSet ?? []);
+  OrchestratorConfigSchema.parse(updatedFileConfig);
+
+  await mkdir(dirname(configFile), { recursive: true });
+  await writeFile(configFile, JSON.stringify(updatedFileConfig, null, 2) + '\n', 'utf-8');
+  return configFile;
 }
 
 function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
@@ -602,6 +624,10 @@ export async function runNetworkCommand(
   }
 
   if (action === 'config') {
+    if (args.networkSet && args.networkSet.length > 0) {
+      const configFile = await persistNetworkConfigSets(args, paths);
+      deps.print(`Saved network config to ${configFile}.`);
+    }
     deps.print(JSON.stringify({
       network: config.network,
       chat: config.chat,
