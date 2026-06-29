@@ -36,7 +36,23 @@ describe('MCP execution adapters', () => {
 
     expect(adapter.hasSkill('query')).toBe(true);
     expect(adapter.hasSkill('summarize')).toBe(true);
-    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['search', 'query', 'summarize']);
+    expect(adapter.hasSkill('search')).toBe(false);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['query', 'summarize']);
+  });
+
+  it('SkillManagerAdapter keeps server aliases only when they resolve to one tool', () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
+    mkdirSync(join(skillsDir, 'memory'));
+    writeFileSync(join(skillsDir, 'memory', 'mcp.json'), JSON.stringify({ mcpServers: { memory: { command: 'memory' } } }));
+    writeFileSync(join(skillsDir, 'memory', 'tools.json'), JSON.stringify([
+      { name: 'query', description: 'Query', inputSchema: {} },
+    ]));
+    const manager = new SkillManager(skillsDir, new Set(['memory']));
+    const adapter = new SkillManagerAdapter(manager);
+
+    expect(adapter.hasSkill('memory')).toBe(true);
+    expect(adapter.hasSkill('query')).toBe(true);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['memory', 'query']);
   });
 
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {

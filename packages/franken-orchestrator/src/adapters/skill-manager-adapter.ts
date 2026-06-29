@@ -13,20 +13,28 @@ export class SkillManagerAdapter implements ISkillsModule {
   constructor(private readonly manager: SkillManager) {}
 
   hasSkill(skillId: string): boolean {
-    return this.manager.getEnabledSkills().some((enabledSkill) => (
-      enabledSkill === skillId || this.manager.readTools(enabledSkill).some(tool => tool.name === skillId)
-    ));
+    return this.manager.getEnabledSkills().some((enabledSkill) => {
+      const tools = this.manager.readTools(enabledSkill);
+      return (
+        (enabledSkill === skillId && isServerAliasExecutable(enabledSkill, tools)) ||
+        tools.some(tool => tool.name === skillId)
+      );
+    });
   }
 
   getAvailableSkills(): readonly SkillDescriptor[] {
     return this.manager.getEnabledSkills().flatMap((name) => {
       const tools = this.manager.readTools(name);
-      const descriptors: SkillDescriptor[] = [{
-        id: name,
-        name,
-        requiresHitl: false,
-        executionType: 'mcp' as const,
-      }];
+      const descriptors: SkillDescriptor[] = [];
+
+      if (isServerAliasExecutable(name, tools)) {
+        descriptors.push({
+          id: name,
+          name,
+          requiresHitl: false,
+          executionType: 'mcp' as const,
+        });
+      }
 
       for (const tool of tools) {
         if (tool.name !== name) {
@@ -51,4 +59,11 @@ export class SkillManagerAdapter implements ISkillsModule {
         'or configure the skill as executionType=cli/function/llm with an executor that implements that path.',
     );
   }
+}
+
+function isServerAliasExecutable(
+  skillName: string,
+  tools: ReturnType<SkillManager['readTools']>,
+): boolean {
+  return tools.length === 1 || tools.some(tool => tool.name === skillName);
 }
