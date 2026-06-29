@@ -409,6 +409,33 @@ describe('fbeast init', () => {
     expect(config).not.toContain('fbeast-memory');
   });
 
+  it('codex re-init removes fbeast MCP subtables without deleting TOML array sections', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const mockSpawn = () => ({ status: 1 });
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    const oldMemoryName = codexServerName(root, 'memory');
+    const configPath = join(root, '.codex', 'config.toml');
+    writeFileSync(configPath, `${readFileSync(configPath, 'utf-8')}\n` + [
+      `[mcp_servers.${oldMemoryName}.tools.fbeast_memory_store]`,
+      'enabled = true',
+      '',
+      '[[hooks.PreToolUse]]',
+      'command = "keep-me"',
+      '',
+    ].join('\n'));
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' });
+
+    const config = readFileSync(configPath, 'utf-8');
+    expect(config).toContain(`[mcp_servers.${codexServerName(root, 'proxy')}]`);
+    expect(config).toContain('[[hooks.PreToolUse]]');
+    expect(config).toContain('command = "keep-me"');
+    expect(config).not.toContain(oldMemoryName);
+    expect(config).not.toContain('fbeast_memory_store');
+  });
+
   it('writes Codex hooks.json when --client=codex --hooks', () => {
     const root = tmpDir();
     dirs.push(root);

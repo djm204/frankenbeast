@@ -410,6 +410,12 @@ describe('fbeast uninstall', () => {
       'command = "fbeast-memory"',
       `args = ["--db", "${join(oldRoot, '.fbeast', 'beast.db')}"]`,
       '',
+      `[mcp_servers.${oldCodexName}.tools.fbeast_memory_store]`,
+      'enabled = true',
+      '',
+      '[[hooks.PreToolUse]]',
+      'command = "keep-me"',
+      '',
     ].join('\n'));
 
     const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
@@ -428,7 +434,10 @@ describe('fbeast uninstall', () => {
     expect(removedNames).toContain(oldCodexName);
     const remainingConfig = readFileSync(join(movedRoot, '.codex', 'config.toml'), 'utf-8');
     expect(remainingConfig).toContain('[mcp_servers.github]');
+    expect(remainingConfig).toContain('[[hooks.PreToolUse]]');
+    expect(remainingConfig).toContain('command = "keep-me"');
     expect(remainingConfig).not.toContain(oldCodexName);
+    expect(remainingConfig).not.toContain('fbeast_memory_store');
   });
 
   it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {

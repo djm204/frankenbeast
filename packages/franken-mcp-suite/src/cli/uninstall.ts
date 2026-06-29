@@ -207,14 +207,18 @@ function removeFbeastMcpServerTables(toml: string): string {
   let dropping = false;
 
   for (const line of lines) {
-    const header = line.match(/^\s*\[([^\]]+)]\s*$/);
+    const header = line.match(/^\s*\[\[?([^\]]+)]\]?\s*$/);
     if (header?.[1]) {
-      dropping = /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)$/.test(header[1]);
+      dropping = isFbeastMcpServerSection(header[1]);
     }
     if (!dropping) kept.push(line);
   }
 
   return kept.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function isFbeastMcpServerSection(section: string): boolean {
+  return /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)(?:\.|$)/.test(section);
 }
 
 function legacyCodexServerNamesForRoot(
