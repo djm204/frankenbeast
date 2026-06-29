@@ -115,6 +115,46 @@ describe('DashboardApiClient', () => {
     });
   });
 
+  describe('operator token', () => {
+    it('attaches a bearer header to fetchSnapshot/toggleSkill/updateSecurityProfile when configured', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => makeMockSnapshot() });
+      globalThis.fetch = fetchMock;
+
+      const client = new DashboardApiClient(BASE_URL, 'op-token');
+      await client.fetchSnapshot();
+      await client.toggleSkill('code-review', false);
+      await client.updateSecurityProfile('strict');
+
+      const [snapshotUrl, snapshotInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(snapshotUrl).toBe(`${BASE_URL}/api/dashboard`);
+      expect(new Headers(snapshotInit.headers).get('authorization')).toBe('Bearer op-token');
+
+      const [skillUrl, skillInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(skillUrl).toBe(`${BASE_URL}/api/skills/code-review`);
+      expect(skillInit.method).toBe('PATCH');
+      const skillHeaders = new Headers(skillInit.headers);
+      expect(skillHeaders.get('content-type')).toBe('application/json');
+      expect(skillHeaders.get('authorization')).toBe('Bearer op-token');
+
+      const [securityUrl, securityInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+      expect(securityUrl).toBe(`${BASE_URL}/api/security`);
+      expect(securityInit.method).toBe('PATCH');
+      const securityHeaders = new Headers(securityInit.headers);
+      expect(securityHeaders.get('content-type')).toBe('application/json');
+      expect(securityHeaders.get('authorization')).toBe('Bearer op-token');
+    });
+
+    it('omits the authorization header when no token is configured', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => makeMockSnapshot() });
+      globalThis.fetch = fetchMock;
+
+      const client = new DashboardApiClient(BASE_URL);
+      await client.fetchSnapshot();
+
+      expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/api/dashboard`);
+    });
+  });
+
   describe('subscribeToDashboard', () => {
     it('creates EventSource and returns unsubscribe function', () => {
       const closeFn = vi.fn();

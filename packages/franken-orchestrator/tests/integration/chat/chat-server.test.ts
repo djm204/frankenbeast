@@ -145,6 +145,60 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('refuses to start when chat and beast operator tokens differ', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const beastServices = createBeastServices({
+      beastsDb: join(TMP, 'beasts.db'),
+      beastLogsDir: join(TMP, 'beast-logs'),
+    });
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir: join(TMP, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('') },
+        projectName: 'test-project',
+        operatorToken: 'chat-token',
+        beastControl: {
+          ...beastServices,
+          security: new TransportSecurityService(),
+          operatorToken: 'beast-token',
+          rateLimit: { windowMs: 60_000, max: 20 },
+        },
+      })).rejects.toThrow(/two different operator tokens/i);
+    } finally {
+      beastServices.ticketStore.destroy();
+    }
+  });
+
+  it('starts when chat and beast operator tokens match', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const beastServices = createBeastServices({
+      beastsDb: join(TMP, 'beasts.db'),
+      beastLogsDir: join(TMP, 'beast-logs'),
+    });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+      operatorToken: 'shared-token',
+      beastControl: {
+        ...beastServices,
+        security: new TransportSecurityService(),
+        operatorToken: 'shared-token',
+        rateLimit: { windowMs: 60_000, max: 20 },
+      },
+    });
+    try {
+      const res = await fetch(`${server.url}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('refuses to start on a non-loopback host without an operator token', async () => {
     mkdirSync(TMP, { recursive: true });
     await expect(startChatServer({

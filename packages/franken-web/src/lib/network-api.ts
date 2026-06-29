@@ -12,7 +12,10 @@ export interface NetworkConfigResponse {
 }
 
 export class NetworkApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly operatorToken?: string,
+  ) {}
 
   async getStatus(): Promise<NetworkStatusResponse> {
     return this.request('/v1/network/status', { method: 'GET' });
@@ -59,11 +62,32 @@ export class NetworkApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const response = await fetch(`${this.baseUrl}${path}`, withOperatorAuth(init, this.operatorToken));
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     const body = await response.json() as { data: T };
     return body.data;
   }
+}
+
+/**
+ * Attach the operator token as an `Authorization: Bearer` header when one is
+ * configured. The control-plane routes (`/v1/network`, `/api/*`) are gated by
+ * the same operator token as chat/beast (see chat-app.ts), so first-party
+ * clients must forward it or every secured request 401s. When no token is set
+ * (loopback dev) the request is left untouched.
+ *
+ * `init.headers` may be a plain object, a `Headers` instance, or a
+ * `[key, value][]` array (all valid `RequestInit` shapes). Object-spreading the
+ * latter two would silently drop existing entries such as `Content-Type`, so we
+ * normalize through `Headers` before setting the bearer token.
+ */
+export function withOperatorAuth(init: RequestInit, operatorToken: string | undefined): RequestInit {
+  if (!operatorToken) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${operatorToken}`);
+  return { ...init, headers };
 }

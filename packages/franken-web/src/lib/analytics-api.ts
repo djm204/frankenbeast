@@ -1,3 +1,5 @@
+import { withOperatorAuth } from './network-api';
+
 export type AnalyticsSource = 'observer' | 'governor' | 'security' | 'cost' | 'beast';
 export type AnalyticsOutcome = 'approved' | 'denied' | 'review_recommended' | 'failed' | 'error' | 'detected';
 export type AnalyticsSeverity = 'info' | 'warning' | 'error';
@@ -58,7 +60,10 @@ export interface AnalyticsEventPage {
 }
 
 export class AnalyticsApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly operatorToken?: string,
+  ) {}
 
   async fetchSummary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
     return this.fetchJson<AnalyticsSummary>(`/api/analytics/summary${queryString(filters)}`);
@@ -78,7 +83,10 @@ export class AnalyticsApiClient {
   }
 
   private async fetchJson<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`);
+    const init = withOperatorAuth({}, this.operatorToken);
+    const res = this.operatorToken
+      ? await fetch(`${this.baseUrl}${path}`, init)
+      : await fetch(`${this.baseUrl}${path}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as T;
   }

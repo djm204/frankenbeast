@@ -78,6 +78,24 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   // Fail closed: refuse to expose /v1/chat/* without an operator token when
   // the server is exposed (managed-network mode OR non-loopback host).
   // Loopback-only dev without a token is intentionally allowed.
+  // Enforce a single operator token across the whole surface. chat-app gates
+  // chat AND the control-plane route groups (/v1/network, /api/*) behind
+  // `operatorToken ?? beastControl.operatorToken`, while beast/agent routes
+  // authenticate with `beastControl.operatorToken` directly. If those two
+  // differ, an operator holding the beast token would pass /v1/beasts/* but get
+  // 401s on the control-plane routes (and vice versa). Fail closed at startup
+  // rather than ship that split-brain auth.
+  if (
+    options.operatorToken
+    && options.beastControl?.operatorToken
+    && options.operatorToken !== options.beastControl.operatorToken
+  ) {
+    throw new Error(
+      'Refusing to start chat-server with two different operator tokens: '
+      + 'operatorToken and beastControl.operatorToken must match (the control '
+      + 'plane uses a single operator token). Pass one token or make them equal.',
+    );
+  }
   const effectiveOperatorToken = options.operatorToken ?? options.beastControl?.operatorToken;
   const isManaged = process.env['FRANKENBEAST_NETWORK_MANAGED'] === '1';
   const isExposed = isManaged || !LOOPBACK_HOSTS.has(host);
