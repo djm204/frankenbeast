@@ -3,14 +3,6 @@ import { createObserverAdapter, type ObserverAdapter } from '../adapters/observe
 import { createGovernanceGate } from './governance-gate.js';
 import type { AuditSink, CreateMcpServerOptions } from './server-factory.js';
 
-function resolveSessionId(): string {
-  return (
-    process.env['FBEAST_SESSION_ID']
-    ?? process.env['CLAUDE_SESSION_ID']
-    ?? randomUUID()
-  );
-}
-
 /**
  * Builds the server-side audit sink used by the central dispatch path. It logs
  * each dispatched tool call through the same {@link ObserverAdapter} the
@@ -23,15 +15,35 @@ function resolveSessionId(): string {
 export function createAuditSink(source: string | ObserverAdapter): AuditSink {
   let observer: ObserverAdapter | undefined = typeof source === 'string' ? undefined : source;
   const dbPath = typeof source === 'string' ? source : undefined;
+  // Resolve the fallback session id once per sink (process), not per record:
+  // the default `fbeast init` registrations set neither FBEAST_SESSION_ID nor
+  // CLAUDE_SESSION_ID, so a fresh UUID per record would scatter a single
+  // server's events across many sessions and break `fbeast_observer_trail`.
+  let sessionId: string | undefined;
+  function resolveSessionId(): string {
+    if (!sessionId) {
+      sessionId =
+        process.env['FBEAST_SESSION_ID']
+        ?? process.env['CLAUDE_SESSION_ID']
+        ?? randomUUID();
+    }
+    return sessionId;
+  }
 
   return {
-    async record({ tool, ok }) {
+    async record({ tool, ok, decision, args }) {
       if (!observer) {
         observer = createObserverAdapter(dbPath!);
       }
       await observer.log({
         event: 'tool_call',
-        metadata: JSON.stringify({ tool, ok, source: 'central-dispatch' }),
+        metadata: JSON.stringify({
+          tool,
+          ok,
+          source: 'central-dispatch',
+          ...(decision !== undefined ? { decision } : {}),
+          ...(args !== undefined ? { args } : {}),
+        }),
         sessionId: resolveSessionId(),
       });
     },

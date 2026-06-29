@@ -63,7 +63,18 @@ export interface GovernanceGate {
  * absent (see ADR-035). Audit failures never fail the tool call.
  */
 export interface AuditSink {
-  record(input: { tool: string; ok: boolean }): Promise<void> | void;
+  record(input: {
+    tool: string;
+    ok: boolean;
+    /**
+     * Outcome classifier when the call did not run to a normal handler result:
+     * the governance decision (`denied`/`review_recommended`) for a blocked
+     * call, or `error` for a fail-closed gate error. Omitted for handler runs.
+     */
+    decision?: string;
+    /** Validated call arguments, so the trail records *what* was attempted. */
+    args?: Record<string, unknown>;
+  }): Promise<void> | void;
 }
 
 export interface CreateMcpServerOptions {
@@ -131,6 +142,20 @@ async function dispatchTool(
   if (!validated.ok) {
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
+  // Best-effort server-side audit (never fails the tool call). Records the
+  // validated args so the trail captures *what* was attempted — including
+  // governance denials, the highest-risk events to reconstruct.
+  const recordAudit = async (input: {
+    ok: boolean;
+    decision?: string;
+  }): Promise<void> => {
+    if (!audit) return;
+    try {
+      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: validated.value });
+    } catch (err) {
+      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  };
   // Central governance gate: enforced server-side regardless of client hooks.
   // Fails closed — any non-`approved` decision (denied OR review_recommended)
   // or a gate error blocks the handler, matching the hook path's enforcement
@@ -140,12 +165,14 @@ async function dispatchTool(
     try {
       decision = await governance.check({ tool: toolName, args: validated.value });
     } catch (err) {
+      await recordAudit({ ok: false, decision: 'error' });
       return {
         content: [{ type: 'text' as const, text: `Denied by governance (fail-closed): ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }
     if (decision.decision !== 'approved') {
+      await recordAudit({ ok: false, decision: decision.decision });
       return {
         content: [{ type: 'text' as const, text: `Denied by governance (${decision.decision}): ${decision.reason}` }],
         isError: true,
@@ -161,14 +188,7 @@ async function dispatchTool(
       isError: true,
     };
   }
-  // Best-effort server-side audit (never fails the tool call).
-  if (audit) {
-    try {
-      await audit.record({ tool: toolName, ok: !result.isError });
-    } catch (err) {
-      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
+  await recordAudit({ ok: !result.isError });
   return result;
 }
 

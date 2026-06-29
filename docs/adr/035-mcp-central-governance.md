@@ -59,6 +59,28 @@ tool calls are checked regardless of whether client hooks are installed. We
   inside the `execute_tool` handler (after registry lookup), not to the
   `execute_tool` meta-tool, so policy and audit are keyed by the real high-risk
   action (e.g. `fbeast_memory_forget`) rather than the generic wrapper.
+- The gate classifies tools by **actual risk**, not just payload text
+  (`shared/governance-gate.ts`):
+  - Read-only safety/meta tools (`fbeast_firewall_scan`,
+    `fbeast_firewall_scan_file`, `fbeast_governor_check`, `search_tools`) are
+    **exempt** — their input is the thing being vetted, so routing the payload
+    through the destructive-pattern governor would self-block the very
+    scan/check they exist to perform (e.g. scanning the text "delete all files").
+  - Known-destructive fbeast tools the word heuristic misses
+    (`fbeast_memory_forget`) are **escalated** to at-least-`review_recommended`
+    when the governor would otherwise approve, so a benign payload cannot
+    auto-approve a mutating call. A stricter governor decision is never
+    downgraded.
+- The central audit records **what was attempted**, not just success/failure:
+  `dispatchTool` and the proxy record the validated `args` and, for blocked
+  calls, the governance `decision` (`denied`/`review_recommended`/`error`).
+  Crucially, **denials and fail-closed gate errors are audited too** (with
+  `ok: false`) — the highest-risk events — rather than vanishing because the
+  handler never ran.
+- `createAuditSink` resolves the fallback session id **once per sink/process**
+  (when neither `FBEAST_SESSION_ID` nor `CLAUDE_SESSION_ID` is set), so a single
+  long-running server's events share one session and `fbeast_observer_trail`
+  can reconstruct the run instead of scattering each record under a fresh UUID.
 
 ### Relationship to hooks
 

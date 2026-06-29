@@ -32,6 +32,48 @@ describe('createAuditSink', () => {
     });
   });
 
+  it('includes decision and args in the metadata when provided', async () => {
+    process.env['FBEAST_SESSION_ID'] = 'sess-args';
+    const logged: ObserverLogInput[] = [];
+    const observer: ObserverAdapter = {
+      async log(input) { logged.push(input); return { id: 1, hash: 'h' }; },
+      async logCost() {},
+      async cost() { return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, byModel: [] }; },
+      async trail() { return []; },
+    };
+
+    const sink = createAuditSink(observer);
+    await sink.record({ tool: 'fbeast_memory_forget', ok: false, decision: 'denied', args: { key: 'prod-secret' } });
+
+    expect(JSON.parse(logged[0]!.metadata)).toEqual({
+      tool: 'fbeast_memory_forget',
+      ok: false,
+      source: 'central-dispatch',
+      decision: 'denied',
+      args: { key: 'prod-secret' },
+    });
+  });
+
+  it('reuses a single fallback session id across records when no env var is set', async () => {
+    delete process.env['FBEAST_SESSION_ID'];
+    delete process.env['CLAUDE_SESSION_ID'];
+    const logged: ObserverLogInput[] = [];
+    const observer: ObserverAdapter = {
+      async log(input) { logged.push(input); return { id: 1, hash: 'h' }; },
+      async logCost() {},
+      async cost() { return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, byModel: [] }; },
+      async trail() { return []; },
+    };
+
+    const sink = createAuditSink(observer);
+    await sink.record({ tool: 'a', ok: true });
+    await sink.record({ tool: 'b', ok: true });
+
+    expect(logged).toHaveLength(2);
+    expect(logged[0]!.sessionId).toBe(logged[1]!.sessionId);
+    expect(logged[0]!.sessionId).toMatch(/[0-9a-f-]{36}/);
+  });
+
   it('does not open a database until first record (lazy from dbPath)', () => {
     expect(() => createAuditSink('/nonexistent/should/not/open.db')).not.toThrow();
   });

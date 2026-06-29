@@ -72,18 +72,29 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         if (!validated.ok) {
           return { content: [{ type: 'text', text: `Error: ${validated.message}` }], isError: true };
         }
+        // Best-effort audit of the resolved target, including its args and any
+        // governance denial (mirrors dispatchTool); never fails the call.
+        const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
+          try {
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: toolArgs });
+          } catch (err) {
+            process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        };
         // Central governance on the resolved target — fails closed on any
         // non-`approved` decision or gate error (mirrors dispatchTool).
         let decision;
         try {
           decision = await governance.check({ tool: toolName, args: validated.value });
         } catch (err) {
+          await recordAudit({ ok: false, decision: 'error' });
           return {
             content: [{ type: 'text', text: `Denied by governance (fail-closed): ${err instanceof Error ? err.message : String(err)}` }],
             isError: true,
           };
         }
         if (decision.decision !== 'approved') {
+          await recordAudit({ ok: false, decision: decision.decision });
           return {
             content: [{ type: 'text', text: `Denied by governance (${decision.decision}): ${decision.reason}` }],
             isError: true,
@@ -100,11 +111,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
             isError: true,
           };
         }
-        try {
-          await audit.record({ tool: toolName, ok: !result.isError });
-        } catch (err) {
-          process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
-        }
+        await recordAudit({ ok: !result.isError });
         return result;
       },
     },

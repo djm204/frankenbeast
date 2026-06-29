@@ -208,8 +208,8 @@ describe('createMcpServer', () => {
       expect(calls).toHaveLength(0);
     });
 
-    it('records the dispatched tool and result status in the audit sink', async () => {
-      const recorded: Array<{ tool: string; ok: boolean }> = [];
+    it('records the dispatched tool, result status, and args in the audit sink', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; args?: unknown }> = [];
       const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
       const tool: ToolDef = {
         name: 'echo',
@@ -219,11 +219,11 @@ describe('createMcpServer', () => {
       };
       const srv = createMcpServer('t', '1', [tool], { audit });
       await srv.callTool('echo', { msg: 'hi' });
-      expect(recorded).toEqual([{ tool: 'echo', ok: true }]);
+      expect(recorded).toEqual([{ tool: 'echo', ok: true, args: { msg: 'hi' } }]);
     });
 
-    it('audits failed handler results as ok=false', async () => {
-      const recorded: Array<{ tool: string; ok: boolean }> = [];
+    it('audits failed handler results as ok=false with args', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; args?: unknown }> = [];
       const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
       const tool: ToolDef = {
         name: 'boom',
@@ -234,24 +234,39 @@ describe('createMcpServer', () => {
       const srv = createMcpServer('t', '1', [tool], { audit });
       const res = await srv.callTool('boom', {});
       expect(res.isError).toBe(true);
-      expect(recorded).toEqual([{ tool: 'boom', ok: false }]);
+      expect(recorded).toEqual([{ tool: 'boom', ok: false, args: {} }]);
     });
 
-    it('does not audit when the gate denies (handler never ran)', async () => {
-      const recorded: unknown[] = [];
+    it('audits a governance denial as ok=false with the decision and args (handler never ran)', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+      let handlerRan = false;
       const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
       const gate: GovernanceGate = { check: async () => ({ decision: 'denied', reason: 'no' }) };
-      const { srv } = (() => {
-        const tool: ToolDef = {
-          name: 'delete_database',
-          description: 'd',
-          inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
-          handler: async () => ({ content: [{ type: 'text' as const, text: 'deleted' }] }),
-        };
-        return { srv: createMcpServer('t', '1', [tool], { governance: gate, audit }) };
-      })();
+      const tool: ToolDef = {
+        name: 'delete_database',
+        description: 'd',
+        inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
+        handler: async () => { handlerRan = true; return { content: [{ type: 'text' as const, text: 'deleted' }] }; },
+      };
+      const srv = createMcpServer('t', '1', [tool], { governance: gate, audit });
+      await srv.callTool('delete_database', { target: 'prod-secret' });
+      expect(handlerRan).toBe(false);
+      expect(recorded).toEqual([{ tool: 'delete_database', ok: false, decision: 'denied', args: { target: 'prod-secret' } }]);
+    });
+
+    it('audits a fail-closed gate error as ok=false with decision="error"', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; decision?: string }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const gate: GovernanceGate = { check: async () => { throw new Error('governor down'); } };
+      const tool: ToolDef = {
+        name: 'delete_database',
+        description: 'd',
+        inputSchema: { type: 'object', properties: { target: { type: 'string', description: 't' } }, required: ['target'] },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'deleted' }] }),
+      };
+      const srv = createMcpServer('t', '1', [tool], { governance: gate, audit });
       await srv.callTool('delete_database', { target: 'x' });
-      expect(recorded).toHaveLength(0);
+      expect(recorded).toEqual([{ tool: 'delete_database', ok: false, decision: 'error', args: { target: 'x' } }]);
     });
 
     it('audit failures never fail the tool call', async () => {
