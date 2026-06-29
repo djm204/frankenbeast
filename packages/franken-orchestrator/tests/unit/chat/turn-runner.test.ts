@@ -25,7 +25,7 @@ describe('TurnRunner', () => {
       approvalRequired: false,
     };
 
-    const result = await runner.run(outcome);
+    const result = await runner.run(outcome, { sessionId: 'session-1' });
     expect(mockExecutor.execute).toHaveBeenCalledWith(
       expect.objectContaining({ userInput: expect.stringContaining('Fix auth bug') }),
     );
@@ -41,7 +41,7 @@ describe('TurnRunner', () => {
       approvalRequired: true,
     };
 
-    const result = await runner.run(outcome);
+    const result = await runner.run(outcome, { sessionId: 'session-1' });
     expect(result.status).toBe('pending_approval');
     expect(mockExecutor.execute).not.toHaveBeenCalled();
   });
@@ -54,7 +54,7 @@ describe('TurnRunner', () => {
       chunkCount: 3,
     };
 
-    const result = await runner.run(outcome);
+    const result = await runner.run(outcome, { sessionId: 'session-1' });
     expect(result.status).toBe('completed');
     expect(result.summary).toContain('3 chunks');
     expect(mockExecutor.execute).not.toHaveBeenCalled();
@@ -71,8 +71,25 @@ describe('TurnRunner', () => {
       approvalRequired: false,
     };
 
-    await runner.run(outcome);
+    await runner.run(outcome, { sessionId: 'session-1' });
     expect(events[0]).toBe('start');
     expect(events[events.length - 1]).toBe('complete');
+  });
+
+  it('includes the session id on emitted and returned events', async () => {
+    const runner = new TurnRunner(mockExecutor);
+    const emitted: Array<{ sessionId: string }> = [];
+    runner.on('event', (e) => emitted.push(e));
+
+    const outcome: ExecuteOutcome = {
+      kind: 'execute',
+      taskDescription: 'Fix bug',
+      approvalRequired: false,
+    };
+
+    const result = await runner.run(outcome, { sessionId: 'session-abc' });
+
+    expect(emitted.map((event) => event.sessionId)).toEqual(['session-abc', 'session-abc']);
+    expect(result.events.map((event) => event.sessionId)).toEqual(['session-abc', 'session-abc']);
   });
 });

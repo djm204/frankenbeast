@@ -11,11 +11,13 @@ describe('chat runtime parity', () => {
     });
 
     const first = await runtime.runtime.run('hello', {
+      sessionId: 'session-1',
       pendingApproval: false,
       projectId: 'test-project',
       transcript: [],
     });
     const second = await runtime.runtime.run('second', {
+      sessionId: 'session-1',
       pendingApproval: false,
       projectId: 'test-project',
       transcript: first.transcript,
@@ -38,7 +40,7 @@ describe('chat runtime parity', () => {
       kind: 'execute',
       taskDescription: 'implement the dashboard shell',
       approvalRequired: false,
-    });
+    }, { sessionId: 'session-1' });
 
     expect(result.summary).toContain('execution result');
     expect(executionLlm.complete).toHaveBeenCalledWith('implement the dashboard shell');
@@ -52,6 +54,7 @@ describe('chat runtime parity', () => {
     });
 
     const result = await runtime.runtime.run('/approve', {
+      sessionId: 'session-1',
       pendingApproval: false,
       projectId: 'test-project',
       transcript: [],
