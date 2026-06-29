@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -108,5 +108,78 @@ describe('handleInitCommand', () => {
     expect(config.chat.enabled).toBe(true);
     expect(config.dashboard.enabled).toBe(false);
     expect(initState.selectedModules).toEqual(['chat']);
+  });
+
+  it('fails fast without prompting when init is non-interactive and config is missing', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    const ask = vi.fn(async () => {
+      throw new Error('unexpected prompt');
+    });
+
+    await expect(handleInitCommand({
+      args: {
+        subcommand: 'init',
+        networkAction: undefined,
+        networkTarget: undefined,
+        networkDetached: false,
+        networkSet: undefined,
+        baseDir: tempDir,
+        baseBranch: undefined,
+        budget: 10,
+        provider: 'claude',
+        providers: undefined,
+        designDoc: undefined,
+        planDir: undefined,
+        planName: undefined,
+        noPr: false,
+        verbose: false,
+        reset: false,
+        resume: false,
+        cleanup: false,
+        config: undefined,
+        host: undefined,
+        port: undefined,
+        allowOrigin: undefined,
+        help: false,
+        issueLabel: undefined,
+        issueMilestone: undefined,
+        issueSearch: undefined,
+        issueAssignee: undefined,
+        issueLimit: undefined,
+        issueRepo: undefined,
+        dryRun: undefined,
+        initVerify: false,
+        initRepair: false,
+        initNonInteractive: true,
+      },
+      config: defaultConfig(),
+      io: {
+        ask,
+        display: () => undefined,
+      },
+      paths: {
+        root: tempDir,
+        frankenbeastDir,
+        llmCacheDir: join(frankenbeastDir, '.cache', 'llm'),
+        plansDir: join(frankenbeastDir, 'plans'),
+        buildDir: join(frankenbeastDir, '.build'),
+        beastsDir: join(frankenbeastDir, '.build', 'beasts'),
+        beastLogsDir: join(frankenbeastDir, '.build', 'beasts', 'logs'),
+        beastsDb: join(frankenbeastDir, 'beast.db'),
+        chunkSessionsDir: join(frankenbeastDir, '.build', 'chunk-sessions'),
+        chunkSessionSnapshotsDir: join(frankenbeastDir, '.build', 'chunk-session-snapshots'),
+        checkpointFile: join(frankenbeastDir, '.build', '.checkpoint'),
+        tracesDb: join(frankenbeastDir, '.build', 'build-traces.db'),
+        logFile: join(frankenbeastDir, '.build', 'build.log'),
+        designDocFile: join(frankenbeastDir, 'plans', 'design.md'),
+        configFile,
+        llmResponseFile: join(frankenbeastDir, 'plans', 'llm-response.json'),
+      },
+      print: () => undefined,
+    })).rejects.toThrow(/Cannot run init non-interactively[\s\S]*Config file is missing[\s\S]*Init state is missing/);
+
+    expect(ask).not.toHaveBeenCalled();
   });
 });
