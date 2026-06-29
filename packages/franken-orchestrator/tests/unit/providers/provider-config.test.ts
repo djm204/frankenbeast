@@ -35,7 +35,7 @@ describe('createLlmProvider', () => {
     const claude = createLlmProvider({
       name: 'claude',
       type: 'claude-cli',
-      extraArgs: ['--model', 'opus'],
+      extraArgs: ['--permission-mode', 'bypassPermissions'],
     });
     const codex = createLlmProvider({
       name: 'codex',
@@ -50,8 +50,8 @@ describe('createLlmProvider', () => {
     });
 
     expect(claude).toBeInstanceOf(ClaudeCliAdapter);
-    expect((claude as ClaudeCliAdapter).buildArgs(request)).toContain('--model');
-    expect((claude as ClaudeCliAdapter).buildArgs(request)).toContain('opus');
+    expect((claude as ClaudeCliAdapter).buildArgs(request)).toContain('--permission-mode');
+    expect((claude as ClaudeCliAdapter).buildArgs(request)).toContain('bypassPermissions');
 
     expect(codex).toBeInstanceOf(CodexCliAdapter);
     expect((codex as CodexCliAdapter).buildArgs(request)).toEqual([
@@ -91,6 +91,28 @@ describe('createLlmProvider', () => {
       'instructions=test',
       '-c',
       'model=o4-mini',
+    ]);
+  });
+
+  it('passes configured models into the Claude CLI adapter', () => {
+    const claude = createLlmProvider({
+      name: 'claude',
+      type: 'claude-cli',
+      model: 'claude-opus-4-1',
+      extraArgs: ['--permission-mode', 'bypassPermissions'],
+    });
+
+    expect(claude).toBeInstanceOf(ClaudeCliAdapter);
+    expect((claude as ClaudeCliAdapter).buildArgs(request)).toEqual([
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--append-system-prompt',
+      'test',
+      '--model',
+      'claude-opus-4-1',
+      '--permission-mode',
+      'bypassPermissions',
     ]);
   });
 

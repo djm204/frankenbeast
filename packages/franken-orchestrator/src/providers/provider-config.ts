@@ -137,6 +137,7 @@ export function createLlmProvider(config: ProviderConfig): ILlmProvider {
     case 'claude-cli':
       return new ClaudeCliAdapter({
         ...(config.cliPath ? { binaryPath: config.cliPath } : {}),
+        ...(config.model ? { model: config.model } : {}),
         ...(config.extraArgs ? { extraArgs: config.extraArgs } : {}),
       });
     case 'codex-cli':

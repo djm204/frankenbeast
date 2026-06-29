@@ -15,6 +15,7 @@ import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.j
 
 export interface ClaudeCliOptions {
   binaryPath?: string;
+  model?: string;
   maxBudgetUsd?: number;
   maxTurns?: number;
   tools?: string[];
@@ -110,6 +111,9 @@ export class ClaudeCliAdapter implements ILlmProvider {
     const args = ['-p', '--output-format', 'stream-json'];
     if (request.systemPrompt) {
       args.push('--append-system-prompt', request.systemPrompt);
+    }
+    if (this.options.model) {
+      args.push('--model', this.options.model);
     }
     if (this.options.maxBudgetUsd) {
       args.push('--max-budget-usd', String(this.options.maxBudgetUsd));
