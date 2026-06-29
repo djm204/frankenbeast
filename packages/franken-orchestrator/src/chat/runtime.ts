@@ -110,7 +110,7 @@ export class ChatRuntime {
           kind: 'plan',
           planSummary: description,
           chunkCount: 0,
-        });
+        }, { sessionId: state.sessionId });
         return this.result(state, [
           { kind: 'plan', content: runResult.summary },
         ], {
@@ -250,7 +250,7 @@ export class ChatRuntime {
     state: ChatRuntimeState,
     tier: string,
   ): Promise<ChatRuntimeResult> {
-    const runResult = await this.turnRunner.run(outcome);
+    const runResult = await this.turnRunner.run(outcome, { sessionId: state.sessionId });
     const pendingApproval = runResult.status === 'pending_approval';
     const displayKind = pendingApproval ? 'approval' : 'execution';
     const content = pendingApproval

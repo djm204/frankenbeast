@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createChatApp } from '../../../src/http/chat-app.js';
-import { TurnRunner } from '../../../src/chat/turn-runner.js';
+import { TurnRunner, type TurnEvent } from '../../../src/chat/turn-runner.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/sse-chat');
@@ -48,7 +48,7 @@ describe('SSE Streaming', () => {
     return data.id;
   }
 
-  function emitAfterDelay(events: Array<{ type: string; data?: unknown }>, delayMs = 50): void {
+  function emitAfterDelay(events: TurnEvent[], delayMs = 50): void {
     const runner = turnRunner; // snapshot to avoid closure-over-variable bug
     setTimeout(() => {
       for (const event of events) {
@@ -59,7 +59,7 @@ describe('SSE Streaming', () => {
 
   it('returns text/event-stream content type', async () => {
     const sessionId = await createSession();
-    emitAfterDelay([{ type: 'complete', data: { status: 'done' } }]);
+    emitAfterDelay([{ type: 'complete', sessionId, data: { status: 'done' } }]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     expect(res.headers.get('content-type')).toContain('text/event-stream');
   });
@@ -71,7 +71,7 @@ describe('SSE Streaming', () => {
 
   it('sends connected event with session ID', async () => {
     const sessionId = await createSession();
-    emitAfterDelay([{ type: 'complete', data: { status: 'done' } }]);
+    emitAfterDelay([{ type: 'complete', sessionId, data: { status: 'done' } }]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     const text = await res.text();
     expect(text).toContain('event: connected');
@@ -81,8 +81,8 @@ describe('SSE Streaming', () => {
   it('emits SSE events as valid JSON data lines', async () => {
     const sessionId = await createSession();
     emitAfterDelay([
-      { type: 'start', data: { taskDescription: 'test task' } },
-      { type: 'complete', data: { status: 'success' } },
+      { type: 'start', sessionId, data: { taskDescription: 'test task' } },
+      { type: 'complete', sessionId, data: { status: 'success' } },
     ]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     const text = await res.text();
@@ -100,10 +100,10 @@ describe('SSE Streaming', () => {
   it('forwards TurnRunner events as SSE messages', async () => {
     const sessionId = await createSession();
     emitAfterDelay([
-      { type: 'start', data: { taskDescription: 'test' } },
-      { type: 'progress', data: { step: 1 } },
-      { type: 'tool_use', data: { tool: 'grep' } },
-      { type: 'complete', data: { status: 'success' } },
+      { type: 'start', sessionId, data: { taskDescription: 'test' } },
+      { type: 'progress', sessionId, data: { step: 1 } },
+      { type: 'tool_use', sessionId, data: { tool: 'grep' } },
+      { type: 'complete', sessionId, data: { status: 'success' } },
     ]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     const text = await res.text();
@@ -115,7 +115,7 @@ describe('SSE Streaming', () => {
 
   it('includes retry directive in SSE stream', async () => {
     const sessionId = await createSession();
-    emitAfterDelay([{ type: 'complete', data: {} }]);
+    emitAfterDelay([{ type: 'complete', sessionId, data: {} }]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     const text = await res.text();
     expect(text).toContain('retry:');
@@ -124,8 +124,8 @@ describe('SSE Streaming', () => {
   it('closes stream after complete event', async () => {
     const sessionId = await createSession();
     emitAfterDelay([
-      { type: 'start', data: { taskDescription: 'test' } },
-      { type: 'complete', data: { status: 'success' } },
+      { type: 'start', sessionId, data: { taskDescription: 'test' } },
+      { type: 'complete', sessionId, data: { status: 'success' } },
     ]);
     const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
     const text = await res.text();
@@ -134,5 +134,43 @@ describe('SSE Streaming', () => {
     // The last event line should be the complete event
     const eventLines = text.split('\n').filter((l: string) => l.startsWith('event:'));
     expect(eventLines[eventLines.length - 1]).toContain('complete');
+  });
+
+  it('only forwards events for the requested session when two streams are open', async () => {
+    const firstSessionId = await createSession();
+    const secondSessionId = await createSession();
+
+    const firstResponsePromise = app.request(`/v1/chat/sessions/${firstSessionId}/stream`);
+    const secondResponsePromise = app.request(`/v1/chat/sessions/${secondSessionId}/stream`);
+
+    emitAfterDelay([
+      { type: 'start', sessionId: firstSessionId, data: { marker: 'first-start' } },
+      { type: 'start', sessionId: secondSessionId, data: { marker: 'second-start' } },
+      { type: 'progress', sessionId: firstSessionId, data: { marker: 'first-progress' } },
+      { type: 'progress', sessionId: secondSessionId, data: { marker: 'second-progress' } },
+      { type: 'complete', sessionId: firstSessionId, data: { marker: 'first-complete' } },
+      { type: 'complete', sessionId: secondSessionId, data: { marker: 'second-complete' } },
+    ]);
+
+    const [firstResponse, secondResponse] = await Promise.all([firstResponsePromise, secondResponsePromise]);
+    const [firstText, secondText] = await Promise.all([firstResponse.text(), secondResponse.text()]);
+
+    expect(firstText).toContain(firstSessionId);
+    expect(firstText).toContain('first-start');
+    expect(firstText).toContain('first-progress');
+    expect(firstText).toContain('first-complete');
+    expect(firstText).not.toContain(secondSessionId);
+    expect(firstText).not.toContain('second-start');
+    expect(firstText).not.toContain('second-progress');
+    expect(firstText).not.toContain('second-complete');
+
+    expect(secondText).toContain(secondSessionId);
+    expect(secondText).toContain('second-start');
+    expect(secondText).toContain('second-progress');
+    expect(secondText).toContain('second-complete');
+    expect(secondText).not.toContain(firstSessionId);
+    expect(secondText).not.toContain('first-start');
+    expect(secondText).not.toContain('first-progress');
+    expect(secondText).not.toContain('first-complete');
   });
 });

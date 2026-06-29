@@ -38,6 +38,10 @@ export function createSseHandler(deps: SseHandlerDeps) {
         let writeChain = Promise.resolve();
 
         const onEvent = (event: TurnEvent) => {
+          if (event.sessionId !== id) {
+            return;
+          }
+
           writeChain = writeChain.then(async () => {
             await stream.writeSSE({
               event: event.type,

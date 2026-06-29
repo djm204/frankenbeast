@@ -277,6 +277,7 @@ describe('ChatRepl', () => {
         kind: 'execute',
         taskDescription: 'create a hello world file',
       }),
+      { sessionId: 'test' },
     );
     // Should NOT go through the engine
     const engineCalls = mockProcessTurn.mock.calls.filter(
@@ -303,6 +304,7 @@ describe('ChatRepl', () => {
         kind: 'plan',
         planSummary: 'build a react dashboard',
       }),
+      { sessionId: 'test' },
     );
   });
 

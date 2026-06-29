@@ -90,6 +90,7 @@ describe('Chat E2E', () => {
 
       const runResult = await runner.run(result.outcome);
       expect(runResult.status).toBe('pending_approval');
+      expect(runResult.events[0]?.sessionId).toBe('unknown-session');
     } else {
       // If not execute, it should at least not silently proceed
       expect(['clarify', 'reply']).toContain(result.outcome.kind);

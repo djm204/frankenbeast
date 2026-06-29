@@ -14,12 +14,21 @@ export interface ITaskExecutor {
   execute(input: { userInput: string }): Promise<ExecutionResult>;
 }
 
+interface TurnEventBase {
+  sessionId: string;
+  data?: unknown;
+}
+
 export type TurnEvent =
-  | { type: 'start'; data?: unknown }
-  | { type: 'progress'; data?: unknown }
-  | { type: 'tool_use'; data?: unknown }
-  | { type: 'approval_request'; data?: unknown }
-  | { type: 'complete'; data?: unknown };
+  | (TurnEventBase & { type: 'start' })
+  | (TurnEventBase & { type: 'progress' })
+  | (TurnEventBase & { type: 'tool_use' })
+  | (TurnEventBase & { type: 'approval_request' })
+  | (TurnEventBase & { type: 'complete' });
+
+export interface TurnRunOptions {
+  sessionId: string;
+}
 
 export interface TurnRunResult {
   status: 'completed' | 'pending_approval' | 'failed';
@@ -35,8 +44,9 @@ export class TurnRunner extends EventEmitter {
     this.executor = executor;
   }
 
-  async run(outcome: ExecuteOutcome | PlanOutcome): Promise<TurnRunResult> {
+  async run(outcome: ExecuteOutcome | PlanOutcome, options?: TurnRunOptions): Promise<TurnRunResult> {
     const events: TurnEvent[] = [];
+    const sessionId = options?.sessionId ?? 'unknown-session';
 
     if (outcome.kind === 'plan') {
       const summary = `Plan created: ${outcome.planSummary} (${outcome.chunkCount} chunks)`;
@@ -44,7 +54,7 @@ export class TurnRunner extends EventEmitter {
     }
 
     if (outcome.approvalRequired) {
-      const event: TurnEvent = { type: 'approval_request', data: { taskDescription: outcome.taskDescription } };
+      const event: TurnEvent = { type: 'approval_request', sessionId, data: { taskDescription: outcome.taskDescription } };
       events.push(event);
       this.emit('event', event);
       return {
@@ -54,7 +64,7 @@ export class TurnRunner extends EventEmitter {
       };
     }
 
-    const startEvent: TurnEvent = { type: 'start', data: { taskDescription: outcome.taskDescription } };
+    const startEvent: TurnEvent = { type: 'start', sessionId, data: { taskDescription: outcome.taskDescription } };
     events.push(startEvent);
     this.emit('event', startEvent);
 
@@ -63,7 +73,7 @@ export class TurnRunner extends EventEmitter {
     const summary = TurnSummarizer.summarize(executionResult);
     const status: TurnRunResult['status'] = executionResult.status === 'success' ? 'completed' : 'failed';
 
-    const completeEvent: TurnEvent = { type: 'complete', data: { status: executionResult.status } };
+    const completeEvent: TurnEvent = { type: 'complete', sessionId, data: { status: executionResult.status } };
     events.push(completeEvent);
     this.emit('event', completeEvent);
 
