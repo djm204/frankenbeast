@@ -174,6 +174,7 @@ export async function auditMcpToolExecution(
   const observer = audit?.observer ?? audit?.getObserver?.();
   const serverName = audit?.serverName;
   if (!observer || !serverName) return;
+  const auditedArgs = args === undefined ? {} : args;
 
   await observer.log({
     event,
@@ -181,8 +182,8 @@ export async function auditMcpToolExecution(
     metadata: JSON.stringify({
       server: serverName,
       tool: toolName,
-      inputHash: hashJson(args),
-      inputSummary: summarizeInput(args),
+      inputHash: hashJson(auditedArgs),
+      inputSummary: summarizeInput(auditedArgs),
       ...extra,
     }),
   });

@@ -39,7 +39,7 @@ const allTools: ToolDef[] = [
   ...createSkillsServer({ skills }).tools,
 ];
 
-const server = createMcpServer('fbeast', '0.1.0', allTools);
+const server = createMcpServer('fbeast', '0.1.0', allTools, { observer });
 
 server.start().catch((err) => {
   console.error('fbeast-mcp failed to start:', err);

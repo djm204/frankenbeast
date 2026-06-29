@@ -74,7 +74,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
   return {
     async log(input) {
       const payload = parseMetadata(input.metadata);
-      const metadata = canonicalMetadata(payload);
+      const metadata = canonicalMetadata(input.metadata);
       const lastRow = store.db.prepare(
         'SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1',
       ).get(input.sessionId) as { hash: string } | undefined;
@@ -85,7 +85,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         input: metadata,
       });
 
-      const baseHash = auditEvent.inputHash ?? hashContent(`${input.event}:${metadata}`);
+      const baseHash = buildEventBaseHash(input.event, metadata, auditEvent.inputHash);
       const hash = buildAuditHash(baseHash, lastRow?.hash);
       const result = store.db.prepare(`
         INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
@@ -181,13 +181,13 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
       for (const [index, row] of rows.entries()) {
         const payload = parseMetadata(row.payload);
-        const metadata = canonicalMetadata(payload);
+        const metadata = canonicalMetadata(row.payload);
         const auditEvent = createAuditEvent(row.eventType, payload, {
           phase: 'mcp',
           provider: 'fbeast-mcp',
           input: metadata,
         });
-        const baseHash = auditEvent.inputHash ?? hashContent(`${row.eventType}:${metadata}`);
+        const baseHash = buildEventBaseHash(row.eventType, metadata, auditEvent.inputHash);
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
         const actualParentHash = row.parentHash ?? undefined;
 
@@ -221,6 +221,10 @@ function buildAuditHash(baseHash: string, parentHash?: string): string {
   return hashContent(`${parentHash}:${baseHash}`);
 }
 
+function buildEventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
+  return hashContent(`${eventType}:${inputHash ?? ''}:${metadata}`);
+}
+
 function parseMetadata(metadata: string): unknown {
   try {
     return JSON.parse(metadata);
@@ -229,6 +233,10 @@ function parseMetadata(metadata: string): unknown {
   }
 }
 
-function canonicalMetadata(payload: unknown): string {
-  return typeof payload === 'string' ? payload : JSON.stringify(payload);
+function canonicalMetadata(metadata: string): string {
+  try {
+    return JSON.stringify(JSON.parse(metadata));
+  } catch {
+    return metadata;
+  }
 }

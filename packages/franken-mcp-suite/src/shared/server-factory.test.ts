@@ -104,6 +104,22 @@ describe('createMcpServer', () => {
     expect(observer.log).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_validation_failure', sessionId: 's2' }));
   });
 
+  it('normalizes absent arguments before hashing validation-failure audits', async () => {
+    const observer = { log: vi.fn().mockResolvedValue({ id: 1, hash: 'h' }) } as unknown as ObserverAdapter;
+    const srv = createMcpServer('t', '1', [], { observer, sessionId: 's3' });
+
+    const res = await srv.callTool('missing', undefined);
+
+    expect(res.isError).toBe(true);
+    expect(observer.log).toHaveBeenCalledOnce();
+    const metadata = JSON.parse(vi.mocked(observer.log).mock.calls[0]![0].metadata) as {
+      inputHash: string;
+      inputSummary: { kind: string; keys: string[] };
+    };
+    expect(metadata.inputHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(metadata.inputSummary).toEqual({ kind: 'object', keys: [] });
+  });
+
   it('requires an OWN required property (rejects prototype-chain keys)', async () => {
     const { calls, callTool } = makeServerWithSpy();
     const res = await callTool('echo', Object.create({ msg: 'x' }));

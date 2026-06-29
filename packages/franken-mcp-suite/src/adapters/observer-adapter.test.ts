@@ -66,6 +66,39 @@ describe('ObserverAdapter', () => {
     expect(verification).toEqual({ ok: true, checked: 2 });
   });
 
+  it('binds the event type into the first audit hash', async () => {
+    const firstHashFrom = async (event: string): Promise<string> => {
+      const observer = createObserverAdapter(tracked(tmpDbPath()));
+      const sessionId = randomUUID();
+
+      const entry = await observer.log({
+        event,
+        metadata: JSON.stringify({ tool: 'memory', ok: true }),
+        sessionId,
+      });
+
+      return entry.hash;
+    };
+
+    const callHash = await firstHashFrom('tool_call');
+    const resultHash = await firstHashFrom('tool_result');
+
+    expect(resultHash).not.toBe(callHash);
+  });
+
+  it('preserves JSON string metadata when hashing and storing payloads', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+    const sessionId = randomUUID();
+
+    const logged = await observer.log({ event: 'tool_call', metadata: JSON.stringify('literal metadata'), sessionId });
+    const trail = await observer.trail(sessionId);
+    const verification = await observer.verify(sessionId);
+
+    expect(trail[0]!.payload).toBe('"literal metadata"');
+    expect(verification).toEqual({ ok: true, checked: 1 });
+    expect(logged.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
   it('reports tampered payloads during full-chain verification', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
