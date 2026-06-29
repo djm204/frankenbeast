@@ -212,6 +212,11 @@ vi.mock('../../src/lib/beast-api.js', () => ({
 }));
 
 vi.mock('../../src/lib/network-api.js', () => ({
+  // AnalyticsApiClient (loaded transitively by ChatShell) imports
+  // withOperatorAuth from this module, so the mock must expose it or the
+  // analytics client throws when it builds an authenticated request.
+  withOperatorAuth: (init: RequestInit, token: string | undefined) =>
+    token ? { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } } : init,
   NetworkApiClient: vi.fn(function (this: { getStatus: ReturnType<typeof vi.fn>; getConfig: ReturnType<typeof vi.fn> }) {
     this.getStatus = vi.fn().mockResolvedValue({
       mode: 'secure',

@@ -54,10 +54,9 @@ describe('AnalyticsApiClient', () => {
     const client = new AnalyticsApiClient(BASE_URL, 'op-token');
     await client.fetchSummary({});
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE_URL}/api/analytics/summary`,
-      expect.objectContaining({ headers: { authorization: 'Bearer op-token' } }),
-    );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE_URL}/api/analytics/summary`);
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer op-token');
   });
 
   it('omits the authorization header when no token is configured', async () => {

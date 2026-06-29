@@ -21,10 +21,10 @@ describe('NetworkApiClient', () => {
     const client = new NetworkApiClient(BASE_URL, 'op-token');
     await client.getStatus();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE_URL}/v1/network/status`,
-      expect.objectContaining({ method: 'GET', headers: { authorization: 'Bearer op-token' } }),
-    );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE_URL}/v1/network/status`);
+    expect(init.method).toBe('GET');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer op-token');
   });
 
   it('preserves existing headers alongside the bearer token', async () => {
@@ -34,13 +34,12 @@ describe('NetworkApiClient', () => {
     const client = new NetworkApiClient(BASE_URL, 'op-token');
     await client.updateConfig(['chat:on']);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${BASE_URL}/v1/network/config`,
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
-      }),
-    );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE_URL}/v1/network/config`);
+    expect(init.method).toBe('POST');
+    const headers = new Headers(init.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('authorization')).toBe('Bearer op-token');
   });
 
   it('omits the authorization header when no token is configured', async () => {
@@ -71,10 +70,34 @@ describe('withOperatorAuth', () => {
     const init = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const result = withOperatorAuth(init, 'op-token');
 
-    expect(result).toEqual({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
-    });
+    expect(result.method).toBe('POST');
+    const headers = new Headers(result.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('authorization')).toBe('Bearer op-token');
+    // original init must be untouched
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+
+  it('preserves Headers-instance headers while adding the bearer token', () => {
+    const result = withOperatorAuth(
+      { headers: new Headers({ 'Content-Type': 'application/json', 'X-Custom': 'v' }) },
+      'op-token',
+    );
+
+    const headers = new Headers(result.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('x-custom')).toBe('v');
+    expect(headers.get('authorization')).toBe('Bearer op-token');
+  });
+
+  it('preserves entry-array headers while adding the bearer token', () => {
+    const result = withOperatorAuth(
+      { headers: [['Content-Type', 'application/json']] as [string, string][] },
+      'op-token',
+    );
+
+    const headers = new Headers(result.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('authorization')).toBe('Bearer op-token');
   });
 });

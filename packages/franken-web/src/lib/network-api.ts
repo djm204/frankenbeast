@@ -77,13 +77,17 @@ export class NetworkApiClient {
  * the same operator token as chat/beast (see chat-app.ts), so first-party
  * clients must forward it or every secured request 401s. When no token is set
  * (loopback dev) the request is left untouched.
+ *
+ * `init.headers` may be a plain object, a `Headers` instance, or a
+ * `[key, value][]` array (all valid `RequestInit` shapes). Object-spreading the
+ * latter two would silently drop existing entries such as `Content-Type`, so we
+ * normalize through `Headers` before setting the bearer token.
  */
 export function withOperatorAuth(init: RequestInit, operatorToken: string | undefined): RequestInit {
   if (!operatorToken) {
     return init;
   }
-  return {
-    ...init,
-    headers: { ...init.headers, authorization: `Bearer ${operatorToken}` },
-  };
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${operatorToken}`);
+  return { ...init, headers };
 }

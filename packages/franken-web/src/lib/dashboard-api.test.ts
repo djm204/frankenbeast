@@ -125,27 +125,23 @@ describe('DashboardApiClient', () => {
       await client.toggleSkill('code-review', false);
       await client.updateSecurityProfile('strict');
 
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        1,
-        `${BASE_URL}/api/dashboard`,
-        expect.objectContaining({ headers: { authorization: 'Bearer op-token' } }),
-      );
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        `${BASE_URL}/api/skills/code-review`,
-        expect.objectContaining({
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
-        }),
-      );
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        3,
-        `${BASE_URL}/api/security`,
-        expect.objectContaining({
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
-        }),
-      );
+      const [snapshotUrl, snapshotInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(snapshotUrl).toBe(`${BASE_URL}/api/dashboard`);
+      expect(new Headers(snapshotInit.headers).get('authorization')).toBe('Bearer op-token');
+
+      const [skillUrl, skillInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(skillUrl).toBe(`${BASE_URL}/api/skills/code-review`);
+      expect(skillInit.method).toBe('PATCH');
+      const skillHeaders = new Headers(skillInit.headers);
+      expect(skillHeaders.get('content-type')).toBe('application/json');
+      expect(skillHeaders.get('authorization')).toBe('Bearer op-token');
+
+      const [securityUrl, securityInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+      expect(securityUrl).toBe(`${BASE_URL}/api/security`);
+      expect(securityInit.method).toBe('PATCH');
+      const securityHeaders = new Headers(securityInit.headers);
+      expect(securityHeaders.get('content-type')).toBe('application/json');
+      expect(securityHeaders.get('authorization')).toBe('Bearer op-token');
     });
 
     it('omits the authorization header when no token is configured', async () => {
