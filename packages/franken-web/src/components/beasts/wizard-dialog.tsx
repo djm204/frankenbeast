@@ -10,9 +10,9 @@ import { StepSkills } from './steps/step-skills';
 import { StepPrompts } from './steps/step-prompts';
 import { StepGit } from './steps/step-git';
 import { StepReview } from './steps/step-review';
+import { buildWizardLaunchConfig } from './wizard-launch-config';
 
 const STEP_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git', 'Review'];
-const SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git', 'review'];
 
 interface WizardDialogProps {
   isOpen: boolean;
@@ -30,11 +30,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, launching, launchError
   const isFirstStep = wizardStep === 0;
 
   function buildAndLaunch() {
-    const config: Record<string, unknown> = {};
-    for (let i = 0; i < STEP_LABELS.length; i++) {
-      if (stepValues[i]) config[SECTION_KEYS[i]!] = stepValues[i];
-    }
-    onLaunch(config);
+    onLaunch(buildWizardLaunchConfig(stepValues));
   }
 
   function handleNext() {

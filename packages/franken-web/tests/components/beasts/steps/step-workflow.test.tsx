@@ -29,4 +29,18 @@ describe('StepWorkflow', () => {
     render(<StepWorkflow />);
     expect(screen.getByPlaceholderText(/topic|context/i)).toBeTruthy();
   });
+
+  it('collects both required chunk-plan launch fields', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan' });
+    render(<StepWorkflow />);
+
+    fireEvent.change(screen.getByLabelText('Design Doc Path'), { target: { value: 'docs/design.md' } });
+    fireEvent.change(screen.getByLabelText('Output Directory'), { target: { value: 'tasks/chunks' } });
+
+    expect(useBeastStore.getState().stepValues[1]).toEqual({
+      workflowType: 'chunk-plan',
+      docPath: 'docs/design.md',
+      outputDir: 'tasks/chunks',
+    });
+  });
 });
