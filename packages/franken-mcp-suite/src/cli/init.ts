@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
-import { codexServerName } from './codex-server-names.js';
+import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -137,6 +137,7 @@ function initCodex(options: {
   mode: 'standard' | 'proxy';
 }): void {
   const { root, servers, hooks, config, spawnFn, mode } = options;
+  ensureCodexProjectId(root);
   const dbPath = join(root, '.fbeast', 'beast.db');
 
   // Register MCP servers via codex mcp add

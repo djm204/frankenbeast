@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
-import { codexServerNames } from './codex-server-names.js';
+import { codexProjectIds, codexServerNamesForProjectIds } from './codex-server-names.js';
 import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
@@ -15,7 +15,7 @@ export interface UninstallOptions {
   purge?: boolean | undefined;
   ask?: (question: string) => Promise<string>;
   /** Injectable spawn for testing the codex path. */
-  spawn?: (cmd: string, args: string[]) => { status: number | null };
+  spawn?: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string };
 }
 
 export async function runUninstall(options: UninstallOptions): Promise<void> {
@@ -114,14 +114,22 @@ const AGENTS_MD_END = '<!-- fbeast-end -->';
 
 function uninstallCodex(options: {
   root: string;
-  spawnFn: (cmd: string, args: string[]) => { status: number | null };
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string };
 }): void {
   const { root, spawnFn } = options;
 
-  // Remove only this project's namespaced MCP servers. Codex MCP server names
-  // are global, so fixed legacy names such as `fbeast-memory` may belong to a
-  // different checkout and must not be blindly removed.
-  for (const name of [...codexServerNames(root, ALL_SERVERS, 'standard'), ...codexServerNames(root, ALL_SERVERS, 'proxy')]) {
+  const projectIds = codexProjectIds(root);
+  const namesToRemove = new Set([
+    ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'standard'),
+    ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'proxy'),
+    ...legacyCodexServerNamesForRoot(root, spawnFn),
+  ]);
+
+  // Remove only this project's MCP servers. Namespaced entries are scoped by a
+  // persisted project id (plus the current path hash as a defensive fallback).
+  // Legacy fixed names are removed only when `codex mcp list --json` proves that
+  // they target this root's .fbeast database.
+  for (const name of namesToRemove) {
     spawnFn('codex', ['mcp', 'remove', name]);
   }
 
@@ -163,6 +171,46 @@ function uninstallCodex(options: {
   }
 
   removeGeneratedHookScripts(root, 'codex');
+}
+
+function legacyCodexServerNamesForRoot(
+  root: string,
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string },
+): string[] {
+  const result = spawnFn('codex', ['mcp', 'list', '--json']);
+  if (result.status !== 0 || result.stdout === undefined) return [];
+
+  let entries: unknown;
+  try {
+    entries = JSON.parse(result.stdout.toString());
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(entries)) return [];
+
+  const legacyNames = new Set([...ALL_SERVERS.map((server) => `fbeast-${server}`), 'fbeast-proxy']);
+  return entries.flatMap((entry) => {
+    if (!isObjectRecord(entry)) return [];
+    const name = entry['name'];
+    if (typeof name !== 'string' || !legacyNames.has(name)) return [];
+    return codexEntryTargetsRootDb(entry, root) ? [name] : [];
+  });
+}
+
+function codexEntryTargetsRootDb(entry: Record<string, unknown>, root: string): boolean {
+  const dbPath = resolve(root, '.fbeast', 'beast.db');
+  const candidates = [entry, isObjectRecord(entry['transport']) ? entry['transport'] : undefined]
+    .filter((value): value is Record<string, unknown> => value !== undefined);
+
+  return candidates.some((candidate) => {
+    const args = candidate['args'];
+    if (!Array.isArray(args)) return false;
+    return args.some((arg) => typeof arg === 'string' && resolve(arg) === dbPath);
+  });
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 'codex'): void {

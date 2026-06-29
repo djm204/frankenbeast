@@ -243,9 +243,9 @@ describe('fbeast uninstall', () => {
     await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
 
     // Each namespaced server gets a remove call (7 individual + project proxy = 8)
-    expect(spawnCalls.length).toBe(8);
-    expect(spawnCalls.every((c) => c.args[1] === 'remove')).toBe(true);
-    expect(spawnCalls.map((c) => c.args[2])).toEqual([
+    const removeCalls = spawnCalls.filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove');
+    expect(removeCalls.length).toBe(8);
+    expect(removeCalls.map((c) => c.args[2])).toEqual([
       ...codexServerNames(root, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
       codexServerName(root, 'proxy'),
     ]);
@@ -333,6 +333,64 @@ describe('fbeast uninstall', () => {
     expect(removedNames).toEqual(projectANames);
     expect(removedNames.some((name) => projectBNames.includes(name))).toBe(false);
     expect(removedNames).not.toContain('fbeast-memory');
+  });
+
+  it('codex uninstall removes legacy fixed names only when they target this root', async () => {
+    const root = tmpDir();
+    const otherRoot = tmpDir();
+    dirs.push(root, otherRoot);
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      if (args[0] === 'mcp' && args[1] === 'list') {
+        return {
+          status: 0,
+          stdout: JSON.stringify([
+            { name: 'fbeast-memory', transport: { type: 'stdio', command: 'fbeast-memory', args: ['--db', join(root, '.fbeast', 'beast.db')] } },
+            { name: 'fbeast-planner', transport: { type: 'stdio', command: 'fbeast-planner', args: ['--db', join(otherRoot, '.fbeast', 'beast.db')] } },
+            { name: 'github', transport: { type: 'streamable_http', url: 'https://example.invalid/mcp' } },
+          ]),
+        };
+      }
+      return { status: 0 };
+    };
+
+    await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    expect(removedNames).toContain('fbeast-memory');
+    expect(removedNames).not.toContain('fbeast-planner');
+    expect(removedNames).not.toContain('github');
+  });
+
+  it('codex uninstall removes persisted project-id names after a project move', async () => {
+    const oldRoot = tmpDir();
+    const movedRoot = tmpDir();
+    dirs.push(oldRoot, movedRoot);
+    const initSpawn = () => ({ status: 0 });
+
+    runInit({ root: oldRoot, claudeDir: join(oldRoot, '.codex'), hooks: false, client: 'codex', spawn: initSpawn });
+    const oldProjectId = readFileSync(join(oldRoot, '.fbeast', 'codex-project-id'), 'utf-8').trim();
+    mkdirSync(join(movedRoot, '.fbeast'), { recursive: true });
+    writeFileSync(join(movedRoot, '.fbeast', 'codex-project-id'), `${oldProjectId}\n`);
+
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return args[0] === 'mcp' && args[1] === 'list'
+        ? { status: 0, stdout: '[]' }
+        : { status: 0 };
+    };
+
+    await runUninstall({ root: movedRoot, claudeDir: join(movedRoot, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    expect(removedNames).toContain(`fbeast-memory-${oldProjectId}`);
+    expect(removedNames).toContain(codexServerName(movedRoot, 'memory'));
   });
 
   it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {
