@@ -17,6 +17,7 @@ export {
   GovernorError,
   ApprovalTimeoutError,
   ChannelUnavailableError,
+  ApprovalConfigurationError,
   SignatureVerificationError,
   ApprovalMismatchError,
   TriggerEvaluationError,

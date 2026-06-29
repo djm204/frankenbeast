@@ -1,13 +1,14 @@
 import type { ApprovalRequest, ApprovalResponse, ApprovalOutcome } from '../core/types.js';
 import type { GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
-import type { SignatureVerifier } from '../security/signature-verifier.js';
+import { SignatureVerifier } from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
 import { createSessionToken } from '../security/session-token.js';
 import {
   ApprovalTimeoutError,
   SignatureVerificationError,
   ApprovalMismatchError,
+  ApprovalConfigurationError,
 } from '../errors/index.js';
 
 export interface AuditRecorder {
@@ -33,15 +34,18 @@ export class ApprovalGateway {
     this.channel = deps.channel;
     this.auditRecorder = deps.auditRecorder;
     this.config = deps.config;
-    this.signatureVerifier = deps.signatureVerifier;
+    this.signatureVerifier = deps.signatureVerifier
+      ?? (deps.config.signingSecret ? new SignatureVerifier(deps.config.signingSecret) : undefined);
     this.sessionTokenStore = deps.sessionTokenStore;
-
-    if (deps.config.requireSignedApprovals && !deps.signatureVerifier) {
-      throw new Error('Signed approvals are required but no signatureVerifier was supplied');
-    }
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalOutcome> {
+    if (this.config.requireSignedApprovals && !this.signatureVerifier) {
+      throw new ApprovalConfigurationError(
+        'Signed approvals are required but no signature verifier is configured. Provide config.signingSecret or ApprovalGatewayDeps.signatureVerifier.',
+      );
+    }
+
     const response = await this.withTimeout(
       this.channel.requestApproval(request),
       request.requestId,
@@ -54,7 +58,7 @@ export class ApprovalGateway {
       throw new ApprovalMismatchError(request.requestId, response.requestId);
     }
 
-    if (this.config.requireSignedApprovals && this.signatureVerifier) {
+    if (this.config.requireSignedApprovals) {
       this.verifySignature(response);
     }
 
