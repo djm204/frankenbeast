@@ -17,6 +17,7 @@ export interface CodexCliOptions {
   binaryPath?: string;
   profile?: string;
   configOverrides?: Record<string, string>;
+  extraArgs?: readonly string[];
 }
 
 export class CodexCliAdapter implements ILlmProvider {
@@ -114,6 +115,9 @@ export class CodexCliAdapter implements ILlmProvider {
       )) {
         args.push('-c', `${key}=${value}`);
       }
+    }
+    if (this.options.extraArgs?.length) {
+      args.push(...this.options.extraArgs);
     }
     return args;
   }

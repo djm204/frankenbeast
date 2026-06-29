@@ -18,6 +18,7 @@ export interface ClaudeCliOptions {
   maxBudgetUsd?: number;
   maxTurns?: number;
   tools?: string[];
+  extraArgs?: readonly string[];
 }
 
 export class ClaudeCliAdapter implements ILlmProvider {
@@ -118,6 +119,9 @@ export class ClaudeCliAdapter implements ILlmProvider {
     }
     if (this.options.tools?.length) {
       args.push('--tools', this.options.tools.join(','));
+    }
+    if (this.options.extraArgs?.length) {
+      args.push(...this.options.extraArgs);
     }
     return args;
   }

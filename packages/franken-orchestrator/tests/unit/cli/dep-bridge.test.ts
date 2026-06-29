@@ -63,6 +63,28 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
+    it('preserves legacy "aider" CLI selection with the consolidated CLI fallback type', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'aider',
+        providersConfig: {
+          aider: {
+            command: '/opt/bin/aider',
+            model: 'gpt-4o',
+            extraArgs: ['--yes-always'],
+          },
+        },
+      }));
+      expect(config.providers).toEqual([
+        {
+          name: 'aider',
+          type: 'claude-cli',
+          cliPath: '/opt/bin/aider',
+          model: 'gpt-4o',
+          extraArgs: ['--yes-always'],
+        },
+      ]);
+    });
+
     it('maps "anthropic" to anthropic-api type', () => {
       const config = bridgeToBeastConfig(makeOptions({ provider: 'anthropic' }));
       expect(config.providers).toEqual([

@@ -135,19 +135,35 @@ export function createLlmProvider(config: ProviderConfig): ILlmProvider {
   const type = resolveProviderType(config.name, config.type);
   switch (type) {
     case 'claude-cli':
-      return new ClaudeCliAdapter(config.cliPath ? { binaryPath: config.cliPath } : {});
+      return new ClaudeCliAdapter({
+        ...(config.cliPath ? { binaryPath: config.cliPath } : {}),
+        ...(config.extraArgs ? { extraArgs: config.extraArgs } : {}),
+      });
     case 'codex-cli':
-      return new CodexCliAdapter(config.cliPath ? { binaryPath: config.cliPath } : {});
+      return new CodexCliAdapter({
+        ...(config.cliPath ? { binaryPath: config.cliPath } : {}),
+        ...(config.extraArgs ? { extraArgs: config.extraArgs } : {}),
+      });
     case 'gemini-cli':
       return new GeminiCliAdapter({
         ...(config.cliPath ? { binaryPath: config.cliPath } : {}),
         ...(config.model ? { model: config.model } : {}),
+        ...(config.extraArgs ? { extraArgs: config.extraArgs } : {}),
       });
     case 'anthropic-api':
-      return new AnthropicApiAdapter(config.apiKey ? { apiKey: config.apiKey } : {});
+      return new AnthropicApiAdapter({
+        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(config.model ? { model: config.model } : {}),
+      });
     case 'openai-api':
-      return new OpenAiApiAdapter(config.apiKey ? { apiKey: config.apiKey } : {});
+      return new OpenAiApiAdapter({
+        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(config.model ? { model: config.model } : {}),
+      });
     case 'gemini-api':
-      return new GeminiApiAdapter(config.apiKey ? { apiKey: config.apiKey } : {});
+      return new GeminiApiAdapter({
+        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(config.model ? { model: config.model } : {}),
+      });
   }
 }

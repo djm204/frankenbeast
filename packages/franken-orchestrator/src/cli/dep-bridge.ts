@@ -51,9 +51,20 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
     }
   }
 
-  const providers: ProviderConfig[] = providerNames.map((name) =>
-    buildProviderConfig(name, options.providersConfig?.[name]),
-  );
+  const providers: ProviderConfig[] = providerNames.map((name) => {
+    if (name === 'aider') {
+      const override = options.providersConfig?.[name];
+      return {
+        name,
+        type: 'claude-cli',
+        ...(override?.command ? { cliPath: override.command } : {}),
+        ...(override?.model ? { model: override.model } : {}),
+        ...(override?.extraArgs ? { extraArgs: override.extraArgs } : {}),
+      };
+    }
+
+    return buildProviderConfig(name, options.providersConfig?.[name]);
+  });
 
   // Security
   const securityProfile: SecurityProfile =
