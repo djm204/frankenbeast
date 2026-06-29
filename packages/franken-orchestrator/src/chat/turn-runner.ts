@@ -44,9 +44,9 @@ export class TurnRunner extends EventEmitter {
     this.executor = executor;
   }
 
-  async run(outcome: ExecuteOutcome | PlanOutcome, options: TurnRunOptions): Promise<TurnRunResult> {
+  async run(outcome: ExecuteOutcome | PlanOutcome, options?: TurnRunOptions): Promise<TurnRunResult> {
     const events: TurnEvent[] = [];
-    const { sessionId } = options;
+    const sessionId = options?.sessionId ?? 'unknown-session';
 
     if (outcome.kind === 'plan') {
       const summary = `Plan created: ${outcome.planSummary} (${outcome.chunkCount} chunks)`;
