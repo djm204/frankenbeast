@@ -68,15 +68,17 @@ npx frankenbeast issues --repo owner/repo --dry-run
 
 ## 6. Optional: initialize MCP mode for a project
 
+The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`). Install it globally (`npm i -g @fbeast/mcp-suite`) and run `fbeast …`, or use the `npx --package=@fbeast/mcp-suite` form shown below.
+
 ```bash
 # Standard MCP registration
-npx fbeast mcp init
+npx --package=@fbeast/mcp-suite fbeast mcp init
 
 # Lower-context proxy registration
-npx fbeast mcp init --mode=proxy
+npx --package=@fbeast/mcp-suite fbeast mcp init --mode=proxy
 
 # Add generated pre/post-tool hooks
-npx fbeast mcp init --hooks
+npx --package=@fbeast/mcp-suite fbeast mcp init --hooks
 ```
 
 The `fbeast` CLI in this repo exposes MCP operations (`init`, `uninstall`, `beast`) under the `mcp` subcommand; any other command is forwarded to `frankenbeast`. MCP data is stored in `.fbeast/beast.db`.

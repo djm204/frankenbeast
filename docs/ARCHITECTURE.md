@@ -778,7 +778,7 @@ The current exact MCP tool names are defined in `packages/franken-mcp-suite/src/
 ### Architecture
 
 ```
-fbeast init / client config
+fbeast mcp init / client config
     │
     ▼
 ┌──────────────────────────────────────────┐
@@ -797,13 +797,9 @@ fbeast init / client config
     MCP Server A       MCP Server B
 ```
 
-### Constraint Resolution
+### Tool registry
 
-Three-level cascade (most conservative defaults):
-
-1. **Module defaults**: `{ is_destructive: true, requires_hitl: true, sandbox_type: "DOCKER" }`
-2. **Server-level**: Overrides defaults for all tools in that server
-3. **Tool-level**: Highest priority, per-tool overrides via `toolOverrides`
+`packages/franken-mcp-suite/src/shared/tool-registry.ts` is the source of truth. It stores tool names, JSON schemas, and handlers, plus lightweight proxy/search metadata and shared `.fbeast/beast.db` adapters. The pre-consolidation `franken-mcp` constraint knobs (`McpToolConstraints`, `toolOverrides`, a three-level server/tool override cascade, and per-server `initTimeoutMs`/`callTimeoutMs`) are **not** part of the current suite; governance (HITL, destructive-action gating) is enforced through the governor/firewall adapters in `createAdapterSet(dbPath)` and the generated tool hooks, not registry-level overrides.
 
 ### Key Types
 
@@ -813,12 +809,6 @@ Three-level cascade (most conservative defaults):
 | `TOOL_STUBS` | Lightweight proxy/search metadata |
 | `createAdapterSet(dbPath)` | Shared brain/observer/governor/planner/critique/firewall/skills adapters |
 | `searchTools()` | Proxy-mode tool discovery helper |
-
-### Resilience
-
-- **Partial startup**: If 3 servers configured and 1 fails, the other 2 still work
-- **Configurable timeouts**: `initTimeoutMs` (default 10s) and `callTimeoutMs` (default 30s) per-server
-- **Graceful shutdown**: SIGTERM → 5s wait → SIGKILL, idempotent
 
 ## Examples
 

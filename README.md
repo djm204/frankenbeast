@@ -349,13 +349,14 @@ See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup gu
 
 ## Run the Dashboard with MCP Mode
 
-Use this path when you installed `@fbeast/mcp-suite` with `fbeast init` and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
+Use this path when you installed `@fbeast/mcp-suite` with `fbeast mcp init` and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
 
 From the project where you initialized MCP:
 
 ```bash
 # One-time MCP setup. Add --hooks if you want tool-call governance and audit logs.
-npx fbeast init --hooks
+# The fbeast binary ships from @fbeast/mcp-suite (no package named "fbeast").
+npx --package=@fbeast/mcp-suite fbeast mcp init --hooks
 ```
 
 From this Frankenbeast repo, start the dashboard backend against that same project root:

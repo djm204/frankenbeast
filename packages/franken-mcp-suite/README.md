@@ -10,26 +10,26 @@ npm install
 
 # Initialize for your project
 cd your-project
-npx fbeast init
+npx fbeast mcp init
 
 # Optional: install with hooks (pre/post tool enforcement)
-npx fbeast init --hooks
+npx fbeast mcp init --hooks
 
 # Choose specific servers
-npx fbeast init --pick=memory,firewall,governor
+npx fbeast mcp init --pick=memory,firewall,governor
 
 # Proxy mode: single server, 2 tools, ~90% lower context cost
-npx fbeast init --mode=proxy
+npx fbeast mcp init --mode=proxy
 ```
 
-`fbeast init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
+`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
 
 ```bash
-npx fbeast uninstall                    # remove from detected client config
-npx fbeast uninstall --client=gemini    # target specific client
-npx fbeast uninstall --purge            # also delete .fbeast/ data
+npx fbeast mcp uninstall                    # remove from detected client config
+npx fbeast mcp uninstall --client=gemini    # target specific client
+npx fbeast mcp uninstall --purge            # also delete .fbeast/ data
 ```
 
 ## Beast mode
@@ -37,13 +37,13 @@ npx fbeast uninstall --purge            # also delete .fbeast/ data
 Activate standalone orchestrator mode (shares `.fbeast/beast.db` with MCP mode):
 
 ```bash
-npx fbeast beast                          # default provider (anthropic-api)
-npx fbeast beast --provider=claude-cli    # requires risk acknowledgment
+npx fbeast mcp beast                          # default provider (anthropic-api)
+npx fbeast mcp beast --provider=claude-cli    # requires risk acknowledgment
 ```
 
 ## Dashboard
 
-The MCP tools, hooks, Beast mode, and web dashboard all use the same project database at `.fbeast/beast.db` when the dashboard backend points at the same project root. After `fbeast init`, run the dashboard when you want a browser view of observer activity, governor decisions, cost rows, and Beast runs.
+The MCP tools, hooks, Beast mode, and web dashboard all use the same project database at `.fbeast/beast.db` when the dashboard backend points at the same project root. After `fbeast mcp init`, run the dashboard when you want a browser view of observer activity, governor decisions, cost rows, and Beast runs.
 
 From the Frankenbeast repo, start the backend in one terminal against the project where MCP was initialized:
 

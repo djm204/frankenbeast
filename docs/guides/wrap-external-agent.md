@@ -4,11 +4,11 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 
 ## Option 1: Use MCP mode for tool governance
 
-Install the MCP suite in the project you want to govern:
+Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`), so either install it globally (`npm i -g @fbeast/mcp-suite`) and run `fbeast …`, or invoke it through `npx --package=@fbeast/mcp-suite`:
 
 ```bash
-npx fbeast mcp init
-npx fbeast mcp init --hooks     # optional: pre/post-tool governance and audit logs
+npx --package=@fbeast/mcp-suite fbeast mcp init
+npx --package=@fbeast/mcp-suite fbeast mcp init --hooks     # optional: pre/post-tool governance and audit logs
 ```
 
 This creates `.fbeast/beast.db`, registers MCP servers with the detected client (Claude Code, Gemini CLI, or Codex CLI), and optionally installs generated hook scripts. MCP tools, hooks, Beast runs, and the dashboard can share the same project database.
@@ -29,7 +29,7 @@ For browser or service integration, run the orchestrator chat/dashboard backend:
 npm --workspace franken-orchestrator run chat-server -- --port 3737
 ```
 
-The integrated Hono app mounts chat, Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes. WebSocket chat is available at `/v1/chat/ws`.
+The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. Comms (`/api/comms`) and security (`/api/security`) are mounted by `createChatApp()` only when `commsConfig`/`commsRuntime` and `securityConfig` are supplied — the `chat-server` CLI path does not pass those, so do not expect those endpoints from the default server.
 
 ## Option 3: Implement BeastLoop dependencies around your agent
 

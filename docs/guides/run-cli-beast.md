@@ -35,35 +35,35 @@ npm link --workspace=packages/franken-orchestrator
 Verify:
 
 ```bash
-fbeast --help          # MCP suite CLI
+fbeast mcp              # MCP suite CLI
 frankenbeast --help    # Orchestrator CLI
 ```
 
 ---
 
-## 2. Register MCP servers (`fbeast init`)
+## 2. Register MCP servers (`fbeast mcp init`)
 
 Run once per project directory:
 
 ```bash
-fbeast init                          # standard — 7 individual servers
-fbeast init --mode=proxy             # proxy — 1 server, 2 meta-tools (lower context cost)
-fbeast init --hooks                  # also install pre/post-tool hooks
-fbeast init --client=gemini          # target Gemini CLI instead of Claude Code (auto-detected)
-fbeast init --client=codex           # target Codex CLI
+fbeast mcp init                          # standard — 7 individual servers
+fbeast mcp init --mode=proxy             # proxy — 1 server, 2 meta-tools (lower context cost)
+fbeast mcp init --hooks                  # also install pre/post-tool hooks
+fbeast mcp init --client=gemini          # target Gemini CLI instead of Claude Code (auto-detected)
+fbeast mcp init --client=codex           # target Codex CLI
 ```
 
 This writes MCP entries into your client config (`~/.claude/settings.json`, `~/.gemini/settings.json`, etc.) and creates `.fbeast/beast.db`.
 
 ---
 
-## 3. Activate beast mode (`fbeast beast`)
+## 3. Activate beast mode (`fbeast mcp beast`)
 
 ```bash
-fbeast beast                                    # default provider: anthropic-api
-fbeast beast --provider=anthropic-api           # Claude via API key
-fbeast beast --provider=codex-cli              # Codex (requires Codex CLI installed)
-fbeast beast --provider=claude-cli             # Claude CLI binary (prompts for risk acknowledgement)
+fbeast mcp beast                                    # default provider: anthropic-api
+fbeast mcp beast --provider=anthropic-api           # Claude via API key
+fbeast mcp beast --provider=codex-cli              # Codex (requires Codex CLI installed)
+fbeast mcp beast --provider=claude-cli             # Claude CLI binary (prompts for risk acknowledgement)
 ```
 
 This writes `.fbeast/config.json` with `mode: "beast"` and prints the beast catalog. The `claude-cli` provider spawns subprocesses outside the API billing path and asks for one-time confirmation.
@@ -218,8 +218,8 @@ frankenbeast network config                # inspect operator config
 
 | Feature | Status |
 |---------|--------|
-| `fbeast init` / MCP registration | ✅ |
-| `fbeast beast` / mode activation | ✅ |
+| `fbeast mcp init` / MCP registration | ✅ |
+| `fbeast mcp beast` / mode activation | ✅ |
 | `frankenbeast interview` | ✅ |
 | `frankenbeast plan` | ✅ |
 | `frankenbeast run` | ✅ |
@@ -253,7 +253,7 @@ The matrix covers parser/config truthfulness, `run` and `run --resume`, required
 npm link --workspace=packages/franken-orchestrator
 ```
 
-**`fbeast-proxy` / `fbeast-memory` not found after `fbeast init`**
+**`fbeast-proxy` / `fbeast-memory` not found after `fbeast mcp init`**
 ```bash
 npm link --workspace=packages/franken-mcp-suite
 ```
