@@ -23,7 +23,7 @@ interface FirewallAdapterDeps {
 export function createFirewallAdapter(
   dbPathOrDeps: string | FirewallAdapterDeps,
   tier: InjectionTier = 'standard',
-  options: { root?: string } = {},
+  options: { root?: string | undefined } = {},
 ): FirewallAdapter {
   if (typeof dbPathOrDeps !== 'string') {
     return dbPathOrDeps;

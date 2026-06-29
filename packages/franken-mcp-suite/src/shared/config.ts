@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export type FbeastServer =
   | 'memory'
@@ -22,6 +22,7 @@ interface BeastModeConfig {
 
 interface ConfigData {
   mode: 'mcp' | 'beast';
+  root?: string;
   db: string;
   servers: FbeastServer[];
   hooks: boolean;
@@ -59,6 +60,7 @@ export class FbeastConfig {
   save(): void {
     const data: ConfigData = {
       mode: this.mode,
+      root: this.root,
       db: '.fbeast/beast.db',
       servers: this.servers,
       hooks: this.hooks,
@@ -68,11 +70,13 @@ export class FbeastConfig {
   }
 
   static init(root: string, servers?: FbeastServer[]): FbeastConfig {
-    const fbDir = join(root, '.fbeast');
+    const resolvedRoot = resolve(root);
+    const fbDir = join(resolvedRoot, '.fbeast');
     mkdirSync(fbDir, { recursive: true });
 
     const data: ConfigData = {
       mode: 'mcp',
+      root: resolvedRoot,
       db: '.fbeast/beast.db',
       servers: servers ?? ALL_SERVERS,
       hooks: false,
@@ -83,14 +87,15 @@ export class FbeastConfig {
       },
     };
 
-    const cfg = new FbeastConfig(root, data);
+    const cfg = new FbeastConfig(resolvedRoot, data);
     cfg.save();
     return cfg;
   }
 
   static load(root: string): FbeastConfig {
-    const configPath = join(root, '.fbeast', 'config.json');
+    const resolvedRoot = resolve(root);
+    const configPath = join(resolvedRoot, '.fbeast', 'config.json');
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-    return new FbeastConfig(root, raw);
+    return new FbeastConfig(resolvedRoot, { ...raw, root: resolvedRoot });
   }
 }
