@@ -701,7 +701,13 @@ const self = fileURLToPath(import.meta.url);
 const caller = process.argv[1];
 
 export function shouldForceDirectCliExit(argv: readonly string[] = process.argv): boolean {
-  return argv[2] !== 'chat-server';
+  if (argv[2] === 'chat-server') {
+    return false;
+  }
+  if (argv[2] === 'beasts' && ['create', 'spawn', 'restart'].includes(argv[3] ?? '')) {
+    return false;
+  }
+  return true;
 }
 
 export function runDirectCli(
@@ -712,7 +718,13 @@ export function runDirectCli(
   void entrypoint()
     .then(() => {
       if (shouldExitOnSuccess()) {
-        exit(process.exitCode ?? 0);
+        let exitCode = 0;
+        if (typeof process.exitCode === 'number') {
+          exitCode = process.exitCode;
+        } else if (typeof process.exitCode === 'string') {
+          exitCode = Number(process.exitCode);
+        }
+        exit(exitCode);
       }
     })
     .catch((error) => {

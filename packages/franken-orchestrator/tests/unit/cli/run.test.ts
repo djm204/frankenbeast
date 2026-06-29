@@ -312,8 +312,11 @@ describe('runDirectCli', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
-  it('classifies chat-server as long-running and catalog as short-lived', () => {
+  it('classifies long-running commands and short-lived catalog commands', () => {
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'chat-server'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'spawn'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'create'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'restart'])).toBe(false);
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(true);
   });
 

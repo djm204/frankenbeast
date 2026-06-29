@@ -107,6 +107,31 @@ describe('handleBeastCommand() spawn', () => {
   });
 });
 
+describe('handleBeastCommand() restart', () => {
+  it('leaves services alive after restarting an in-process executor', async () => {
+    mockServices.runs.restart.mockResolvedValue({ id: 'run-1' });
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'restart', beastTarget: 'run-1' } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(mockServices.runs.restart).toHaveBeenCalledWith('run-1', expect.any(String));
+    expect(deps.print).toHaveBeenCalledWith('Restarted run-1');
+    expect(mockServices.dispose).not.toHaveBeenCalled();
+  });
+
+  it('disposes services if restart fails before a run is started', async () => {
+    mockServices.runs.restart.mockRejectedValue(new Error('missing run'));
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'restart', beastTarget: 'missing' } as CliArgs,
+    });
+
+    await expect(handleBeastCommand(deps)).rejects.toThrow('missing run');
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('handleBeastCommand() resume', () => {
   it('calls control.resumeAgent with agent id, prints result, and disposes services', async () => {
     const deps = makeDeps({

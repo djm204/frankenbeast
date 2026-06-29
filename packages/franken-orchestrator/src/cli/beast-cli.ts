@@ -106,6 +106,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           throw new Error('beasts restart requires a run id');
         }
         const run = await services.runs.restart(args.beastTarget, actor);
+        keepServicesAlive = true;
         print(`Restarted ${run.id}`);
         return;
       }
@@ -129,7 +130,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       services.dispose();
     }
     if (ownsControl) {
-      control?.dispose();
+      control?.dispose?.();
     }
   }
 }
