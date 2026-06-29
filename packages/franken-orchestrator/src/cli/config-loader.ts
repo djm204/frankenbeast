@@ -76,10 +76,17 @@ function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
  * Loads and merges config from all sources.
  * Priority: CLI > env > file > defaults
  */
-export async function loadConfig(args: CliArgs): Promise<OrchestratorConfig> {
+export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Promise<OrchestratorConfig> {
   let fileConfig: Partial<OrchestratorConfig> = {};
-  if (args.config) {
-    fileConfig = await fromFile(args.config);
+  const configPath = args.config ?? defaultConfigPath;
+  if (configPath) {
+    try {
+      fileConfig = await fromFile(configPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || args.config) {
+        throw error;
+      }
+    }
   }
 
   const envConfig = fromEnv();

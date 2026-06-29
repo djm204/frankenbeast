@@ -102,11 +102,11 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
  * Validates config path and loads config from all sources.
  * Exported for testability.
  */
-export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> {
+export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): Promise<OrchestratorConfig> {
   if (args.config && !existsSync(args.config)) {
     throw new Error(`Config file not found: ${args.config}`);
   }
-  return loadConfig(args);
+  return loadConfig(args, defaultConfigPath);
 }
 
 interface ChatSurfaceDeps {
@@ -240,7 +240,10 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
-  const config = await resolveConfig(args);
+  // Resolve project root — scope plans by name unless --plan-dir overrides
+  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const paths = getProjectPaths(root, planName);
+  const config = await resolveConfig(args, paths.configFile);
 
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
@@ -253,9 +256,6 @@ export async function main(): Promise<void> {
     console.log('Config:', JSON.stringify(config, null, 2));
   }
 
-  // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
-  const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
   if (args.subcommand === 'network') {

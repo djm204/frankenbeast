@@ -369,6 +369,48 @@ describe('runNetworkCommand', () => {
     }
   });
 
+  it('persists config --set changes to the default operator config file when --config is omitted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frankenbeast-network-default-config-'));
+    const paths = makePaths(root);
+    try {
+      const config = defaultConfig();
+      config.dashboard.port = 6000;
+      const print = vi.fn();
+
+      await runNetworkCommand(
+        makeArgs({
+          networkAction: 'config',
+          networkSet: ['dashboard.port=6000'],
+        }),
+        config,
+        root,
+        paths,
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(),
+            stop: vi.fn(),
+            logs: vi.fn(),
+          })),
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+
+      const saved = JSON.parse(await readFile(paths.configFile, 'utf-8')) as {
+        dashboard: { port: number };
+      };
+      expect(saved.dashboard.port).toBe(6000);
+      expect(print).toHaveBeenCalledWith(`Saved network config to ${paths.configFile}.`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('help prints a man-style command reference', async () => {
     const print = vi.fn();
 
