@@ -2,10 +2,25 @@
 import { createMcpServer, validateToolArguments, type FbeastMcpServer, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
+import { basename, dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
+  if (explicitRoot) {
+    return resolve(explicitRoot);
+  }
+
+  const dbDir = dirname(resolve(dbPath));
+  if (basename(dbDir) === '.fbeast') {
+    return dirname(dbDir);
+  }
+
+  return undefined;
+}
+
 export function createProxyServer(deps: { dbPath: string; root?: string | undefined }): FbeastMcpServer {
-  const { dbPath, root } = deps;
+  const { dbPath } = deps;
+  const root = deriveProxyRoot(dbPath, deps.root);
   let cachedAdapters: AdapterSet | undefined;
 
   function getAdapters(): AdapterSet {

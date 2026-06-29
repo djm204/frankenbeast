@@ -96,6 +96,6 @@ export class FbeastConfig {
     const resolvedRoot = resolve(root);
     const configPath = join(resolvedRoot, '.fbeast', 'config.json');
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-    return new FbeastConfig(raw.root ?? resolvedRoot, raw);
+    return new FbeastConfig(resolvedRoot, { ...raw, root: resolvedRoot });
   }
 }
