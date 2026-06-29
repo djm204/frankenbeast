@@ -5,19 +5,33 @@ import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
 
+type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
+  dispose?: () => void;
+};
+
 interface BeastCommandDeps {
   args: CliArgs;
   io: InterviewIO;
   paths: ProjectPaths;
   print(message: string): void;
-  control?: ReturnType<typeof createBeastControlClient>;
+  control?: BeastControlClient;
 }
 
 export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> {
   const { args, io, paths, print } = deps;
   const services = createBeastServices(paths);
-  const control = deps.control ?? createBeastControlClient(paths);
+  let control = deps.control;
+  let ownsControl = false;
+  const getControl = (): BeastControlClient => {
+    if (!control) {
+      control = createBeastControlClient(paths);
+      ownsControl = true;
+    }
+    const activeControl = control;
+    return activeControl;
+  };
   const actor = process.env.USER ?? 'operator';
+  let keepServicesAlive = false;
 
   try {
     switch (args.beastAction) {
@@ -47,6 +61,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           startNow: true,
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
+        keepServicesAlive = true;
         print(`Spawned ${run.definitionId} as ${run.id}`);
         return;
       }
@@ -96,13 +111,13 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       }
       case 'resume': {
         if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
-        const run = await control.resumeAgent(args.beastTarget, actor);
+        const run = await getControl().resumeAgent(args.beastTarget, actor);
         print(`Resumed ${run.id}`);
         return;
       }
       case 'delete': {
         if (!args.beastTarget) throw new Error('beasts delete requires an agent id');
-        await control.deleteAgent(args.beastTarget);
+        await getControl().deleteAgent(args.beastTarget);
         print(`Deleted ${args.beastTarget}`);
         return;
       }
@@ -110,6 +125,11 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         throw new Error('Unknown beasts command');
     }
   } finally {
-    services.dispose();
+    if (!keepServicesAlive) {
+      services.dispose();
+    }
+    if (ownsControl) {
+      control?.dispose();
+    }
   }
 }

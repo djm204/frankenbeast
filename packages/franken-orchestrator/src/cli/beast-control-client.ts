@@ -34,5 +34,6 @@ export function createBeastControlClient(paths: ProjectPaths) {
     },
     createRun: (input: Parameters<typeof services.dispatch.createRun>[0]) =>
       services.dispatch.createRun(input),
+    dispose: () => services.dispose(),
   };
 }

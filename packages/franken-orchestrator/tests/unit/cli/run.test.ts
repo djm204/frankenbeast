@@ -200,7 +200,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
@@ -287,6 +287,50 @@ describe('createStdinIO', () => {
     expect(readline.close).toHaveBeenCalled();
     expect(pauseSpy).toHaveBeenCalled();
     pauseSpy.mockRestore();
+  });
+});
+
+describe('runDirectCli', () => {
+  it('does not force process.exit after successful long-running chat-server startup', async () => {
+    const entrypoint = vi.fn(async () => undefined);
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit, () => false);
+    await Promise.resolve();
+
+    expect(entrypoint).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('forces process.exit after successful short-lived direct commands', async () => {
+    const entrypoint = vi.fn(async () => undefined);
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit, () => true);
+    await Promise.resolve();
+
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  it('classifies chat-server as long-running and catalog as short-lived', () => {
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'chat-server'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(true);
+  });
+
+  it('exits nonzero when the direct CLI entrypoint rejects', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const entrypoint = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
+    errorSpy.mockRestore();
   });
 });
 

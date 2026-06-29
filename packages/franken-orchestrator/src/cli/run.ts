@@ -699,13 +699,28 @@ import { realpathSync } from 'node:fs';
 
 const self = fileURLToPath(import.meta.url);
 const caller = process.argv[1];
-if (caller && realpathSync(caller) === realpathSync(self)) {
-  main()
+
+export function shouldForceDirectCliExit(argv: readonly string[] = process.argv): boolean {
+  return argv[2] !== 'chat-server';
+}
+
+export function runDirectCli(
+  entrypoint: () => Promise<void> = main,
+  exit: (code?: number) => never = process.exit,
+  shouldExitOnSuccess: () => boolean = shouldForceDirectCliExit,
+): void {
+  void entrypoint()
     .then(() => {
-      process.exit(process.exitCode ?? 0);
+      if (shouldExitOnSuccess()) {
+        exit(process.exitCode ?? 0);
+      }
     })
     .catch((error) => {
       console.error('Fatal:', error instanceof Error ? error.message : error);
-      process.exit(1);
+      exit(1);
     });
+}
+
+if (caller && realpathSync(caller) === realpathSync(self)) {
+  runDirectCli();
 }
