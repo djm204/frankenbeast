@@ -355,7 +355,7 @@ async function executeMcpSkill(
   }
 
   const tool = resolveMcpTool(skillId, mcp.getAvailableTools());
-  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input, tool.inputSchema));
+  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input, tool.inputSchema), tool.serverId);
 
   if (result.isError) {
     throw new Error(`MCP skill '${skillId}' failed via tool '${tool.name}': ${String(result.content)}`);
@@ -368,6 +368,15 @@ function resolveMcpTool(
   skillId: string,
   tools: ReturnType<IMcpModule['getAvailableTools']>,
 ): McpToolInfo {
+  const namespaced = parseNamespacedToolId(skillId);
+  if (namespaced) {
+    const matches = tools.filter(tool => tool.serverId === namespaced.serverId && tool.name === namespaced.toolName);
+    if (matches.length === 1) return matches[0]!;
+    if (matches.length > 1) {
+      throw new Error(`MCP skill '${skillId}' is ambiguous: multiple MCP tools match that namespaced id.`);
+    }
+  }
+
   const byName = tools.filter(tool => tool.name === skillId);
   const byServer = tools.filter(tool => tool.serverId === skillId);
 
@@ -390,17 +399,7 @@ function resolveMcpTool(
   }
 
   if (exactTool) return exactTool;
-  if (byServer.length === 1) {
-    const serverTool = byServer[0]!;
-    const duplicateNames = tools.filter(tool => tool.name === serverTool.name && tool.serverId !== serverTool.serverId);
-    if (duplicateNames.length > 0) {
-      throw new Error(
-        `MCP skill '${skillId}' resolves to tool '${serverTool.name}', but that tool name is also exposed by ` +
-          `other MCP servers (${duplicateNames.map(tool => tool.serverId).join(', ')}). Use an unambiguous tool id.`,
-      );
-    }
-    return serverTool;
-  }
+  if (byServer.length === 1) return byServer[0]!;
 
   if (byServer.length > 1) {
     throw new Error(
@@ -415,6 +414,15 @@ function resolveMcpTool(
       `Expected a tool named '${skillId}' or exactly one tool from server '${skillId}'. Available MCP tools: ${available}. ` +
       'Start/configure the MCP server or disable the skill.',
   );
+}
+
+function parseNamespacedToolId(skillId: string): { serverId: string; toolName: string } | undefined {
+  const separator = skillId.indexOf('/');
+  if (separator <= 0 || separator === skillId.length - 1) return undefined;
+  return {
+    serverId: skillId.slice(0, separator),
+    toolName: skillId.slice(separator + 1),
+  };
 }
 
 function serializeMcpSkillInput(input: SkillInput, inputSchema?: Record<string, unknown>): Record<string, unknown> {
@@ -444,6 +452,9 @@ function serializeMcpSkillInput(input: SkillInput, inputSchema?: Record<string, 
   }
   if ('input' in properties && !('input' in schemaInput)) {
     schemaInput.input = input.objective;
+  }
+  if ('content' in properties && !('content' in schemaInput)) {
+    schemaInput.content = input.objective;
   }
 
   return schemaInput;

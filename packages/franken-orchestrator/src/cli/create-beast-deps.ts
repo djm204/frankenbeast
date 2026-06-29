@@ -81,6 +81,7 @@ export interface ExistingDeps {
   graphBuilder?: BeastLoopDeps['graphBuilder'];
   prCreator?: BeastLoopDeps['prCreator'];
   cliExecutor?: BeastLoopDeps['cliExecutor'];
+  mcp?: BeastLoopDeps['mcp'];
   checkpoint?: BeastLoopDeps['checkpoint'];
   refreshPlanTasks?: BeastLoopDeps['refreshPlanTasks'];
   runConfigOverrides?: BeastLoopDeps['runConfigOverrides'];
@@ -182,7 +183,7 @@ export function createBeastDeps(
     'unknown',
     replayStore,
   );
-  const mcp = new McpSdkAdapter(collectEnabledMcpTools(skillManager));
+  const mcp = existingDeps.mcp ?? new McpSdkAdapter(collectEnabledMcpTools(skillManager));
 
   return {
     firewall,
@@ -232,13 +233,9 @@ export function createBeastDeps(
 function collectEnabledMcpTools(skillManager: SkillManager): McpToolInfo[] {
   return skillManager.getEnabledSkills().flatMap((skillName) => {
     const tools = skillManager.readTools(skillName);
-    const mcpConfig = skillManager.readMcpConfig(skillName);
-    const serverIds = mcpConfig ? Object.keys(mcpConfig.mcpServers) : [];
-    const serverId = serverIds.length === 1 ? serverIds[0]! : skillName;
-
     return tools.map((tool) => ({
       name: tool.name,
-      serverId,
+      serverId: skillName,
       description: tool.description,
       inputSchema: tool.inputSchema,
     }));

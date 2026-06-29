@@ -430,6 +430,7 @@ describe('runExecution', () => {
         sessionId: 'sess',
         dependencyOutputs: {},
       }),
+      'search-server',
     );
     expect(skills.execute).not.toHaveBeenCalled();
     expect(outcomes[0]!.status).toBe('success');
@@ -529,7 +530,7 @@ describe('runExecution', () => {
 
     const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
 
-    expect(mcp.callTool).toHaveBeenCalledWith('query', expect.objectContaining({ objective: 'look this up' }));
+    expect(mcp.callTool).toHaveBeenCalledWith('query', expect.objectContaining({ objective: 'look this up' }), 'search');
     expect(outcomes[0]!.status).toBe('success');
     expect(outcomes[0]!.output).toBe('query output');
   });
@@ -559,7 +560,36 @@ describe('runExecution', () => {
 
     const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
 
-    expect(mcp.callTool).toHaveBeenCalledWith('fbeast_memory_query', { query: 'what do we know about MCP?' });
+    expect(mcp.callTool).toHaveBeenCalledWith('fbeast_memory_query', { query: 'what do we know about MCP?' }, 'memory');
+    expect(outcomes[0]!.status).toBe('success');
+  });
+
+  it('maps objective to content for content-based MCP tool schemas', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'fbeast_critique_evaluate', name: 'Critique', requiresHitl: false, executionType: 'mcp' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'placeholder', tokensUsed: 1 })),
+    });
+    const mcp: IMcpModule = {
+      getAvailableTools: vi.fn(() => [
+        {
+          name: 'fbeast_critique_evaluate',
+          serverId: 'fbeast',
+          description: 'Evaluate content',
+          inputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'] },
+        },
+      ]),
+      callTool: vi.fn(async () => ({ content: 'critique output', isError: false })),
+    };
+    const c = ctx([
+      { id: 't1', objective: 'review this work', requiredSkills: ['fbeast_critique_evaluate'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
+
+    expect(mcp.callTool).toHaveBeenCalledWith('fbeast_critique_evaluate', { content: 'review this work' }, 'fbeast');
     expect(outcomes[0]!.status).toBe('success');
   });
 
@@ -589,7 +619,33 @@ describe('runExecution', () => {
     expect(outcomes[0]!.error).toContain('multiple MCP servers expose a tool named');
   });
 
-  it('fails closed when a server-id match resolves to a duplicated tool name', async () => {
+  it('routes namespaced MCP tool ids when tool names collide', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'memory/search', name: 'Search', parentSkillId: 'memory', requiresHitl: false, executionType: 'mcp' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'placeholder', tokensUsed: 1 })),
+    });
+    const mcp: IMcpModule = {
+      getAvailableTools: vi.fn(() => [
+        { name: 'search', serverId: 'memory', description: 'Memory search' },
+        { name: 'search', serverId: 'web', description: 'Web search' },
+      ]),
+      callTool: vi.fn(async () => ({ content: 'memory result', isError: false })),
+    };
+    const c = ctx([
+      { id: 't1', objective: 'look this up', requiredSkills: ['memory/search'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
+
+    expect(mcp.callTool).toHaveBeenCalledWith('search', expect.objectContaining({ objective: 'look this up' }), 'memory');
+    expect(outcomes[0]!.status).toBe('success');
+    expect(outcomes[0]!.output).toBe('memory result');
+  });
+
+  it('passes server identity when a server-id match resolves to a duplicated tool name', async () => {
     const skills = makeSkills({
       hasSkill: vi.fn(() => true),
       getAvailableSkills: vi.fn(() => [
@@ -610,9 +666,8 @@ describe('runExecution', () => {
 
     const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
 
-    expect(mcp.callTool).not.toHaveBeenCalled();
-    expect(outcomes[0]!.status).toBe('failure');
-    expect(outcomes[0]!.error).toContain("resolves to tool 'search'");
+    expect(mcp.callTool).toHaveBeenCalledWith('search', expect.objectContaining({ objective: 'look this up' }), 'serverA');
+    expect(outcomes[0]!.status).toBe('success');
   });
 
   it('prefers an exact same-server MCP tool match over sibling server tools', async () => {
@@ -636,7 +691,7 @@ describe('runExecution', () => {
 
     const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
 
-    expect(mcp.callTool).toHaveBeenCalledWith('search', expect.objectContaining({ objective: 'look this up' }));
+    expect(mcp.callTool).toHaveBeenCalledWith('search', expect.objectContaining({ objective: 'look this up' }), 'search');
     expect(outcomes[0]!.status).toBe('success');
   });
 

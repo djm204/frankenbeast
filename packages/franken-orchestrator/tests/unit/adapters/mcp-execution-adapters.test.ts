@@ -37,7 +37,9 @@ describe('MCP execution adapters', () => {
     expect(adapter.hasSkill('query')).toBe(true);
     expect(adapter.hasSkill('summarize')).toBe(true);
     expect(adapter.hasSkill('search')).toBe(false);
-    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['query', 'summarize']);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['query', 'search/query', 'summarize', 'search/summarize']);
+    expect(adapter.getAvailableSkills().filter(skill => skill.parentSkillId === 'search').map(skill => skill.id))
+      .toEqual(['query', 'search/query', 'summarize', 'search/summarize']);
   });
 
   it('SkillManagerAdapter keeps server aliases only when they resolve to one tool', () => {
@@ -52,7 +54,18 @@ describe('MCP execution adapters', () => {
 
     expect(adapter.hasSkill('memory')).toBe(true);
     expect(adapter.hasSkill('query')).toBe(true);
-    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['memory', 'query']);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['memory', 'query', 'memory/query']);
+  });
+
+  it('SkillManagerAdapter preserves mcp.json-only skill aliases for runtime discovery', () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
+    mkdirSync(join(skillsDir, 'dynamic'));
+    writeFileSync(join(skillsDir, 'dynamic', 'mcp.json'), JSON.stringify({ mcpServers: { dynamic: { command: 'dynamic' } } }));
+    const manager = new SkillManager(skillsDir, new Set(['dynamic']));
+    const adapter = new SkillManagerAdapter(manager);
+
+    expect(adapter.hasSkill('dynamic')).toBe(true);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['dynamic']);
   });
 
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {

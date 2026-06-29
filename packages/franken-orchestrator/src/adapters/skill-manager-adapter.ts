@@ -17,7 +17,7 @@ export class SkillManagerAdapter implements ISkillsModule {
       const tools = this.manager.readTools(enabledSkill);
       return (
         (enabledSkill === skillId && isServerAliasExecutable(enabledSkill, tools)) ||
-        tools.some(tool => tool.name === skillId)
+        tools.some(tool => tool.name === skillId || namespacedToolId(enabledSkill, tool.name) === skillId)
       );
     });
   }
@@ -28,23 +28,14 @@ export class SkillManagerAdapter implements ISkillsModule {
       const descriptors: SkillDescriptor[] = [];
 
       if (isServerAliasExecutable(name, tools)) {
-        descriptors.push({
-          id: name,
-          name,
-          requiresHitl: false,
-          executionType: 'mcp' as const,
-        });
+        descriptors.push(createDescriptor(name, name));
       }
 
       for (const tool of tools) {
         if (tool.name !== name) {
-          descriptors.push({
-            id: tool.name,
-            name: tool.name,
-            requiresHitl: false,
-            executionType: 'mcp' as const,
-          });
+          descriptors.push(createDescriptor(tool.name, tool.name, name));
         }
+        descriptors.push(createDescriptor(namespacedToolId(name, tool.name), tool.name, name));
       }
 
       return descriptors;
@@ -61,9 +52,23 @@ export class SkillManagerAdapter implements ISkillsModule {
   }
 }
 
+function createDescriptor(id: string, name: string, parentSkillId?: string): SkillDescriptor {
+  return {
+    id,
+    name,
+    ...(parentSkillId ? { parentSkillId } : {}),
+    requiresHitl: false,
+    executionType: 'mcp',
+  };
+}
+
+function namespacedToolId(skillName: string, toolName: string): string {
+  return `${skillName}/${toolName}`;
+}
+
 function isServerAliasExecutable(
   skillName: string,
   tools: ReturnType<SkillManager['readTools']>,
 ): boolean {
-  return tools.length === 1 || tools.some(tool => tool.name === skillName);
+  return tools.length === 0 || tools.length === 1 || tools.some(tool => tool.name === skillName);
 }
