@@ -273,17 +273,20 @@ describe('bridgeToBeastConfig()', () => {
     it('uses config.consolidatedProviders before validating CLI-derived providers', () => {
       const orchestratorConfig = {
         consolidatedProviders: [
-          { name: 'custom-codex', type: 'codex-cli', model: 'o4-mini' },
+          { name: 'azure-openai', type: 'openai-api', model: 'gpt-4.1' },
         ],
       } as any;
 
       const config = bridgeToBeastConfig(
-        makeOptions({ provider: 'unknown-legacy-provider' }),
+        makeOptions({
+          provider: 'azure-openai',
+          providers: ['unknown-legacy-provider'],
+        }),
         orchestratorConfig,
       );
 
       expect(config.providers).toEqual([
-        { name: 'custom-codex', type: 'codex-cli', model: 'o4-mini' },
+        { name: 'azure-openai', type: 'openai-api', model: 'gpt-4.1' },
       ]);
     });
 

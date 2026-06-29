@@ -5,7 +5,7 @@ import { CodexCliAdapter } from '../../../src/providers/codex-cli-adapter.js';
 import { GeminiApiAdapter } from '../../../src/providers/gemini-api-adapter.js';
 import { GeminiCliAdapter } from '../../../src/providers/gemini-cli-adapter.js';
 import { OpenAiApiAdapter } from '../../../src/providers/openai-api-adapter.js';
-import { createLlmProvider, type ProviderConfig } from '../../../src/providers/provider-config.js';
+import { buildProviderConfig, createLlmProvider, type ProviderConfig } from '../../../src/providers/provider-config.js';
 
 const request = {
   messages: [],
@@ -17,6 +17,20 @@ function optionsOf<TOptions>(adapter: unknown): TOptions {
 }
 
 describe('createLlmProvider', () => {
+  it('preserves legacy override fields while building consolidated provider configs', () => {
+    expect(buildProviderConfig('gemini', {
+      command: '/opt/bin/gemini',
+      model: 'gemini-2.5-pro',
+      extraArgs: ['--debug', '--yolo'],
+    })).toEqual({
+      name: 'gemini',
+      type: 'gemini-cli',
+      cliPath: '/opt/bin/gemini',
+      model: 'gemini-2.5-pro',
+      extraArgs: ['--debug', '--yolo'],
+    });
+  });
+
   it('forwards extraArgs to consolidated CLI adapters', () => {
     const claude = createLlmProvider({
       name: 'claude',

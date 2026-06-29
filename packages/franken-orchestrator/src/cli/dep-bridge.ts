@@ -35,38 +35,40 @@ const SECURITY_TIER_MAP: Record<string, SecurityProfile> = {
 export function bridgeToBeastConfig(options: CliDepOptions, config?: OrchestratorConfig): BeastDepsConfig {
   const consolidatedProviders = config?.consolidatedProviders as ProviderConfig[] | undefined;
 
-  // Resolve effective primary provider (runConfig overrides take precedence)
-  const effectiveProvider =
-    options.runConfig?.llmConfig?.default?.provider
-    ?? options.runConfig?.provider
-    ?? options.provider;
+  const providers: ProviderConfig[] = consolidatedProviders ?? (() => {
+    // Resolve effective primary provider (runConfig overrides take precedence)
+    const effectiveProvider =
+      options.runConfig?.llmConfig?.default?.provider
+      ?? options.runConfig?.provider
+      ?? options.provider;
 
-  // Build provider list: primary first, then additional (deduplicated)
-  const providerNames: string[] = [];
-  providerNames.push(effectiveProvider);
+    // Build provider list: primary first, then additional (deduplicated)
+    const providerNames: string[] = [];
+    providerNames.push(effectiveProvider);
 
-  if (options.providers) {
-    for (const name of options.providers) {
-      if (!providerNames.includes(name)) {
-        providerNames.push(name);
+    if (options.providers) {
+      for (const name of options.providers) {
+        if (!providerNames.includes(name)) {
+          providerNames.push(name);
+        }
       }
     }
-  }
 
-  const providers: ProviderConfig[] = consolidatedProviders ?? providerNames.map((name) => {
-    if (name === 'aider') {
-      const override = options.providersConfig?.[name];
-      return {
-        name,
-        type: 'claude-cli',
-        ...(override?.command ? { cliPath: override.command } : {}),
-        ...(override?.model ? { model: override.model } : {}),
-        ...(override?.extraArgs ? { extraArgs: override.extraArgs } : {}),
-      };
-    }
+    return providerNames.map((name) => {
+      if (name === 'aider') {
+        const override = options.providersConfig?.[name];
+        return {
+          name,
+          type: 'claude-cli',
+          ...(override?.command ? { cliPath: override.command } : {}),
+          ...(override?.model ? { model: override.model } : {}),
+          ...(override?.extraArgs ? { extraArgs: override.extraArgs } : {}),
+        };
+      }
 
-    return buildProviderConfig(name, options.providersConfig?.[name]);
-  });
+      return buildProviderConfig(name, options.providersConfig?.[name]);
+    });
+  })();
 
   // Security
   const securityProfile: SecurityProfile =
