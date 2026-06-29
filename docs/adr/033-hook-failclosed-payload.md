@@ -28,20 +28,36 @@ architectural defects made that path unsafe:
 
 For the security-critical pre-tool enforcement path:
 
-1. **Forward a filtered, bounded slice of the tool payload.** Each pre-tool
-   script extracts only the policy-relevant fields from `tool_input` — command
-   and path/scope keys (`command`, `cmd`, `args`, `file_path`, `path`, `target`,
-   ...) — joins them, and truncates to 4096 chars before passing them as the
-   third positional argument to `fbeast-hook pre-tool` (the governor's
-   `context`). The destructive command text is now evaluated. File-content fields
-   (`content`, `old_string`, `new_string`, patch bodies, ...) are deliberately
-   **excluded**, which:
-   - keeps the argv small so a large Write/Edit payload cannot exceed `ARG_MAX`
-     (`MAX_ARG_STRLEN` ≈ 128 KiB) and be turned into a spurious fail-closed deny;
-   - prevents raw file contents (secrets/PII) from being persisted verbatim into
-     `governor_log`;
-   - avoids false positives where benign file data mentions `delete`/`format`/
-     `drop` and trips the broad `DANGEROUS_PATTERNS` matcher.
+1. **Forward command text as the governor context via an env var, not argv.**
+   Each pre-tool script extracts only the policy-relevant **command** fields from
+   `tool_input` (`command`, `cmd`, `commands`, `args`, `argv`, `script`),
+   flattens command-token arrays (`["rm","-rf","/x"]` → `"rm -rf /x"`) so
+   whitespace-based patterns like `/rm\s+-rf/` still match, and passes the result
+   to `fbeast-hook pre-tool` in the `FBEAST_TOOL_CONTEXT` environment variable.
+   `hook.ts` reads it via an injectable `readContext()` dependency. The tool name
+   remains a positional but is passed after a `--` end-of-options marker, and the
+   arg parser honours `--`. (An env var was chosen over stdin because reading
+   stdin synchronously blocks whenever the hook is invoked without a closed stdin
+   — e.g. in-process callers and tests — whereas an env var is non-blocking.)
+   This is the structural fix for the round-2 findings:
+   - **No flag injection.** Untrusted command text never appears on argv, so a
+     payload like `--db=/tmp/x; rm -rf /tmp/y` can no longer be consumed by the
+     `--db` parser and hidden from the governor.
+   - **No truncation / no silent fail-open.** The context is forwarded **whole**;
+     we no longer truncate to 4096 chars (which previously could drop a dangerous
+     suffix and fail open). If a command ever exceeds the OS env-size limit, the
+     `exec` of `fbeast-hook` fails and the non-zero status is treated as a deny
+     (fail-closed) — the safe direction.
+   - **Arrays normalized.** Command tokens supplied as arrays are flattened
+     before matching instead of being serialized as JSON (`["rm","-rf"]`), which
+     the whitespace patterns would miss.
+   - **Path/content fields excluded.** File paths (`file_path`, `path`, ...) and
+     file-content fields (`content`, `old_string`, `new_string`, patch bodies)
+     are not forwarded. This prevents (a) false positives where a benign path
+     such as `src/dropdown.tsx` or `docs/formatting.md` trips `/drop/i`/`/format/i`,
+     and (b) persisting raw file contents (secrets/PII) verbatim into
+     `governor_log`. Destructive file operations are still governed via the
+     `command` text (e.g. `rm -rf path`) and the tool name (`action`).
 
 2. **Fail closed by default.** A missing/unparseable tool name now DENIES instead
    of allowing. Timeout status `124` is no longer special-cased to exit `0`; it

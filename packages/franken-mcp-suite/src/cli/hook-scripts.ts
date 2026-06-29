@@ -55,11 +55,14 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-# Forward only policy-relevant, length-bounded fields (command/path) as governor
-# context. File-content fields are deliberately excluded so a large or benign
-# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
-# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
+# Extract only policy-relevant COMMAND text as governor context. It is passed to
+# fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
+# parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
+# and is therefore denied (fail-closed) rather than silently dropping a dangerous
+# suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
+# string so patterns like 'rm -rf' still match. Path and file-content fields are
+# excluded to avoid false positives and persisting secrets.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -69,10 +72,10 @@ fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 fi
 set -e
@@ -141,11 +144,14 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-# Forward only policy-relevant, length-bounded fields (command/path) as governor
-# context. File-content fields are deliberately excluded so a large or benign
-# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
-# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
+# Extract only policy-relevant COMMAND text as governor context. It is passed to
+# fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
+# parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
+# and is therefore denied (fail-closed) rather than silently dropping a dangerous
+# suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
+# string so patterns like 'rm -rf' still match. Path and file-content fields are
+# excluded to avoid false positives and persisting secrets.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -155,10 +161,10 @@ fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 fi
 set -e
@@ -226,11 +232,14 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-# Forward only policy-relevant, length-bounded fields (command/path) as governor
-# context. File-content fields are deliberately excluded so a large or benign
-# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
-# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
+# Extract only policy-relevant COMMAND text as governor context. It is passed to
+# fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
+# parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
+# and is therefore denied (fail-closed) rather than silently dropping a dangerous
+# suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
+# string so patterns like 'rm -rf' still match. Path and file-content fields are
+# excluded to avoid false positives and persisting secrets.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -240,10 +249,10 @@ fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  RESULT=$(timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 else
-  RESULT=$(fbeast-hook pre-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_INPUT" 2>&1)
+  RESULT=$(FBEAST_TOOL_CONTEXT="$TOOL_CONTEXT" fbeast-hook pre-tool --db "$DB_PATH" -- "$TOOL_NAME" 2>&1)
   STATUS=$?
 fi
 set -e

@@ -16,6 +16,28 @@ describe('fbeast-hook runtime', () => {
     expect(result.stderr).toContain('destructive');
   });
 
+  it('forwards stdin context to the governor without parsing it as a flag', async () => {
+    // A payload that begins with --db= must not be consumed by the arg parser;
+    // it arrives via readContext (stdin) and reaches the governor verbatim.
+    const result = await runHookForTest(['pre-tool', '--', 'shell'], {
+      context: '--db=/tmp/x; rm -rf /tmp/y',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls).toEqual([
+      { action: 'shell', context: '--db=/tmp/x; rm -rf /tmp/y' },
+    ]);
+  });
+
+  it('treats tokens after -- as positionals, not options', async () => {
+    const result = await runHookForTest(['pre-tool', '--db', '/real/db', '--', 'Bash'], {
+      context: 'rm -rf /',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /' }]);
+  });
+
   it('post-tool hook records observer events', async () => {
     const result = await runHookForTest(['post-tool', 'write_file', '{"ok":true}']);
 
@@ -28,10 +50,17 @@ async function runHookForTest(
   argv: string[],
   options: {
     governorDecision?: { decision: string; reason: string };
+    context?: string;
   } = {},
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  checkCalls: Array<{ action: string; context: string }>;
+}> {
   let stdout = '';
   let stderr = '';
+  const checkCalls: Array<{ action: string; context: string }> = [];
 
   vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
     stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
@@ -55,18 +84,21 @@ async function runHookForTest(
         log(input: { event: string; metadata: string; sessionId: string }): Promise<unknown>;
       };
       sessionId(): string;
+      readContext(): string;
     },
   ) => Promise<void>)(argv, {
     governor: {
-      check: vi.fn().mockResolvedValue(
-        options.governorDecision ?? { decision: 'approved', reason: 'safe' },
-      ),
+      check: vi.fn().mockImplementation(async (input: { action: string; context: string }) => {
+        checkCalls.push({ action: input.action, context: input.context });
+        return options.governorDecision ?? { decision: 'approved', reason: 'safe' };
+      }),
     },
     observer: {
       log: vi.fn().mockResolvedValue({ id: 1, hash: 'abc123' }),
     },
     sessionId: () => 'sess-test',
+    readContext: () => options.context ?? '',
   });
 
-  return { exitCode: process.exitCode ?? 0, stdout, stderr };
+  return { exitCode: process.exitCode ?? 0, stdout, stderr, checkCalls };
 }
