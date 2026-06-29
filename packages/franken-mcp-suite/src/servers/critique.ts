@@ -2,10 +2,12 @@
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { createCritiqueAdapter, type CritiqueAdapter } from '../adapters/critique-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface CritiqueServerDeps {
   critique: CritiqueAdapter;
+  observer?: ObserverAdapter;
 }
 
 export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer {
@@ -80,7 +82,7 @@ export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-critique', '0.1.0', tools);
+  return createMcpServer('fbeast-critique', '0.1.0', tools, { observer: deps.observer });
 }
 
 if (isMain(import.meta.url)) {
@@ -88,7 +90,8 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const critique = createCritiqueAdapter();
-  const server = createCritiqueServer({ critique });
+  const observer = createObserverAdapter(values['db']!);
+  const server = createCritiqueServer({ critique, observer });
   server.start().catch((err) => {
     console.error('fbeast-critique failed to start:', err);
     process.exit(1);

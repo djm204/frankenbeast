@@ -2,10 +2,12 @@
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { createBrainAdapter, type BrainAdapter } from '../adapters/brain-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface MemoryServerDeps {
   brain: BrainAdapter;
+  observer?: ObserverAdapter;
 }
 
 export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
@@ -106,7 +108,7 @@ export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-memory', '0.1.0', tools);
+  return createMcpServer('fbeast-memory', '0.1.0', tools, { observer: deps.observer });
 }
 
 // CLI entry point
@@ -115,7 +117,8 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const brain = createBrainAdapter(values['db']!);
-  const server = createMemoryServer({ brain });
+  const observer = createObserverAdapter(values['db']!);
+  const server = createMemoryServer({ brain, observer });
   server.start().catch((err) => {
     console.error('fbeast-memory failed to start:', err);
     process.exit(1);

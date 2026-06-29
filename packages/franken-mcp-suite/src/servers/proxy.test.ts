@@ -44,11 +44,13 @@ describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
   let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
+  let observerLog: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    observerLog = vi.fn().mockResolvedValue({ id: 1, hash: 'h' });
     mockSearchTools.mockReturnValue(FAKE_STUBS);
-    mockCreateAdapterSet.mockReturnValue({} as ReturnType<typeof registry.createAdapterSet>);
+    mockCreateAdapterSet.mockReturnValue({ observer: { log: observerLog } } as ReturnType<typeof registry.createAdapterSet>);
 
     server = createProxyServer({ dbPath: ':memory:' });
     searchToolsDef = server.tools.find((t) => t.name === 'search_tools')!;
@@ -113,6 +115,18 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
+      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_validation_failure' }));
+    });
+
+    it('audits proxied target tool success', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_call' }));
+      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_result' }));
     });
   });
 });

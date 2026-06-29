@@ -33,7 +33,20 @@ export interface ObserverTrailEntry {
   eventType: string;
   payload: string;
   hash?: string;
+  parentHash?: string;
   createdAt: string;
+}
+
+export interface ObserverVerifyResult {
+  ok: boolean;
+  checked: number;
+  firstInvalid?: {
+    index: number;
+    expectedHash: string;
+    actualHash?: string | undefined;
+    expectedParentHash?: string | undefined;
+    actualParentHash?: string | undefined;
+  };
 }
 
 export interface ObserverCostInput {
@@ -49,6 +62,7 @@ export interface ObserverAdapter {
   logCost(input: ObserverCostInput): Promise<void>;
   cost(input: { sessionId?: string }): Promise<ObserverCostSummary>;
   trail(sessionId: string): Promise<ObserverTrailEntry[]>;
+  verify(sessionId: string): Promise<ObserverVerifyResult>;
 }
 
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
@@ -60,6 +74,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
   return {
     async log(input) {
       const payload = parseMetadata(input.metadata);
+      const metadata = canonicalMetadata(payload);
       const lastRow = store.db.prepare(
         'SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1',
       ).get(input.sessionId) as { hash: string } | undefined;
@@ -67,10 +82,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       const auditEvent = createAuditEvent(input.event, payload, {
         phase: 'mcp',
         provider: 'fbeast-mcp',
-        input: input.metadata,
+        input: metadata,
       });
 
-      const baseHash = auditEvent.inputHash ?? hashContent(`${input.event}:${input.metadata}`);
+      const baseHash = auditEvent.inputHash ?? hashContent(`${input.event}:${metadata}`);
       const hash = buildAuditHash(baseHash, lastRow?.hash);
       const result = store.db.prepare(`
         INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
@@ -78,7 +93,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       `).run(
         input.sessionId,
         input.event,
-        JSON.stringify(payload),
+        metadata,
         hash,
         lastRow?.hash ?? null,
       );
@@ -156,18 +171,54 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
     async trail(sessionId) {
       return store.db.prepare(
-        'SELECT event_type AS eventType, payload, hash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+        'SELECT event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
       ).all(sessionId) as ObserverTrailEntry[];
+    },
+
+    async verify(sessionId) {
+      const rows = await this.trail(sessionId);
+      let expectedParentHash: string | undefined;
+
+      for (const [index, row] of rows.entries()) {
+        const payload = parseMetadata(row.payload);
+        const metadata = canonicalMetadata(payload);
+        const auditEvent = createAuditEvent(row.eventType, payload, {
+          phase: 'mcp',
+          provider: 'fbeast-mcp',
+          input: metadata,
+        });
+        const baseHash = auditEvent.inputHash ?? hashContent(`${row.eventType}:${metadata}`);
+        const expectedHash = buildAuditHash(baseHash, expectedParentHash);
+        const actualParentHash = row.parentHash ?? undefined;
+
+        if (actualParentHash !== expectedParentHash || row.hash !== expectedHash) {
+          return {
+            ok: false,
+            checked: index,
+            firstInvalid: {
+              index,
+              expectedHash,
+              actualHash: row.hash,
+              expectedParentHash,
+              actualParentHash,
+            },
+          };
+        }
+
+        expectedParentHash = row.hash;
+      }
+
+      return { ok: true, checked: rows.length };
     },
   };
 }
 
 function buildAuditHash(baseHash: string, parentHash?: string): string {
   if (!parentHash) {
-    return baseHash.slice(0, 16);
+    return baseHash;
   }
 
-  return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
+  return hashContent(`${parentHash}:${baseHash}`);
 }
 
 function parseMetadata(metadata: string): unknown {
@@ -176,4 +227,8 @@ function parseMetadata(metadata: string): unknown {
   } catch {
     return metadata;
   }
+}
+
+function canonicalMetadata(payload: unknown): string {
+  return typeof payload === 'string' ? payload : JSON.stringify(payload);
 }

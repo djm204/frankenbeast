@@ -115,9 +115,35 @@ export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer 
         return { content: [{ type: 'text', text: `## Audit Trail (${rows.length} events)\n\n${text}` }] };
       },
     },
+    {
+      name: 'fbeast_observer_verify',
+      description: 'Verify the full audit hash chain for a session.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sessionId: { type: 'string', description: 'Session identifier' },
+        },
+        required: ['sessionId'],
+      },
+      async handler(args) {
+        const sessionId = String(args['sessionId']);
+        const result = await observer.verify(sessionId);
+        if (result.ok) {
+          return { content: [{ type: 'text', text: `Audit chain verified for session ${sessionId}: ${result.checked} events checked.` }] };
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Audit chain verification failed for session ${sessionId} at index ${result.firstInvalid?.index ?? 'unknown'}.`,
+          }],
+          isError: true,
+        };
+      },
+    },
   ];
 
-  return createMcpServer('fbeast-observer', '0.1.0', tools);
+  return createMcpServer('fbeast-observer', '0.1.0', tools, { observer });
 }
 
 if (isMain(import.meta.url)) {

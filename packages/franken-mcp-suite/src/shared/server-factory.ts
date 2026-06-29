@@ -4,6 +4,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { createHash } from 'node:crypto';
+import type { ObserverAdapter } from '../adapters/observer-adapter.js';
 
 export interface ToolContent {
   type: 'text';
@@ -37,6 +39,12 @@ export interface FbeastMcpServer {
   /** Invoke a tool through the same validation gate the MCP CallTool path uses. */
   callTool(name: string, args: unknown): Promise<ToolResult>;
   start(): Promise<void>;
+}
+
+export interface AuditOptions {
+  observer?: ObserverAdapter | undefined;
+  getObserver?: (() => ObserverAdapter | undefined) | undefined;
+  sessionId?: string;
 }
 
 export function validateToolArguments(
@@ -76,22 +84,48 @@ async function dispatchTool(
   toolMap: Map<string, ToolDef>,
   toolName: string,
   args: unknown,
+  audit?: AuditOptions & { serverName: string },
 ): Promise<ToolResult> {
+  const startedAt = Date.now();
   const tool = toolMap.get(toolName);
   if (!tool) {
+    await auditToolEvent(audit, 'mcp_tool_validation_failure', toolName, args, {
+      reason: 'unknown_tool',
+      message: `Unknown tool: ${toolName}`,
+    });
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
   // Only an *absent* argument object defaults to {}; an explicit `null` (or any
   // non-object) on the wire must reach the validator and be rejected.
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
+    await auditToolEvent(audit, 'mcp_tool_validation_failure', toolName, args, {
+      reason: 'invalid_arguments',
+      message: validated.message,
+    });
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
+  await auditToolEvent(audit, 'mcp_tool_call', toolName, validated.value, {
+    decision: 'validated',
+  });
   try {
-    return await tool.handler(validated.value);
+    const result = await tool.handler(validated.value);
+    await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
+      ok: !result.isError,
+      durationMs: Date.now() - startedAt,
+      outputSummary: summarizeResult(result),
+      outputHash: hashJson(result),
+    });
+    return result;
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: message,
+    });
     return {
-      content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [{ type: 'text' as const, text: `Error: ${message}` }],
       isError: true,
     };
   }
@@ -101,6 +135,7 @@ export function createMcpServer(
   name: string,
   version: string,
   tools: ToolDef[],
+  audit?: AuditOptions,
 ): FbeastMcpServer {
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
@@ -115,16 +150,78 @@ export function createMcpServer(
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
     const { name: toolName, arguments: args } = request.params;
-    return { ...(await dispatchTool(toolMap, toolName, args)) };
+    return { ...(await dispatchTool(toolMap, toolName, args, { ...audit, serverName: name })) };
   });
 
   return {
     name,
     tools,
-    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args),
+    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, { ...audit, serverName: name }),
     async start() {
       const transport = new StdioServerTransport();
       await server.connect(transport);
     },
+  };
+}
+
+export async function auditMcpToolExecution(
+  audit: (AuditOptions & { serverName: string }) | undefined,
+  event: string,
+  toolName: string,
+  args: unknown,
+  extra: Record<string, unknown>,
+): Promise<void> {
+  const observer = audit?.observer ?? audit?.getObserver?.();
+  const serverName = audit?.serverName;
+  if (!observer || !serverName) return;
+
+  await observer.log({
+    event,
+    sessionId: audit?.sessionId ?? `mcp:${serverName}`,
+    metadata: JSON.stringify({
+      server: serverName,
+      tool: toolName,
+      inputHash: hashJson(args),
+      inputSummary: summarizeInput(args),
+      ...extra,
+    }),
+  });
+}
+
+async function auditToolEvent(
+  audit: (AuditOptions & { serverName: string }) | undefined,
+  event: string,
+  toolName: string,
+  args: unknown,
+  extra: Record<string, unknown>,
+): Promise<void> {
+  await auditMcpToolExecution(audit, event, toolName, args, extra);
+}
+
+function hashJson(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
+    .join(',')}}`;
+}
+
+function summarizeInput(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { kind: Array.isArray(value) ? 'array' : typeof value };
+  }
+  return { kind: 'object', keys: Object.keys(value as Record<string, unknown>).sort() };
+}
+
+function summarizeResult(result: ToolResult): Record<string, unknown> {
+  return {
+    contentItems: result.content.length,
+    textBytes: result.content.reduce((sum, item) => sum + Buffer.byteLength(item.text), 0),
+    isError: result.isError === true,
   };
 }
