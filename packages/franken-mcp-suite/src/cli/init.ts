@@ -91,8 +91,9 @@ function initJsonClient(options: {
   // Add MCP server entries
   const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = join(root, '.fbeast', 'beast.db');
+  const proxyArgs = ['--db', dbPath, '--root', root];
   if (mode === 'proxy') {
-    mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: ['--db', dbPath] };
+    mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
   } else {
     for (const srv of servers) {
       mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
@@ -140,7 +141,7 @@ function initCodex(options: {
 
   // Register MCP servers via codex mcp add
   if (mode === 'proxy') {
-    const result = spawnFn('codex', ['mcp', 'add', 'fbeast-proxy', '--', 'fbeast-proxy', '--db', dbPath]);
+    const result = spawnFn('codex', ['mcp', 'add', 'fbeast-proxy', '--', 'fbeast-proxy', '--db', dbPath, '--root', root]);
     if (result.status !== 0) {
       throw new Error(`fbeast init: failed to register fbeast-proxy with codex: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
     }

@@ -50,7 +50,7 @@ describe('proxy server', () => {
     mockSearchTools.mockReturnValue(FAKE_STUBS);
     mockCreateAdapterSet.mockReturnValue({} as ReturnType<typeof registry.createAdapterSet>);
 
-    server = createProxyServer({ dbPath: ':memory:' });
+    server = createProxyServer({ dbPath: ':memory:', root: '/tmp/project-root' });
     searchToolsDef = server.tools.find((t) => t.name === 'search_tools')!;
     executeToolDef = server.tools.find((t) => t.name === 'execute_tool')!;
   });
@@ -84,6 +84,7 @@ describe('proxy server', () => {
 
       const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
       expect(result).toEqual(fakeResult);
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(':memory:', { root: '/tmp/project-root' });
     });
 
     it('returns isError response for unknown tool', async () => {
