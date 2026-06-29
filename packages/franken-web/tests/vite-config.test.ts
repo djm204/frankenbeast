@@ -20,9 +20,11 @@ describe('operator token bridge', () => {
     expect(CONFIG_SOURCE).toContain("'import.meta.env.VITE_BEAST_OPERATOR_TOKEN'");
   });
 
-  it('prefers the root FRANKENBEAST_BEAST_OPERATOR_TOKEN with VITE_ as fallback', () => {
-    expect(CONFIG_SOURCE).toContain(
-      'env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || env.VITE_BEAST_OPERATOR_TOKEN',
-    );
+  it('resolves the token via the shared helper, reading from the repo root', () => {
+    // Resolution precedence is unit-tested in vite-env.test.ts; here we only
+    // assert the config delegates to the helper and passes the repo-root dir
+    // (so the documented root .env is read despite cwd = package dir).
+    expect(CONFIG_SOURCE).toContain('loadBeastOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');
+    expect(CONFIG_SOURCE).toContain("fileURLToPath(new URL('../../', import.meta.url))");
   });
 });
