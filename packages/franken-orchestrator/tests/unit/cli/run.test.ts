@@ -203,6 +203,7 @@ vi.mock('node:readline', () => ({
 import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { createInterface } from 'node:readline';
 
 // ── Tests ──
 
@@ -274,6 +275,18 @@ describe('createStdinIO', () => {
     const io = createStdinIO();
     const answer = await io.ask('What?');
     expect(answer).toBe('mock-answer');
+  });
+
+  it('close closes readline and pauses stdin so read-only commands can terminate', () => {
+    const pauseSpy = vi.spyOn(process.stdin, 'pause').mockImplementation(() => process.stdin);
+    const io = createStdinIO();
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+
+    io.close();
+
+    expect(readline.close).toHaveBeenCalled();
+    expect(pauseSpy).toHaveBeenCalled();
+    pauseSpy.mockRestore();
   });
 });
 

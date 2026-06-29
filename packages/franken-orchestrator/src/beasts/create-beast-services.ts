@@ -27,6 +27,7 @@ export interface BeastServiceBundle {
   metrics: PrometheusBeastMetrics;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
+  dispose(): void;
 }
 
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
@@ -69,5 +70,9 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     metrics,
     eventBus,
     ticketStore,
+    dispose: () => {
+      ticketStore.destroy();
+      repository.close();
+    },
   };
 }
