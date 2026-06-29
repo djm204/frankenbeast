@@ -23,6 +23,7 @@ export interface GeminiCliOptions {
   binaryPath?: string;
   model?: string;
   workingDir?: string;
+  extraArgs?: readonly string[];
 }
 
 export class GeminiCliAdapter implements ILlmProvider {
@@ -145,6 +146,9 @@ export class GeminiCliAdapter implements ILlmProvider {
     const args = ['-p', '--output-format', 'stream-json'];
     if (this.options.model) {
       args.push('-m', this.options.model);
+    }
+    if (this.options.extraArgs?.length) {
+      args.push(...this.options.extraArgs);
     }
     return args;
   }

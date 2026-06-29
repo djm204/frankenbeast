@@ -63,6 +63,28 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
+    it('preserves legacy "aider" CLI selection with the consolidated CLI fallback type', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'aider',
+        providersConfig: {
+          aider: {
+            command: '/opt/bin/aider',
+            model: 'gpt-4o',
+            extraArgs: ['--yes-always'],
+          },
+        },
+      }));
+      expect(config.providers).toEqual([
+        {
+          name: 'aider',
+          type: 'claude-cli',
+          cliPath: '/opt/bin/aider',
+          model: 'gpt-4o',
+          extraArgs: ['--yes-always'],
+        },
+      ]);
+    });
+
     it('maps "anthropic" to anthropic-api type', () => {
       const config = bridgeToBeastConfig(makeOptions({ provider: 'anthropic' }));
       expect(config.providers).toEqual([
@@ -77,11 +99,11 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
-    it('defaults unknown provider to claude-cli', () => {
-      const config = bridgeToBeastConfig(makeOptions({ provider: 'some-custom' }));
-      expect(config.providers).toEqual([
-        { name: 'some-custom', type: 'claude-cli' },
-      ]);
+    it('rejects unknown providers instead of guessing by substring', () => {
+      expect(() => bridgeToBeastConfig(makeOptions({ provider: 'some-custom' })))
+        .toThrowError(/Unknown provider "some-custom"/);
+      expect(() => bridgeToBeastConfig(makeOptions({ provider: 'my-openai-wrapper' })))
+        .toThrowError(/Unknown provider "my-openai-wrapper"/);
     });
 
     it('maps multiple providers from options.providers', () => {
@@ -120,6 +142,28 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
+    it('maps providersConfig command, model, and extraArgs through typed provider config', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'gemini',
+        providersConfig: {
+          gemini: {
+            command: '/opt/bin/gemini',
+            model: 'gemini-2.5-pro',
+            extraArgs: ['--debug'],
+          },
+        },
+      }));
+      expect(config.providers).toEqual([
+        {
+          name: 'gemini',
+          type: 'gemini-cli',
+          cliPath: '/opt/bin/gemini',
+          model: 'gemini-2.5-pro',
+          extraArgs: ['--debug'],
+        },
+      ]);
+    });
+
     it('uses runConfig.provider as override when present', () => {
       const config = bridgeToBeastConfig(makeOptions({
         provider: 'codex',
@@ -142,6 +186,57 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.providers![0]).toEqual(
         expect.objectContaining({ name: 'anthropic', type: 'anthropic-api' }),
       );
+    });
+
+    it('forwards runConfig.model into the effective bridged provider', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'codex',
+        runConfig: { provider: 'gemini', model: 'gemini-2.5-pro' },
+        providers: ['codex', 'gemini'],
+      }));
+
+      expect(config.providers).toEqual([
+        { name: 'gemini', type: 'gemini-cli', model: 'gemini-2.5-pro' },
+        { name: 'codex', type: 'codex-cli' },
+      ]);
+    });
+
+    it('forwards runConfig.llmConfig.default.model into the effective bridged provider', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'codex',
+        providersConfig: {
+          claude: { command: '/opt/bin/claude', extraArgs: ['--print'] },
+        },
+        runConfig: {
+          provider: 'gemini',
+          model: 'gemini-1.5-pro',
+          llmConfig: { default: { provider: 'claude', model: 'claude-sonnet-4-20250514' } },
+        },
+      }));
+
+      expect(config.providers).toEqual([
+        {
+          name: 'claude',
+          type: 'claude-cli',
+          cliPath: '/opt/bin/claude',
+          model: 'claude-sonnet-4-20250514',
+          extraArgs: ['--print'],
+        },
+      ]);
+    });
+
+    it('forwards runConfig.model through the legacy aider provider path', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'aider',
+        providersConfig: {
+          aider: { command: '/opt/bin/aider' },
+        },
+        runConfig: { model: 'gpt-4o' },
+      }));
+
+      expect(config.providers).toEqual([
+        { name: 'aider', type: 'claude-cli', cliPath: '/opt/bin/aider', model: 'gpt-4o' },
+      ]);
     });
   });
 
@@ -223,6 +318,26 @@ describe('bridgeToBeastConfig()', () => {
       const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
       expect(config.providers).toEqual([
         { name: 'my-claude', type: 'anthropic-api', apiKey: 'sk-123' },
+      ]);
+    });
+
+    it('uses config.consolidatedProviders before validating CLI-derived providers', () => {
+      const orchestratorConfig = {
+        consolidatedProviders: [
+          { name: 'azure-openai', type: 'openai-api', model: 'gpt-4.1' },
+        ],
+      } as any;
+
+      const config = bridgeToBeastConfig(
+        makeOptions({
+          provider: 'azure-openai',
+          providers: ['unknown-legacy-provider'],
+        }),
+        orchestratorConfig,
+      );
+
+      expect(config.providers).toEqual([
+        { name: 'azure-openai', type: 'openai-api', model: 'gpt-4.1' },
       ]);
     });
 
