@@ -225,7 +225,7 @@ export function createBeastDeps(
 function buildProviderList(providerConfigs?: ProviderConfig[]): ILlmProvider[] {
   if (!providerConfigs || providerConfigs.length === 0) {
     throw new Error(
-      'No providers configured. Run \'frankenbeast provider add claude\' to get started.'
+      'No providers configured. Add a consolidatedProviders entry to your frankenbeast config.'
     );
   }
   return providerConfigs.map((pc) => {
@@ -354,7 +354,7 @@ describe('createBeastDeps()', () => {
     expect(() => createBeastDeps(
       { providers: [] },
       mockExistingDeps,
-    )).toThrow(/frankenbeast provider add/);
+    )).toThrow(/consolidatedProviders/);
   });
 
   it('wires onProviderSwitch callback to audit trail', () => {
