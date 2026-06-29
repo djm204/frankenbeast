@@ -11,6 +11,7 @@ import { ClaudeProvider } from './claude-provider.js';
 import { CodexProvider } from './codex-provider.js';
 import { GeminiProvider } from './gemini-provider.js';
 import { AiderProvider } from './aider-provider.js';
+import { cliProviderCatalogEntries } from '../../providers/provider-config.js';
 
 export interface ProviderOpts {
   readonly maxTurns?: number | undefined;
@@ -99,9 +100,23 @@ export class ProviderRegistry {
 
 export function createDefaultRegistry(): ProviderRegistry {
   const registry = new ProviderRegistry();
-  registry.register(new ClaudeProvider());
-  registry.register(new CodexProvider());
-  registry.register(new GeminiProvider());
+  for (const entry of cliProviderCatalogEntries()) {
+    switch (entry.cliRegistryName) {
+      case 'claude':
+        registry.register(new ClaudeProvider());
+        break;
+      case 'codex':
+        registry.register(new CodexProvider());
+        break;
+      case 'gemini':
+        registry.register(new GeminiProvider());
+        break;
+    }
+  }
+
+  // Aider is only a legacy Martin-loop CLI provider today. It intentionally
+  // remains outside the consolidated LLM registry until an ILlmProvider adapter
+  // exists, so it cannot be selected by typed provider bridging accidentally.
   registry.register(new AiderProvider());
   return registry;
 }

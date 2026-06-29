@@ -12,23 +12,10 @@ import type {
   ExistingDeps,
   ProviderConfig,
 } from './create-beast-deps.js';
+import { buildProviderConfig } from '../providers/provider-config.js';
 import type { SecurityProfile } from '../middleware/security-profiles.js';
 import type { BeastLoopDeps, IObserverModule } from '../deps.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-
-// ─── Provider name → type detection ───
-
-type ProviderType = ProviderConfig['type'];
-
-function detectProviderType(name: string): ProviderType {
-  const lower = name.toLowerCase();
-  if (lower.includes('claude')) return 'claude-cli';
-  if (lower.includes('codex')) return 'codex-cli';
-  if (lower.includes('gemini')) return 'gemini-cli';
-  if (lower.includes('anthropic')) return 'anthropic-api';
-  if (lower.includes('openai')) return 'openai-api';
-  return 'claude-cli'; // CLI default
-}
 
 // ─── Security tier mapping ───
 
@@ -64,20 +51,9 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
     }
   }
 
-  const providers: ProviderConfig[] = providerNames.map((name) => {
-    const config: ProviderConfig = {
-      name,
-      type: detectProviderType(name),
-    };
-
-    // Map providersConfig.command → cliPath
-    const override = options.providersConfig?.[name];
-    if (override?.command) {
-      return { ...config, cliPath: override.command };
-    }
-
-    return config;
-  });
+  const providers: ProviderConfig[] = providerNames.map((name) =>
+    buildProviderConfig(name, options.providersConfig?.[name]),
+  );
 
   // Security
   const securityProfile: SecurityProfile =

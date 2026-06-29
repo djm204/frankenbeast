@@ -2,10 +2,40 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createBeastDeps } from '../../../src/cli/create-beast-deps.js';
+import { buildProviderList, createBeastDeps } from '../../../src/cli/create-beast-deps.js';
 import { makeCritique, makeGovernor, makeLogger, makeObserver, makePlanner } from '../../helpers/stubs.js';
 
 describe('createBeastDeps', () => {
+  it('builds consolidated CLI providers from the same typed provider config used by the CLI bridge', () => {
+    const providers = buildProviderList([
+      {
+        name: 'gemini',
+        type: 'gemini-cli',
+        cliPath: '/opt/bin/gemini',
+        model: 'gemini-2.5-pro',
+      },
+    ]);
+
+    expect(providers).toHaveLength(1);
+    const [provider] = providers;
+    expect(provider!.name).toBe('gemini-cli');
+    expect(provider!.type).toBe('gemini-cli');
+    expect(provider!.authMethod).toBe('cli-login');
+    expect(provider!.capabilities).toMatchObject({
+      streaming: true,
+      toolUse: true,
+      mcpSupport: true,
+      maxContextTokens: 1_000_000,
+    });
+    expect((provider as { buildArgs(request: unknown): string[] }).buildArgs({})).toEqual([
+      '-p',
+      '--output-format',
+      'stream-json',
+      '-m',
+      'gemini-2.5-pro',
+    ]);
+  });
+
   it('populates the MCP adapter catalog from enabled skill tool manifests', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
     const skillsDir = join(root, 'skills');

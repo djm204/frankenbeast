@@ -77,11 +77,11 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
-    it('defaults unknown provider to claude-cli', () => {
-      const config = bridgeToBeastConfig(makeOptions({ provider: 'some-custom' }));
-      expect(config.providers).toEqual([
-        { name: 'some-custom', type: 'claude-cli' },
-      ]);
+    it('rejects unknown providers instead of guessing by substring', () => {
+      expect(() => bridgeToBeastConfig(makeOptions({ provider: 'some-custom' })))
+        .toThrowError(/Unknown provider "some-custom"/);
+      expect(() => bridgeToBeastConfig(makeOptions({ provider: 'my-openai-wrapper' })))
+        .toThrowError(/Unknown provider "my-openai-wrapper"/);
     });
 
     it('maps multiple providers from options.providers', () => {
@@ -117,6 +117,28 @@ describe('bridgeToBeastConfig()', () => {
       }));
       expect(config.providers).toEqual([
         { name: 'claude', type: 'claude-cli', cliPath: '/usr/local/bin/claude' },
+      ]);
+    });
+
+    it('maps providersConfig command, model, and extraArgs through typed provider config', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'gemini',
+        providersConfig: {
+          gemini: {
+            command: '/opt/bin/gemini',
+            model: 'gemini-2.5-pro',
+            extraArgs: ['--debug'],
+          },
+        },
+      }));
+      expect(config.providers).toEqual([
+        {
+          name: 'gemini',
+          type: 'gemini-cli',
+          cliPath: '/opt/bin/gemini',
+          model: 'gemini-2.5-pro',
+          extraArgs: ['--debug'],
+        },
       ]);
     });
 
