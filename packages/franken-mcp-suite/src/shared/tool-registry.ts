@@ -5,6 +5,7 @@ import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governo
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
+import type { ToolInputSchema } from './server-factory.js';
 
 export type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
@@ -25,7 +26,7 @@ interface ToolStub {
 }
 
 interface ToolFull extends ToolStub {
-  inputSchema: Record<string, unknown>;
+  inputSchema: ToolInputSchema;
   makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
 }
 
@@ -58,7 +59,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         key: { type: 'string', description: 'Unique key for this memory entry' },
         value: { type: 'string', description: 'Content to store' },
-        type: { type: 'string', description: 'Memory type: working, episodic, or recovery' },
+        type: { type: 'string', description: 'Memory type: working, episodic, or recovery', enum: ['working', 'episodic', 'recovery'] },
       },
       required: ['key', 'value', 'type'],
     },
@@ -78,7 +79,7 @@ const TOOLS: ToolFull[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query (substring match on key and value)' },
-        type: { type: 'string', description: 'Filter by type: working, episodic, recovery' },
+        type: { type: 'string', description: 'Filter by type: working, episodic, recovery', enum: ['working', 'episodic', 'recovery'] },
         limit: { type: 'string', description: 'Max results (default 20)' },
       },
       required: ['query'],
@@ -431,7 +432,7 @@ const TOOLS: ToolFull[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        enabled: { type: 'string', description: 'Filter: "true" for enabled only, "false" for disabled only' },
+        enabled: { type: 'string', description: 'Filter: "true" for enabled only, "false" for disabled only', enum: ['true', 'false'] },
       },
     },
     makeHandler: ({ skills }) => async (args) => {

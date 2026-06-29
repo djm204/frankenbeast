@@ -9,7 +9,7 @@ vi.mock('../shared/tool-registry.js', () => ({
         name: 'test_tool',
         server: 'memory',
         description: 'A test tool',
-        inputSchema: { type: 'object', properties: {} },
+        inputSchema: { type: 'object', properties: { key: { type: 'string', description: 'Key' } }, required: ['key'] },
         makeHandler: vi.fn(),
       },
     ],
@@ -98,9 +98,21 @@ describe('proxy server', () => {
       const entry = mockRegistry.get('test_tool')!;
       vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
 
-      const toolArgs = { foo: 'bar', count: 42 };
+      const toolArgs = { key: 'bar' };
       await executeToolDef.handler({ tool: 'test_tool', args: toolArgs });
       expect(fakeHandler).toHaveBeenCalledWith(toolArgs);
+    });
+
+    it('validates proxied target tool args before calling the target handler', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 42 } }) as { isError: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('property key must be string');
+      expect(fakeHandler).not.toHaveBeenCalled();
     });
   });
 });

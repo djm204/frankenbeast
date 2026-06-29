@@ -19,7 +19,7 @@ export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Search query (substring match on key and value)' },
-          type: { type: 'string', description: 'Filter by type: working, episodic, recovery' },
+          type: { type: 'string', description: 'Filter by type: working, episodic, recovery', enum: ['working', 'episodic', 'recovery'] },
           limit: { type: 'string', description: 'Max results (default 20)' },
         },
         required: ['query'],
@@ -48,7 +48,7 @@ export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
         properties: {
           key: { type: 'string', description: 'Unique key for this memory entry' },
           value: { type: 'string', description: 'Content to store' },
-          type: { type: 'string', description: 'Memory type: working, episodic, or recovery' },
+          type: { type: 'string', description: 'Memory type: working, episodic, or recovery', enum: ['working', 'episodic', 'recovery'] },
         },
         required: ['key', 'value', 'type'],
       },

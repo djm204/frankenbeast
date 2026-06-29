@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMcpServer, type ToolDef } from './server-factory.js';
+import { createMcpServer, validateToolArguments, type ToolDef } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -108,6 +108,40 @@ describe('createMcpServer', () => {
     const res = await srv.callTool('cfg', { args: null });
     expect(res.isError).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  it('rejects non-finite number arguments before invoking the handler', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cost',
+      description: 'cost',
+      inputSchema: { type: 'object', properties: { costUsd: { type: 'number', description: 'cost' } }, required: ['costUsd'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const res = await srv.callTool('cost', { costUsd: Infinity });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects enum values not advertised by the input schema', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'store',
+      description: 'store',
+      inputSchema: {
+        type: 'object',
+        properties: { type: { type: 'string', description: 'memory type', enum: ['working', 'episodic', 'recovery'] } },
+        required: ['type'],
+      },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const res = await srv.callTool('store', { type: 'bogus' });
+    expect(res.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+
+    expect(validateToolArguments(tool, { type: 'working' }).ok).toBe(true);
   });
 
   it('handler returns correct format', async () => {

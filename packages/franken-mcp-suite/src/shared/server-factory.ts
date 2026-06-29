@@ -17,14 +17,17 @@ export interface ToolResult {
 
 export interface ToolInputSchema {
   type: 'object';
-  properties: Record<string, { type: string; description: string }>;
+  properties: Record<string, { type: string; description: string; enum?: readonly unknown[] }>;
   required?: string[];
 }
 
-export interface ToolDef {
+export interface ToolSchemaDef {
   name: string;
-  description: string;
   inputSchema: ToolInputSchema;
+}
+
+export interface ToolDef extends ToolSchemaDef {
+  description: string;
   handler: (args: Record<string, unknown>) => Promise<ToolResult>;
 }
 
@@ -37,7 +40,7 @@ export interface FbeastMcpServer {
 }
 
 export function validateToolArguments(
-  tool: ToolDef,
+  tool: ToolSchemaDef,
   args: unknown,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
@@ -58,6 +61,12 @@ export function validateToolArguments(
     const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
     if (prop.type === 'integer' ? !Number.isInteger(value) : actual !== prop.type) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be ${prop.type}` };
+    }
+    if (prop.type === 'number' && !Number.isFinite(value)) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be a finite number` };
+    }
+    if (prop.enum && !prop.enum.includes(value)) {
+      return { ok: false, message: `Tool ${tool.name} property ${key} must be one of: ${prop.enum.join(', ')}` };
     }
   }
   return { ok: true, value: obj };
