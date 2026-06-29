@@ -93,7 +93,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-proxy', '0.1.0', tools, { getObserver: () => getAdapters().observer });
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, { getObserver: getCachedObserver });
 }
 
 // CLI entry point

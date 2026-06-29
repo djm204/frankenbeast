@@ -102,6 +102,15 @@ describe('proxy server', () => {
       expect(mockCreateAdapterSet).not.toHaveBeenCalled();
     });
 
+    it('does not load adapters when proxy meta-tool validation rejects arguments', async () => {
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'bar' }, extra: true });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('unknown property: extra');
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+      expect(observerLog).not.toHaveBeenCalled();
+    });
+
     it('passes args to handler correctly', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
