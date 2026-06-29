@@ -302,22 +302,24 @@ describe('runDirectCli', () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
-  it('forces process.exit after successful short-lived direct commands', async () => {
+  it('lets successful direct commands exit naturally so stdout can drain', async () => {
     const entrypoint = vi.fn(async () => undefined);
     const exit = vi.fn() as unknown as (code?: number) => never;
 
     runDirectCli(entrypoint, exit, () => true);
     await Promise.resolve();
 
-    expect(exit).toHaveBeenCalledWith(0);
+    expect(exit).not.toHaveBeenCalled();
   });
 
-  it('classifies long-running commands and short-lived catalog commands', () => {
+  it('does not force successful direct CLI exits, including catalog and option-shifted beast actions', () => {
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'chat-server'])).toBe(false);
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'spawn'])).toBe(false);
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'create'])).toBe(false);
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'restart'])).toBe(false);
-    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(true);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'resume'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', '--base-dir', '/tmp', 'spawn'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(false);
   });
 
   it('exits nonzero when the direct CLI entrypoint rejects', async () => {

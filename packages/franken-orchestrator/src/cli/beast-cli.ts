@@ -4,10 +4,22 @@ import { createBeastServices } from '../beasts/create-beast-services.js';
 import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
+import type { BeastRun } from '../beasts/types.js';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
   dispose?: () => void;
 };
+
+const liveRunStatuses = new Set<BeastRun['status']>([
+  'queued',
+  'interviewing',
+  'running',
+  'pending_approval',
+]);
+
+function shouldKeepServicesAliveForRun(run: Pick<BeastRun, 'status' | 'currentAttemptId'>): boolean {
+  return Boolean(run.currentAttemptId && liveRunStatuses.has(run.status));
+}
 
 interface BeastCommandDeps {
   args: CliArgs;
@@ -61,7 +73,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           startNow: true,
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
-        keepServicesAlive = true;
+        keepServicesAlive = shouldKeepServicesAliveForRun(run);
         print(`Spawned ${run.definitionId} as ${run.id}`);
         return;
       }
@@ -106,13 +118,14 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           throw new Error('beasts restart requires a run id');
         }
         const run = await services.runs.restart(args.beastTarget, actor);
-        keepServicesAlive = true;
+        keepServicesAlive = shouldKeepServicesAliveForRun(run);
         print(`Restarted ${run.id}`);
         return;
       }
       case 'resume': {
         if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
         const run = await getControl().resumeAgent(args.beastTarget, actor);
+        keepServicesAlive = shouldKeepServicesAliveForRun(run);
         print(`Resumed ${run.id}`);
         return;
       }
@@ -129,7 +142,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
     if (!keepServicesAlive) {
       services.dispose();
     }
-    if (ownsControl) {
+    if (ownsControl && !keepServicesAlive) {
       control?.dispose?.();
     }
   }

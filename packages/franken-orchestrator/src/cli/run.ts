@@ -7,7 +7,6 @@ import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
-import { createBeastControlClient } from './beast-control-client.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
@@ -273,7 +272,6 @@ export async function main(): Promise<void> {
         io,
         paths,
         print: console.log,
-        control: createBeastControlClient(paths),
       });
     } finally {
       io.close();
@@ -701,13 +699,8 @@ const self = fileURLToPath(import.meta.url);
 const caller = process.argv[1];
 
 export function shouldForceDirectCliExit(argv: readonly string[] = process.argv): boolean {
-  if (argv[2] === 'chat-server') {
-    return false;
-  }
-  if (argv[2] === 'beasts' && ['create', 'spawn', 'restart'].includes(argv[3] ?? '')) {
-    return false;
-  }
-  return true;
+  void argv;
+  return false;
 }
 
 export function runDirectCli(
@@ -718,13 +711,9 @@ export function runDirectCli(
   void entrypoint()
     .then(() => {
       if (shouldExitOnSuccess()) {
-        let exitCode = 0;
-        if (typeof process.exitCode === 'number') {
-          exitCode = process.exitCode;
-        } else if (typeof process.exitCode === 'string') {
-          exitCode = Number(process.exitCode);
-        }
-        exit(exitCode);
+        // Successful direct CLI invocations exit naturally after command-specific
+        // cleanup disposes blocking handles. Avoid process.exit(0), which can
+        // truncate asynchronous stdout writes for short commands like beasts logs.
       }
     })
     .catch((error) => {

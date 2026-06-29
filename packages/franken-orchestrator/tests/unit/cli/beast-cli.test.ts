@@ -42,7 +42,7 @@ function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> =
       readLogs: vi.fn(),
       stopRun: vi.fn(),
       restartRun: vi.fn(),
-      resumeAgent: vi.fn().mockResolvedValue({ id: 'run-42' }),
+      resumeAgent: vi.fn().mockResolvedValue({ id: 'run-42', status: 'running', currentAttemptId: 'attempt-42' }),
       deleteAgent: vi.fn().mockResolvedValue({ id: 'agent-1' }),
       createRun: vi.fn(),
       dispose: vi.fn(),
@@ -80,7 +80,12 @@ describe('handleBeastCommand() spawn', () => {
       interviewPrompts: [],
       configSchema: { parse: vi.fn(() => ({})) },
     });
-    mockServices.dispatch.createRun.mockResolvedValue({ id: 'run-1', definitionId: 'design-interview' });
+    mockServices.dispatch.createRun.mockResolvedValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
     const deps = makeDeps({
       args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
     });
@@ -105,11 +110,34 @@ describe('handleBeastCommand() spawn', () => {
     await expect(handleBeastCommand(deps)).rejects.toThrow('Unknown Beast definition: missing');
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
+
+  it('disposes services if spawn returns a failed run after executor start fails', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    mockServices.dispatch.createRun.mockResolvedValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'failed',
+      currentAttemptId: undefined,
+    });
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(deps.print).toHaveBeenCalledWith('Spawned design-interview as run-1');
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('handleBeastCommand() restart', () => {
   it('leaves services alive after restarting an in-process executor', async () => {
-    mockServices.runs.restart.mockResolvedValue({ id: 'run-1' });
+    mockServices.runs.restart.mockResolvedValue({ id: 'run-1', status: 'running', currentAttemptId: 'attempt-1' });
     const deps = makeDeps({
       args: { subcommand: 'beasts', beastAction: 'restart', beastTarget: 'run-1' } as CliArgs,
     });
@@ -133,7 +161,7 @@ describe('handleBeastCommand() restart', () => {
 });
 
 describe('handleBeastCommand() resume', () => {
-  it('calls control.resumeAgent with agent id, prints result, and disposes services', async () => {
+  it('calls control.resumeAgent with agent id, prints result, and leaves services alive for a live run', async () => {
     const deps = makeDeps({
       args: { subcommand: 'beasts', beastAction: 'resume', beastTarget: 'agent-1' } as CliArgs,
     });
@@ -141,6 +169,20 @@ describe('handleBeastCommand() resume', () => {
     await handleBeastCommand(deps);
 
     expect(deps.control.resumeAgent).toHaveBeenCalledWith('agent-1', expect.any(String));
+    expect(deps.print).toHaveBeenCalledWith('Resumed run-42');
+    expect(mockServices.dispose).not.toHaveBeenCalled();
+  });
+
+  it('disposes services if resume returns a non-live run', async () => {
+    const control = makeDeps().control;
+    control.resumeAgent = vi.fn().mockResolvedValue({ id: 'run-42', status: 'failed' });
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'resume', beastTarget: 'agent-1' } as CliArgs,
+      control,
+    });
+
+    await handleBeastCommand(deps);
+
     expect(deps.print).toHaveBeenCalledWith('Resumed run-42');
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
