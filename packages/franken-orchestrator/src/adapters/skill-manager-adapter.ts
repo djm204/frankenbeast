@@ -13,16 +13,31 @@ export class SkillManagerAdapter implements ISkillsModule {
   constructor(private readonly manager: SkillManager) {}
 
   hasSkill(skillId: string): boolean {
-    return this.manager.getEnabledSkills().includes(skillId);
+    return this.manager.getEnabledSkills().some((enabledSkill) => (
+      enabledSkill === skillId || this.manager.readTools(enabledSkill).some(tool => tool.name === skillId)
+    ));
   }
 
   getAvailableSkills(): readonly SkillDescriptor[] {
-    return this.manager.getEnabledSkills().map((name) => ({
-      id: name,
-      name,
-      requiresHitl: false,
-      executionType: 'mcp' as const,
-    }));
+    return this.manager.getEnabledSkills().flatMap((name) => {
+      const tools = this.manager.readTools(name);
+
+      if (tools.length > 1) {
+        return tools.map((tool) => ({
+          id: tool.name,
+          name: tool.name,
+          requiresHitl: false,
+          executionType: 'mcp' as const,
+        }));
+      }
+
+      return [{
+        id: name,
+        name,
+        requiresHitl: false,
+        executionType: 'mcp' as const,
+      }];
+    });
   }
 
   async execute(skillId: string, input: SkillInput): Promise<SkillResult> {

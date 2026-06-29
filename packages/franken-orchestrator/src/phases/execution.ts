@@ -277,7 +277,7 @@ async function executeTask(
 
     for (const skillId of task.requiredSkills) {
       const descriptor = availableSkills.find(sk => sk.id === skillId);
-      const isCli = descriptor?.executionType === 'cli';
+      const isCli = descriptor?.executionType === 'cli' || (!descriptor && skillId.startsWith('cli:'));
       const isMcp = descriptor?.executionType === 'mcp';
 
       let result;
@@ -368,9 +368,17 @@ function resolveMcpTool(
   tools: ReturnType<IMcpModule['getAvailableTools']>,
 ): { name: string; serverId: string } {
   const byName = tools.find(tool => tool.name === skillId);
-  if (byName) return byName;
-
   const byServer = tools.filter(tool => tool.serverId === skillId);
+
+  if (byName && byServer.some(tool => tool !== byName)) {
+    throw new Error(
+      `MCP skill '${skillId}' is ambiguous: it matches tool '${byName.name}' from server '${byName.serverId}' ` +
+        `and server '${skillId}' tools (${byServer.map(tool => tool.name).join(', ')}). ` +
+        'Use an unambiguous tool id or server id.',
+    );
+  }
+
+  if (byName) return byName;
   if (byServer.length === 1) return byServer[0]!;
 
   if (byServer.length > 1) {

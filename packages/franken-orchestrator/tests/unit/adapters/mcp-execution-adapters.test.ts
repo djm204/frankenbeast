@@ -23,6 +23,22 @@ describe('MCP execution adapters', () => {
     })).rejects.toThrow('cannot be executed by SkillManagerAdapter directly');
   });
 
+  it('SkillManagerAdapter exposes tool-level descriptors for multi-tool MCP skills', () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
+    mkdirSync(join(skillsDir, 'search'));
+    writeFileSync(join(skillsDir, 'search', 'mcp.json'), JSON.stringify({ mcpServers: { search: { command: 'search' } } }));
+    writeFileSync(join(skillsDir, 'search', 'tools.json'), JSON.stringify([
+      { name: 'query', description: 'Query', inputSchema: {} },
+      { name: 'summarize', description: 'Summarize', inputSchema: {} },
+    ]));
+    const manager = new SkillManager(skillsDir, new Set(['search']));
+    const adapter = new SkillManagerAdapter(manager);
+
+    expect(adapter.hasSkill('query')).toBe(true);
+    expect(adapter.hasSkill('summarize')).toBe(true);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['query', 'summarize']);
+  });
+
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {
     const adapter = new McpSdkAdapter([{ name: 'search', serverId: 'search', description: 'Search' }]);
 

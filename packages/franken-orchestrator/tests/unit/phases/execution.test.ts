@@ -482,6 +482,58 @@ describe('runExecution', () => {
     expect(outcomes[0]!.error).toContain('Start/configure the MCP server or disable the skill');
   });
 
+  it('fails closed for ambiguous MCP tool and server-id matches', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'search', name: 'Search', requiresHitl: false, executionType: 'mcp' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'placeholder', tokensUsed: 1 })),
+    });
+    const mcp: IMcpModule = {
+      getAvailableTools: vi.fn(() => [
+        { name: 'search', serverId: 'other-server', description: 'Search tool' },
+        { name: 'query', serverId: 'search', description: 'Query tool' },
+      ]),
+      callTool: vi.fn(async () => ({ content: 'should not run', isError: false })),
+    };
+    const c = ctx([
+      { id: 't1', objective: 'look this up', requiredSkills: ['search'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
+
+    expect(mcp.callTool).not.toHaveBeenCalled();
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain("MCP skill 'search' is ambiguous");
+  });
+
+  it('executes exact MCP tool ids exposed from multi-tool servers', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn((skillId: string) => skillId === 'query'),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'query', name: 'Query', requiresHitl: false, executionType: 'mcp' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'placeholder', tokensUsed: 1 })),
+    });
+    const mcp: IMcpModule = {
+      getAvailableTools: vi.fn(() => [
+        { name: 'query', serverId: 'search', description: 'Query tool' },
+        { name: 'summarize', serverId: 'search', description: 'Summarize tool' },
+      ]),
+      callTool: vi.fn(async () => ({ content: 'query output', isError: false })),
+    };
+    const c = ctx([
+      { id: 't1', objective: 'look this up', requiredSkills: ['query'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
+
+    expect(mcp.callTool).toHaveBeenCalledWith('query', expect.objectContaining({ objective: 'look this up' }));
+    expect(outcomes[0]!.status).toBe('success');
+    expect(outcomes[0]!.output).toBe('query output');
+  });
+
   it('routes llm executionType skills through skills.execute (regression)', async () => {
     const cliExec = makeCliExecutor();
     const skills = makeSkills({
@@ -540,6 +592,24 @@ describe('runExecution', () => {
 
     expect(outcomes[0]!.status).toBe('failure');
     expect(outcomes[0]!.error).toContain("CLI skill 'build' requires a CliSkillExecutor but none was provided");
+  });
+
+  it('routes cli-prefixed skills through cliExecutor even without descriptors', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn((skillId: string) => skillId.startsWith('cli:')),
+      getAvailableSkills: vi.fn(() => []),
+      execute: vi.fn(async () => ({ output: 'fallback-output', tokensUsed: 1 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'implement chunk', requiredSkills: ['cli:chunk-1'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(cliExec.execute).toHaveBeenCalledWith('cli:chunk-1', expect.objectContaining({ objective: 'implement chunk' }), expect.anything(), undefined, 't1');
+    expect(skills.execute).not.toHaveBeenCalled();
+    expect(outcomes[0]!.output).toBe('cli-output');
   });
 
   it('falls through to skills.execute when skill not found in available skills list', async () => {
