@@ -122,6 +122,7 @@ function uninstallCodex(options: {
   const namesToRemove = new Set([
     ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'standard'),
     ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'proxy'),
+    ...codexServerNamesFromLocalConfig(root),
     ...legacyCodexServerNamesForRoot(root, spawnFn),
   ]);
 
@@ -170,7 +171,50 @@ function uninstallCodex(options: {
     } catch { /* ignore parse errors */ }
   }
 
+  removeCodexProjectConfigEntries(root);
+
   removeGeneratedHookScripts(root, 'codex');
+}
+
+function codexServerNamesFromLocalConfig(root: string): string[] {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return [];
+
+  const toml = readFileSync(configPath, 'utf-8');
+  return toml.split(/\r?\n/).flatMap((line) => {
+    const header = line.match(/^\s*\[mcp_servers\.(?:"([^"]+)"|([^\]]+))]\s*$/);
+    const name = header?.[1] ?? header?.[2];
+    return typeof name === 'string' && name.startsWith('fbeast-') ? [name] : [];
+  });
+}
+
+function removeCodexProjectConfigEntries(root: string): void {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return;
+
+  const existing = readFileSync(configPath, 'utf-8');
+  const cleaned = removeFbeastMcpServerTables(existing).trimEnd();
+  if (cleaned.length === 0) {
+    unlinkSync(configPath);
+  } else {
+    writeFileSync(configPath, `${cleaned}\n`);
+  }
+}
+
+function removeFbeastMcpServerTables(toml: string): string {
+  const lines = toml.split(/\r?\n/);
+  const kept: string[] = [];
+  let dropping = false;
+
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)]\s*$/);
+    if (header?.[1]) {
+      dropping = /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)$/.test(header[1]);
+    }
+    if (!dropping) kept.push(line);
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 function legacyCodexServerNamesForRoot(

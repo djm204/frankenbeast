@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { FbeastServer } from '../shared/config.js';
@@ -9,20 +9,21 @@ const CODEX_PROJECT_ID_FILE = join('.fbeast', 'codex-project-id');
 /**
  * Codex MCP server names are global, so fbeast registrations must be scoped to
  * the project root they serve. Keep the human-readable server prefix while
- * suffixing a stable root hash to avoid cross-repository collisions.
+ * suffixing a persisted project id to avoid cross-repository collisions and keep
+ * uninstall stable if the repository is moved or opened via another path.
  */
 export function codexProjectId(root: string): string {
   const persisted = readPersistedCodexProjectId(root);
   if (persisted) return persisted;
 
-  return codexProjectIdForPath(root);
+  return legacyCodexProjectIdForPath(root);
 }
 
 export function ensureCodexProjectId(root: string): string {
   const existing = readPersistedCodexProjectId(root);
   if (existing) return existing;
 
-  const projectId = codexProjectIdForPath(root);
+  const projectId = randomBytes(CODEX_NAME_HASH_LENGTH / 2).toString('hex');
   const fbeastDir = join(root, '.fbeast');
   mkdirSync(fbeastDir, { recursive: true });
   writeFileSync(join(root, CODEX_PROJECT_ID_FILE), `${projectId}\n`);
@@ -33,11 +34,13 @@ export function codexProjectIds(root: string): string[] {
   const ids = new Set<string>();
   const persisted = readPersistedCodexProjectId(root);
   if (persisted) ids.add(persisted);
-  ids.add(codexProjectIdForPath(root));
+  // Backward-compatible cleanup for prerelease registrations whose names were
+  // derived from the current root path before project ids were persisted.
+  ids.add(legacyCodexProjectIdForPath(root));
   return [...ids];
 }
 
-function codexProjectIdForPath(root: string): string {
+function legacyCodexProjectIdForPath(root: string): string {
   return createHash('sha256')
     .update(resolve(root))
     .digest('hex')
