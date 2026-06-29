@@ -7,6 +7,7 @@ import type {
   PlanTask,
   SkillInput,
   IMcpModule,
+  McpToolInfo,
   MemoryContext,
   ILogger,
   ICheckpointStore,
@@ -366,7 +367,7 @@ async function executeMcpSkill(
 function resolveMcpTool(
   skillId: string,
   tools: ReturnType<IMcpModule['getAvailableTools']>,
-): { name: string; serverId: string } {
+): McpToolInfo {
   const byName = tools.filter(tool => tool.name === skillId);
   const byServer = tools.filter(tool => tool.serverId === skillId);
 
@@ -389,7 +390,17 @@ function resolveMcpTool(
   }
 
   if (exactTool) return exactTool;
-  if (byServer.length === 1) return byServer[0]!;
+  if (byServer.length === 1) {
+    const serverTool = byServer[0]!;
+    const duplicateNames = tools.filter(tool => tool.name === serverTool.name && tool.serverId !== serverTool.serverId);
+    if (duplicateNames.length > 0) {
+      throw new Error(
+        `MCP skill '${skillId}' resolves to tool '${serverTool.name}', but that tool name is also exposed by ` +
+          `other MCP servers (${duplicateNames.map(tool => tool.serverId).join(', ')}). Use an unambiguous tool id.`,
+      );
+    }
+    return serverTool;
+  }
 
   if (byServer.length > 1) {
     throw new Error(

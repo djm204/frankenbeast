@@ -589,6 +589,32 @@ describe('runExecution', () => {
     expect(outcomes[0]!.error).toContain('multiple MCP servers expose a tool named');
   });
 
+  it('fails closed when a server-id match resolves to a duplicated tool name', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'serverA', name: 'Server A', requiresHitl: false, executionType: 'mcp' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'placeholder', tokensUsed: 1 })),
+    });
+    const mcp: IMcpModule = {
+      getAvailableTools: vi.fn(() => [
+        { name: 'search', serverId: 'serverA', description: 'A search' },
+        { name: 'search', serverId: 'serverB', description: 'B search' },
+      ]),
+      callTool: vi.fn(async () => ({ content: 'should not run', isError: false })),
+    };
+    const c = ctx([
+      { id: 't1', objective: 'look this up', requiredSkills: ['serverA'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), mcp);
+
+    expect(mcp.callTool).not.toHaveBeenCalled();
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain("resolves to tool 'search'");
+  });
+
   it('prefers an exact same-server MCP tool match over sibling server tools', async () => {
     const skills = makeSkills({
       hasSkill: vi.fn(() => true),
