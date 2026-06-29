@@ -242,11 +242,12 @@ describe('fbeast uninstall', () => {
 
     await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
 
-    // Uninstall removes the persisted project-id names plus the legacy current-path
-    // fallback names for older path-derived registrations.
+    // Uninstall removes the persisted project-id names. Older path-derived
+    // registrations are discovered from local config or `codex mcp list --json`,
+    // not by deriving another path hash.
     const removeCalls = spawnCalls.filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove');
     const removedNames = removeCalls.map((c) => c.args[2]);
-    expect(removeCalls.length).toBe(16);
+    expect(removeCalls.length).toBe(8);
     expect(removedNames).toEqual(expect.arrayContaining([
       ...codexServerNames(root, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
       codexServerName(root, 'proxy'),
@@ -299,6 +300,9 @@ describe('fbeast uninstall', () => {
       return { status: 0 };
     };
 
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', mode: 'proxy', spawn: mockSpawn });
+    spawnCalls.length = 0;
+
     await runUninstall({ root, claudeDir: join(root, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
 
     const removedNames = spawnCalls
@@ -317,12 +321,6 @@ describe('fbeast uninstall', () => {
       spawnCalls.push({ cmd, args });
       return { status: 0 };
     };
-
-    await runUninstall({ root: rootA, claudeDir: join(rootA, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
-
-    const removedNames = spawnCalls
-      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
-      .map((c) => c.args[2]);
     const projectANames = [
       ...codexServerNames(rootA, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
       codexServerName(rootA, 'proxy'),
@@ -331,6 +329,12 @@ describe('fbeast uninstall', () => {
       ...codexServerNames(rootB, ['memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills'], 'standard'),
       codexServerName(rootB, 'proxy'),
     ];
+
+    await runUninstall({ root: rootA, claudeDir: join(rootA, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
 
     expect(removedNames).toEqual(projectANames);
     expect(removedNames.some((name) => projectBNames.includes(name))).toBe(false);
@@ -438,6 +442,41 @@ describe('fbeast uninstall', () => {
     expect(remainingConfig).toContain('command = "keep-me"');
     expect(remainingConfig).not.toContain(oldCodexName);
     expect(remainingConfig).not.toContain('fbeast_memory_store');
+  });
+
+  it('codex uninstall removes moved pre-persistence registrations by DB path from local config', async () => {
+    const oldRoot = tmpDir();
+    const movedRoot = tmpDir();
+    dirs.push(oldRoot, movedRoot);
+    const oldDbPath = join(oldRoot, '.fbeast', 'beast.db');
+    const oldName = 'fbeast-memory-deadbeefcafe';
+
+    mkdirSync(join(movedRoot, '.codex'), { recursive: true });
+    writeFileSync(join(movedRoot, '.codex', 'config.toml'), [
+      `[mcp_servers.${oldName}]`,
+      'command = "fbeast-memory"',
+      `args = ["--db", "${oldDbPath}"]`,
+      '',
+    ].join('\n'));
+
+    const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      spawnCalls.push({ cmd, args });
+      return args[0] === 'mcp' && args[1] === 'list'
+        ? { status: 0, stdout: JSON.stringify([
+          { name: oldName, transport: { type: 'stdio', command: 'fbeast-memory', args: ['--db', oldDbPath] } },
+          { name: 'fbeast-memory-other', transport: { type: 'stdio', command: 'fbeast-memory', args: ['--db', join(tmpDir(), '.fbeast', 'beast.db')] } },
+        ]) }
+        : { status: 0 };
+    };
+
+    await runUninstall({ root: movedRoot, claudeDir: join(movedRoot, '.codex'), client: 'codex', purge: false, spawn: mockSpawn });
+
+    const removedNames = spawnCalls
+      .filter((c) => c.args[0] === 'mcp' && c.args[1] === 'remove')
+      .map((c) => c.args[2]);
+    expect(removedNames).toContain(oldName);
+    expect(removedNames).not.toContain('fbeast-memory-other');
   });
 
   it('preserves non-fbeast hooks sharing a Claude matcher entry on uninstall', async () => {

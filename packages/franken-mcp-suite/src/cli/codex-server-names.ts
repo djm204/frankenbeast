@@ -1,6 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { FbeastServer } from '../shared/config.js';
 
 const CODEX_NAME_HASH_LENGTH = 12;
@@ -13,10 +13,7 @@ const CODEX_PROJECT_ID_FILE = join('.fbeast', 'codex-project-id');
  * uninstall stable if the repository is moved or opened via another path.
  */
 export function codexProjectId(root: string): string {
-  const persisted = readPersistedCodexProjectId(root);
-  if (persisted) return persisted;
-
-  return legacyCodexProjectIdForPath(root);
+  return ensureCodexProjectId(root);
 }
 
 export function ensureCodexProjectId(root: string): string {
@@ -34,17 +31,7 @@ export function codexProjectIds(root: string): string[] {
   const ids = new Set<string>();
   const persisted = readPersistedCodexProjectId(root);
   if (persisted) ids.add(persisted);
-  // Backward-compatible cleanup for prerelease registrations whose names were
-  // derived from the current root path before project ids were persisted.
-  ids.add(legacyCodexProjectIdForPath(root));
   return [...ids];
-}
-
-function legacyCodexProjectIdForPath(root: string): string {
-  return createHash('sha256')
-    .update(resolve(root))
-    .digest('hex')
-    .slice(0, CODEX_NAME_HASH_LENGTH);
 }
 
 function readPersistedCodexProjectId(root: string): string | null {

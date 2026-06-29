@@ -123,13 +123,13 @@ function uninstallCodex(options: {
     ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'standard'),
     ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'proxy'),
     ...codexServerNamesFromLocalConfig(root),
-    ...legacyCodexServerNamesForRoot(root, spawnFn),
+    ...codexServerNamesFromRegisteredDbPaths(root, spawnFn),
   ]);
 
   // Remove only this project's MCP servers. Namespaced entries are scoped by a
-  // persisted project id (plus the current path hash as a defensive fallback).
-  // Legacy fixed names are removed only when `codex mcp list --json` proves that
-  // they target this root's .fbeast database.
+  // persisted project id. Pre-persistence entries are removed only when local
+  // config or `codex mcp list --json` ties a fbeast registration to this root's
+  // database (including a moved repo's old database path from .codex/config.toml).
   for (const name of namesToRemove) {
     spawnFn('codex', ['mcp', 'remove', name]);
   }
@@ -188,6 +188,24 @@ function codexServerNamesFromLocalConfig(root: string): string[] {
   });
 }
 
+function codexDbPathsFromLocalConfig(root: string): string[] {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return [];
+
+  const paths = new Set<string>();
+  const toml = readFileSync(configPath, 'utf-8');
+  for (const line of toml.split(/\r?\n/)) {
+    const args = line.match(/^\s*args\s*=\s*\[(.*)]\s*$/)?.[1];
+    if (!args) continue;
+    const strings = [...args.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => match[1]?.replace(/\\"/g, '"') ?? '');
+    for (let index = 0; index < strings.length - 1; index += 1) {
+      const dbPath = strings[index + 1];
+      if (strings[index] === '--db' && dbPath) paths.add(resolve(dbPath));
+    }
+  }
+  return [...paths];
+}
+
 function removeCodexProjectConfigEntries(root: string): void {
   const configPath = join(root, '.codex', 'config.toml');
   if (!existsSync(configPath)) return;
@@ -221,7 +239,7 @@ function isFbeastMcpServerSection(section: string): boolean {
   return /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)(?:\.|$)/.test(section);
 }
 
-function legacyCodexServerNamesForRoot(
+function codexServerNamesFromRegisteredDbPaths(
   root: string,
   spawnFn: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string },
 ): string[] {
@@ -236,24 +254,26 @@ function legacyCodexServerNamesForRoot(
   }
   if (!Array.isArray(entries)) return [];
 
-  const legacyNames = new Set([...ALL_SERVERS.map((server) => `fbeast-${server}`), 'fbeast-proxy']);
+  const dbPaths = new Set([
+    resolve(root, '.fbeast', 'beast.db'),
+    ...codexDbPathsFromLocalConfig(root),
+  ]);
   return entries.flatMap((entry) => {
     if (!isObjectRecord(entry)) return [];
     const name = entry['name'];
-    if (typeof name !== 'string' || !legacyNames.has(name)) return [];
-    return codexEntryTargetsRootDb(entry, root) ? [name] : [];
+    if (typeof name !== 'string' || !name.startsWith('fbeast-')) return [];
+    return codexEntryTargetsAnyDbPath(entry, dbPaths) ? [name] : [];
   });
 }
 
-function codexEntryTargetsRootDb(entry: Record<string, unknown>, root: string): boolean {
-  const dbPath = resolve(root, '.fbeast', 'beast.db');
+function codexEntryTargetsAnyDbPath(entry: Record<string, unknown>, dbPaths: ReadonlySet<string>): boolean {
   const candidates = [entry, isObjectRecord(entry['transport']) ? entry['transport'] : undefined]
     .filter((value): value is Record<string, unknown> => value !== undefined);
 
   return candidates.some((candidate) => {
     const args = candidate['args'];
     if (!Array.isArray(args)) return false;
-    return args.some((arg) => typeof arg === 'string' && resolve(arg) === dbPath);
+    return args.some((arg) => typeof arg === 'string' && dbPaths.has(resolve(arg)));
   });
 }
 
