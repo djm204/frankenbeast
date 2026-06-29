@@ -7,8 +7,8 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 Install the MCP suite in the project you want to govern:
 
 ```bash
-npx fbeast init
-npx fbeast init --hooks     # optional: pre/post-tool governance and audit logs
+npx fbeast mcp init
+npx fbeast mcp init --hooks     # optional: pre/post-tool governance and audit logs
 ```
 
 This creates `.fbeast/beast.db`, registers MCP servers with the detected client (Claude Code, Gemini CLI, or Codex CLI), and optionally installs generated hook scripts. MCP tools, hooks, Beast runs, and the dashboard can share the same project database.
@@ -20,7 +20,7 @@ Use `frankenbeast` when you want Frankenbeast to own the interview/plan/run loop
 ```bash
 frankenbeast interview
 frankenbeast plan --design-doc path/to/design.md
-frankenbeast run --plan-dir .fbeast/plans/my-plan/chunks
+frankenbeast run --plan-dir .fbeast/plans/my-plan/
 ```
 
 For browser or service integration, run the orchestrator chat/dashboard backend:

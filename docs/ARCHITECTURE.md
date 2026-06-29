@@ -452,7 +452,7 @@ The shipped HTTP server is integrated in `franken-orchestrator`:
 | Surface | Location | Notes |
 |---------|----------|-------|
 | Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
-| Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Mounts chat, tracked Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes. |
+| Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. Comms (`/api/comms`) and security (`/api/security`) mount only when `commsConfig`/`commsRuntime` and `securityConfig` are passed — the `chat-server` CLI path does not pass them. |
 | Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @frankenbeast/web run dev:chat`. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
@@ -732,8 +732,8 @@ Most inter-module communication uses typed port interfaces defined in each modul
 
 | Port | Defined In | Consumed By |
 |------|-----------|-------------|
-| `ICliProvider` / provider registry | `franken-orchestrator/src/skills/providers` | CLI LLM execution and fallback chains |
-| API provider registry | `franken-orchestrator/src/providers` | Chat/dashboard/API-backed provider calls |
+| `ICliProvider` / provider registry | `franken-orchestrator/src/skills/providers` | CLI LLM execution and fallback chains; also backs `frankenbeast chat`/dashboard chat via `CliLlmAdapter` (resolved from `createDefaultRegistry()`) |
+| API provider registry | `franken-orchestrator/src/providers` | Beast-mode deps and HTTP skill/dashboard route dependencies (not the chat-turn provider path) |
 | `SqliteBrain` / brain interfaces | franken-brain, @franken/types | Working/episodic/recovery memory |
 | `GuardrailsPort` | franken-critique | Critique evaluators |
 | `MemoryPort` | franken-critique | Critique evaluators |

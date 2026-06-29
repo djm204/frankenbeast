@@ -8,7 +8,7 @@ fbeast works with any MCP-compatible AI assistant client. Currently supported:
 | Gemini CLI | `.gemini/` | ✅ BeforeTool / AfterTool (shell scripts) |
 | Codex CLI | `codex mcp add` | ✅ PreToolUse / PostToolUse (shell scripts) |
 
-Beast mode (`fbeast beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
+Beast mode (`fbeast mcp beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
 
 ---
 
@@ -118,7 +118,7 @@ npm link --workspace=@fbeast/mcp-suite
 Verify:
 
 ```sh
-fbeast --help
+fbeast mcp
 ```
 
 ### 3. Initialize in your project
@@ -127,15 +127,15 @@ Run from the root of the project you want to add fbeast to:
 
 ```sh
 cd /your/project
-fbeast init
+fbeast mcp init
 ```
 
-`fbeast init` auto-detects your client by looking for `.claude/` or `.gemini/` dirs
+`fbeast mcp init` auto-detects your client by looking for `.claude/` or `.gemini/` dirs
 (project-level first, then home dir). Override with `--client`:
 
 ```sh
-fbeast init --client=claude    # Claude Code
-fbeast init --client=gemini    # Gemini CLI
+fbeast mcp init --client=claude    # Claude Code
+fbeast mcp init --client=gemini    # Gemini CLI
 ```
 
 This creates:
@@ -156,10 +156,10 @@ Hooks fire `fbeast-hook` on every tool call for live governance and audit loggin
 All three clients support hooks.
 
 ```sh
-fbeast init --hooks                      # auto-detect client
-fbeast init --client=claude --hooks      # Claude Code
-fbeast init --client=gemini --hooks      # Gemini CLI
-fbeast init --client=codex --hooks       # Codex CLI
+fbeast mcp init --hooks                      # auto-detect client
+fbeast mcp init --client=claude --hooks      # Claude Code
+fbeast mcp init --client=gemini --hooks      # Gemini CLI
+fbeast mcp init --client=codex --hooks       # Codex CLI
 ```
 
 **Claude Code** — generated shell scripts under `.fbeast/hooks/`, referenced by `PreToolUse` / `PostToolUse` entries in `settings.json`:
@@ -202,13 +202,13 @@ The scripts read JSON from stdin and deny with the Codex format (exit 2 + `{"hoo
 #### Install a subset of servers
 
 ```sh
-fbeast init --pick=memory,observer,governor
+fbeast mcp init --pick=memory,observer,governor
 ```
 
 Or interactive selection:
 
 ```sh
-fbeast init --pick
+fbeast mcp init --pick
 ```
 
 Available servers: `memory`, `planner`, `critique`, `firewall`, `observer`, `governor`, `skills`
@@ -236,7 +236,7 @@ Proxy mode is ideal for large projects or agents with tight context budgets. It 
 ### How to install
 
 ```sh
-fbeast init --mode=proxy
+fbeast mcp init --mode=proxy
 ```
 
 ### What the agent sees
@@ -255,7 +255,7 @@ Only two tools in its tool list:
 
 ### Default behavior
 
-By default, `fbeast init` installs 7 individual servers with all tools visible upfront. Proxy mode is opt-in via the `--mode=proxy` flag.
+By default, `fbeast mcp init` installs 7 individual servers with all tools visible upfront. Proxy mode is opt-in via the `--mode=proxy` flag.
 
 ---
 
@@ -291,11 +291,11 @@ Beast mode is a configuration activation/handoff command. It writes `.fbeast/con
 
 ```sh
 # Default provider (anthropic-api)
-fbeast beast
+fbeast mcp beast
 
 # Explicitly choose provider
-fbeast beast --provider=codex-cli
-fbeast beast --provider=claude-cli
+fbeast mcp beast --provider=codex-cli
+fbeast mcp beast --provider=claude-cli
 ```
 
 `claude-cli` triggers a confirmation prompt because it spawns subprocesses outside
@@ -310,15 +310,15 @@ All adapters continue reading from the same `beast.db`.
 
 ```sh
 # Remove MCP servers and hooks, keep .fbeast/ data (auto-detects client)
-fbeast uninstall
+fbeast mcp uninstall
 
 # Target a specific client
-fbeast uninstall --client=claude
-fbeast uninstall --client=gemini
-fbeast uninstall --client=codex
+fbeast mcp uninstall --client=claude
+fbeast mcp uninstall --client=gemini
+fbeast mcp uninstall --client=codex
 
 # Remove everything including stored data
-fbeast uninstall --purge
+fbeast mcp uninstall --purge
 ```
 
 Codex: runs `codex mcp remove` for each server and clears fbeast entries from `.codex/hooks.json`.

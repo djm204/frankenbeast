@@ -312,7 +312,7 @@ Historical docs and ADRs may still mention removed packages such as `frankenfire
 
 ## HTTP surface
 
-The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). It mounts chat, tracked Beast agents/SSE, network, comms, security, skills, dashboard, and analytics routes, with WebSocket chat on `/v1/chat/ws`. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
+The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime mounts chat (with WebSocket chat on `/v1/chat/ws`), tracked Beast agents/SSE, network, and analytics routes; skills/dashboard routes activate when a provider registry is configured. The comms (`/api/comms`) and security (`/api/security`) routes are mounted only when `createChatApp()` is given `commsConfig`/`commsRuntime` and `securityConfig` respectively — the default `chat-server` CLI path does not pass those, so those endpoints are not exposed there. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
 
 ## Prerequisites
 
