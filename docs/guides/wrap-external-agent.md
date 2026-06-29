@@ -4,11 +4,12 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 
 ## Option 1: Use MCP mode for tool governance
 
-Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`), so either install it globally (`npm i -g @fbeast/mcp-suite`) and run `fbeast …`, or invoke it through `npx --package=@fbeast/mcp-suite`:
+Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
 
 ```bash
-npx --package=@fbeast/mcp-suite fbeast mcp init
-npx --package=@fbeast/mcp-suite fbeast mcp init --hooks     # optional: pre/post-tool governance and audit logs
+npm install -g @fbeast/mcp-suite      # or: npm link --workspace=packages/franken-mcp-suite
+fbeast mcp init
+fbeast mcp init --hooks                # optional: pre/post-tool governance and audit logs
 ```
 
 This creates `.fbeast/beast.db`, registers MCP servers with the detected client (Claude Code, Gemini CLI, or Codex CLI), and optionally installs generated hook scripts. MCP tools, hooks, Beast runs, and the dashboard can share the same project database.

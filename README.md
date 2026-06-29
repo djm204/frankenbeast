@@ -312,7 +312,7 @@ Historical docs and ADRs may still mention removed packages such as `frankenfire
 
 ## HTTP surface
 
-The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime mounts chat (with WebSocket chat on `/v1/chat/ws`), tracked Beast agents/SSE, network, and analytics routes; skills/dashboard routes activate when a provider registry is configured. The comms (`/api/comms`) and security (`/api/security`) routes are mounted only when `createChatApp()` is given `commsConfig`/`commsRuntime` and `securityConfig` respectively — the default `chat-server` CLI path does not pass those, so those endpoints are not exposed there. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
+The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime always mounts chat (with WebSocket chat on `/v1/chat/ws`), network, and analytics routes; tracked Beast agents/SSE (`/v1/beasts/*`) routes mount only when an operator token resolves (loopback dev mode run without a token omits them), and skills/dashboard routes activate when a provider registry is configured. The comms (`/api/comms`) and security (`/api/security`) routes are mounted only when `createChatApp()` is given `commsConfig`/`commsRuntime` and `securityConfig` respectively — the default `chat-server` CLI path does not pass those, so those endpoints are not exposed there. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
 
 ## Prerequisites
 
@@ -349,14 +349,19 @@ See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup gu
 
 ## Run the Dashboard with MCP Mode
 
-Use this path when you installed `@fbeast/mcp-suite` with `fbeast mcp init` and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
+Use this path when you installed `@fbeast/mcp-suite` and ran `fbeast mcp init`, and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
 
 From the project where you initialized MCP:
 
 ```bash
+# Install the suite persistently so `fbeast` and the `fbeast-*` MCP server
+# binaries stay on PATH. A one-shot `npx` won't work here: `mcp init` registers
+# servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns
+# later, so those binaries must remain installed after setup.
+npm install -g @fbeast/mcp-suite
+
 # One-time MCP setup. Add --hooks if you want tool-call governance and audit logs.
-# The fbeast binary ships from @fbeast/mcp-suite (no package named "fbeast").
-npx --package=@fbeast/mcp-suite fbeast mcp init --hooks
+fbeast mcp init --hooks
 ```
 
 From this Frankenbeast repo, start the dashboard backend against that same project root:
