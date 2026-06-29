@@ -180,7 +180,6 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
       ).all(sessionId) as AuditTrailRow[];
       let expectedParentHash: string | undefined;
-      let expectedUnboundParentHash: string | undefined;
       let expectedLegacy16ParentHash: string | undefined;
 
       for (const [index, row] of rows.entries()) {
@@ -193,15 +192,12 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         });
         const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
-        const unboundBaseHash = buildLegacyEventBaseHash(row.eventType, metadata, auditEvent.inputHash);
-        const expectedUnboundHash = buildAuditHash(unboundBaseHash, expectedUnboundParentHash);
         const expectedLegacy16Hash = buildLegacy16AuditHash(auditEvent.inputHash, expectedLegacy16ParentHash);
         const actualParentHash = row.parentHash ?? undefined;
         const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
-        const matchesUnboundLegacy = actualParentHash === expectedUnboundParentHash && row.hash === expectedUnboundHash;
         const matchesLegacy16 = actualParentHash === expectedLegacy16ParentHash && row.hash === expectedLegacy16Hash;
 
-        if (!matchesCurrent && !matchesUnboundLegacy && !matchesLegacy16) {
+        if (!matchesCurrent && !matchesLegacy16) {
           return {
             ok: false,
             checked: index,
@@ -220,7 +216,6 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         }
 
         expectedParentHash = expectedHash;
-        expectedUnboundParentHash = expectedUnboundHash;
         expectedLegacy16ParentHash = expectedLegacy16Hash;
       }
 
@@ -243,10 +238,6 @@ function buildAuditHash(baseHash: string, parentHash?: string): string {
 
 function buildEventBaseHash(sessionId: string, eventType: string, metadata: string, inputHash?: string): string {
   return hashContent(`${sessionId}:${eventType}:${inputHash ?? ''}:${metadata}`);
-}
-
-function buildLegacyEventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
-  return hashContent(`${eventType}:${inputHash ?? ''}:${metadata}`);
 }
 
 function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {

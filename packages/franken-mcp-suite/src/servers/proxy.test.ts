@@ -144,5 +144,21 @@ describe('proxy server', () => {
       expect(fakeHandler).toHaveBeenCalledOnce();
       expect(observerLog).toHaveBeenCalledTimes(2);
     });
+
+    it('executes proxied target tools when pre-call audit logging fails', async () => {
+      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
+      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      observerLog
+        .mockRejectedValueOnce(new Error('audit write failed'))
+        .mockResolvedValueOnce({ id: 2, hash: 'h2' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(result).toEqual(fakeResult);
+      expect(fakeHandler).toHaveBeenCalledWith({ key: 'bar' });
+      expect(observerLog).toHaveBeenCalledTimes(2);
+    });
   });
 });

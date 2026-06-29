@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
+import { createAuditEvent, hashContent } from '@frankenbeast/observer';
 import { createObserverAdapter } from './observer-adapter.js';
 
 function tmpDbPath(): string {
@@ -117,6 +118,29 @@ describe('ObserverAdapter', () => {
     await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId: 'session-a' });
     const db = new Database(dbPath);
     db.prepare('UPDATE audit_trail SET session_id = ? WHERE session_id = ?').run('session-b', 'session-a');
+    db.close();
+
+    const verification = await observer.verify('session-b');
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+  });
+
+  it('rejects legacy full hashes that are not bound to the verified session', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const metadata = JSON.stringify({ tool: 'memory', ok: true });
+    const auditEvent = createAuditEvent('tool_call', JSON.parse(metadata), {
+      phase: 'mcp',
+      provider: 'fbeast-mcp',
+      input: metadata,
+    });
+    const unboundHash = hashContent(`tool_call:${auditEvent.inputHash ?? ''}:${metadata}`);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('session-b', 'tool_call', metadata, unboundHash, null);
     db.close();
 
     const verification = await observer.verify('session-b');
