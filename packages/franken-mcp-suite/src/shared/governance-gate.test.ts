@@ -86,18 +86,15 @@ describe('createGovernanceGate', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('escalates a known-destructive fbeast tool the word heuristic misses', async () => {
-    const { governor } = spyGovernor('approved');
+  it('routes a destructive tool through the shared governor without a gate-level override', async () => {
+    // Classification now lives in the governor adapter, not the gate. The gate
+    // must NOT exempt or re-decide fbeast_memory_forget: it passes the call to
+    // the governor and returns the governor's decision verbatim, so every caller
+    // agrees on the same answer.
+    const { governor, seen } = spyGovernor('review_recommended');
     const gate = createGovernanceGate(governor);
     const result = await gate.check({ tool: 'fbeast_memory_forget', args: { key: 'note' } });
     expect(result.decision).toBe('review_recommended');
-    expect(result.reason).toContain('destructive');
-  });
-
-  it('never downgrades a stricter governor decision for destructive tools', async () => {
-    const { governor } = spyGovernor('denied');
-    const gate = createGovernanceGate(governor);
-    const result = await gate.check({ tool: 'fbeast_memory_forget', args: { key: 'note' } });
-    expect(result.decision).toBe('denied');
+    expect(seen).toEqual([{ action: 'fbeast_memory_forget', context: JSON.stringify({ key: 'note' }) }]);
   });
 });

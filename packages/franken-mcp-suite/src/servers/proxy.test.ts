@@ -195,4 +195,57 @@ describe('proxy server', () => {
       expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'error', args: {} });
     });
   });
+
+  // Malformed execute_tool probes are rejected by the factory's argument
+  // validation BEFORE the custom handler runs, so they must be exercised via
+  // server.callTool (the full dispatch path), not the handler directly.
+  describe('wrapper-level audit of malformed proxy probes', () => {
+    it('audits a validation failure on execute_tool (missing required args)', async () => {
+      const res = await server.callTool('execute_tool', { tool: 'test_tool' }) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { tool: 'test_tool' },
+      });
+    });
+
+    it('audits a non-object payload probe (wraps the raw value)', async () => {
+      const res = await server.callTool('execute_tool', null) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { invalid: null },
+      });
+    });
+
+    it('audits an unknown proxy tool probe', async () => {
+      const res = await server.callTool('ghost_tool', { probe: 1 }) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'ghost_tool',
+        ok: false,
+        decision: 'unknown_tool',
+        args: { probe: 1 },
+      });
+    });
+
+    it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await server.callTool('execute_tool', { tool: 'test_tool', args: { k: 'v' } });
+      // Only the resolved-target record; no generic execute_tool wrapper record.
+      expect(auditRecord).toHaveBeenCalledTimes(1);
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { k: 'v' } });
+    });
+
+    it('does NOT audit a read-only search_tools call at the wrapper level', async () => {
+      await server.callTool('search_tools', {});
+      expect(auditRecord).not.toHaveBeenCalled();
+    });
+  });
 });

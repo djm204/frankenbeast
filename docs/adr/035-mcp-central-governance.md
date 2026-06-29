@@ -73,13 +73,18 @@ tool calls are checked regardless of whether client hooks are installed. We
     payload is data, not an operation to authorize; governing it would break
     legitimate critique/audit/store workflows on risky content (e.g. critiquing
     code containing `DROP TABLE`, or logging an event mentioning `rm -rf`).
-  - **Destructive tools** (`DESTRUCTIVE_TOOLS`, e.g. `fbeast_memory_forget`)
-    whose name the word heuristic misses are **escalated** to at-least-
-    `review_recommended` when the governor would otherwise approve, so a benign
-    payload cannot auto-approve a mutating call. A stricter governor decision is
-    never downgraded.
-  - **Unclassified/unknown tools** fall through to the governor with their
-    payload — fail-closed by default for any tool we have not vetted.
+  - **Everything else** falls through to the governor with its payload —
+    fail-closed by default for any tool we have not vetted.
+- **Destructive-tool classification lives in the shared governor adapter**, not
+  in the central gate. fbeast tools whose name the word heuristic misses but
+  which mutate state (`DESTRUCTIVE_ACTIONS`, e.g. `fbeast_memory_forget`) are
+  flagged inside `adapters/governor-adapter.ts` (`isDestructive`), so a single
+  policy drives **every** caller — the client hook, the public
+  `fbeast_governor_check` tool, the `governor_log` record, and the central
+  dispatch gate — and they all return the same decision for the same action. An
+  earlier revision overrode the decision only in the gate, which made central
+  dispatch disagree with the governor log / hook / check tool; that override was
+  removed in favour of the shared classification.
 - The central audit records **what was attempted**, not just success/failure:
   `dispatchTool` and the proxy record the `args` and a `decision` classifier for
   every non-success path — governance `denied`/`review_recommended`, a
@@ -88,6 +93,14 @@ tool calls are checked regardless of whether client hooks are installed. We
   are all audited** (with `ok: false`) — the highest-risk events — rather than
   vanishing because the handler never ran. Pre-validation rejections record the
   raw (possibly malformed) payload so the attempt is still reconstructable.
+  - The proxy's `execute_tool`/`search_tools` wrapper is validated by the
+    factory *before* its custom handler runs, so malformed proxy probes (missing
+    or non-object `args`, non-string `tool`, unknown tool) never reach the
+    target-level audit. The proxy therefore wires a **wrapper audit** that
+    forwards *only* those pre-handler rejections (`validation_error`/
+    `unknown_tool`); it deliberately drops the post-handler `execute_tool`
+    record so a successful proxied call is audited once (by its resolved target),
+    not twice, and read-only `search_tools` listings stay unaudited.
 - `createAuditSink` resolves the session id **once per sink/process**: an
   explicit `FBEAST_SESSION_ID`/`CLAUDE_SESSION_ID` is preferred for real
   per-run correlation, but when neither is set (the default `fbeast init`

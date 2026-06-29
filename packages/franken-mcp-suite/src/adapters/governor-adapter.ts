@@ -3,6 +3,18 @@ import type { TriggerResult, TriggerSeverity } from '@franken/governor';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
+/**
+ * fbeast tool/action names that are destructive but whose name the word
+ * patterns below do not catch (e.g. `forget` deletes a memory entry). Treated
+ * as destructive here, in the *shared* governor, so every caller agrees: the
+ * client hook, the public `fbeast_governor_check` tool, the `governor_log`
+ * record, and the central MCP dispatch gate all get the same decision for the
+ * same action.
+ */
+const DESTRUCTIVE_ACTIONS = new Set([
+  'fbeast_memory_forget',
+]);
+
 /** Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover. */
 const DANGEROUS_PATTERNS = [
   /delete/i,
@@ -49,7 +61,7 @@ function matchesDangerousPattern(text: string): boolean {
 
 function assessAction(action: string, context: string): GovernorCheckResult {
   const combined = `${action} ${context}`;
-  const isDestructive = matchesDangerousPattern(combined);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(combined);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({

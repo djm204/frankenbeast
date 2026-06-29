@@ -120,11 +120,23 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
     },
   ];
 
-  // Governance/audit are applied inside the `execute_tool` handler against the
-  // resolved target tool (not the `execute_tool` wrapper), so the wrapper-level
-  // gate is intentionally omitted here. `search_tools` is a read-only listing
-  // and needs no gate.
-  return createMcpServer('fbeast-proxy', '0.1.0', tools);
+  // Governance/audit run inside the `execute_tool` handler against the resolved
+  // target tool, so wrapper-level governance is intentionally omitted. But the
+  // factory rejects malformed `execute_tool`/`search_tools` calls (missing or
+  // non-object `args`, non-string `tool`, unknown tool) *before* the handler
+  // runs, so those probes never reach the target-level audit. Wire a wrapper
+  // audit that forwards ONLY those pre-handler rejections — keyed by their
+  // `decision` (`validation_error`/`unknown_tool`) — so malformed proxy probes
+  // are recorded without double-auditing successful calls (the handler already
+  // audits the resolved target) or auditing read-only `search_tools` listings.
+  const wrapperAudit: AuditSink = {
+    record(event) {
+      if (event.decision === 'validation_error' || event.decision === 'unknown_tool') {
+        return audit.record(event);
+      }
+    },
+  };
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, { audit: wrapperAudit });
 }
 
 // CLI entry point

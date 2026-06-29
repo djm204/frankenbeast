@@ -24,11 +24,13 @@ function stringifyArgs(args: Record<string, unknown>): string {
  * - {@link NON_EXECUTING_TOOLS}: the payload is data to query/analyze/store/log;
  *   the tool performs no destructive operation, so it is exempt from
  *   payload-keyword governance and approved.
- * - {@link DESTRUCTIVE_TOOLS}: the tool performs a destructive/irreversible
- *   operation whose name the word heuristic misses (e.g. `forget`); it is
- *   escalated to at-least-`review_recommended`.
- * - Anything else (an unclassified/unknown tool) falls through to the governor
- *   with its payload — fail-closed by default for tools we have not vetted.
+ * - Everything else falls through to the governor with its payload. Destructive
+ *   tools whose name the word heuristic misses (e.g. `fbeast_memory_forget`) are
+ *   classified in the *shared* governor adapter (`DESTRUCTIVE_ACTIONS`), NOT
+ *   here, so the hook path, the public `fbeast_governor_check` tool,
+ *   `governor_log`, and this gate all return the same decision for the same
+ *   action. Unknown tools are governed by payload — fail-closed by default for
+ *   tools we have not vetted.
  */
 const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   // proxy meta
@@ -61,17 +63,6 @@ const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * fbeast tools that perform a destructive/mutating operation but whose tool
- * name does not literally match the governor's destructive-word heuristic
- * (delete/drop/truncate/…). They are classified by their actual risk rather
- * than payload text, so a benign-looking payload (e.g. `fbeast_memory_forget`
- * with key "note") cannot be auto-approved.
- */
-const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
-  'fbeast_memory_forget',
-]);
-
-/**
  * Builds the default central governance gate used by the MCP server dispatch
  * path. It reuses the same {@link GovernorAdapter} the client hook path uses
  * (`fbeast-hook pre-tool`), so server-side enforcement and hook-based
@@ -99,16 +90,9 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
       if (!governor) {
         governor = createGovernorAdapter(dbPath!);
       }
+      // Destructive-tool classification (e.g. `forget`) lives in the shared
+      // governor adapter, so the decision here matches every other caller.
       const result = await governor.check({ action: tool, context: stringifyArgs(args) });
-      // Escalate known-destructive fbeast tools the word-pattern heuristic
-      // misses (e.g. `forget`) so a benign payload cannot auto-approve a
-      // mutating call. Never downgrade a stricter governor decision.
-      if (DESTRUCTIVE_TOOLS.has(tool) && result.decision === 'approved') {
-        return {
-          decision: 'review_recommended',
-          reason: `Tool "${tool}" performs a destructive operation and requires review.`,
-        };
-      }
       return { decision: result.decision, reason: result.reason };
     },
   };
