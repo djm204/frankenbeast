@@ -73,6 +73,15 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('test_tool');
       expect(result.content[0].text).not.toContain('another_tool');
     });
+
+    it('includes target tool input schemas for client-side proxy validation', async () => {
+      mockSearchTools.mockReturnValue([FAKE_STUBS[0]]);
+      const result = await searchToolsDef.handler({}) as { content: Array<{ type: string; text: string }> };
+
+      expect(result.content[0].text).toContain('inputSchema:');
+      expect(result.content[0].text).toContain('"required":["key"]');
+      expect(result.content[0].text).toContain('"key":{"type":"string"');
+    });
   });
 
   describe('execute_tool', () => {
@@ -109,6 +118,42 @@ describe('proxy server', () => {
       vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
 
       const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 42 } }) as { isError: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('property key must be string');
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('rejects proxied calls with missing target required fields', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: {} }) as { isError: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('missing required property: key');
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('rejects proxied calls with target unknown properties', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'val', extra: true } }) as { isError: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('received unknown property: extra');
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('rejects proxied calls with invalid target primitive types', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 42 } }) as { isError: boolean; content: Array<{ text: string }> };
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');

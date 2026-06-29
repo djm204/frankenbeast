@@ -27,7 +27,11 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
       },
       async handler(args) {
         const results = searchTools(args['query'] ? String(args['query']) : undefined);
-        const lines = results.map((t) => `${t.name.padEnd(32)} ${t.description}`);
+        const lines = results.map((t) => {
+          const schema = TOOL_REGISTRY.get(t.name)?.inputSchema;
+          const schemaText = schema ? `\n  inputSchema: ${JSON.stringify(schema)}` : '';
+          return `${t.name.padEnd(32)} ${t.description}${schemaText}`;
+        });
         return { content: [{ type: 'text', text: lines.join('\n') }] };
       },
     },
