@@ -51,4 +51,20 @@ describe('Critique Server', () => {
     expect(critique.compare).toHaveBeenCalledWith({ original: 'var x = 1', revised: 'const x = 1' });
     expect(compareResult.content[0]!.text).toContain('improved');
   });
+
+  it('serves critique tools when lazy audit DB setup fails', async () => {
+    const critique = {
+      evaluate: vi.fn().mockResolvedValue({ verdict: 'pass', score: 1, findings: [] }),
+      compare: vi.fn(),
+    };
+    const server = createCritiqueServer({
+      critique,
+      getObserver: () => { throw new Error('audit db unavailable'); },
+    });
+
+    const result = await server.callTool('fbeast_critique_evaluate', { content: 'ok' });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]!.text).toContain('pass');
+  });
 });

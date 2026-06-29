@@ -15,6 +15,8 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
     return cachedAdapters;
   }
 
+  const getCachedObserver = () => cachedAdapters?.observer;
+
   const tools: ToolDef[] = [
     {
       name: 'search_tools',
@@ -47,8 +49,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
         const toolArgs = (args['args'] ?? {}) as Record<string, unknown>;
         const entry = TOOL_REGISTRY.get(toolName);
         if (!entry) {
-          const adapters = getAdapters();
-          await auditMcpToolExecution({ observer: adapters.observer, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
+          await auditMcpToolExecution({ getObserver: getCachedObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
             reason: 'unknown_tool',
             message: `Unknown tool: ${toolName}`,
             via: 'proxy.execute_tool',
@@ -60,8 +61,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
         }
         const validated = validateToolArguments(entry, toolArgs);
         if (!validated.ok) {
-          const adapters = getAdapters();
-          await auditMcpToolExecution({ observer: adapters.observer, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
+          await auditMcpToolExecution({ getObserver: getCachedObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
             reason: 'invalid_arguments',
             message: validated.message,
             via: 'proxy.execute_tool',

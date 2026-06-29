@@ -153,8 +153,8 @@ describe('ObserverAdapter', () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
     const sessionId = randomUUID();
-    const firstMetadata = JSON.stringify({ tool: 'memory', step: 1 });
-    const secondMetadata = JSON.stringify({ tool: 'memory', ok: true });
+    const firstMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory', step: 1 });
+    const secondMetadata = JSON.stringify({ sessionId, eventType: 'tool_result', tool: 'memory', ok: true });
     const firstLegacyHash = legacy16AuditHash(firstMetadata);
     const secondLegacyHash = legacy16AuditHash(secondMetadata, firstLegacyHash);
     const db = new Database(dbPath);
@@ -176,6 +176,48 @@ describe('ObserverAdapter', () => {
     expect(trail[0]!.parentHash).toBeNull();
     expect(trail[1]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+  });
+
+  it('migrates legacy 16-character hashes logged with pretty-printed metadata', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const rawMetadata = `{ "sessionId": ${JSON.stringify(sessionId)}, "eventType": "tool_call", "tool": "memory" }`;
+    const storedMetadata = JSON.stringify(JSON.parse(rawMetadata));
+    const legacyHash = legacy16AuditHash(rawMetadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', storedMetadata, legacyHash, null);
+    db.close();
+
+    const verification = await observer.verify(sessionId);
+    const trail = await observer.trail(sessionId);
+
+    expect(verification).toEqual({ ok: true, checked: 1 });
+    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(trail[0]!.payload).toBe(storedMetadata);
+  });
+
+  it('rejects legacy 16-character audit rows without session binding before migrating', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const metadata = JSON.stringify({ tool: 'memory', ok: true });
+    const legacyHash = legacy16AuditHash(metadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('session-b', 'tool_call', metadata, legacyHash, null);
+    db.close();
+
+    const verification = await observer.verify('session-b');
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+    const [row] = await observer.trail('session-b');
+    expect(row!.hash).toBe(legacyHash);
   });
 
   it('preserves JSON string metadata when hashing and storing payloads', async () => {

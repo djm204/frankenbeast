@@ -192,12 +192,28 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         });
         const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
-        const expectedLegacy16Hash = buildLegacy16AuditHash(auditEvent.inputHash, expectedLegacy16ParentHash);
+        const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
         const actualParentHash = row.parentHash ?? undefined;
         const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
-        const matchesLegacy16 = actualParentHash === expectedLegacy16ParentHash && row.hash === expectedLegacy16Hash;
+        const matchesLegacy16 = expectedLegacy16Hash !== undefined
+          && actualParentHash === expectedLegacy16ParentHash
+          && row.hash === expectedLegacy16Hash;
 
         if (!matchesCurrent && !matchesLegacy16) {
+          return {
+            ok: false,
+            checked: index,
+            firstInvalid: {
+              index,
+              expectedHash,
+              actualHash: row.hash,
+              expectedParentHash,
+              actualParentHash,
+            },
+          };
+        }
+
+        if (!matchesCurrent && matchesLegacy16 && !legacy16RowIsBoundToTrail(row, sessionId)) {
           return {
             ok: false,
             checked: index,
@@ -247,6 +263,55 @@ function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string
   }
 
   return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
+}
+
+function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): string | undefined {
+  if (!isLegacy16Hash(row.hash)) return undefined;
+
+  for (const metadata of legacyMetadataCandidates(row.payload)) {
+    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash);
+    if (row.hash === expected) return expected;
+  }
+
+  return undefined;
+}
+
+function isLegacy16Hash(hash: string | undefined): hash is string {
+  return /^sha256:[a-f0-9]{9}$/.test(hash ?? '');
+}
+
+function legacyMetadataCandidates(storedMetadata: string): string[] {
+  const candidates = [storedMetadata];
+  try {
+    const parsed = JSON.parse(storedMetadata) as unknown;
+    candidates.push(JSON.stringify(parsed, null, 2));
+    if (isPlainObject(parsed)) {
+      candidates.push(prettyOneLineJson(parsed));
+    }
+  } catch {
+    // Non-JSON legacy metadata has no alternate insignificant-whitespace form.
+  }
+
+  return [...new Set(candidates)];
+}
+
+function prettyOneLineJson(value: Record<string, unknown>): string {
+  return `{ ${Object.entries(value)
+    .map(([key, nested]) => `${JSON.stringify(key)}: ${JSON.stringify(nested)}`)
+    .join(', ')} }`;
+}
+
+function legacy16RowIsBoundToTrail(row: AuditTrailRow, sessionId: string): boolean {
+  const payload = parseMetadata(row.payload);
+  if (!isPlainObject(payload)) return false;
+
+  const payloadSession = payload['sessionId'] ?? payload['session_id'];
+  const payloadEvent = payload['eventType'] ?? payload['event_type'] ?? payload['event'];
+  return payloadSession === sessionId && (payloadEvent === undefined || payloadEvent === row.eventType);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {

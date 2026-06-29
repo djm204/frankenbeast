@@ -95,6 +95,13 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('search_tools');
     });
 
+    it('does not load adapters just to report unknown tool validation errors', async () => {
+      const result = await executeToolDef.handler({ tool: 'nonexistent_tool', args: {} }) as { isError: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+    });
+
     it('passes args to handler correctly', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
@@ -115,7 +122,8 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
-      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_validation_failure' }));
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+      expect(observerLog).not.toHaveBeenCalled();
     });
 
     it('audits proxied target tool success', async () => {

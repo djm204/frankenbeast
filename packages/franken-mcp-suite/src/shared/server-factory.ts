@@ -179,12 +179,12 @@ export async function auditMcpToolExecution(
   args: unknown,
   extra: Record<string, unknown>,
 ): Promise<void> {
-  const observer = audit?.observer ?? audit?.getObserver?.();
-  const serverName = audit?.serverName;
-  if (!observer || !serverName) return;
-  const auditedArgs = args === undefined ? {} : args;
-
   try {
+    const observer = audit?.observer ?? audit?.getObserver?.();
+    const serverName = audit?.serverName;
+    if (!observer || !serverName) return;
+    const auditedArgs = args === undefined ? {} : args;
+
     await observer.log({
       event,
       sessionId: audit?.sessionId ?? `mcp:${serverName}`,
@@ -197,8 +197,9 @@ export async function auditMcpToolExecution(
       }),
     });
   } catch {
-    // MCP audit logging is best-effort: observer persistence outages must not
-    // block validation responses, tool execution, or already-completed results.
+    // MCP audit logging is best-effort: observer resolution and persistence
+    // outages must not block validation responses, tool execution, or
+    // already-completed results.
   }
 }
 

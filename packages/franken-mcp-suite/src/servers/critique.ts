@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 export interface CritiqueServerDeps {
   critique: CritiqueAdapter;
   observer?: ObserverAdapter;
+  getObserver?: (() => ObserverAdapter | undefined) | undefined;
 }
 
 export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer {
@@ -82,7 +83,7 @@ export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-critique', '0.1.0', tools, { observer: deps.observer });
+  return createMcpServer('fbeast-critique', '0.1.0', tools, { observer: deps.observer, getObserver: deps.getObserver });
 }
 
 if (isMain(import.meta.url)) {
@@ -90,8 +91,14 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const critique = createCritiqueAdapter();
-  const observer = createObserverAdapter(values['db']!);
-  const server = createCritiqueServer({ critique, observer });
+  let observer: ObserverAdapter | undefined;
+  const server = createCritiqueServer({
+    critique,
+    getObserver: () => {
+      observer ??= createObserverAdapter(values['db']!);
+      return observer;
+    },
+  });
   server.start().catch((err) => {
     console.error('fbeast-critique failed to start:', err);
     process.exit(1);

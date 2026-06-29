@@ -115,6 +115,27 @@ describe('createMcpServer', () => {
     expect(observer.log).toHaveBeenCalledTimes(2);
   });
 
+  it('runs valid tools when lazy audit observer resolution fails', async () => {
+    const handler = vi.fn(async (args: Record<string, unknown>) => ({
+      content: [{ type: 'text' as const, text: String(args['msg']) }],
+    }));
+    const tool: ToolDef = {
+      name: 'echo',
+      description: 'echo',
+      inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+      handler,
+    };
+    const srv = createMcpServer('t', '1', [tool], {
+      getObserver: () => { throw new Error('db unavailable'); },
+      sessionId: 's1',
+    });
+
+    const res = await srv.callTool('echo', { msg: 'hi' });
+
+    expect(res).toEqual({ content: [{ type: 'text', text: 'hi' }] });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it('returns successful tool results when result audit logging fails', async () => {
     const observer = {
       log: vi.fn()
