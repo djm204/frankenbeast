@@ -70,6 +70,26 @@ describe('createBeastDeps', () => {
 
     expect(deps.mcp).toBe(liveMcp);
   });
+
+  it('points missing-provider guidance at config instead of a nonexistent provider CLI', () => {
+    const createWithoutProviders = () => createBeastDeps(
+      {
+        providers: [],
+        reflection: false,
+      },
+      {
+        planner: makePlanner(),
+        critique: makeCritique(),
+        governor: makeGovernor(),
+        observer: makeObserver(),
+        logger: makeLogger(),
+        clock: vi.fn(() => new Date('2026-01-01T00:00:00Z')),
+      },
+    );
+
+    expect(createWithoutProviders).toThrow(/consolidatedProviders/);
+    expect(createWithoutProviders).not.toThrow(/frankenbeast provider add/);
+  });
 });
 
 function createDeps(

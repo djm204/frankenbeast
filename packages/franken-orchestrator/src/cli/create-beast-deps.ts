@@ -247,7 +247,8 @@ function buildProviderList(
 ): ILlmProvider[] {
   if (!configs || configs.length === 0) {
     throw new Error(
-      "No providers configured. Run 'frankenbeast provider add claude' to get started.",
+      'No providers configured. Add a consolidatedProviders entry to your frankenbeast config, for example: '
+        + '{"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}',
     );
   }
   return configs.map((pc) => {
