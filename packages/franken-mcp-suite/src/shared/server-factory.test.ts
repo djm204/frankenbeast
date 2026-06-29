@@ -91,6 +91,30 @@ describe('createMcpServer', () => {
     expect(observer.log).toHaveBeenNthCalledWith(2, expect.objectContaining({ event: 'mcp_tool_result', sessionId: 's1' }));
   });
 
+  it('runs valid tools when pre-call audit logging fails', async () => {
+    const observer = {
+      log: vi.fn()
+        .mockRejectedValueOnce(new Error('audit write failed'))
+        .mockResolvedValueOnce({ id: 2, hash: 'h2' }),
+    } as unknown as ObserverAdapter;
+    const handler = vi.fn(async (args: Record<string, unknown>) => ({
+      content: [{ type: 'text' as const, text: String(args['msg']) }],
+    }));
+    const tool: ToolDef = {
+      name: 'echo',
+      description: 'echo',
+      inputSchema: { type: 'object', properties: { msg: { type: 'string', description: 'm' } }, required: ['msg'] },
+      handler,
+    };
+    const srv = createMcpServer('t', '1', [tool], { observer, sessionId: 's1' });
+
+    const res = await srv.callTool('echo', { msg: 'hi' });
+
+    expect(res).toEqual({ content: [{ type: 'text', text: 'hi' }] });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(observer.log).toHaveBeenCalledTimes(2);
+  });
+
   it('returns successful tool results when result audit logging fails', async () => {
     const observer = {
       log: vi.fn()

@@ -184,8 +184,8 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       let expectedLegacy16ParentHash: string | undefined;
 
       for (const [index, row] of rows.entries()) {
-        const payload = parseMetadata(row.payload);
-        const metadata = canonicalMetadata(row.payload);
+        const metadata = row.payload;
+        const payload = parseMetadata(metadata);
         const auditEvent = createAuditEvent(row.eventType, payload, {
           phase: 'mcp',
           provider: 'fbeast-mcp',
@@ -195,8 +195,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
         const unboundBaseHash = buildLegacyEventBaseHash(row.eventType, metadata, auditEvent.inputHash);
         const expectedUnboundHash = buildAuditHash(unboundBaseHash, expectedUnboundParentHash);
-        const legacy16BaseHash = buildLegacy16EventBaseHash(row.eventType, metadata, auditEvent.inputHash);
-        const expectedLegacy16Hash = buildLegacy16AuditHash(legacy16BaseHash, expectedLegacy16ParentHash);
+        const expectedLegacy16Hash = buildLegacy16AuditHash(auditEvent.inputHash, expectedLegacy16ParentHash);
         const actualParentHash = row.parentHash ?? undefined;
         const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
         const matchesUnboundLegacy = actualParentHash === expectedUnboundParentHash && row.hash === expectedUnboundHash;
@@ -250,20 +249,13 @@ function buildLegacyEventBaseHash(eventType: string, metadata: string, inputHash
   return hashContent(`${eventType}:${inputHash ?? ''}:${metadata}`);
 }
 
-function buildLegacy16AuditHash(baseHash: string, parentHash?: string): string {
+function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {
+  const baseHash = (inputHash ?? hashContent('')).slice(0, 16);
   if (!parentHash) {
     return baseHash;
   }
 
-  return toLegacy16Hash(`${parentHash}:${baseHash}`);
-}
-
-function buildLegacy16EventBaseHash(eventType: string, metadata: string, inputHash?: string): string {
-  return toLegacy16Hash(`${eventType}:${inputHash ?? ''}:${metadata}`);
-}
-
-function toLegacy16Hash(content: string): string {
-  return hashContent(content).replace(/^sha256:/, '').slice(0, 16);
+  return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
 }
 
 function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {

@@ -13,12 +13,12 @@ function tmpDbPath(): string {
 }
 
 function legacy16(content: string): string {
-  return createHash('sha256').update(content).digest('hex').slice(0, 16);
+  return `sha256:${createHash('sha256').update(content).digest('hex')}`.slice(0, 16);
 }
 
-function legacy16AuditHash(eventType: string, metadata: string, parentHash?: string): string {
+function legacy16AuditHash(metadata: string, parentHash?: string): string {
   const inputHash = `sha256:${createHash('sha256').update(metadata).digest('hex')}`;
-  const baseHash = legacy16(`${eventType}:${inputHash}:${metadata}`);
+  const baseHash = inputHash.slice(0, 16);
   return parentHash ? legacy16(`${parentHash}:${baseHash}`) : baseHash;
 }
 
@@ -110,14 +110,29 @@ describe('ObserverAdapter', () => {
     expect(secondSessionHash).not.toBe(firstSessionHash);
   });
 
+  it('rejects audit rows moved to a different session', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+
+    await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId: 'session-a' });
+    const db = new Database(dbPath);
+    db.prepare('UPDATE audit_trail SET session_id = ? WHERE session_id = ?').run('session-b', 'session-a');
+    db.close();
+
+    const verification = await observer.verify('session-b');
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+  });
+
   it('verifies and migrates legacy 16-character audit hashes', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
     const sessionId = randomUUID();
     const firstMetadata = JSON.stringify({ tool: 'memory', step: 1 });
     const secondMetadata = JSON.stringify({ tool: 'memory', ok: true });
-    const firstLegacyHash = legacy16AuditHash('tool_call', firstMetadata);
-    const secondLegacyHash = legacy16AuditHash('tool_result', secondMetadata, firstLegacyHash);
+    const firstLegacyHash = legacy16AuditHash(firstMetadata);
+    const secondLegacyHash = legacy16AuditHash(secondMetadata, firstLegacyHash);
     const db = new Database(dbPath);
     db.prepare(`
       INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
@@ -160,6 +175,22 @@ describe('ObserverAdapter', () => {
     await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
     const db = new Database(dbPath);
     db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId);
+    db.close();
+
+    const verification = await observer.verify(sessionId);
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+  });
+
+  it('hashes the exact stored payload bytes during verification', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+
+    await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
+    const db = new Database(dbPath);
+    db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('{ "tool": "memory" }', sessionId);
     db.close();
 
     const verification = await observer.verify(sessionId);

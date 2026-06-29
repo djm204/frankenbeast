@@ -128,5 +128,21 @@ describe('proxy server', () => {
       expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_call' }));
       expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_result' }));
     });
+
+    it('preserves proxied results when result audit logging fails', async () => {
+      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
+      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      observerLog
+        .mockResolvedValueOnce({ id: 1, hash: 'h1' })
+        .mockRejectedValueOnce(new Error('audit write failed'));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(result).toEqual(fakeResult);
+      expect(fakeHandler).toHaveBeenCalledOnce();
+      expect(observerLog).toHaveBeenCalledTimes(2);
+    });
   });
 });
