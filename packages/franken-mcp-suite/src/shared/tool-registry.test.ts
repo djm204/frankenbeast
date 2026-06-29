@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools } from './tool-registry.js';
@@ -97,6 +97,8 @@ describe('proxy adapter containment', () => {
       } else {
         process.env['FBEAST_ROOT'] = originalEnvRoot;
       }
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(wrongRoot, { recursive: true, force: true });
     }
   });
 });

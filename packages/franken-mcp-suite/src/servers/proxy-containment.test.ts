@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProxyServer } from './proxy.js';
@@ -40,6 +40,8 @@ describe('proxy firewall file containment', () => {
       } else {
         process.env['FBEAST_ROOT'] = originalEnvRoot;
       }
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(wrongRoot, { recursive: true, force: true });
     }
   });
 });
