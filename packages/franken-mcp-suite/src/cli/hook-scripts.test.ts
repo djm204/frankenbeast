@@ -198,6 +198,38 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('destructive payload blocked');
   });
 
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('fails closed (denies) when the pre-tool tool name is empty', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -501,6 +533,38 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toContain('destructive payload blocked');
   });
 
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('fails closed (denies) when the pre-tool tool name is empty', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -743,6 +807,36 @@ describe('Gemini hook scripts', () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toContain('"decision":"deny"');
     expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'write_file',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'write_file',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
   });
 
   it('fails closed (denies) when the before-tool tool name is empty', () => {

@@ -55,7 +55,11 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
+# Forward only policy-relevant, length-bounded fields (command/path) as governor
+# context. File-content fields are deliberately excluded so a large or benign
+# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
+# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -137,7 +141,11 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
+# Forward only policy-relevant, length-bounded fields (command/path) as governor
+# context. File-content fields are deliberately excluded so a large or benign
+# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
+# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -218,7 +226,11 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
-TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('tool_input',{})))" 2>/dev/null || echo "{}")
+# Forward only policy-relevant, length-bounded fields (command/path) as governor
+# context. File-content fields are deliberately excluded so a large or benign
+# payload cannot (a) overflow argv (ARG_MAX), (b) persist raw secrets/PII into
+# governor_log, or (c) false-positive the broad DANGEROUS_PATTERNS matcher.
+TOOL_INPUT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','file_path','filePath','path','paths','target','targets','destination','filename','files'); out=(ti if isinstance(ti,str) else (' '.join((ti[k] if isinstance(ti[k],str) else json.dumps(ti[k])) for k in ks if k in ti) if isinstance(ti,dict) else '')); print(out[:4096])" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then

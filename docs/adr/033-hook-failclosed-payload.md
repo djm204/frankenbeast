@@ -28,10 +28,20 @@ architectural defects made that path unsafe:
 
 For the security-critical pre-tool enforcement path:
 
-1. **Forward the tool payload.** Each pre-tool script now also extracts
-   `tool_input` (JSON-serialized, all three clients use this field) and passes it
-   as the third positional argument to `fbeast-hook pre-tool`, where it becomes
-   the governor's `context`. The destructive command text is now evaluated.
+1. **Forward a filtered, bounded slice of the tool payload.** Each pre-tool
+   script extracts only the policy-relevant fields from `tool_input` — command
+   and path/scope keys (`command`, `cmd`, `args`, `file_path`, `path`, `target`,
+   ...) — joins them, and truncates to 4096 chars before passing them as the
+   third positional argument to `fbeast-hook pre-tool` (the governor's
+   `context`). The destructive command text is now evaluated. File-content fields
+   (`content`, `old_string`, `new_string`, patch bodies, ...) are deliberately
+   **excluded**, which:
+   - keeps the argv small so a large Write/Edit payload cannot exceed `ARG_MAX`
+     (`MAX_ARG_STRLEN` ≈ 128 KiB) and be turned into a spurious fail-closed deny;
+   - prevents raw file contents (secrets/PII) from being persisted verbatim into
+     `governor_log`;
+   - avoids false positives where benign file data mentions `delete`/`format`/
+     `drop` and trips the broad `DANGEROUS_PATTERNS` matcher.
 
 2. **Fail closed by default.** A missing/unparseable tool name now DENIES instead
    of allowing. Timeout status `124` is no longer special-cased to exit `0`; it
