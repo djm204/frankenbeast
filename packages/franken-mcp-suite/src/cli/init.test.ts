@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { runInit } from './init.js';
 import { resolveClientConfigDir } from './mcp-client-paths.js';
+import { codexServerName } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -252,37 +253,102 @@ describe('fbeast init', () => {
     expect(content.split('<!-- fbeast-start -->').length).toBe(2); // exactly one
   });
 
-  it('registers Codex MCP servers via spawn when --client=codex', () => {
+  it('writes Codex MCP servers to project-scoped config when --client=codex', () => {
     const root = tmpDir();
     dirs.push(root);
     const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
     const mockSpawn = (cmd: string, args: string[]) => {
       spawnCalls.push({ cmd, args });
-      return { status: 0 };
+      return { status: 1, stderr: Buffer.from('not found') };
     };
 
     runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
 
-    // One spawn call per server
-    expect(spawnCalls.length).toBe(7);
+    expect(spawnCalls.length).toBe(8);
     expect(spawnCalls.every((c) => c.cmd === 'codex')).toBe(true);
-    expect(spawnCalls.every((c) => c.args[0] === 'mcp' && c.args[1] === 'add')).toBe(true);
-    const names = spawnCalls.map((c) => c.args[2]);
-    expect(names).toContain('fbeast-memory');
-    expect(names).toContain('fbeast-governor');
+    expect(spawnCalls.every((c) => c.args[0] === 'mcp' && c.args[1] === 'get')).toBe(true);
+    expect(spawnCalls.map((c) => c.args[2])).toContain('fbeast-memory');
+    expect(spawnCalls.map((c) => c.args[2])).toContain('fbeast-proxy');
+
+    const config = readFileSync(join(root, '.codex', 'config.toml'), 'utf-8');
+    const names = config.match(/^\[mcp_servers\.[^\]]+]/gm) ?? [];
+    expect(names.length).toBe(7);
+    expect(config).toContain(`[mcp_servers.${codexServerName(root, 'memory')}]`);
+    expect(config).toContain(`[mcp_servers.${codexServerName(root, 'governor')}]`);
+    expect(config).not.toContain('[mcp_servers.fbeast-memory]');
+    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}"]`);
   });
 
-  it('throws when codex mcp add fails for any server', () => {
+  it('uses distinct Codex MCP server names for distinct project roots', () => {
+    const rootA = tmpDir();
+    const rootB = tmpDir();
+    dirs.push(rootA, rootB);
+
+    runInit({
+      root: rootA,
+      claudeDir: join(rootA, '.codex'),
+      hooks: false,
+      client: 'codex',
+      spawn: () => ({ status: 1 }),
+    });
+    runInit({
+      root: rootB,
+      claudeDir: join(rootB, '.codex'),
+      hooks: false,
+      client: 'codex',
+      spawn: () => ({ status: 1 }),
+    });
+
+    const configA = readFileSync(join(rootA, '.codex', 'config.toml'), 'utf-8');
+    const configB = readFileSync(join(rootB, '.codex', 'config.toml'), 'utf-8');
+    expect(configA).toContain(`[mcp_servers.${codexServerName(rootA, 'memory')}]`);
+    expect(configB).toContain(`[mcp_servers.${codexServerName(rootB, 'memory')}]`);
+    expect(codexServerName(rootA, 'memory')).not.toBe(codexServerName(rootB, 'memory'));
+    expect(configA).not.toContain(codexServerName(rootB, 'memory'));
+    expect(configB).not.toContain(codexServerName(rootA, 'memory'));
+  });
+
+  it('removes legacy global Codex entries only when they target the current root', () => {
     const root = tmpDir();
     dirs.push(root);
-    const mockSpawn = (_cmd: string, args: string[]) => ({
-      status: args[2] === 'fbeast-memory' ? 1 : 0,
-      stderr: Buffer.from('command not found'),
-    });
+    const dbPath = join(root, '.fbeast', 'beast.db');
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const mockSpawn = (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      if (args[1] === 'get' && args[2] === 'fbeast-memory') return { status: 0, stdout: Buffer.from(`command = "fbeast-memory"\nargs = ["--db", "${dbPath}"]`) };
+      if (args[1] === 'get' && args[2] === 'fbeast-planner') return { status: 0, stdout: Buffer.from('args = ["--db", "/other/project/.fbeast/beast.db"]') };
+      if (args[1] === 'remove' && args[2] === 'fbeast-memory') return { status: 0 };
+      return { status: 1 };
+    };
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+
+    expect(calls.filter((c) => c.args[1] === 'get').map((c) => c.args[2])).toEqual([
+      'fbeast-memory',
+      'fbeast-planner',
+      'fbeast-critique',
+      'fbeast-firewall',
+      'fbeast-observer',
+      'fbeast-governor',
+      'fbeast-skills',
+      'fbeast-proxy',
+    ]);
+    expect(calls.filter((c) => c.args[1] === 'remove').map((c) => c.args[2])).toEqual(['fbeast-memory']);
+  });
+
+  it('throws when legacy Codex removal fails', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const dbPath = join(root, '.fbeast', 'beast.db');
+    const mockSpawn = (_cmd: string, args: string[]) => {
+      if (args[1] === 'get' && args[2] === 'fbeast-memory') return { status: 0, stdout: Buffer.from(dbPath) };
+      if (args[1] === 'remove' && args[2] === 'fbeast-memory') return { status: 1, stderr: Buffer.from('permission denied') };
+      return { status: 1 };
+    };
 
     expect(() =>
       runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn }),
-    ).toThrow('failed to register 1 server');
+    ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
   });
 
   it('proxy mode writes single fbeast-proxy entry (not 7) for claude client', () => {
@@ -324,32 +390,50 @@ describe('fbeast init', () => {
     expect(settings.mcpServers['fbeast-proxy']).toBeUndefined();
   });
 
-  it('proxy mode for codex calls spawnFn once with fbeast-proxy (not 7 times)', () => {
+  it('proxy mode for codex writes only the project-scoped fbeast-proxy entry', () => {
     const root = tmpDir();
     dirs.push(root);
     const spawnCalls: Array<{ cmd: string; args: string[] }> = [];
     const mockSpawn = (cmd: string, args: string[]) => {
       spawnCalls.push({ cmd, args });
-      return { status: 0 };
+      return { status: 1 };
     };
 
     runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' });
 
-    expect(spawnCalls.length).toBe(1);
-    expect(spawnCalls[0].cmd).toBe('codex');
-    expect(spawnCalls[0].args[0]).toBe('mcp');
-    expect(spawnCalls[0].args[1]).toBe('add');
-    expect(spawnCalls[0].args[2]).toBe('fbeast-proxy');
+    expect(spawnCalls.length).toBe(8);
+    expect(spawnCalls.every((c) => c.args[0] === 'mcp' && c.args[1] === 'get')).toBe(true);
+    const config = readFileSync(join(root, '.codex', 'config.toml'), 'utf-8');
+    expect(config.match(/^\[mcp_servers\.[^\]]+]/gm)).toEqual([`[mcp_servers.${codexServerName(root, 'proxy')}]`]);
+    expect(config).toContain('command = "fbeast-proxy"');
+    expect(config).not.toContain('fbeast-memory');
   });
 
-  it('proxy mode for codex throws when fbeast-proxy registration fails', () => {
+  it('codex re-init removes fbeast MCP subtables without deleting TOML array sections', () => {
     const root = tmpDir();
     dirs.push(root);
-    const mockSpawn = () => ({ status: 1, stderr: Buffer.from('command not found') });
+    const mockSpawn = () => ({ status: 1 });
 
-    expect(() =>
-      runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' }),
-    ).toThrow('failed to register fbeast-proxy with codex');
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn });
+    const oldMemoryName = codexServerName(root, 'memory');
+    const configPath = join(root, '.codex', 'config.toml');
+    writeFileSync(configPath, `${readFileSync(configPath, 'utf-8')}\n` + [
+      `[mcp_servers.${oldMemoryName}.tools.fbeast_memory_store]`,
+      'enabled = true',
+      '',
+      '[[hooks.PreToolUse]]',
+      'command = "keep-me"',
+      '',
+    ].join('\n'));
+
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn, mode: 'proxy' });
+
+    const config = readFileSync(configPath, 'utf-8');
+    expect(config).toContain(`[mcp_servers.${codexServerName(root, 'proxy')}]`);
+    expect(config).toContain('[[hooks.PreToolUse]]');
+    expect(config).toContain('command = "keep-me"');
+    expect(config).not.toContain(oldMemoryName);
+    expect(config).not.toContain('fbeast_memory_store');
   });
 
   it('writes Codex hooks.json when --client=codex --hooks', () => {
