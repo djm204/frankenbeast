@@ -13,6 +13,7 @@ import type {
   ProviderConfig,
 } from './create-beast-deps.js';
 import { buildProviderConfig } from '../providers/provider-config.js';
+import type { ProviderOverrideConfig } from '../providers/provider-config.js';
 import type { SecurityProfile } from '../middleware/security-profiles.js';
 import type { BeastLoopDeps, IObserverModule } from '../deps.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -41,6 +42,19 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
       options.runConfig?.llmConfig?.default?.provider
       ?? options.runConfig?.provider
       ?? options.provider;
+    const effectiveModel =
+      options.runConfig?.llmConfig?.default?.model
+      ?? options.runConfig?.model;
+
+    const providerOverride = (name: string): ProviderOverrideConfig | undefined => {
+      const override = options.providersConfig?.[name];
+      if (name !== effectiveProvider || !effectiveModel) return override;
+
+      return {
+        ...override,
+        model: effectiveModel,
+      };
+    };
 
     // Build provider list: primary first, then additional (deduplicated)
     const providerNames: string[] = [];
@@ -56,7 +70,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
 
     return providerNames.map((name) => {
       if (name === 'aider') {
-        const override = options.providersConfig?.[name];
+        const override = providerOverride(name);
         return {
           name,
           type: 'claude-cli',
@@ -66,7 +80,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
         };
       }
 
-      return buildProviderConfig(name, options.providersConfig?.[name]);
+      return buildProviderConfig(name, providerOverride(name));
     });
   })();
 

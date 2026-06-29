@@ -187,6 +187,57 @@ describe('bridgeToBeastConfig()', () => {
         expect.objectContaining({ name: 'anthropic', type: 'anthropic-api' }),
       );
     });
+
+    it('forwards runConfig.model into the effective bridged provider', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'codex',
+        runConfig: { provider: 'gemini', model: 'gemini-2.5-pro' },
+        providers: ['codex', 'gemini'],
+      }));
+
+      expect(config.providers).toEqual([
+        { name: 'gemini', type: 'gemini-cli', model: 'gemini-2.5-pro' },
+        { name: 'codex', type: 'codex-cli' },
+      ]);
+    });
+
+    it('forwards runConfig.llmConfig.default.model into the effective bridged provider', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'codex',
+        providersConfig: {
+          claude: { command: '/opt/bin/claude', extraArgs: ['--print'] },
+        },
+        runConfig: {
+          provider: 'gemini',
+          model: 'gemini-1.5-pro',
+          llmConfig: { default: { provider: 'claude', model: 'claude-sonnet-4-20250514' } },
+        },
+      }));
+
+      expect(config.providers).toEqual([
+        {
+          name: 'claude',
+          type: 'claude-cli',
+          cliPath: '/opt/bin/claude',
+          model: 'claude-sonnet-4-20250514',
+          extraArgs: ['--print'],
+        },
+      ]);
+    });
+
+    it('forwards runConfig.model through the legacy aider provider path', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        provider: 'aider',
+        providersConfig: {
+          aider: { command: '/opt/bin/aider' },
+        },
+        runConfig: { model: 'gpt-4o' },
+      }));
+
+      expect(config.providers).toEqual([
+        { name: 'aider', type: 'claude-cli', cliPath: '/opt/bin/aider', model: 'gpt-4o' },
+      ]);
+    });
   });
 
   describe('security tier mapping', () => {
