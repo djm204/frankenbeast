@@ -270,6 +270,23 @@ describe('bridgeToBeastConfig()', () => {
       ]);
     });
 
+    it('uses config.consolidatedProviders before validating CLI-derived providers', () => {
+      const orchestratorConfig = {
+        consolidatedProviders: [
+          { name: 'custom-codex', type: 'codex-cli', model: 'o4-mini' },
+        ],
+      } as any;
+
+      const config = bridgeToBeastConfig(
+        makeOptions({ provider: 'unknown-legacy-provider' }),
+        orchestratorConfig,
+      );
+
+      expect(config.providers).toEqual([
+        { name: 'custom-codex', type: 'codex-cli', model: 'o4-mini' },
+      ]);
+    });
+
     it('falls back to CLI-derived values when config fields are absent', () => {
       const orchestratorConfig = {} as any;
       const config = bridgeToBeastConfig(makeOptions({ provider: 'codex' }), orchestratorConfig);

@@ -33,6 +33,8 @@ const SECURITY_TIER_MAP: Record<string, SecurityProfile> = {
  * consolidatedProviders) take precedence over CLI-derived defaults.
  */
 export function bridgeToBeastConfig(options: CliDepOptions, config?: OrchestratorConfig): BeastDepsConfig {
+  const consolidatedProviders = config?.consolidatedProviders as ProviderConfig[] | undefined;
+
   // Resolve effective primary provider (runConfig overrides take precedence)
   const effectiveProvider =
     options.runConfig?.llmConfig?.default?.provider
@@ -51,7 +53,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
     }
   }
 
-  const providers: ProviderConfig[] = providerNames.map((name) => {
+  const providers: ProviderConfig[] = consolidatedProviders ?? providerNames.map((name) => {
     if (name === 'aider') {
       const override = options.providersConfig?.[name];
       return {
@@ -74,7 +76,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
   const dbPath = resolve(options.paths.frankenbeastDir, 'beast.db');
 
   return {
-    providers: (config?.consolidatedProviders as ProviderConfig[] | undefined) ?? providers,
+    providers,
     security: config?.security
       ? {
           profile: (config.security.profile as SecurityProfile) ?? securityProfile,

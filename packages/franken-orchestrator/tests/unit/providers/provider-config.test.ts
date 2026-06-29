@@ -61,6 +61,25 @@ describe('createLlmProvider', () => {
     ]);
   });
 
+  it('passes configured models into the Codex CLI adapter', () => {
+    const codex = createLlmProvider({
+      name: 'codex',
+      type: 'codex-cli',
+      model: 'o4-mini',
+    });
+
+    expect(codex).toBeInstanceOf(CodexCliAdapter);
+    expect((codex as CodexCliAdapter).buildArgs(request)).toEqual([
+      'exec',
+      '--json',
+      '--ephemeral',
+      '-c',
+      'instructions=test',
+      '-c',
+      'model=o4-mini',
+    ]);
+  });
+
   it('passes configured models into API adapters', () => {
     const configs: ProviderConfig[] = [
       { name: 'anthropic', type: 'anthropic-api', model: 'claude-opus-4' },

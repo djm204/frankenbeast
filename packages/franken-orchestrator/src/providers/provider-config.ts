@@ -142,6 +142,7 @@ export function createLlmProvider(config: ProviderConfig): ILlmProvider {
     case 'codex-cli':
       return new CodexCliAdapter({
         ...(config.cliPath ? { binaryPath: config.cliPath } : {}),
+        ...(config.model ? { model: config.model } : {}),
         ...(config.extraArgs ? { extraArgs: config.extraArgs } : {}),
       });
     case 'gemini-cli':
