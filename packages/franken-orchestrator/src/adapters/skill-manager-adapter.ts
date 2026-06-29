@@ -26,12 +26,11 @@ export class SkillManagerAdapter implements ISkillsModule {
   }
 
   async execute(skillId: string, input: SkillInput): Promise<SkillResult> {
-    // SkillManager manages directory config, not direct execution.
-    // Skill execution happens through CliSkillExecutor or MCP SDK.
-    // This adapter provides the metadata layer; execution is delegated.
-    return {
-      output: `Skill ${skillId} executed for: ${input.objective}`,
-      tokensUsed: 0,
-    };
+    void input;
+    throw new Error(
+      `MCP skill '${skillId}' cannot be executed by SkillManagerAdapter directly. ` +
+        'Provide an IMcpModule to runExecution so executionType=mcp skills can be dispatched to a real MCP tool/server, ' +
+        'or configure the skill as executionType=cli/function/llm with an executor that implements that path.',
+    );
   }
 }

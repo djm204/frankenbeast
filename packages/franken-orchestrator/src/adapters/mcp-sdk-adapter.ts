@@ -2,9 +2,8 @@ import type { IMcpModule, McpToolCallResult, McpToolInfo } from '../deps.js';
 
 /**
  * Adapts MCP SDK clients to the IMcpModule port.
- * v1: placeholder that delegates to provider-native MCP support.
- * Real MCP SDK integration deferred until @modelcontextprotocol/sdk
- * is used directly.
+ * Direct SDK-based MCP calls are not wired here yet; this adapter intentionally
+ * fails closed instead of reporting synthetic success.
  */
 export class McpSdkAdapter implements IMcpModule {
   private readonly tools: McpToolInfo[];
@@ -14,13 +13,11 @@ export class McpSdkAdapter implements IMcpModule {
   }
 
   async callTool(name: string, args: unknown): Promise<McpToolCallResult> {
-    // In v1, MCP tool calls go through the CLI provider's native MCP support
-    // (--mcp-config for Claude, codex mcp add for Codex, settings.json for Gemini).
-    // Direct SDK-based MCP calls are a future enhancement.
-    return {
-      content: `MCP tool ${name} called with args: ${JSON.stringify(args)}`,
-      isError: false,
-    };
+    void args;
+    throw new Error(
+      `MCP tool '${name}' is not reachable through McpSdkAdapter: no MCP SDK client/server transport is configured. ` +
+        'Configure an IMcpModule implementation with a live MCP client, or route this skill through a CLI/provider path that supports MCP.',
+    );
   }
 
   getAvailableTools(): readonly McpToolInfo[] {

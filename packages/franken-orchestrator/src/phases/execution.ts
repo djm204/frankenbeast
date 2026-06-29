@@ -158,7 +158,7 @@ async function executeTask(
   observer: IObserverModule,
   ctx: BeastContext,
   completedOutputs: ReadonlyMap<string, unknown>,
-  _mcp?: IMcpModule,
+  mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
@@ -211,7 +211,7 @@ async function executeTask(
       }
     }
 
-    // Execute (placeholder — real execution calls skill registry)
+    // Execute through the concrete path declared by each skill descriptor.
     ctx.addAudit('executor', 'task:start', { taskId: task.id, objective: task.objective });
 
     const dependencyOutputs = new Map<string, unknown>();
@@ -278,6 +278,7 @@ async function executeTask(
     for (const skillId of task.requiredSkills) {
       const descriptor = availableSkills.find(sk => sk.id === skillId);
       const isCli = descriptor?.executionType === 'cli';
+      const isMcp = descriptor?.executionType === 'mcp';
 
       let result;
       if (isCli) {
@@ -285,6 +286,8 @@ async function executeTask(
           throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
         }
         result = await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
+      } else if (isMcp) {
+        result = await executeMcpSkill(skillId, baseInput, mcp);
       } else {
         result = await skills.execute(skillId, baseInput);
       }
@@ -336,6 +339,63 @@ async function executeTask(
   } finally {
     span.end({ taskId: task.id });
   }
+}
+
+async function executeMcpSkill(
+  skillId: string,
+  input: SkillInput,
+  mcp?: IMcpModule,
+): Promise<{ output: unknown; tokensUsed: number }> {
+  if (!mcp) {
+    throw new Error(
+      `MCP skill '${skillId}' requires an IMcpModule but none was provided. ` +
+        'Wire a live MCP module into runExecution/createBeastDeps or disable the MCP skill.',
+    );
+  }
+
+  const tool = resolveMcpTool(skillId, mcp.getAvailableTools());
+  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input));
+
+  if (result.isError) {
+    throw new Error(`MCP skill '${skillId}' failed via tool '${tool.name}': ${String(result.content)}`);
+  }
+
+  return { output: result.content, tokensUsed: 0 };
+}
+
+function resolveMcpTool(
+  skillId: string,
+  tools: ReturnType<IMcpModule['getAvailableTools']>,
+): { name: string; serverId: string } {
+  const byName = tools.find(tool => tool.name === skillId);
+  if (byName) return byName;
+
+  const byServer = tools.filter(tool => tool.serverId === skillId);
+  if (byServer.length === 1) return byServer[0]!;
+
+  if (byServer.length > 1) {
+    throw new Error(
+      `MCP skill '${skillId}' maps to multiple MCP tools (${byServer.map(tool => tool.name).join(', ')}). ` +
+        'Use a required skill id that matches the intended MCP tool name, or expose exactly one tool for this skill server.',
+    );
+  }
+
+  const available = tools.map(tool => `${tool.serverId}/${tool.name}`).join(', ') || 'none';
+  throw new Error(
+    `MCP skill '${skillId}' is enabled but no matching MCP tool/server is available. ` +
+      `Expected a tool named '${skillId}' or exactly one tool from server '${skillId}'. Available MCP tools: ${available}. ` +
+      'Start/configure the MCP server or disable the skill.',
+  );
+}
+
+function serializeMcpSkillInput(input: SkillInput): Record<string, unknown> {
+  return {
+    objective: input.objective,
+    context: input.context,
+    dependencyOutputs: Object.fromEntries(input.dependencyOutputs),
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+  };
 }
 
 function resolveMemoryContext(
