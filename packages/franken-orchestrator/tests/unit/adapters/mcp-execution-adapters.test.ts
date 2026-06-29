@@ -36,7 +36,7 @@ describe('MCP execution adapters', () => {
 
     expect(adapter.hasSkill('query')).toBe(true);
     expect(adapter.hasSkill('summarize')).toBe(true);
-    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['query', 'summarize']);
+    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['search', 'query', 'summarize']);
   });
 
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {

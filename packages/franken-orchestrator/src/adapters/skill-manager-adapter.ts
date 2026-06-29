@@ -21,22 +21,25 @@ export class SkillManagerAdapter implements ISkillsModule {
   getAvailableSkills(): readonly SkillDescriptor[] {
     return this.manager.getEnabledSkills().flatMap((name) => {
       const tools = this.manager.readTools(name);
-
-      if (tools.length > 1) {
-        return tools.map((tool) => ({
-          id: tool.name,
-          name: tool.name,
-          requiresHitl: false,
-          executionType: 'mcp' as const,
-        }));
-      }
-
-      return [{
+      const descriptors: SkillDescriptor[] = [{
         id: name,
         name,
         requiresHitl: false,
         executionType: 'mcp' as const,
       }];
+
+      for (const tool of tools) {
+        if (tool.name !== name) {
+          descriptors.push({
+            id: tool.name,
+            name: tool.name,
+            requiresHitl: false,
+            executionType: 'mcp' as const,
+          });
+        }
+      }
+
+      return descriptors;
     });
   }
 

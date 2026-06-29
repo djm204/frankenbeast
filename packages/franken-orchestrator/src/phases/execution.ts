@@ -354,7 +354,7 @@ async function executeMcpSkill(
   }
 
   const tool = resolveMcpTool(skillId, mcp.getAvailableTools());
-  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input));
+  const result = await mcp.callTool(tool.name, serializeMcpSkillInput(input, tool.inputSchema));
 
   if (result.isError) {
     throw new Error(`MCP skill '${skillId}' failed via tool '${tool.name}': ${String(result.content)}`);
@@ -367,18 +367,28 @@ function resolveMcpTool(
   skillId: string,
   tools: ReturnType<IMcpModule['getAvailableTools']>,
 ): { name: string; serverId: string } {
-  const byName = tools.find(tool => tool.name === skillId);
+  const byName = tools.filter(tool => tool.name === skillId);
   const byServer = tools.filter(tool => tool.serverId === skillId);
 
-  if (byName && byServer.some(tool => tool !== byName)) {
+  if (byName.length > 1) {
     throw new Error(
-      `MCP skill '${skillId}' is ambiguous: it matches tool '${byName.name}' from server '${byName.serverId}' ` +
+      `MCP skill '${skillId}' is ambiguous: multiple MCP servers expose a tool named '${skillId}' ` +
+        `(${byName.map(tool => tool.serverId).join(', ')}). Use an unambiguous server/tool id.`,
+    );
+  }
+
+  const exactTool = byName[0];
+  if (exactTool && exactTool.serverId === skillId) return exactTool;
+
+  if (exactTool && byServer.length > 0) {
+    throw new Error(
+      `MCP skill '${skillId}' is ambiguous: it matches tool '${exactTool.name}' from server '${exactTool.serverId}' ` +
         `and server '${skillId}' tools (${byServer.map(tool => tool.name).join(', ')}). ` +
         'Use an unambiguous tool id or server id.',
     );
   }
 
-  if (byName) return byName;
+  if (exactTool) return exactTool;
   if (byServer.length === 1) return byServer[0]!;
 
   if (byServer.length > 1) {
@@ -396,14 +406,44 @@ function resolveMcpTool(
   );
 }
 
-function serializeMcpSkillInput(input: SkillInput): Record<string, unknown> {
-  return {
+function serializeMcpSkillInput(input: SkillInput, inputSchema?: Record<string, unknown>): Record<string, unknown> {
+  const genericInput = {
     objective: input.objective,
     context: input.context,
     dependencyOutputs: Object.fromEntries(input.dependencyOutputs),
     sessionId: input.sessionId,
     projectId: input.projectId,
   };
+
+  const properties = getSchemaProperties(inputSchema);
+  if (!properties) return genericInput;
+
+  const schemaInput: Record<string, unknown> = {};
+  for (const key of Object.keys(properties)) {
+    if (key in genericInput) {
+      schemaInput[key] = genericInput[key as keyof typeof genericInput];
+    }
+  }
+
+  if ('query' in properties && !('query' in schemaInput)) {
+    schemaInput.query = input.objective;
+  }
+  if ('prompt' in properties && !('prompt' in schemaInput)) {
+    schemaInput.prompt = input.objective;
+  }
+  if ('input' in properties && !('input' in schemaInput)) {
+    schemaInput.input = input.objective;
+  }
+
+  return schemaInput;
+}
+
+function getSchemaProperties(inputSchema: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const properties = inputSchema?.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return undefined;
+  }
+  return properties as Record<string, unknown>;
 }
 
 function resolveMemoryContext(

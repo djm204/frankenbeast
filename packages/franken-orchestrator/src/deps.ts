@@ -195,6 +195,7 @@ export interface McpToolInfo {
   readonly name: string;
   readonly serverId: string;
   readonly description: string;
+  readonly inputSchema?: Record<string, unknown> | undefined;
 }
 
 /** Checkpoint persistence for crash recovery. */
