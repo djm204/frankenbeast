@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as publicApi from '../../src/index.js';
-import { ApprovalMismatchError as InternalApprovalMismatchError } from '../../src/errors/index.js';
+import {
+  ApprovalMismatchError as InternalApprovalMismatchError,
+  ApprovalConfigurationError as InternalApprovalConfigurationError,
+} from '../../src/errors/index.js';
 
 describe('public API exports', () => {
   it('re-exports ApprovalMismatchError from the package root', () => {
@@ -12,6 +15,7 @@ describe('public API exports', () => {
     expect(publicApi.GovernorError).toBeDefined();
     expect(publicApi.ApprovalTimeoutError).toBeDefined();
     expect(publicApi.ChannelUnavailableError).toBeDefined();
+    expect(publicApi.ApprovalConfigurationError).toBe(InternalApprovalConfigurationError);
     expect(publicApi.SignatureVerificationError).toBeDefined();
     expect(publicApi.TriggerEvaluationError).toBeDefined();
   });

@@ -5,7 +5,11 @@ import type { ApprovalRequest, ApprovalResponse } from '../../../src/core/types.
 import { defaultConfig } from '../../../src/core/config.js';
 import { SignatureVerifier } from '../../../src/security/signature-verifier.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
-import { SignatureVerificationError, ApprovalMismatchError } from '../../../src/errors/index.js';
+import {
+  SignatureVerificationError,
+  ApprovalMismatchError,
+  ApprovalConfigurationError,
+} from '../../../src/errors/index.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -104,13 +108,34 @@ describe('ApprovalGateway — security integration', () => {
     }
   });
 
-  it('throws at construction when signed approvals are required without a verifier', () => {
-    expect(() => new ApprovalGateway({
-      channel: makeFakeChannel(),
-      auditRecorder: makeFakeAuditRecorder(),
+  it('rejects with a configuration error before contacting the channel when signed approvals require a verifier but none is configured', async () => {
+    const channel = makeFakeChannel();
+    const auditRecorder = makeFakeAuditRecorder();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
       config: { ...defaultConfig(), requireSignedApprovals: true },
-      // no signatureVerifier
-    })).toThrow(/signed approvals.*verifier/i);
+      // no signatureVerifier and no config.signingSecret
+    });
+
+    await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(ApprovalConfigurationError);
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+    expect(auditRecorder.record).not.toHaveBeenCalled();
+  });
+
+  it('constructs a verifier from config.signingSecret and accepts a valid signature', async () => {
+    const signingSecret = 'secret-from-config';
+    const verifier = new SignatureVerifier(signingSecret);
+    const validSig = verifier.sign(JSON.stringify({ requestId: 'req-001', decision: 'APPROVE' }));
+    const channel = makeFakeChannel({ signature: validSig });
+    const wiredGateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config: { ...defaultConfig(), requireSignedApprovals: true, signingSecret },
+    });
+
+    const outcome = await wiredGateway.requestApproval(makeRequest());
+    expect(outcome.decision).toBe('APPROVE');
   });
 
   it('rejects an unsigned response whose requestId does not match the active request', async () => {

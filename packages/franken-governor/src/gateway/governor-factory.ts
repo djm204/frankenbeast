@@ -3,7 +3,7 @@ import { GovernorAuditRecorder } from '../audit/audit-recorder.js';
 import { CliChannel, type ReadlineAdapter } from '../channels/cli-channel.js';
 import type { GovernorMemoryPort } from '../audit/governor-memory-port.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
-import { defaultConfig } from '../core/config.js';
+import { defaultConfig, type GovernorConfig } from '../core/config.js';
 
 export interface CreateGovernorOptions {
   readonly readline: ReadlineAdapter;
@@ -11,10 +11,14 @@ export interface CreateGovernorOptions {
   readonly evaluators?: ReadonlyArray<TriggerEvaluator>;
   readonly projectId?: string;
   readonly operatorName?: string;
+  readonly config?: Partial<GovernorConfig>;
 }
 
 export function createGovernor(options: CreateGovernorOptions): GovernorCritiqueAdapter {
-  const config = defaultConfig();
+  const config: GovernorConfig = {
+    ...defaultConfig(),
+    ...options.config,
+  };
 
   const channel = new CliChannel({
     readline: options.readline,
@@ -28,5 +32,6 @@ export function createGovernor(options: CreateGovernorOptions): GovernorCritique
     auditRecorder,
     evaluators: options.evaluators ?? [],
     projectId: options.projectId ?? 'default',
+    config,
   });
 }

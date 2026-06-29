@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { ApprovalRequest, TriggerResult } from '../core/types.js';
-import { defaultConfig } from '../core/config.js';
+import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
 import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
+import type { SignatureVerifier } from '../security/signature-verifier.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
 
@@ -11,6 +12,8 @@ export interface GovernorCritiqueAdapterDeps {
   readonly auditRecorder: AuditRecorder;
   readonly evaluators: ReadonlyArray<TriggerEvaluator>;
   readonly projectId: string;
+  readonly config?: GovernorConfig;
+  readonly signatureVerifier?: SignatureVerifier;
 }
 
 export class GovernorCritiqueAdapter {
@@ -22,7 +25,8 @@ export class GovernorCritiqueAdapter {
     this.gateway = new ApprovalGateway({
       channel: deps.channel,
       auditRecorder: deps.auditRecorder,
-      config: defaultConfig(),
+      config: deps.config ?? defaultConfig(),
+      ...(deps.signatureVerifier ? { signatureVerifier: deps.signatureVerifier } : {}),
     });
     this.evaluators = deps.evaluators;
     this.projectId = deps.projectId;
