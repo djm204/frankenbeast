@@ -5,5 +5,5 @@
 - [x] Implement centralized audit middleware for MCP tool calls.
 - [x] Add focused tests for direct/proxy/success/failure audit coverage and hash verification.
 - [x] Run relevant tests/typecheck.
-- [ ] Commit, push, open PR closing #373.
-- [ ] Trigger visible Codex review and short-poll for response.
+- [x] Commit, push, open PR closing #373.
+- [x] Trigger visible Codex review and short-poll for response.
