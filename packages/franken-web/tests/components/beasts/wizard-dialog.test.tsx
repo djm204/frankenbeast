@@ -33,7 +33,7 @@ describe('WizardDialog', () => {
   it('footer launch uses the shared config shape for non-default workflows', () => {
     const onLaunch = vi.fn();
     useBeastStore.getState().setStepValues(0, { name: 'Footer Agent' });
-    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md' });
+    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' });
     useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
 
     render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={onLaunch} />);
@@ -41,8 +41,9 @@ describe('WizardDialog', () => {
 
     expect(onLaunch).toHaveBeenCalledWith({
       identity: { name: 'Footer Agent' },
-      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md' },
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
       designDocPath: 'docs/design.md',
+      outputDir: 'tasks/chunks',
     });
   });
 });

@@ -39,16 +39,29 @@ export function StepWorkflow() {
       )}
 
       {values.workflowType === 'chunk-plan' && (
-        <div>
-          <label htmlFor="wf-file" className="block text-sm font-medium text-beast-text mb-1.5">Design Doc Path</label>
-          <input
-            id="wf-file"
-            type="text"
-            value={(values.docPath as string) ?? ''}
-            onChange={(e) => updateField('docPath', e.target.value)}
-            placeholder="/path/to/design-doc.md"
-            className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-          />
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="wf-file" className="block text-sm font-medium text-beast-text mb-1.5">Design Doc Path</label>
+            <input
+              id="wf-file"
+              type="text"
+              value={(values.docPath as string) ?? ''}
+              onChange={(e) => updateField('docPath', e.target.value)}
+              placeholder="/path/to/design-doc.md"
+              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+            />
+          </div>
+          <div>
+            <label htmlFor="wf-output-dir" className="block text-sm font-medium text-beast-text mb-1.5">Output Directory</label>
+            <input
+              id="wf-output-dir"
+              type="text"
+              value={(values.outputDir as string) ?? ''}
+              onChange={(e) => updateField('outputDir', e.target.value)}
+              placeholder="/path/to/chunks"
+              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+            />
+          </div>
         </div>
       )}
 
