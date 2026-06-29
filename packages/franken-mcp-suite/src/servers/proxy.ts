@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef, type ToolResult } from '../shared/server-factory.js';
+import { createMcpServer, validateToolArguments, type FbeastMcpServer, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { parseArgs } from 'node:util';
@@ -52,9 +52,13 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
             isError: true,
           };
         }
+        const validated = validateToolArguments(entry, toolArgs);
+        if (!validated.ok) {
+          return { content: [{ type: 'text', text: `Error: ${validated.message}` }], isError: true };
+        }
         const adapters = getAdapters();
         const handler = entry.makeHandler(adapters);
-        return handler(toolArgs) as Promise<ToolResult>;
+        return handler(validated.value) as Promise<ToolResult>;
       },
     },
   ];

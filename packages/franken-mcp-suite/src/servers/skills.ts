@@ -18,7 +18,7 @@ export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
       inputSchema: {
         type: 'object',
         properties: {
-          enabled: { type: 'string', description: 'Filter: "true" for enabled only, "false" for disabled only' },
+          enabled: { type: 'string', description: 'Filter: "true" for enabled only, "false" for disabled only', enum: ['true', 'false'] },
         },
       },
       async handler(args) {
