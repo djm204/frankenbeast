@@ -7,7 +7,6 @@ import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
-import { createBeastControlClient } from './beast-control-client.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
@@ -55,12 +54,16 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 /**
  * Creates an InterviewIO backed by stdin/stdout.
  */
-export function createStdinIO(): InterviewIO {
+export function createStdinIO(): InterviewIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return {
     ask: (question: string) =>
       new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
     display: (message: string) => console.log(message),
+    close: () => {
+      rl.close();
+      process.stdin.pause();
+    },
   };
 }
 
@@ -264,24 +267,33 @@ export async function main(): Promise<void> {
   }
 
   if (args.subcommand === 'beasts') {
-    await handleBeastCommand({
-      args,
-      io: createStdinIO(),
-      paths,
-      print: console.log,
-      control: createBeastControlClient(paths),
-    });
+    const io = createStdinIO();
+    try {
+      await handleBeastCommand({
+        args,
+        io,
+        paths,
+        print: console.log,
+      });
+    } finally {
+      io.close();
+    }
     return;
   }
 
   if (args.subcommand === 'init') {
-    await handleInitCommand({
-      args,
-      config,
-      io: createStdinIO(),
-      paths,
-      print: console.log,
-    });
+    const io = createStdinIO();
+    try {
+      await handleInitCommand({
+        args,
+        config,
+        io,
+        paths,
+        print: console.log,
+      });
+    } finally {
+      io.close();
+    }
     return;
   }
 
@@ -711,9 +723,31 @@ import { realpathSync } from 'node:fs';
 
 const self = fileURLToPath(import.meta.url);
 const caller = process.argv[1];
+
+export function shouldForceDirectCliExit(argv: readonly string[] = process.argv): boolean {
+  void argv;
+  return false;
+}
+
+export function runDirectCli(
+  entrypoint: () => Promise<void> = main,
+  exit: (code?: number) => never = process.exit,
+  shouldExitOnSuccess: () => boolean = shouldForceDirectCliExit,
+): void {
+  void entrypoint()
+    .then(() => {
+      if (shouldExitOnSuccess()) {
+        // Successful direct CLI invocations exit naturally after command-specific
+        // cleanup disposes blocking handles. Avoid process.exit(0), which can
+        // truncate asynchronous stdout writes for short commands like beasts logs.
+      }
+    })
+    .catch((error) => {
+      console.error('Fatal:', error instanceof Error ? error.message : error);
+      exit(1);
+    });
+}
+
 if (caller && realpathSync(caller) === realpathSync(self)) {
-  main().catch((error) => {
-    console.error('Fatal:', error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
+  runDirectCli();
 }

@@ -200,9 +200,10 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { createInterface } from 'node:readline';
 
 // ── Tests ──
 
@@ -274,6 +275,67 @@ describe('createStdinIO', () => {
     const io = createStdinIO();
     const answer = await io.ask('What?');
     expect(answer).toBe('mock-answer');
+  });
+
+  it('close closes readline and pauses stdin so read-only commands can terminate', () => {
+    const pauseSpy = vi.spyOn(process.stdin, 'pause').mockImplementation(() => process.stdin);
+    const io = createStdinIO();
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+
+    io.close();
+
+    expect(readline.close).toHaveBeenCalled();
+    expect(pauseSpy).toHaveBeenCalled();
+    pauseSpy.mockRestore();
+  });
+});
+
+describe('runDirectCli', () => {
+  it('does not force process.exit after successful long-running chat-server startup', async () => {
+    const entrypoint = vi.fn(async () => undefined);
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit, () => false);
+    await Promise.resolve();
+
+    expect(entrypoint).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('lets successful direct commands exit naturally so stdout can drain', async () => {
+    const entrypoint = vi.fn(async () => undefined);
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit, () => true);
+    await Promise.resolve();
+
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('does not force successful direct CLI exits, including catalog and option-shifted beast actions', () => {
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'chat-server'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'spawn'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'create'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'restart'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'resume'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', '--base-dir', '/tmp', 'spawn'])).toBe(false);
+    expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(false);
+  });
+
+  it('exits nonzero when the direct CLI entrypoint rejects', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const entrypoint = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const exit = vi.fn() as unknown as (code?: number) => never;
+
+    runDirectCli(entrypoint, exit);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
+    errorSpy.mockRestore();
   });
 });
 
