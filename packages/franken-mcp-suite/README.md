@@ -4,32 +4,40 @@ MCP server suite exposing frankenbeast safety capabilities as Claude Code tools.
 
 ## Install
 
+Install the package persistently so the `fbeast` CLI **and** the `fbeast-*` MCP
+server binaries are on PATH. `mcp init` registers servers as bare
+`fbeast-memory`/`fbeast-proxy` commands the AI client launches later, so a
+one-shot `npx fbeast …` (which also can't resolve a package named `fbeast`)
+would leave the registered servers unable to start.
+
 ```bash
-# From the monorepo root
-npm install
+# Global install (publishes the fbeast + fbeast-* binaries onto PATH)
+npm install -g @fbeast/mcp-suite
+# …or, from a clone of this monorepo:
+#   npm install && npm link --workspace=packages/franken-mcp-suite
 
 # Initialize for your project
 cd your-project
-npx fbeast init
+fbeast mcp init
 
 # Optional: install with hooks (pre/post tool enforcement)
-npx fbeast init --hooks
+fbeast mcp init --hooks
 
 # Choose specific servers
-npx fbeast init --pick=memory,firewall,governor
+fbeast mcp init --pick=memory,firewall,governor
 
 # Proxy mode: single server, 2 tools, ~90% lower context cost
-npx fbeast init --mode=proxy
+fbeast mcp init --mode=proxy
 ```
 
-`fbeast init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
+`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
 
 ```bash
-npx fbeast uninstall                    # remove from detected client config
-npx fbeast uninstall --client=gemini    # target specific client
-npx fbeast uninstall --purge            # also delete .fbeast/ data
+fbeast mcp uninstall                    # remove from detected client config
+fbeast mcp uninstall --client=gemini    # target specific client
+fbeast mcp uninstall --purge            # also delete .fbeast/ data
 ```
 
 ## Beast mode
@@ -37,13 +45,13 @@ npx fbeast uninstall --purge            # also delete .fbeast/ data
 Activate standalone orchestrator mode (shares `.fbeast/beast.db` with MCP mode):
 
 ```bash
-npx fbeast beast                          # default provider (anthropic-api)
-npx fbeast beast --provider=claude-cli    # requires risk acknowledgment
+fbeast mcp beast                          # default provider (anthropic-api)
+fbeast mcp beast --provider=claude-cli    # requires risk acknowledgment
 ```
 
 ## Dashboard
 
-The MCP tools, hooks, Beast mode, and web dashboard all use the same project database at `.fbeast/beast.db` when the dashboard backend points at the same project root. After `fbeast init`, run the dashboard when you want a browser view of observer activity, governor decisions, cost rows, and Beast runs.
+The MCP tools, hooks, Beast mode, and web dashboard all use the same project database at `.fbeast/beast.db` when the dashboard backend points at the same project root. After `fbeast mcp init`, run the dashboard when you want a browser view of observer activity, governor decisions, cost rows, and Beast runs.
 
 From the Frankenbeast repo, start the backend in one terminal against the project where MCP was initialized:
 
@@ -74,13 +82,13 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_query`, `store`, `frontload`, `forget` | Key-value and episodic memory via SqliteBrain |
-| `fbeast-observer` | `fbeast_observer_log`, `cost`, `trail` | Audit trail with chained hashes, cost tracking |
-| `fbeast-governor` | `fbeast_governor_check`, `budget_status` | Action safety assessment via trigger evaluation |
-| `fbeast-planner` | `fbeast_plan_decompose`, `visualize`, `validate` | Task DAG planning with cycle detection |
-| `fbeast-critique` | `fbeast_critique_evaluate`, `compare` | Content evaluation (logic, complexity, conciseness) |
-| `fbeast-firewall` | `fbeast_firewall_scan`, `scan_file` | Prompt injection detection (standard/strict tiers) |
-| `fbeast-skills` | `fbeast_skills_list`, `discover`, `info` | Skill registry discovery |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget` | Key-value and episodic memory via SqliteBrain |
+| `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail` | Audit trail with chained hashes, token/cost logging and summaries |
+| `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
+| `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
+| `fbeast-critique` | `fbeast_critique_evaluate`, `fbeast_critique_compare` | Content evaluation and revision comparison |
+| `fbeast-firewall` | `fbeast_firewall_scan`, `fbeast_firewall_scan_file` | Prompt injection detection (standard/strict tiers) |
+| `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode).
 
@@ -99,7 +107,7 @@ All three clients are supported:
 
 | Client | Hook mechanism |
 |--------|---------------|
-| Claude Code | `preToolCall` / `postToolCall` command strings in `settings.json` |
+| Claude Code | `PreToolUse` / `PostToolUse` entries in `settings.json` that call generated shell scripts under `.fbeast/hooks/` |
 | Gemini CLI | `BeforeTool` / `AfterTool` shell scripts in `.fbeast/hooks/` |
 | Codex CLI | `PreToolUse` / `PostToolUse` shell scripts in `.codex/hooks/`, referenced by `.codex/hooks.json` |
 

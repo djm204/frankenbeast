@@ -1,14 +1,16 @@
 # Module 06: Self-Critique & Reflection (The Reviewer)
 
 ## 1. Overview
-MOD-06 implements the "Reflexion" pattern. It is a secondary, specialized agentic process that evaluates the output of the "Coder/Actor" agent before it reaches the user or the production environment. Its goal is to identify hallucinations, logic flaws, and architectural drift.
+MOD-06 implements the reviewer side of the "Reflexion" pattern. It evaluates plans or generated content before they reach the user or production environment. Its goal is to identify safety issues, hallucinations, logic flaws, complexity bloat, and architectural drift.
 
 ## 2. The Critique Loop
-The module operates in a "Generator-Reviewer" cycle:
+The wider system can operate in a "Generator-Reviewer" cycle:
 1. **Initial Draft:** The Actor agent proposes code or a plan.
 2. **Severed Critique:** The Reviewer agent (MOD-06) analyzes the draft against the **Guardrails (MOD-01)** and **Semantic Memory (MOD-03)**.
-3. **Feedback Injection:** If flaws are found, MOD-06 returns a "Correction Request" with specific, actionable feedback.
-4. **Refinement:** The Actor regenerates based on the critique. This repeats until a "Pass" is achieved or a max-loop limit is hit.
+3. **Feedback Injection:** If flaws are found, MOD-06 returns a `CorrectionRequest` with specific, actionable feedback.
+4. **Refinement:** The caller/orchestrator decides whether to ask the Actor to regenerate and can feed the revised input back into MOD-06.
+
+Current implementation note: `CritiqueLoop` does not call the Actor itself. It composes `CritiquePipeline` and circuit breakers, runs `run(input, config)`, and returns pass/fail/halt information plus a correction request only when appropriate for the caller to handle.
 
 ## 3. Core Components
 
@@ -19,11 +21,8 @@ The Reviewer is prompted as a "Senior Technical Architect" with a bias toward sk
 - **Logic Loops:** Infinite recursions or improper error handling.
 - **ADR Non-Compliance:** Code that ignores the architecture rules stored in memory.
 
-### 3.2 Automated Verification Tools
-MOD-06 leverages the **Skill Registry (MOD-02)** to run deterministic checks:
-- **Linting/Types:** Does the code pass a static type check?
-- **Unit Test Runner:** Does the proposed code pass existing tests?
-- **Dry-Run Executor:** Executes code in a **MOD-01 Sandbox** to verify the output matches expectations.
+### 3.2 Automated Verification Scope
+Current MOD-06 evaluators are in-process critique checks: safety, ghost dependency, logic loop, factuality, conciseness, complexity, scalability, and ADR compliance. It does not currently run lint/type/unit-test commands or dry-run code in a sandbox. Consumers that need those checks should run them separately and pass the results into critique context.
 
 
 
