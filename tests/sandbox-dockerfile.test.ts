@@ -21,6 +21,21 @@ describe('sandbox Dockerfile', () => {
     expect(dockerfile).toContain('WORKDIR /workspace');
   });
 
+  it('installs git for sandboxed martin-loop branch isolation', () => {
+    expect(dockerfile).toContain('apt-get install -y --no-install-recommends git');
+  });
+
+  it('filters local secrets and heavy directories from the Docker build context', () => {
+    const dockerignore = readFileSync(resolve('.dockerignore'), 'utf8');
+
+    expect(dockerignore).toContain('.env');
+    expect(dockerignore).toContain('!.env.example');
+    expect(dockerignore).toContain('.fbeast');
+    expect(dockerignore).toContain('.codex');
+    expect(dockerignore).toContain('node_modules');
+    expect(dockerignore).toContain('.git');
+  });
+
   dockerIt('actually builds fbeast/sandbox:latest from the repo Dockerfile when Docker is available', () => {
     execFileSync('docker', ['build', '-t', 'fbeast/sandbox:latest', '-f', 'Dockerfile', '.'], {
       cwd: resolve('.'),

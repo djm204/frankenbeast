@@ -17,8 +17,8 @@ export interface ContainerBeastExecutorDeps {
   readonly supervisorFactory?: () => ProcessSupervisorLike;
 }
 
-function containerNameForRun(run: BeastRun): string {
-  return `fbeast-${run.id}`.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 128);
+function containerNameForRunAttempt(run: BeastRun, attemptNumber: number): string {
+  return `fbeast-${run.id}-attempt-${attemptNumber}`.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 128);
 }
 
 function containerAttemptMetadata(
@@ -27,8 +27,9 @@ function containerAttemptMetadata(
   originalSpec: BeastProcessSpec,
   dockerSpec: BeastProcessSpec,
   handle: { pid: number },
+  attemptNumber: number,
 ): Readonly<Record<string, unknown>> {
-  const containerName = containerNameForRun(run);
+  const containerName = containerNameForRunAttempt(run, attemptNumber);
   const resourceSnapshot = {
     memory: policy.resourceLimits.memory,
     cpus: policy.resourceLimits.cpus,
@@ -69,11 +70,12 @@ export class ContainerBeastExecutor implements BeastExecutor {
     if (deps.eventBus) {
       options.eventBus = deps.eventBus;
     }
+    const nextAttemptNumber = (run: BeastRun): number => deps.repository.listAttempts(run.id).length + 1;
     options.transformSpec = (run, _originalSpec, mergedSpec) => toDockerSpec(mergedSpec, policy, {
-      containerName: containerNameForRun(run),
+      containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),
     });
     options.attemptMetadata = (run, originalSpec, dockerSpec, handle) => (
-      containerAttemptMetadata(policy, run, originalSpec, dockerSpec, handle)
+      containerAttemptMetadata(policy, run, originalSpec, dockerSpec, handle, nextAttemptNumber(run))
     );
 
     this.inner = new ProcessBeastExecutor(

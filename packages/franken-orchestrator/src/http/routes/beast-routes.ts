@@ -52,6 +52,17 @@ function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAtt
   };
 }
 
+function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunAttempt[] {
+  if (!run || run.executionMode !== 'container') {
+    return [];
+  }
+  return deps.runs.listAttempts(run.id);
+}
+
+function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
+  return runWithContainerFields(run, attemptsForContainerRun(run, deps));
+}
+
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
   skills: z.boolean().optional(),
@@ -142,14 +153,13 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       }
       throw error;
     }
-    const attempts = deps.runs.listAttempts(run.id);
-    return c.json({ data: runWithContainerFields(run, attempts) }, 201);
+    return c.json({ data: runResponse(run, deps) }, 201);
   });
 
   app.get('/v1/beasts/runs', (c) => {
     return c.json({
       data: {
-        runs: deps.runs.listRuns().map((run) => runWithContainerFields(run, deps.runs.listAttempts(run.id))),
+        runs: deps.runs.listRuns().map((run) => runResponse(run, deps)),
       },
     });
   });
@@ -185,22 +195,22 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.post('/v1/beasts/runs/:runId/start', async (c) => {
     const run = await deps.runs.start(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/stop', async (c) => {
     const run = await deps.runs.stop(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/kill', async (c) => {
     const run = await deps.runs.kill(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/restart', async (c) => {
     const run = await deps.runs.restart(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/interviews/:definitionId/start', (c) => {
