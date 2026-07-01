@@ -65,7 +65,10 @@ describe('toDockerSpec', () => {
     });
 
     const userFlag = spec.args.indexOf('--user');
-    expect(spec.args[userFlag + 1]).toBe(`${process.getuid?.()}:${process.getgid?.()}`);
+    const expectedUser = process.getuid?.() === 0
+      ? '10001:10001'
+      : `${process.getuid?.()}:${process.getgid?.()}`;
+    expect(spec.args[userFlag + 1]).toBe(expectedUser);
   });
 
   it('keeps the configured user for read-only workspace mounts', () => {

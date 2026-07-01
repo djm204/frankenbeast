@@ -25,6 +25,10 @@ describe('sandbox Dockerfile', () => {
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends git');
   });
 
+  it('marks the mounted workspace safe for git when runtime falls back from root-owned mounts', () => {
+    expect(dockerfile).toContain('git config --system --add safe.directory /workspace');
+  });
+
   it('filters local secrets and heavy directories from the Docker build context', () => {
     const dockerignore = readFileSync(resolve('.dockerignore'), 'utf8');
 

@@ -5,6 +5,7 @@ ARG SANDBOX_GID=10001
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git \
+  && git config --system --add safe.directory /workspace \
   && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid "${SANDBOX_GID}" fbeast \
