@@ -1,0 +1,120 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chownSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function hasDocker(): boolean {
+  const result = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  return !result.error && result.status === 0;
+}
+
+function testNonRootUser(): `${number}:${number}` {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid !== undefined && gid !== undefined && uid > 0) {
+    return `${uid}:${gid}`;
+  }
+  return '10001:10001';
+}
+
+function makeWritableForUser(path: string, user: `${number}:${number}`): void {
+  const [uid, gid] = user.split(':').map(Number);
+  if (Number.isInteger(uid) && Number.isInteger(gid)) {
+    try {
+      chownSync(path, uid, gid);
+    } catch {
+      // Non-root test processes cannot chown; in that case the fallback user is
+      // the host user and the freshly-created temp path is already writable.
+    }
+  }
+}
+
+const dockerIt = hasDocker() ? it : it.skip;
+
+describe('sandbox Docker runtime enforcement', () => {
+  dockerIt('builds the sandbox image and enforces memory limits on an exceeding workload', () => {
+    const tag = `fbeast/sandbox:test-${process.pid}`;
+    execFileSync('docker', ['build', '-t', tag, '-f', 'Dockerfile', '.'], {
+      cwd: join(__dirname, '../../../../..'),
+      stdio: 'pipe',
+    });
+
+    const workspace = mkdtempSync(join(tmpdir(), 'fbeast-sandbox-runtime-'));
+    const script = join(workspace, 'memory-hog.js');
+    writeFileSync(script, 'const chunks=[]; while (true) chunks.push(Buffer.alloc(32 * 1024 * 1024));\n', 'utf8');
+    const user = testNonRootUser();
+    makeWritableForUser(workspace, user);
+    makeWritableForUser(script, user);
+
+    const result = spawnSync('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--memory',
+      '64m',
+      '--cpus',
+      '1.0',
+      '--pids-limit',
+      '64',
+      '--user',
+      user,
+      '-v',
+      `${workspace}:/workspace`,
+      '-w',
+      '/workspace',
+      tag,
+      'node',
+      'memory-hog.js',
+    ], {
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).not.toContain('Cannot find module');
+  }, 60_000);
+
+  dockerIt('runs the default writable workspace mount as a non-root host UID/GID that can write artifacts', () => {
+    const tag = `fbeast/sandbox:test-${process.pid}`;
+    execFileSync('docker', ['build', '-t', tag, '-f', 'Dockerfile', '.'], {
+      cwd: join(__dirname, '../../../../..'),
+      stdio: 'pipe',
+    });
+
+    const workspace = mkdtempSync(join(tmpdir(), 'fbeast-sandbox-write-'));
+    const user = testNonRootUser();
+    const [uid] = user.split(':');
+    expect(uid).not.toBe('0');
+    makeWritableForUser(workspace, user);
+
+    const result = spawnSync('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--user',
+      user,
+      '-v',
+      `${workspace}:/workspace`,
+      '-w',
+      '/workspace',
+      tag,
+      'sh',
+      '-lc',
+      'test "$(id -u)" != "0" && echo artifact > .fbeast-container-write-test',
+    ], {
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+
+    expect(result.status).toBe(0);
+  }, 60_000);
+});
