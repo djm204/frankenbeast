@@ -65,7 +65,10 @@ export async function runHook(
     // The governor context (command text) arrives via the FBEAST_TOOL_CONTEXT
     // env var, never argv, so it cannot be consumed as a flag. It is not
     // truncated; an over-limit command fails the exec and is denied (fail-closed).
-    const context = resolvedDeps.readContext();
+    // Fall back to the positional payload for direct/legacy callers
+    // (`fbeast-hook pre-tool <tool> <payload>`) so they keep governance coverage
+    // when the env var is unset.
+    const context = resolvedDeps.readContext() || payload;
     const decision = await resolvedDeps.governor.check({ action: toolName, context });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);

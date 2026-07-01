@@ -3,19 +3,25 @@ import type { TriggerResult, TriggerSeverity } from '@franken/governor';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
-/** Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover. */
+/**
+ * Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover.
+ * Single-word verbs are anchored with `\b` word boundaries so benign path-like
+ * arguments forwarded in shell commands (e.g. `cat src/dropdown.tsx`,
+ * `git diff docs/formatting.md`) do not false-match `drop`/`format`, while real
+ * destructive verbs (`drop table`, `format c:`) still trip.
+ */
 const DANGEROUS_PATTERNS = [
-  /delete/i,
-  /drop/i,
-  /truncate/i,
-  /destroy/i,
+  /\bdelete\b/i,
+  /\bdrop\b/i,
+  /\btruncate\b/i,
+  /\bdestroy\b/i,
   /remove.*all/i,
   /force.*push/i,
   /reset.*hard/i,
   /rm\s+-rf/i,
-  /format/i,
-  /wipe/i,
-  /purge/i,
+  /\bformat\b/i,
+  /\bwipe\b/i,
+  /\bpurge\b/i,
 ];
 
 export interface GovernorCheckResult {
@@ -47,7 +53,7 @@ function matchesDangerousPattern(text: string): boolean {
   return DANGEROUS_PATTERNS.some((p) => p.test(text));
 }
 
-function assessAction(action: string, context: string): GovernorCheckResult {
+export function assessAction(action: string, context: string): GovernorCheckResult {
   const combined = `${action} ${context}`;
   const isDestructive = matchesDangerousPattern(combined);
 

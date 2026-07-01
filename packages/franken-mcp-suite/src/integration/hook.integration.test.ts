@@ -38,6 +38,16 @@ describe('fbeast-hook runtime', () => {
     expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /' }]);
   });
 
+  it('falls back to the positional payload when the context env var is unset (legacy callers)', async () => {
+    // Direct/legacy callers use `fbeast-hook pre-tool <tool> <payload>` and set no
+    // FBEAST_TOOL_CONTEXT. readContext() returns '' here; the governor must still
+    // see the positional payload so those callers keep coverage.
+    const result = await runHookForTest(['pre-tool', 'Bash', 'rm -rf /legacy']);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /legacy' }]);
+  });
+
   it('post-tool hook records observer events', async () => {
     const result = await runHookForTest(['post-tool', 'write_file', '{"ok":true}']);
 

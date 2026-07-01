@@ -215,6 +215,24 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('does not forward apply_patch patch bodies carried in tool_input.command', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    // Codex apply_patch puts the whole patch in tool_input.command; forwarding it
+    // would both false-positive on diff text and persist secrets in governor_log.
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: { command: '*** Begin Patch\n+ rm -rf / and SECRET_TOKEN=abc\n*** End Patch' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
     const root = makeTempRoot();
     tempRoots.push(root);

@@ -61,8 +61,9 @@ TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.
 # and is therefore denied (fail-closed) rather than silently dropping a dangerous
 # suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
-# excluded to avoid false positives and persisting secrets.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
+# excluded to avoid false positives and persisting secrets. apply_patch patch
+# bodies (carried in tool_input.command) are also excluded for the same reason.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); tn=d.get('tool_name',''); ks=('command','cmd','commands','args','argv','script'); body=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); out=('' if tn=='apply_patch' else body); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -150,8 +151,9 @@ TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.
 # and is therefore denied (fail-closed) rather than silently dropping a dangerous
 # suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
-# excluded to avoid false positives and persisting secrets.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
+# excluded to avoid false positives and persisting secrets. apply_patch patch
+# bodies (carried in tool_input.command) are also excluded for the same reason.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); tn=d.get('tool_name',''); ks=('command','cmd','commands','args','argv','script'); body=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); out=('' if tn=='apply_patch' else body); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -238,8 +240,9 @@ TOOL_NAME=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.
 # and is therefore denied (fail-closed) rather than silently dropping a dangerous
 # suffix. Command-token arrays (args/argv) are flattened to a whitespace-joined
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
-# excluded to avoid false positives and persisting secrets.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); ks=('command','cmd','commands','args','argv','script'); out=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); sys.stdout.write(out)" 2>/dev/null || echo "")
+# excluded to avoid false positives and persisting secrets. apply_patch patch
+# bodies (carried in tool_input.command) are also excluded for the same reason.
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); ti=d.get('tool_input',{}); tn=d.get('tool_name',''); ks=('command','cmd','commands','args','argv','script'); body=(ti if isinstance(ti,str) else (' '.join((' '.join(map(str,ti[k])) if isinstance(ti[k],list) else (ti[k] if isinstance(ti[k],str) else json.dumps(ti[k]))) for k in ks if k in ti) if isinstance(ti,dict) else '')); out=('' if tn=='apply_patch' else body); sys.stdout.write(out)" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
