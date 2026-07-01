@@ -5,3 +5,4 @@ export { GovernorCritiqueAdapter } from './governor-critique-adapter.js';
 export type { GovernorCritiqueAdapterDeps } from './governor-critique-adapter.js';
 export { createGovernor } from './governor-factory.js';
 export type { CreateGovernorOptions } from './governor-factory.js';
+export { ApprovalWaiterRegistry } from './approval-waiter-registry.js';

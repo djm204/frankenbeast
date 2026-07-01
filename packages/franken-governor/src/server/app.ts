@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
+import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -10,6 +11,15 @@ export interface GovernorAppOptions {
   slackSigningSecret?: string;
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
+  /**
+   * Shared registry of pending approval waiters. Pass the same instance to
+   * an `HttpApprovalChannel` (used by `ApprovalGateway`) so that a caller
+   * awaiting an approval is actually woken when this app resolves it via
+   * `POST /v1/approval/respond` or the Slack webhook. If omitted, a private
+   * registry is created and only HTTP-visible bookkeeping (e.g.
+   * `GET /health`) is available — no in-process caller can be waiting on it.
+   */
+  registry?: ApprovalWaiterRegistry;
 }
 
 /** Maximum age (seconds) for a Slack request timestamp before it is rejected as a replay. */
@@ -91,18 +101,14 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
-  const pendingApprovals = new Map<string, {
-    taskId: string;
-    summary: string;
-    resolve: (decision: string) => void;
-  }>();
+  const registry = options.registry ?? new ApprovalWaiterRegistry();
 
   // Health check
   app.get('/health', (c) => {
     return c.json({
       status: 'ok',
       service: 'franken-governor',
-      pendingApprovals: pendingApprovals.size,
+      pendingApprovals: registry.size,
     });
   });
 
@@ -117,11 +123,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       );
     }
 
-    pendingApprovals.set(body.requestId, {
-      taskId: body.taskId,
-      summary: body.summary,
-      resolve: () => {}, // placeholder
-    });
+    registry.register(body.requestId, body.taskId, body.summary);
 
     return c.json({
       requestId: body.requestId,
@@ -133,7 +135,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());
-    let body: { requestId?: string; decision?: string };
+    let body: { requestId?: string; decision?: string; respondedBy?: string; feedback?: string };
     try {
       body = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf8')) : {};
     } catch {
@@ -181,12 +183,24 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       );
     }
 
-    const pending = pendingApprovals.get(body.requestId);
-    if (!pending) {
+    if (!registry.has(body.requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
     }
 
-    pendingApprovals.delete(body.requestId);
+    const respondedBy = typeof body.respondedBy === 'string' ? body.respondedBy : 'http-operator';
+    const feedback = typeof body.feedback === 'string' ? body.feedback : undefined;
+
+    // Wake the real waiter (if any) registered via `HttpApprovalChannel`, so
+    // a caller blocked on `ApprovalGateway.requestApproval()` actually
+    // unblocks with this decision instead of the request silently resolving
+    // only from the HTTP caller's point of view.
+    registry.resolve(body.requestId, {
+      requestId: body.requestId,
+      decision: body.decision as ResponseCode,
+      respondedBy,
+      respondedAt: new Date(),
+      ...(feedback !== undefined ? { feedback } : {}),
+    });
 
     return c.json({
       requestId: body.requestId,
@@ -236,7 +250,10 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // Parse the payload. Slack delivers interactive callbacks as
     // `application/x-www-form-urlencoded` with a JSON `payload` field; we also
     // accept raw JSON bodies for direct/test integrations.
-    let payload: { actions?: Array<{ action_id?: string; value?: string }> };
+    let payload: {
+      actions?: Array<{ action_id?: string; value?: string }>;
+      user?: { id?: string; username?: string };
+    };
     try {
       const contentType = c.req.header('content-type') ?? '';
       if (contentType.includes('application/x-www-form-urlencoded')) {
@@ -268,14 +285,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     }
 
     // Look up the pending approval; unknown requests are rejected.
-    const pending = pendingApprovals.get(requestId);
-    if (!pending) {
+    if (!registry.has(requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
     }
 
-    // Resolve and clear the pending approval exactly once.
-    pendingApprovals.delete(requestId);
-    pending.resolve(decision);
+    // Resolve and clear the pending approval exactly once, waking any real
+    // waiter registered via `HttpApprovalChannel`.
+    registry.resolve(requestId, {
+      requestId,
+      decision,
+      respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
+      respondedAt: new Date(),
+    });
 
     return c.json({
       requestId,
