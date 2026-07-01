@@ -1,5 +1,22 @@
 # fbeast dual-mode launch
 
+## Current Batch: Deploy Beasts Sprint Planning
+
+- [x] Survey current dashboard/CLI/deploy state (initial pass, later found incomplete).
+- [x] Clarify MVP scope (containerized/sandboxed deploy), issue-creation workflow, and deliverable format with user.
+- [x] Draft 9-issue sprint backlog, get user approval.
+- [x] Create `feature` and `deploy-beasts` GitHub labels (neither existed).
+- [x] Create issues #453-#461 in djm204/frankenbeast.
+- [x] Verify claims against direct file reads; discovered `ContainerBeastExecutor` already exists per ADR-036 (initial Explore pass missed it).
+- [x] Correct the backlog: closed #453/#454 as not-planned (duplicate of ADR-036), rewrote #455/#457/#458/#459/#460 to reflect verified real gaps, found new P0 gap (no `fbeast/sandbox` Dockerfile exists).
+- [x] Write `docs/plans/2026-07-01-deploy-beasts-sprint.md` summarizing verified state and final backlog.
+
+## Review
+
+- Final backlog (all labeled `feature` + `deploy-beasts`): #455 (chat/WS + API container fields), #456 (CLI `--mode container`), #457 (dashboard mode selection), #458 (live status/log streaming), #459 (P0 — build `fbeast/sandbox` image, resource limits, non-root), #460 (docs), #461 (stretch — ADR-027 beast-daemon decision).
+- #453 and #454 were opened then closed as not-planned the same session after direct file reads showed ADR-036 (`docs/adr/036-sandboxed-beast-execution.md`, accepted 2026-05-23) already implemented container execution — see `tasks/lessons.md` for the process fix.
+- No code changes this session; only GitHub issues/labels (external) and one new local doc file (`docs/plans/2026-07-01-deploy-beasts-sprint.md`, uncommitted pending user confirmation).
+
 ## Current Batch: PR 289 Review Comments
 
 - [x] Use the isolated `.worktrees/fbeast-passthrough` PR worktree and confirm it matches PR #289 head.
