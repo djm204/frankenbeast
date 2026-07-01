@@ -1,6 +1,6 @@
 # Deploy Beasts from the Dashboard
 
-This guide walks an operator through starting the local dashboard, creating a tracked Beast agent, dispatching a run, monitoring status/logs, and stopping or killing the run.
+This guide walks an operator through starting the local dashboard, creating a tracked Beast agent, dispatching a supported run, monitoring status/logs, and stopping or restarting the run.
 
 > **Sprint status note:** this guide is written against current `origin/main` after PR #465 / issue #459 and PR #466 / issue #456 merged. Container execution exists in the Beast CLI/API and the in-repo sandbox image/hardening defaults are present, but the dashboard execution-mode selector (#457), chat/WS container dispatch wiring (#455), and live container streaming work (#458) are still open. Until those land, the dashboard deploy flow creates and controls tracked agents through the default Beast definition execution mode. Use the CLI/API container-mode workaround below when you need an actual container run before the dashboard selector lands.
 
@@ -10,7 +10,7 @@ The dashboard talks to `frankenbeast chat-server`, which serves both the chat UI
 
 - `GET /v1/beasts/catalog` lists deployable Beast definitions.
 - `POST /v1/beasts/agents` creates a tracked dashboard agent from the wizard.
-- Agent actions (`start`, `stop`, `restart`, `resume`, `kill`, `delete`) control the linked run.
+- Agent actions (`start`, `stop`, `restart`, `resume`, `delete`) control the tracked agent or its linked run.
 - Run detail and logs are read from `/v1/beasts/runs/:runId` and `/v1/beasts/runs/:runId/logs`.
 
 ## Prerequisites
@@ -20,7 +20,9 @@ The dashboard talks to `frankenbeast chat-server`, which serves both the chat UI
 - An operator token is configured so Beast control routes are enabled.
 - For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
 
-Set a local operator token in one shell and reuse the same value for the backend and frontend:
+Use the operator token already configured for the repo, or update the configured token first and then reuse that same value for the backend and frontend. In initialized repos, the backend may resolve `network.operatorTokenRef` from the configured secret store before it reads token environment variables, so exporting a throwaway value only for the dashboard can make browser requests fail with 401s.
+
+For a new local-only setup without a stored token, set one shell variable and reuse it for both processes:
 
 ```bash
 export OPERATOR_TOKEN='dev-operator-token'
@@ -28,7 +30,7 @@ export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 export VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 ```
 
-`chat-server` also discovers the token from the repo `.env` or `packages/franken-web/.env.local` using either `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or `VITE_BEAST_OPERATOR_TOKEN`.
+`chat-server` also discovers the token from the configured secret store, the repo `.env`, or `packages/franken-web/.env.local` using either `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or `VITE_BEAST_OPERATOR_TOKEN`.
 
 ## 1. Start the backend
 
@@ -63,10 +65,10 @@ VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
   npm --workspace @frankenbeast/web run dev:chat
 ```
 
-If the backend is not on `http://127.0.0.1:3737`, pass `VITE_API_URL`:
+If the backend is not on `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests.
 
 ```bash
-VITE_API_URL=http://127.0.0.1:4242 \
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
 VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
   npm --workspace @frankenbeast/web run dev
 ```
@@ -87,8 +89,8 @@ Execution boundary choices are a Beast-run concept, separate from the four toolk
 
 | Mode | Boundary | Current dashboard status |
 |------|----------|--------------------------|
-| `process` | Host child process with supervised lifecycle, env allowlist, and project-root `cwd` containment. Not a hard sandbox. | Available through the dashboard tracked-agent flow. |
-| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root user policy, memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available in CLI/API after #456; dashboard selector is pending #457, so use the workaround below on current main. |
+| `process` | Host child process with supervised lifecycle, env allowlist, and project-root `cwd` containment. Not a hard sandbox. | Available through the dashboard tracked-agent flow for workflows whose wizard payload supplies the required definition fields. |
+| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root user policy, memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available in CLI/API after #456; dashboard selector is pending #457, so use the raw run workaround below on current main. |
 
 ### Container-mode workaround until #457 lands
 
@@ -122,11 +124,13 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs \
 
 ## 4. Create and launch from the dashboard
 
+On current main, the dashboard wizard can create tracked agents for catalog workflows, but its launch payload only maps the strict run fields required by `chunk-plan` (`designDocPath` and `outputDir`). Do not use the wizard to launch `design-interview` or `martin-loop` yet: their strict definitions require fields that the wizard does not currently populate (`goal`/`outputPath` for design interviews and `provider`/`objective`/`chunkDirectory` for Martin Loop). Use the CLI/API examples for those runs until the dashboard launch payload is wired for their definitions.
+
 1. Open **Beasts** in the left navigation.
 2. Click **Create Agent**.
 3. Fill the wizard:
    - **Identity**: name/description for the tracked agent.
-   - **Workflow**: choose one of the deployable Beast catalog flows (`design-interview`, `chunk-plan`, or `martin-loop`). The wizard may also show UI-only presets such as `issues-agent`; those are not deployable Beast catalog entries until their backend definition exists.
+   - **Workflow**: choose `chunk-plan` for a dashboard-launched tracked run on current main. The catalog may also list `design-interview` and `martin-loop`, but launch those through CLI/API until the dashboard supplies their strict config fields. The wizard may also show UI-only presets such as `issues-agent`; those are not deployable Beast catalog entries until their backend definition exists.
    - **LLM Targets**: select provider/model routing.
    - **Modules**: keep guardrail modules enabled unless you intentionally need a narrower run.
    - **Skills** and **Prompts**: attach context and prompt material.
@@ -134,7 +138,7 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs \
 4. Review the generated launch config.
 5. Click **Launch**.
 
-The dashboard creates a tracked agent first. Starting the agent dispatches the linked Beast run. If the agent does not start immediately, select it in the list and click **Start** from the detail panel.
+The dashboard creates a tracked agent first. For supported tracked-agent workflows, starting the agent dispatches the linked Beast run. If the agent does not start immediately, select it in the list and click **Start** from the detail panel. If validation fails because required definition fields are missing, use the raw CLI/API run path for that definition instead.
 
 ## 5. Monitor status, events, and logs
 
@@ -158,12 +162,11 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs/<run-id>/logs \
   -H "x-frankenbeast-operator-token: $OPERATOR_TOKEN"
 ```
 
-## 6. Stop, kill, restart, resume, or delete
+## 6. Stop, restart, resume, or delete
 
 From the selected agent detail panel:
 
-- **Stop** asks the run to stop cleanly. Use this first for normal interruption.
-- **Kill** force-stops the run. Use this when the run is stuck or ignoring stop.
+- **Stop** asks the linked run to stop cleanly. Use this for normal interruption.
 - **Restart** starts a new attempt for a stopped/failed/completed or currently running agent.
 - **Resume** resumes a tracked agent's linked run when resumable state exists.
 - **Delete** soft-deletes the tracked agent from the dashboard list.
@@ -195,7 +198,11 @@ frankenbeast beasts delete <agent-id>
 
 `The catalog or agents fail with 401`
 
-- The frontend token and backend token differ. Use one shared token for chat, network, dashboard, and Beast routes.
+- The frontend token and backend token differ. Use or update the configured operator token, then make the dashboard use that same token for chat, network, dashboard, and Beast routes; do not assume a dummy `VITE_BEAST_OPERATOR_TOKEN` overrides a stored backend token.
+
+`A dashboard launch fails validation for design-interview or martin-loop`
+
+- Expected on current main. The tracked-agent wizard does not yet populate the strict definition fields for those runs. Launch them through the CLI/API with their required config fields instead.
 
 `I cannot choose container mode in the dashboard`
 
@@ -208,5 +215,5 @@ frankenbeast beasts delete <agent-id>
 
 `The UI loads but does not connect to the backend`
 
-- Confirm `VITE_API_URL` matches the backend URL.
-- If using a non-default origin, start the backend with `--allow-origin <frontend-url>`.
+- In Vite dev mode, leave `VITE_API_URL` unset and confirm `VITE_API_PROXY_TARGET` matches the backend URL.
+- If the chat WebSocket uses a non-default frontend origin, start the backend with `--allow-origin <frontend-url>`.
