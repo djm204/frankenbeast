@@ -68,6 +68,26 @@ describe('parseArgs', () => {
     expect(args.beastTarget).toBe('martin-loop');
   });
 
+  it('parses beasts execution mode for spawn/create/status/logs', () => {
+    const spawn = parseArgs(['beasts', 'spawn', 'martin-loop', '--mode', 'container']);
+    expect(spawn.beastExecutionMode).toBe('container');
+
+    const create = parseArgs(['beasts', 'create', 'martin-loop', '--mode', 'process']);
+    expect(create.beastExecutionMode).toBe('process');
+
+    const status = parseArgs(['beasts', 'status', 'run-1', '--mode', 'container']);
+    expect(status.beastExecutionMode).toBe('container');
+
+    const logs = parseArgs(['beasts', 'logs', 'run-1', '--mode', 'container']);
+    expect(logs.beastExecutionMode).toBe('container');
+  });
+
+  it('rejects invalid beasts execution modes', () => {
+    expect(() => parseArgs(['beasts', 'spawn', 'martin-loop', '--mode', 'vm'])).toThrow('Invalid beast execution mode');
+    expect(() => parseArgs(['run', '--mode', 'container'])).toThrow('--mode is only supported for beasts commands');
+    expect(() => parseArgs(['beasts', 'kill', 'run-1', '--mode', 'container'])).toThrow('--mode is only supported for beasts create, spawn, status, and logs');
+  });
+
   it('parses beasts restart target', () => {
     const args = parseArgs(['beasts', 'restart', 'run-1']);
     expect(args.subcommand).toBe('beasts');
