@@ -71,7 +71,19 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
         });
         return attempt;
       }),
-      kill: vi.fn(),
+      kill: vi.fn(async (runId: string, attemptId: string) => {
+        const attempt = repository.updateAttempt(attemptId, {
+          status: 'stopped',
+          finishedAt: '2026-03-11T00:02:30.000Z',
+          stopReason: 'operator_kill',
+        });
+        repository.updateRun(runId, {
+          status: 'stopped',
+          finishedAt: '2026-03-11T00:02:30.000Z',
+          stopReason: 'operator_kill',
+        });
+        return attempt;
+      }),
     },
     container: {
       start: vi.fn(),
@@ -592,6 +604,123 @@ describe('agent routes integration', () => {
     expect(restarted.data.id).toBe(createdRun.data.id);
     expect(restarted.data.attemptCount).toBe(3);
     expect(restarted.data.status).toBe('running');
+  });
+
+  it('kills a running tracked agent by killing its linked run', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createAgentResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+        },
+      }),
+    });
+    expect(createAgentResponse.status).toBe(201);
+    const createdAgent = await createAgentResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(createdAgent.data.status).toBe('running');
+    expect(createdAgent.data.dispatchRunId).toBeTruthy();
+
+    const killResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/kill`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(killResponse.status).toBe(200);
+    const killed = await killResponse.json() as { data: { id: string; status: string; stopReason?: string } };
+    expect(killed.data.id).toBe(createdAgent.data.dispatchRunId);
+    expect(killed.data.status).toBe('stopped');
+    expect(killed.data.stopReason).toBe('operator_kill');
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const detail = await detailResponse.json() as {
+      data: {
+        agent: { status: string };
+        events: AgentEvent[];
+      };
+    };
+    expectEventsToIncludeTypes(detail.data.events, ['agent.kill.requested']);
+  });
+
+  it('returns 409 when killing a tracked agent that has no linked run', async () => {
+    const { app } = createStandaloneAgentApp();
+    const operatorToken = 'super-secret-operator-token';
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Kill without a linked run' },
+        },
+        initConfig: { goal: 'Kill without a linked run' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const killResponse = await app.request(`/v1/beasts/agents/${created.data.id}/kill`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(killResponse.status).toBe(409);
+    expect(await killResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_KILLABLE',
+        message: `Tracked agent '${created.data.id}' has no linked run to kill`,
+      },
+    });
+  });
+
+  it('returns 404 when killing an unknown tracked agent', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+
+    const killResponse = await app.request('/v1/beasts/agents/agent-missing/kill', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(killResponse.status).toBe(404);
+    expect(await killResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_FOUND',
+        message: "Tracked agent 'agent-missing' was not found",
+      },
+    });
   });
 
   it('soft-deletes stopped tracked agents so they disappear from the dashboard list', async () => {
