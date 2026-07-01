@@ -2,7 +2,7 @@
 
 **MOD-07: Human-in-the-Loop (HITL) & Governance** for the Frankenbeast AI agent orchestrator.
 
-The Governor is the safety valve of the Frankenbeast system. It pauses agent execution for human approval on high-stakes actions — budget breaches, destructive skills, low-confidence plans, and ambiguity. The agent cannot execute gated operations without an explicit human ACK.
+The Governor is the safety valve of the Frankenbeast system. It evaluates whether high-stakes actions — budget breaches, destructive skills, low-confidence plans, and ambiguity — require human approval, then issues/audits approval decisions. Enforcement happens in the caller/orchestrator or hook that consults the Governor; this package provides the trigger, approval, audit, signing, and session-token primitives.
 
 ## Table of Contents
 
@@ -102,7 +102,7 @@ The module follows hexagonal architecture with dependency injection at every bou
 - **Triggers** are stateless evaluators — no I/O, purely functional
 - **Channels** are the Strategy pattern — swap CLI for Slack (or both) without touching the gateway
 - **Audit** records every decision through a port interface compatible with MOD-03 (franken-brain)
-- **Security** layer adds optional HMAC-SHA256 signed approvals and session tokens
+- **Security** layer adds optional HMAC-SHA256 signed approvals and session-token issuance/storage/validation helpers; callers must enforce those tokens at the execution boundary
 
 ## Trigger Evaluators
 
@@ -136,7 +136,7 @@ Severity: **critical**
 
 ### SkillTrigger
 
-Fires when a skill from MOD-02 (franken-skills) is marked as requiring HITL or is destructive.
+Fires when a skill/tool descriptor is marked as requiring HITL or is destructive. In the current repo, skill/provider handling is consolidated into `franken-orchestrator` and MCP suite surfaces rather than a standalone `franken-skills` package.
 
 ```typescript
 import { SkillTrigger, type SkillTriggerContext } from '@franken/governor';
@@ -553,16 +553,16 @@ circuitBreaker.on('limit-reached', (result) => {
 });
 ```
 
-### MOD-02: franken-skills (Skill Gating)
+### Skill/tool gating
 
-Check `UnifiedSkillContract.constraints` before invoking a skill:
+Check the caller's skill or tool descriptor before invoking it:
 
 ```typescript
 import { SkillTrigger } from '@franken/governor';
 
 const skillTrigger = new SkillTrigger();
 
-function shouldGateSkill(contract: UnifiedSkillContract) {
+function shouldGateSkill(contract: { id: string; constraints: { requires_hitl: boolean; is_destructive?: boolean } }) {
   return skillTrigger.evaluate({
     skillId: contract.id,
     requiresHitl: contract.constraints.requires_hitl,

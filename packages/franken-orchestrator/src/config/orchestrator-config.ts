@@ -15,6 +15,8 @@ export const ProviderConfigSchema = z.object({
   ]),
   apiKey: z.string().optional(),
   cliPath: z.string().optional(),
+  model: z.string().optional(),
+  extraArgs: z.array(z.string()).optional(),
 });
 
 export const SecurityConfigInputSchema = z.object({

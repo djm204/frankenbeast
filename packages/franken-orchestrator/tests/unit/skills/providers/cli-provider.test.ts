@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ICliProvider, ProviderOpts } from '../../../../src/skills/providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from '../../../../src/skills/providers/cli-provider.js';
+import { cliProviderCatalogEntries } from '../../../../src/providers/provider-config.js';
 
 // ---------------------------------------------------------------------------
 // ICliProvider interface shape
@@ -243,6 +244,12 @@ describe('createDefaultRegistry', () => {
   it('has all 4 built-in providers registered in order', () => {
     const registry = createDefaultRegistry();
     expect(registry.names()).toEqual(['claude', 'codex', 'gemini', 'aider']);
+  });
+
+  it('keeps consolidated CLI provider names in the legacy registry', () => {
+    const registry = createDefaultRegistry();
+    const bridgedNames = cliProviderCatalogEntries().map((entry) => entry.cliRegistryName);
+    expect(registry.names()).toEqual(expect.arrayContaining(bridgedNames));
   });
 
   it('each registered provider is the correct class instance', () => {

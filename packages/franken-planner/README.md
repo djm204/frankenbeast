@@ -59,10 +59,12 @@ PlanResult
 ## Usage
 
 ```typescript
-import { Planner } from 'franken-planner';
-import { LinearPlanner } from 'franken-planner/planners/linear';
-import { StubHITLGate } from 'franken-planner/hitl/stub-hitl-gate';
-import { RecoveryController } from 'franken-planner/recovery/recovery-controller';
+import {
+  Planner,
+  LinearPlanner,
+  StubHITLGate,
+  RecoveryController,
+} from 'franken-planner';
 
 const planner = new Planner(
   guardrailsModule,   // GuardrailsModule — sanitizes raw input
@@ -114,12 +116,17 @@ Pass a `SelfCritiqueModule` to enable Chain-of-Thought verification before each 
 ## Development
 
 ```bash
-pnpm install        # install dependencies
-pnpm test           # run tests in watch mode
-pnpm test:ci        # single run with coverage report
-pnpm typecheck      # strict TypeScript type check
-pnpm lint           # ESLint
-pnpm build          # compile to dist/
+npm install         # from repo root
+npm --workspace franken-planner test
+npm --workspace franken-planner run test:ci
+npm --workspace franken-planner run typecheck
+npm --workspace franken-planner run lint
+npm --workspace franken-planner run build
+
+# Or, from packages/franken-planner:
+npm test
+npm run typecheck
+npm run build
 ```
 
 ### Test structure

@@ -28,11 +28,10 @@ Implement a `CritiqueLoop` class that composes the `CritiquePipeline` and `Circu
 class CritiqueLoop {
   constructor(
     pipeline: CritiquePipeline,
-    breakers: CircuitBreaker[],
-    config: LoopConfig
+    breakers: readonly CircuitBreaker[]
   )
 
-  async run(input: CritiqueInput): Promise<CritiqueLoopResult>
+  async run(input: EvaluationInput, config: LoopConfig): Promise<CritiqueLoopResult>
 }
 ```
 
@@ -42,9 +41,9 @@ The `run()` method follows this algorithm:
 3. Run the `CritiquePipeline` against the current input
 4. Record the `CritiqueResult` in iteration history
 5. If the result is a **pass**, return success with all iteration data
-6. If the result is a **fail**, construct a `CorrectionRequest` from the failed evaluations
-7. Increment iteration count, update `LoopState`
-8. Go to step 2
+6. If the result is a **fail**, update failure history and iteration count.
+7. If this was the final allowed iteration (`iterationCount >= config.maxIterations`), construct and return a `CorrectionRequest` from the failed evaluations.
+8. Otherwise go to step 2 with the same input. The caller owns regeneration and can invoke the loop again with revised input.
 
 The `CritiqueLoop` does NOT call the Actor to regenerate. It returns a `CorrectionRequest` and expects the caller (the Orchestrator) to feed the revised input back in. This keeps MOD-06 focused on evaluation, not generation.
 

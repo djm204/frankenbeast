@@ -15,8 +15,10 @@ import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.j
 
 export interface CodexCliOptions {
   binaryPath?: string;
+  model?: string;
   profile?: string;
   configOverrides?: Record<string, string>;
+  extraArgs?: readonly string[];
 }
 
 export class CodexCliAdapter implements ILlmProvider {
@@ -108,12 +110,18 @@ export class CodexCliAdapter implements ILlmProvider {
     if (this.options.profile) {
       args.push('-p', this.options.profile);
     }
+    if (this.options.model && !this.options.configOverrides?.['model']) {
+      args.push('-c', `model=${this.options.model}`);
+    }
     if (this.options.configOverrides) {
       for (const [key, value] of Object.entries(
         this.options.configOverrides,
       )) {
         args.push('-c', `${key}=${value}`);
       }
+    }
+    if (this.options.extraArgs?.length) {
+      args.push(...this.options.extraArgs);
     }
     return args;
   }

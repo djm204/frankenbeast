@@ -1,4 +1,4 @@
-# ADR-035: Central in-process governance on the MCP dispatch path
+# ADR-038: Central in-process governance on the MCP dispatch path
 
 - **Date:** 2026-06-28
 - **Status:** Accepted
