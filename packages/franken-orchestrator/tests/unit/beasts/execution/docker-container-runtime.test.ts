@@ -56,6 +56,34 @@ describe('toDockerSpec', () => {
     expect(user?.split(':')[0]).not.toBe('0');
   });
 
+  it('uses the writable workspace owner UID/GID for bind-mounted workspaces', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'fbeast-owned-workspace-'));
+    const spec = toDockerSpec(base, {
+      ...DEFAULT_SANDBOX_POLICY,
+      workspaceHostPath: workspace,
+      user: '10001:10001',
+    });
+
+    const userFlag = spec.args.indexOf('--user');
+    const expectedUser = process.getuid?.() === 0
+      ? '10001:10001'
+      : `${process.getuid?.()}:${process.getgid?.()}`;
+    expect(spec.args[userFlag + 1]).toBe(expectedUser);
+  });
+
+  it('keeps the configured user for read-only workspace mounts', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'fbeast-readonly-workspace-'));
+    const spec = toDockerSpec(base, {
+      ...DEFAULT_SANDBOX_POLICY,
+      workspaceHostPath: workspace,
+      readOnlyWorkspaceMount: true,
+      user: '10001:10001',
+    });
+
+    const userFlag = spec.args.indexOf('--user');
+    expect(spec.args[userFlag + 1]).toBe('10001:10001');
+  });
+
   it('supports an opt-in read-only workspace mount', () => {
     const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj', readOnlyWorkspaceMount: true });
 

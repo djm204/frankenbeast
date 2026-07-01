@@ -145,6 +145,8 @@ Container mode requires Docker and the in-repo sandbox image. Build the default 
 docker build -t fbeast/sandbox:latest -f Dockerfile .
 ```
 
+The repository includes a root `.dockerignore` for this build context. Keep local secrets and agent state out of the image context by filtering `.env*` (except `.env.example`), `.fbeast/`, `.codex/`, `node_modules/`, `.git/`, build outputs, coverage, and logs before running `docker build`.
+
 Unit tests do not require a Docker daemon because they assert the generated Docker command and Dockerfile hardening instead of launching Docker. Docker-backed integration tests are also present and are skipped automatically when Docker is unavailable; when Docker is installed they build `fbeast/sandbox:latest`, verify writable non-root workspace behavior, and run a memory-exceeding workload under the configured limits.
 
 The default env allowlist is intentionally narrow: `PATH`, `HOME`, `LANG`, `LC_ALL`, `FRANKENBEAST_RUN_CONFIG`, `FRANKENBEAST_SPAWNED`, and the `FRANKENBEAST_MODULE_*` toggles for firewall, skills, memory, planner, critique, governor, and heartbeat. Secrets such as `GITHUB_TOKEN`, provider API keys, and arbitrary shell environment variables are not inherited unless the Beast definition explicitly places them in `spec.env` and the runtime policy allows the key.

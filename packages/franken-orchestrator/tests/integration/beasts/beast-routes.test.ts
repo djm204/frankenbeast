@@ -125,7 +125,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
     },
   });
 
-  return { app, operatorToken, fakeContainerSupervisor };
+  return { app, operatorToken, fakeContainerSupervisor, repository };
 }
 
 describe('beast routes', () => {
@@ -235,7 +235,7 @@ describe('beast routes', () => {
     expect(created.data).toMatchObject({
       executionMode: 'container',
       status: 'running',
-      containerId: `fbeast-${created.data.id}`,
+      containerId: `fbeast-${created.data.id}-attempt-1`,
       containerRuntime: 'docker',
       image: 'fbeast/sandbox:test',
       containerImage: 'fbeast/sandbox:test',
@@ -259,18 +259,90 @@ describe('beast routes', () => {
       };
     };
     expect(detail.data.run).toMatchObject({
-      containerId: `fbeast-${created.data.id}`,
+      containerId: `fbeast-${created.data.id}-attempt-1`,
       image: 'fbeast/sandbox:test',
       containerImage: 'fbeast/sandbox:test',
       workspaceContainerPath: '/workspace',
     });
     expect(detail.data.attempts[0]?.executorMetadata).toMatchObject({
       backend: 'container',
-      containerId: `fbeast-${created.data.id}`,
+      containerId: `fbeast-${created.data.id}-attempt-1`,
       containerRuntime: 'docker',
       image: 'fbeast/sandbox:test',
       containerImage: 'fbeast/sandbox:test',
       dockerCommand: 'docker',
+    });
+  });
+
+  it('does not require attempts when listing stale process-mode runs', async () => {
+    const { app, operatorToken, repository } = createBeastApp();
+    const staleRun = repository.createRun({
+      definitionId: 'deleted-definition',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const response = await app.request('/v1/beasts/runs', {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { runs: Array<{ id: string }> } };
+    expect(body.data.runs.map((run) => run.id)).toContain(staleRun.id);
+  });
+
+  it('exposes container fields in start and restart action responses', async () => {
+    const { app, operatorToken } = createBeastApp({ realContainer: true });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createRun = async () => {
+      const response = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Exercise container action response',
+            chunkDirectory: 'docs/chunks',
+          },
+          executionMode: 'container',
+          startNow: false,
+        }),
+      });
+      expect(response.status).toBe(201);
+      return await response.json() as { data: { id: string } };
+    };
+
+    const startCandidate = await createRun();
+    const startResponse = await app.request(`/v1/beasts/runs/${startCandidate.data.id}/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(startResponse.status).toBe(200);
+    const started = await startResponse.json() as { data: { containerId?: string; containerRuntime?: string } };
+    expect(started.data).toMatchObject({
+      containerId: `fbeast-${startCandidate.data.id}-attempt-1`,
+      containerRuntime: 'docker',
+    });
+
+    const restartCandidate = await createRun();
+    const restartResponse = await app.request(`/v1/beasts/runs/${restartCandidate.data.id}/restart`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(restartResponse.status).toBe(200);
+    const restarted = await restartResponse.json() as { data: { containerId?: string; containerRuntime?: string } };
+    expect(restarted.data).toMatchObject({
+      containerId: `fbeast-${restartCandidate.data.id}-attempt-1`,
+      containerRuntime: 'docker',
     });
   });
 
