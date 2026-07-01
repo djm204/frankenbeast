@@ -111,7 +111,11 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs \
   -d '{
     "definitionId": "martin-loop",
     "executionMode": "container",
-    "config": { "planDir": ".fbeast/plans/my-plan/chunks" },
+    "config": {
+      "provider": "codex",
+      "objective": "Run the implementation chunks",
+      "chunkDirectory": ".fbeast/plans/my-plan/chunks"
+    },
     "startNow": true
   }'
 ```
@@ -164,7 +168,7 @@ From the selected agent detail panel:
 - **Resume** resumes a tracked agent's linked run when resumable state exists.
 - **Delete** soft-deletes the tracked agent from the dashboard list.
 
-Equivalent CLI controls are available for raw run IDs:
+Equivalent CLI controls for raw run IDs:
 
 ```bash
 frankenbeast beasts list
@@ -173,6 +177,11 @@ frankenbeast beasts logs <run-id>
 frankenbeast beasts stop <run-id>
 frankenbeast beasts kill <run-id>
 frankenbeast beasts restart <run-id>
+```
+
+Tracked-agent-only CLI controls use agent IDs, not raw run IDs:
+
+```bash
 frankenbeast beasts resume <agent-id>
 frankenbeast beasts delete <agent-id>
 ```

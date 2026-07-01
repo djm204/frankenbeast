@@ -430,7 +430,7 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 ## Deploy-Beasts / Sandboxed Execution Tracking
 
 - **ADR-036** (`docs/adr/036-sandboxed-beast-execution.md`, Accepted 2026-05-23): documents the current Beast execution boundaries. `process` mode is a host child process with env allowlist and project-root cwd containment; `container` mode transforms the Beast process spec into Docker `--network none` with one explicit workspace mount and the same env allowlist. Docker container mode is not micro-VM/gVisor/Firecracker/Wasm/seccomp isolation.
-- **Dashboard deploy guide**: `docs/guides/deploy-beasts.md` covers the current dashboard tracked-agent deploy flow, monitoring, stop/kill controls, and sprint caveats while #455/#457/#459 remain open.
+- **Dashboard deploy guide**: `docs/guides/deploy-beasts.md` covers the current dashboard tracked-agent deploy flow, monitoring, stop/kill controls, and sprint caveats while #455/#457/#458 remain open.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
