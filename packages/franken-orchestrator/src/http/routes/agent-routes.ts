@@ -299,6 +299,13 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' has no linked run to kill`,
         );
       }
+      if (agent.status !== 'running') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_KILLABLE',
+          `Tracked agent '${agentId}' is not running`,
+        );
+      }
       const run = await deps.runs.kill(agent.dispatchRunId, 'operator');
       deps.agents.appendEvent(agentId, {
         level: 'info',

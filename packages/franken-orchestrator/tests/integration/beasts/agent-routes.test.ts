@@ -664,6 +664,74 @@ describe('agent routes integration', () => {
     expectEventsToIncludeTypes(detail.data.events, ['agent.kill.requested']);
   });
 
+  it('returns 409 on a stale/double kill request instead of re-killing an already-stopped linked run', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createAgentResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+        },
+      }),
+    });
+    expect(createAgentResponse.status).toBe(201);
+    const createdAgent = await createAgentResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(createdAgent.data.status).toBe('running');
+
+    const firstKillResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/kill`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(firstKillResponse.status).toBe(200);
+    const firstKilled = await firstKillResponse.json() as { data: { status: string; stopReason?: string } };
+    expect(firstKilled.data.status).toBe('stopped');
+    expect(firstKilled.data.stopReason).toBe('operator_kill');
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const detail = await detailResponse.json() as { data: { agent: { status: string } } };
+    expect(detail.data.agent.status).toBe('stopped');
+
+    // A stale/double-click kill (e.g. the operator clicks Kill twice, or the request is
+    // retried after the agent already stopped) must not be allowed to re-run the executor's
+    // kill against an already-terminal run and stomp its stop reason.
+    const secondKillResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/kill`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(secondKillResponse.status).toBe(409);
+    expect(await secondKillResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_KILLABLE',
+        message: `Tracked agent '${createdAgent.data.id}' is not running`,
+      },
+    });
+  });
+
   it('returns 409 when killing a tracked agent that has no linked run', async () => {
     const { app } = createStandaloneAgentApp();
     const operatorToken = 'super-secret-operator-token';
