@@ -29,4 +29,15 @@ export class HttpApprovalChannel implements ApprovalChannel {
   requestApproval(request: ApprovalRequest): Promise<ApprovalResponse> {
     return this.registry.waitFor(request.requestId, request.taskId, request.summary);
   }
+
+  /**
+   * Called by `ApprovalGateway` when it gives up waiting (e.g. on timeout).
+   * Purges the registry entry so `GET /health` stops reporting an abandoned
+   * request as pending, and so a late `POST /v1/approval/respond` or Slack
+   * callback for it returns 404 instead of a misleading 200 for a decision
+   * nobody is listening for anymore.
+   */
+  cancel(requestId: string): void {
+    this.registry.delete(requestId);
+  }
 }

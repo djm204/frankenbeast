@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
 import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
+import { SignatureVerifier } from '../security/signature-verifier.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -74,6 +75,31 @@ function verifyGovernorSignature(
   }
 
   return { ok: true };
+}
+
+/**
+ * Produce a signature for a resolved `ApprovalResponse` matching the format
+ * `ApprovalGateway.verifySignature` expects (HMAC-SHA256 hex digest of
+ * `JSON.stringify({ requestId, decision })`, via `SignatureVerifier`).
+ *
+ * Without this, a caller awaiting the approval through `ApprovalGateway`
+ * with `config.requireSignedApprovals: true` would always unblock only to
+ * immediately fail with `SignatureVerificationError`, because the response
+ * handed to the registry never carried a `signature` (see issue #411 review
+ * follow-up). The HTTP handlers below have already authenticated the
+ * caller (via `x-governor-signature` or the Slack signature scheme) before
+ * calling this, so re-signing the canonical `{requestId, decision}` payload
+ * with the same governor `signingSecret` is safe and lets the two
+ * signature schemes compose.
+ */
+function signApprovalResponse(
+  requestId: string,
+  decision: ResponseCode,
+  signingSecret: string,
+): string {
+  return new SignatureVerifier(signingSecret).sign(
+    JSON.stringify({ requestId, decision }),
+  );
 }
 
 /**
@@ -189,6 +215,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
     const respondedBy = typeof body.respondedBy === 'string' ? body.respondedBy : 'http-operator';
     const feedback = typeof body.feedback === 'string' ? body.feedback : undefined;
+    const decision = body.decision as ResponseCode;
+    // Only produced once this request has already been authenticated above
+    // (a valid x-governor-signature, or explicitly allowed unsigned for
+    // tests); see `signApprovalResponse` for why this is safe to attach.
+    const signature = options.signingSecret
+      ? signApprovalResponse(body.requestId, decision, options.signingSecret)
+      : undefined;
 
     // Wake the real waiter (if any) registered via `HttpApprovalChannel`, so
     // a caller blocked on `ApprovalGateway.requestApproval()` actually
@@ -196,10 +229,11 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // only from the HTTP caller's point of view.
     registry.resolve(body.requestId, {
       requestId: body.requestId,
-      decision: body.decision as ResponseCode,
+      decision,
       respondedBy,
       respondedAt: new Date(),
       ...(feedback !== undefined ? { feedback } : {}),
+      ...(signature !== undefined ? { signature } : {}),
     });
 
     return c.json({
@@ -290,12 +324,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     }
 
     // Resolve and clear the pending approval exactly once, waking any real
-    // waiter registered via `HttpApprovalChannel`.
+    // waiter registered via `HttpApprovalChannel`. The Slack signature
+    // above already authenticated this callback; if a governor
+    // `signingSecret` is also configured, re-sign the canonical decision so
+    // `ApprovalGateway.requireSignedApprovals` accepts it too (see
+    // `signApprovalResponse`).
+    const slackSignature = options.signingSecret
+      ? signApprovalResponse(requestId, decision, options.signingSecret)
+      : undefined;
+
     registry.resolve(requestId, {
       requestId,
       decision,
       respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
       respondedAt: new Date(),
+      ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
 
     return c.json({
