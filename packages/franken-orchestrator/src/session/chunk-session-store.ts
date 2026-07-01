@@ -4,6 +4,22 @@ import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
 import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
 
+const QUARANTINE_SUFFIX = /\.corrupt\.\d+\.\d+$/;
+
+/**
+ * Derives a session's storage key from a filename on disk, without parsing
+ * JSON — recognizes both live `<key>.json` files and quarantined
+ * `<key>.json.corrupt.<ts>.<pid>` files (see readJsonFileOrQuarantine).
+ * Returns undefined for anything else (directories, unrelated files).
+ */
+function sessionKeyFromFileName(file: string): string | undefined {
+  const dequarantined = file.replace(QUARANTINE_SUFFIX, '');
+  if (!dequarantined.endsWith('.json')) {
+    return undefined;
+  }
+  return dequarantined.slice(0, -'.json'.length);
+}
+
 export class FileChunkSessionStore {
   constructor(private readonly rootDir: string) {}
 
@@ -97,6 +113,32 @@ export class FileChunkSessionStore {
     }
 
     return sessions;
+  }
+
+  /**
+   * Lists the storage keys of every session file present on disk — including
+   * quarantined (corrupt) ones — without parsing JSON. Callers like garbage
+   * collection use this instead of list() so a session whose primary file is
+   * corrupt (quarantined, not yet recovered) still counts as "present" and
+   * its snapshot history is not deleted as orphaned.
+   */
+  listStorageKeys(planName?: string): string[] {
+    const plans = planName ? [planName] : this.listPlanNames();
+    const keys: string[] = [];
+
+    for (const plan of plans) {
+      const planDir = join(this.rootDir, plan);
+      if (!existsSync(planDir)) continue;
+
+      for (const file of readdirSync(planDir)) {
+        const key = sessionKeyFromFileName(file);
+        if (key) {
+          keys.push(`${plan}/${key}`);
+        }
+      }
+    }
+
+    return keys;
   }
 
   private filePathFor(planName: string, chunkId: string, taskId?: string): string {

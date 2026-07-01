@@ -267,4 +267,22 @@ describe('FileChunkSessionSnapshotStore', () => {
     expect(() => snapshots.list('demo-plan', '01_demo')).not.toThrow();
     expect(snapshots.list('demo-plan', '01_demo')).toHaveLength(1);
   });
+
+  it('list() with a taskId also quarantines a corrupt snapshot instead of returning it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-task-corrupt-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const goodFile = snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptPath = join(dir, '2026-01-03T00-00-00-000Z-gen-2-pre-compaction.json');
+    writeFileSync(corruptPath, 'not valid json{{{');
+
+    const files = snapshots.list('demo-plan', '01_demo', session.taskId);
+
+    expect(files).toEqual([goodFile]);
+    expect(existsSync(corruptPath)).toBe(false);
+    expect(readdirSync(dir).some((f) => f.includes('.corrupt.'))).toBe(true);
+  });
 });

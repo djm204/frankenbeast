@@ -25,6 +25,10 @@ export class FileChunkSessionSnapshotStore {
       return readdirSync(dir)
         .filter((file) => file.endsWith('.json'))
         .map((file) => join(dir, file))
+        // Corrupt snapshots are quarantined and skipped here too — the
+        // taskId-scoped fast path must degrade the same way as the
+        // unscoped listing below, not silently hand back a torn file.
+        .filter((filePath) => readJsonFileOrQuarantine<ChunkSession>(filePath) !== undefined)
         .sort();
     }
 
