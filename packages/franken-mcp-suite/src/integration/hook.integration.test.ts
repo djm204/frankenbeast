@@ -48,6 +48,18 @@ describe('fbeast-hook runtime', () => {
     expect(result.checkCalls).toEqual([{ action: 'Bash', context: 'rm -rf /legacy' }]);
   });
 
+  it('redacts inline credentials from the governor context before it is checked/logged', async () => {
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: "curl -H 'Authorization: Bearer sk-secret-abc123' https://api.example.com --password hunter2",
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).not.toContain('sk-secret-abc123');
+    expect(seen).not.toContain('hunter2');
+    expect(seen).toContain('[REDACTED]');
+  });
+
   it('post-tool hook records observer events', async () => {
     const result = await runHookForTest(['post-tool', 'write_file', '{"ok":true}']);
 

@@ -34,6 +34,23 @@ export function defaultHookDeps(dbPath?: string): HookDeps {
   };
 }
 
+/**
+ * Redact common inline credentials from the governor context before it is
+ * checked (and persisted to `governor_log.context`). The governor only pattern-
+ * matches destructive *verbs*, so stripping secret values never weakens
+ * detection, but it keeps bearer tokens / passwords / API keys out of the audit
+ * log. This is a proportionate, best-effort scrub — exhaustive secret detection
+ * is intentionally out of scope.
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
+    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
+    .replace(/(\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
+    .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+}
+
 export async function runHook(
   argv: string[] = process.argv.slice(2),
   deps?: HookDeps,
@@ -68,7 +85,8 @@ export async function runHook(
     // Fall back to the positional payload for direct/legacy callers
     // (`fbeast-hook pre-tool <tool> <payload>`) so they keep governance coverage
     // when the env var is unset.
-    const context = resolvedDeps.readContext() || payload;
+    // Redact inline credentials before the governor sees/logs the context.
+    const context = redactSecrets(resolvedDeps.readContext() || payload);
     const decision = await resolvedDeps.governor.check({ action: toolName, context });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);

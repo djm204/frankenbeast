@@ -5,23 +5,25 @@ import { createSqliteStore } from '../shared/sqlite-store.js';
 
 /**
  * Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover.
- * Single-word verbs are anchored with `\b` word boundaries so benign path-like
- * arguments forwarded in shell commands (e.g. `cat src/dropdown.tsx`,
- * `git diff docs/formatting.md`) do not false-match `drop`/`format`, while real
- * destructive verbs (`drop table`, `format c:`) still trip.
+ * Substring (not word-boundary) matching is deliberate: it fails closed, so
+ * snake_case/camelCase destructive verbs (`drop_table`, `dropTable`) are still
+ * caught. The tradeoff is benign paths containing these substrings
+ * (`src/dropdown.tsx`) also trip — a safe false-positive. Tightening this
+ * heuristic (tokenizer/verb-aware matching, split-flag detection like
+ * `rm -r -f`) is tracked as a follow-up and intentionally out of scope here.
  */
 const DANGEROUS_PATTERNS = [
-  /\bdelete\b/i,
-  /\bdrop\b/i,
-  /\btruncate\b/i,
-  /\bdestroy\b/i,
+  /delete/i,
+  /drop/i,
+  /truncate/i,
+  /destroy/i,
   /remove.*all/i,
   /force.*push/i,
   /reset.*hard/i,
   /rm\s+-rf/i,
-  /\bformat\b/i,
-  /\bwipe\b/i,
-  /\bpurge\b/i,
+  /format/i,
+  /wipe/i,
+  /purge/i,
 ];
 
 export interface GovernorCheckResult {
@@ -53,7 +55,7 @@ function matchesDangerousPattern(text: string): boolean {
   return DANGEROUS_PATTERNS.some((p) => p.test(text));
 }
 
-export function assessAction(action: string, context: string): GovernorCheckResult {
+function assessAction(action: string, context: string): GovernorCheckResult {
   const combined = `${action} ${context}`;
   const isDestructive = matchesDangerousPattern(combined);
 
