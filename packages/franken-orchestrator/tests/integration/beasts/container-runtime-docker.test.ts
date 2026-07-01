@@ -15,6 +15,15 @@ function hasDocker(): boolean {
   return !result.error && result.status === 0;
 }
 
+function testNonRootUser(): `${number}:${number}` {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid !== undefined && gid !== undefined && uid > 0) {
+    return `${uid}:${gid}`;
+  }
+  return '10001:10001';
+}
+
 const dockerIt = hasDocker() ? it : it.skip;
 
 describe('sandbox Docker runtime enforcement', () => {
@@ -41,7 +50,7 @@ describe('sandbox Docker runtime enforcement', () => {
       '--pids-limit',
       '64',
       '--user',
-      `${process.getuid?.() ?? 10001}:${process.getgid?.() ?? 10001}`,
+      testNonRootUser(),
       '-v',
       `${workspace}:/workspace`,
       '-w',
@@ -65,9 +74,8 @@ describe('sandbox Docker runtime enforcement', () => {
     });
 
     const workspace = mkdtempSync(join(tmpdir(), 'fbeast-sandbox-write-'));
-    const uid = process.getuid?.() ?? 10001;
-    const gid = process.getgid?.() ?? 10001;
-    expect(uid).not.toBe(0);
+    const [uid, gid] = testNonRootUser().split(':');
+    expect(uid).not.toBe('0');
 
     const result = spawnSync('docker', [
       'run',
