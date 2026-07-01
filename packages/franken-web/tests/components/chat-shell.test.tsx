@@ -441,10 +441,9 @@ describe('ChatShell', () => {
     });
   });
 
-  it('deduplicates live log events by SSE event id', async () => {
+  it('deduplicates live log events already returned by the REST log load', async () => {
     window.location.hash = '#/beasts';
     const persistedLine = JSON.stringify({
-      eventId: 'log-event-1',
       stream: 'stdout',
       message: 'container line 1',
       createdAt: '2026-03-11T00:00:04.000Z',
@@ -618,9 +617,6 @@ describe('ChatShell', () => {
       expect(document.body.textContent).toContain('No events or logs yet');
     });
 
-    latestBeastEventHandlers?.snapshot?.({
-      agents: [{ id: 'agent-1', dispatchRunId: 'run-2' }],
-    });
     mockGetAgent.mockResolvedValue({
       agent: {
         id: 'agent-1',
@@ -651,6 +647,19 @@ describe('ChatShell', () => {
       events: [],
     });
     mockGetLogs.mockResolvedValue(['linked run log']);
+
+    latestBeastEventHandlers?.agentEvent?.({
+      agentId: 'agent-1',
+      event: {
+        id: 'agent-event-1',
+        sequence: 1,
+        level: 'info',
+        type: 'agent.dispatch.linked',
+        message: 'Dispatch run linked',
+        payload: { runId: 'run-2' },
+        createdAt: '2026-03-11T00:00:03.000Z',
+      },
+    });
 
     latestBeastEventHandlers?.runLog?.({
       eventId: 'log-event-1',

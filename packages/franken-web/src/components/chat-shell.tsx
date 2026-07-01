@@ -62,25 +62,48 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
 
 function appendUniqueLogLine(logs: string[], nextLine: string): string[] {
   const nextIdentity = parseLogIdentity(nextLine);
-  if (nextIdentity && logs.some((line) => parseLogIdentity(line)?.eventId === nextIdentity.eventId)) {
+  if (nextIdentity?.eventId && logs.some((line) => parseLogIdentity(line)?.eventId === nextIdentity.eventId)) {
+    return logs;
+  }
+  if (nextIdentity?.createdAt && logs.some((line) => {
+    const identity = parseLogIdentity(line);
+    return identity
+      && (!identity.eventId || !nextIdentity.eventId)
+      && identity.stream === nextIdentity.stream
+      && identity.message === nextIdentity.message
+      && identity.createdAt === nextIdentity.createdAt;
+  })) {
     return logs;
   }
   return logs[logs.length - 1] === nextLine ? logs : [...logs, nextLine];
 }
 
-function parseLogIdentity(line: string): { eventId: string } | null {
+function parseLogIdentity(line: string): { eventId?: string; stream?: string; message?: string; createdAt?: string } | null {
   try {
     const parsed = JSON.parse(line) as unknown;
     if (typeof parsed !== 'object' || parsed === null) {
       return null;
     }
-    const candidate = parsed as { eventId?: unknown };
-    return typeof candidate.eventId === 'string' && candidate.eventId.length > 0
-      ? { eventId: candidate.eventId }
-      : null;
+    const candidate = parsed as { eventId?: unknown; stream?: unknown; message?: unknown; createdAt?: unknown };
+    const identity = {
+      ...(typeof candidate.eventId === 'string' && candidate.eventId.length > 0 ? { eventId: candidate.eventId } : {}),
+      ...(typeof candidate.stream === 'string' ? { stream: candidate.stream } : {}),
+      ...(typeof candidate.message === 'string' ? { message: candidate.message } : {}),
+      ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
+    };
+    return identity.eventId || (identity.message && identity.createdAt) ? identity : null;
   } catch {
     return null;
   }
+}
+
+function getAgentEventRunId(payload: unknown): string | null {
+  return typeof payload === 'object'
+    && payload !== null
+    && 'runId' in payload
+    && typeof (payload as { runId?: unknown }).runId === 'string'
+    ? (payload as { runId: string }).runId
+    : null;
 }
 
 function formatStreamedLogLine(event: { eventId?: string; stream?: string; line: string; createdAt?: string }): string {
@@ -346,7 +369,22 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
       },
       agentEvent: (event) => {
         if (cancelled) return;
-        const sawSelectedAgent = beastAgentDetailRef.current?.agent.id === event.agentId;
+        const currentDetail = beastAgentDetailRef.current;
+        const sawSelectedAgent = currentDetail?.agent.id === event.agentId;
+        const linkedRunId = getAgentEventRunId(event.event.payload);
+        const selectedAgentLinkedRun = Boolean(
+          sawSelectedAgent
+          && linkedRunId
+          && currentDetail
+          && currentDetail.agent.dispatchRunId !== linkedRunId
+          && currentDetail.run?.run.id !== linkedRunId,
+        );
+        if (selectedAgentLinkedRun && currentDetail && linkedRunId) {
+          beastAgentDetailRef.current = {
+            ...currentDetail,
+            agent: { ...currentDetail.agent, dispatchRunId: linkedRunId },
+          };
+        }
         setBeastAgentDetail((current) => {
           if (!current || current.agent.id !== event.agentId) return current;
           const nextEvent = {
@@ -360,9 +398,13 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             createdAt: event.event.createdAt ?? new Date().toISOString(),
           };
           if (current.events.some((existing) => existing.id === nextEvent.id)) return current;
-          return { ...current, events: [...current.events, nextEvent] };
+          return {
+            ...current,
+            agent: linkedRunId ? { ...current.agent, dispatchRunId: linkedRunId } : current.agent,
+            events: [...current.events, nextEvent],
+          };
         });
-        if (!sawSelectedAgent) requestBeastRefresh();
+        if (!sawSelectedAgent || selectedAgentLinkedRun) requestBeastRefresh();
       },
       runStatus: (event) => {
         if (cancelled) return;
