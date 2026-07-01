@@ -392,7 +392,7 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 
 - **Chunk A** (#262): Wired `createBeastDeps()` into `dep-factory.ts`, replacing stubs with real adapters. Added dep-bridge, comms config, token aggregation, skill route mounting, commsConfig pass-through.
 - **Chunk B** (#264): Deleted legacy episodic memory + types from franken-brain (-796 lines), removed ulid/zod deps.
-- **Chunk C** (#265): Added `skill`, `provider`, `security`, `dashboard` CLI command groups.
+- **Chunk C** (#265): Added CLI command groups during consolidation; current live CLI subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security`. Earlier top-level `provider`/`dashboard` command surfaces were removed when provider config, `chat-server`, HTTP dashboard routes, and `franken-web` became the supported surfaces.
 - **Chunk E** (#268): Created skill directory equivalents for beast definitions.
 - **Chunk F** (#267): Added `SkillConfigStore` for persistent skill toggle state.
 - **One-Shots**: Deleted standalone comms server files, added HITL integration test, fixed checkpoint flush.
@@ -423,9 +423,14 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 1. **Orchestrator depends on port interfaces, not implementations** (by design — hexagonal architecture). Concrete module wiring is done in `dep-factory.ts` via `createBeastDeps()`.
 2. **No `--non-interactive` flag**: Review loops require stdin. For CI/headless use, pipe `"y\n"` to stdin.
 3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
-4. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
+4. **No top-level `provider` or `dashboard` CLI subcommands**: `packages/franken-orchestrator/src/cli/args.ts` currently exposes `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security`. Provider/dashboard functionality lives in provider config, `chat-server`, HTTP routes, and `franken-web`.
 5. **ProviderRegistry only active in reflection path**: Task execution still flows through CliLlmAdapter → MartinLoop → spawn(). Multi-provider failover applies to heartbeat/reflection LLM calls only. This is by design — middleware applies to prompt text in-process, not subprocess stdio.
 6. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
+
+## Deploy-Beasts / Sandboxed Execution Tracking
+
+- **ADR-036** (`docs/adr/036-sandboxed-beast-execution.md`, Accepted 2026-05-23): documents the current Beast execution boundaries. `process` mode is a host child process with env allowlist and project-root cwd containment; `container` mode transforms the Beast process spec into Docker `--network none` with one explicit workspace mount and the same env allowlist. Docker container mode is not micro-VM/gVisor/Firecracker/Wasm/seccomp isolation.
+- **Dashboard deploy guide**: `docs/guides/deploy-beasts.md` covers the current dashboard tracked-agent deploy flow, monitoring, stop/kill controls, and sprint caveats while #455/#457/#459 remain open.
 
 ## Notes
 - Critical path: PR-15 → 19 → 20 → 25 → 26 → 27 → 28 → 29 → 30 → 36 → 37 → 38
