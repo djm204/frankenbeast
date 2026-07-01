@@ -13,6 +13,7 @@ const CreateSessionBody = z.object({
 
 const SubmitMessageBody = z.object({
   content: z.string().min(1),
+  executionMode: z.enum(['process', 'container']).optional(),
 }).strict();
 
 const ApproveBody = z.object({
@@ -78,7 +79,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   app.post('/v1/chat/sessions/:id/messages', async (c) => {
     const id = c.req.param('id');
     const body = await parseJsonBody(c);
-    const { content } = validateBody(SubmitMessageBody, body);
+    const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
     const result = await runtime.run(content, {
@@ -87,6 +88,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      ...(executionMode ? { executionMode } : {}),
     });
 
     session.transcript = result.transcript;

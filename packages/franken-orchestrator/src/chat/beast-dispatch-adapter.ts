@@ -2,6 +2,7 @@ import type { BeastCatalogService } from '../beasts/services/beast-catalog-servi
 import type { BeastDispatchService } from '../beasts/services/beast-dispatch-service.js';
 import type { BeastInterviewService, BeastInterviewProgress } from '../beasts/services/beast-interview-service.js';
 import type { AgentInitService } from '../beasts/services/agent-init-service.js';
+import type { BeastExecutionMode } from '../beasts/types.js';
 import type { ChatBeastContext, TranscriptMessage } from './types.js';
 
 export interface ChatBeastDispatchState {
@@ -9,6 +10,7 @@ export interface ChatBeastDispatchState {
   readonly sessionId: string;
   readonly transcript: TranscriptMessage[];
   readonly beastContext?: ChatBeastContext | null | undefined;
+  readonly executionMode?: BeastExecutionMode | undefined;
 }
 
 export interface ChatBeastDispatchResult {
@@ -38,7 +40,9 @@ export class ChatBeastDispatchAdapter {
   constructor(private readonly options: ChatBeastDispatchAdapterOptions) {}
 
   async handle(input: string, state: ChatBeastDispatchState): Promise<ChatBeastDispatchResult | null> {
-    const activeContext = state.beastContext;
+    const activeContext = state.beastContext && state.executionMode
+      ? { ...state.beastContext, executionMode: state.executionMode }
+      : state.beastContext;
     if (activeContext?.status === 'interviewing' && activeContext.interviewSessionId) {
       const progress = this.options.interviews.answer(activeContext.interviewSessionId, input);
       return this.resultFromProgress(progress, activeContext, state.sessionId);
@@ -71,6 +75,7 @@ export class ChatBeastDispatchAdapter {
         agentId: agent.id,
         definitionId: definition.id,
         interviewSessionId: interview.id,
+        ...(state.executionMode ? { executionMode: state.executionMode } : {}),
         status: 'interviewing',
       },
     };
@@ -95,6 +100,7 @@ export class ChatBeastDispatchAdapter {
           ...(context.agentId ? { agentId: context.agentId } : {}),
           definitionId,
           interviewSessionId: progress.session.id,
+          ...(context.executionMode ? { executionMode: context.executionMode } : {}),
           status: 'interviewing',
         },
       };
@@ -105,6 +111,7 @@ export class ChatBeastDispatchAdapter {
           definitionId,
           chatSessionId: sessionId,
           config: progress.config,
+          ...(context.executionMode ? { executionMode: context.executionMode } : {}),
         })
       : await this.options.dispatch.createRun({
           definitionId,
@@ -112,6 +119,7 @@ export class ChatBeastDispatchAdapter {
           dispatchedBy: 'chat',
           dispatchedByUser: `chat-session:${sessionId}`,
           startNow: true,
+          ...(context.executionMode ? { executionMode: context.executionMode } : {}),
         });
 
     return {

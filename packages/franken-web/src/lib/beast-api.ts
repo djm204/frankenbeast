@@ -20,9 +20,22 @@ export interface BeastRunSummary {
   trackedAgentId?: string;
   definitionId: string;
   status: string;
+  executionMode: 'process' | 'container';
   dispatchedBy: string;
   dispatchedByUser: string;
   attemptCount: number;
+  currentAttemptId?: string;
+  stopReason?: string;
+  containerId?: string;
+  containerName?: string;
+  containerRuntime?: string;
+  image?: string;
+  containerImage?: string;
+  containerNetwork?: string;
+  resourceSnapshot?: Record<string, unknown>;
+  resources?: Record<string, unknown>;
+  workspaceHostPath?: string;
+  workspaceContainerPath?: string;
   createdAt: string;
 }
 

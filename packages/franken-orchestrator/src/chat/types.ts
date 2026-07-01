@@ -50,6 +50,7 @@ export const ChatBeastContextSchema = z.object({
   agentId: z.string().min(1).optional(),
   definitionId: z.string().min(1),
   interviewSessionId: z.string().min(1),
+  executionMode: z.enum(['process', 'container']).optional(),
   status: z.enum(['interviewing']),
 });
 export type ChatBeastContext = z.infer<typeof ChatBeastContextSchema>;

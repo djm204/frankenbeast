@@ -65,8 +65,22 @@ describe('ContainerBeastExecutor', () => {
     const attempt = await executor.start(run, definition);
 
     expect(attempt.pid).toBe(4242);
+    expect(attempt.executorMetadata).toMatchObject({
+      backend: 'container',
+      containerRuntime: 'docker',
+      containerId: run.id.replace(/^/, 'fbeast-'),
+      containerName: run.id.replace(/^/, 'fbeast-'),
+      image: 'fbeast/sandbox:test',
+      containerImage: 'fbeast/sandbox:test',
+      containerNetwork: 'none',
+      resourceSnapshot: { memory: DEFAULT_SANDBOX_POLICY.resourceLimits.memory },
+      workspaceHostPath: workDir,
+      workspaceContainerPath: '/workspace',
+      dockerCommand: 'docker',
+    });
     expect(spawned).toHaveLength(1);
     expect(spawned[0].command).toBe('docker');
+    expect(spawned[0].args).toEqual(expect.arrayContaining(['--name', `fbeast-${run.id}`]));
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--network', 'none']));
   });
 });

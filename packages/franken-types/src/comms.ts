@@ -5,6 +5,7 @@ export const ClientSocketEventSchema = z.discriminatedUnion('type', [
     type: z.literal('message.send'),
     clientMessageId: z.string().min(1),
     content: z.string().min(1).max(16_384),
+    executionMode: z.enum(['process', 'container']).optional(),
   }).strict(),
   z.object({
     type: z.literal('approval.respond'),

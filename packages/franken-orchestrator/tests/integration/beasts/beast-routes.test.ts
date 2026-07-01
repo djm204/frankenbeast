@@ -14,16 +14,34 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
+import { ContainerBeastExecutor } from '../../../src/beasts/execution/container-beast-executor.js';
+import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-policy.js';
+import type { BeastProcessSpec } from '../../../src/beasts/types.js';
+import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
-function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }) {
+function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; realContainer?: boolean }) {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
   const logStore = new BeastLogStore(join(TMP, 'logs'));
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
+  const fakeContainerSupervisor: ProcessSupervisorLike = {
+    spawn: vi.fn(async (_spec: BeastProcessSpec, _callbacks: ProcessCallbacks) => ({ pid: 5678 })),
+    stop: vi.fn(async () => undefined),
+    kill: vi.fn(async () => undefined),
+  };
+  const containerExecutor = options?.realContainer
+    ? new ContainerBeastExecutor({
+      repository,
+      logStore,
+      eventBus: new BeastEventBus(),
+      supervisorFactory: () => fakeContainerSupervisor,
+      policy: { ...DEFAULT_SANDBOX_POLICY, image: 'fbeast/sandbox:test', workspaceHostPath: TMP },
+    })
+    : undefined;
   const executors = {
     process: {
       start: vi.fn(async (run, _definition) => {
@@ -72,7 +90,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }
         return repository.getAttempt(attemptId)!;
       }),
     },
-    container: {
+    container: containerExecutor ?? {
       start: vi.fn(),
       stop: vi.fn(),
       kill: vi.fn(),
@@ -107,7 +125,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean }
     },
   });
 
-  return { app, operatorToken };
+  return { app, operatorToken, fakeContainerSupervisor };
 }
 
 describe('beast routes', () => {
@@ -175,6 +193,85 @@ describe('beast routes', () => {
     });
     const logsBody = await logsResponse.json() as { data: { logs: string[] } };
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
+  });
+
+  it('dispatches a real container executor through the API and exposes container fields', async () => {
+    const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Exercise container API dispatch',
+          chunkDirectory: 'docs/chunks',
+        },
+        executionMode: 'container',
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as {
+      data: {
+        id: string;
+        executionMode: string;
+        status: string;
+        containerId?: string;
+        containerRuntime?: string;
+        image?: string;
+        containerImage?: string;
+        containerNetwork?: string;
+        resourceSnapshot?: Record<string, unknown>;
+        workspaceContainerPath?: string;
+      };
+    };
+    expect(created.data).toMatchObject({
+      executionMode: 'container',
+      status: 'running',
+      containerId: `fbeast-${created.data.id}`,
+      containerRuntime: 'docker',
+      image: 'fbeast/sandbox:test',
+      containerImage: 'fbeast/sandbox:test',
+      containerNetwork: 'none',
+      resourceSnapshot: { memory: '512m', cpus: '1.0', pidsLimit: 256 },
+      workspaceContainerPath: '/workspace',
+    });
+    expect(fakeContainerSupervisor.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'docker' }),
+      expect.any(Object),
+    );
+
+    const detailResponse = await app.request(`/v1/beasts/runs/${created.data.id}`, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as {
+      data: {
+        run: { containerId?: string; image?: string; containerImage?: string; workspaceContainerPath?: string };
+        attempts: Array<{ executorMetadata?: Record<string, unknown> }>;
+      };
+    };
+    expect(detail.data.run).toMatchObject({
+      containerId: `fbeast-${created.data.id}`,
+      image: 'fbeast/sandbox:test',
+      containerImage: 'fbeast/sandbox:test',
+      workspaceContainerPath: '/workspace',
+    });
+    expect(detail.data.attempts[0]?.executorMetadata).toMatchObject({
+      backend: 'container',
+      containerId: `fbeast-${created.data.id}`,
+      containerRuntime: 'docker',
+      image: 'fbeast/sandbox:test',
+      containerImage: 'fbeast/sandbox:test',
+      dockerCommand: 'docker',
+    });
   });
 
   it('supports interview start and answer flow', async () => {

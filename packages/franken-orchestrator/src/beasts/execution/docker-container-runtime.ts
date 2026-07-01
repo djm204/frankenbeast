@@ -57,12 +57,21 @@ function workspaceMount(policy: SandboxPolicy): string {
   return `${policy.workspaceHostPath}:${policy.workspaceContainerPath}${accessMode}`;
 }
 
-export function toDockerSpec(spec: BeastProcessSpec, policy: SandboxPolicy): BeastProcessSpec {
+export interface DockerSpecOptions {
+  readonly containerName?: string | undefined;
+}
+
+export function toDockerSpec(
+  spec: BeastProcessSpec,
+  policy: SandboxPolicy,
+  options: DockerSpecOptions = {},
+): BeastProcessSpec {
   return {
     command: 'docker',
     args: [
       'run',
       '--rm',
+      ...(options.containerName ? ['--name', options.containerName] : []),
       '--network',
       policy.network,
       '--memory',

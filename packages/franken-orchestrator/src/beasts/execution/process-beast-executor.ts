@@ -5,7 +5,7 @@ import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
-import type { BeastDefinition, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
 
@@ -25,6 +25,17 @@ export interface ProcessBeastExecutorOptions {
   onRunStatusChange?: (runId: string) => void;
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
+  transformSpec?: (
+    run: BeastRun,
+    originalSpec: BeastProcessSpec,
+    mergedSpec: BeastProcessSpec,
+  ) => BeastProcessSpec;
+  attemptMetadata?: (
+    run: BeastRun,
+    originalSpec: BeastProcessSpec,
+    spawnedSpec: BeastProcessSpec,
+    handle: { pid: number },
+  ) => Readonly<Record<string, unknown>>;
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -64,6 +75,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         FRANKENBEAST_RUN_CONFIG: configFilePath,
       },
     };
+    const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -74,7 +86,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     let handle: { pid: number };
     try {
-      handle = await this.supervisor.spawn(mergedSpec, {
+      handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
           if (attemptId) {
             void this.logs.append(run.id, attemptId, 'stdout', line);
@@ -155,7 +167,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       status: 'running',
       pid: handle.pid,
       startedAt,
-      executorMetadata: {
+      executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
         backend: 'process',
         command: processSpec.command,
         args: [...processSpec.args],
