@@ -15,4 +15,4 @@
   - [x] `npm run typecheck` passed at repo root.
   - [x] `npm test` at repo root was attempted; unrelated existing/flaky timeout in `@franken/critique` safety evaluator (`allows disjoint and deterministic repeated alternatives`) after 5s.
 - [x] Run Codex review loops until all-clear; fix real findings or document rejected findings. (Attempted twice; blocked because Codex CLI has no credentials in this environment, per `codex doctor`.)
-- [ ] Push branch and open PR with `Closes #459`.
+- [x] Push branch and open PR with `Closes #459`. PR: https://github.com/djm204/frankenbeast/pull/465
