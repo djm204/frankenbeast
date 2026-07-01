@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
@@ -130,8 +131,8 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     });
   });
 
-  app.get('/v1/beasts/runtime/container', (c) => {
-    return c.json({ data: getContainerRuntimeStatus() });
+  app.get('/v1/beasts/runtime/container', async (c) => {
+    return c.json({ data: await getContainerRuntimeStatus() });
   });
 
   app.post('/v1/beasts/runs', async (c) => {
@@ -232,11 +233,38 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   return app;
 }
 
-function getContainerRuntimeStatus(): { available: boolean; reason?: string } {
+const execFileAsync = promisify(execFile);
+const CONTAINER_RUNTIME_STATUS_CACHE_MS = 30_000;
+
+type ContainerRuntimeStatus = { available: boolean; reason?: string };
+
+let containerRuntimeStatusCache: {
+  readonly checkedAt: number;
+  readonly status: ContainerRuntimeStatus;
+} | undefined;
+let containerRuntimeStatusProbe: Promise<ContainerRuntimeStatus> | undefined;
+
+async function getContainerRuntimeStatus(now = Date.now()): Promise<ContainerRuntimeStatus> {
+  if (containerRuntimeStatusCache && now - containerRuntimeStatusCache.checkedAt < CONTAINER_RUNTIME_STATUS_CACHE_MS) {
+    return containerRuntimeStatusCache.status;
+  }
+
+  containerRuntimeStatusProbe ??= probeContainerRuntime()
+    .then((status) => {
+      containerRuntimeStatusCache = { checkedAt: Date.now(), status };
+      return status;
+    })
+    .finally(() => {
+      containerRuntimeStatusProbe = undefined;
+    });
+
+  return containerRuntimeStatusProbe;
+}
+
+async function probeContainerRuntime(): Promise<ContainerRuntimeStatus> {
   try {
-    execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+    await execFileAsync('docker', ['version', '--format', '{{.Server.Version}}'], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 2000,
     });
     return { available: true };
