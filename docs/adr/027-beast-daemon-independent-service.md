@@ -15,9 +15,9 @@ a new process boundary.
 Follow-on implementation is tracked in
 [#463](https://github.com/djm204/frankenbeast/issues/463). Until that issue is
 implemented, `chat-server` continues to host the beast control APIs used by the
-dashboard and CLI. ADR-027 should be revisited when the daemon becomes active so
-`docs/RAMP_UP.md` and operator guides can be updated to describe the new default
-route.
+dashboard, while CLI/direct service paths remain unchanged. ADR-027 should be
+revisited when the daemon becomes active so `docs/RAMP_UP.md` and operator guides
+can be updated to describe the new default route.
 
 ## Context
 
