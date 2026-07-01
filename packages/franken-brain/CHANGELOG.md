@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.1...franken-brain-v0.6.2) (2026-07-01)
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
 ## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.0...franken-brain-v0.6.1) (2026-06-13)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.3...franken-planner-v0.4.4) (2026-07-01)
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
 ## [0.4.3](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.2...franken-planner-v0.4.3) (2026-06-28)
 
 

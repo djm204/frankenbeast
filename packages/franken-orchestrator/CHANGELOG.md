@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.36.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.5...franken-orchestrator-v0.36.0) (2026-07-01)
+
+
+### Features
+
+* **orchestrator:** add CLI container beast mode ([0178c1d](https://github.com/djm204/frankenbeast/commit/0178c1d8f5fde156bec747b032a36cd49736e251))
+* **orchestrator:** harden sandbox container execution ([849d87c](https://github.com/djm204/frankenbeast/commit/849d87ceb27377736af98ebfd26950ea108426af))
+* **orchestrator:** wire container chat dispatch ([#468](https://github.com/djm204/frankenbeast/issues/468)) ([94d0f5e](https://github.com/djm204/frankenbeast/commit/94d0f5e7a55a09e8aa540ce0f9832b975af2e9de))
+* **web:** stream beast run status and logs ([ef86e02](https://github.com/djm204/frankenbeast/commit/ef86e02776d6398e9b12e94480ec2e15e073692b))
+
+
+### Bug Fixes
+
+* **cli:** correct provider setup guidance ([#438](https://github.com/djm204/frankenbeast/issues/438)) ([55703a9](https://github.com/djm204/frankenbeast/commit/55703a942effcfa800f3bc2374889c7cf8ad960f))
+* **cli:** honor non-interactive init ([#439](https://github.com/djm204/frankenbeast/issues/439)) ([2e8fc74](https://github.com/djm204/frankenbeast/commit/2e8fc749693d93ebc140f7c2089780b18ba055fe))
+* **cli:** make beasts catalog exit cleanly ([#442](https://github.com/djm204/frankenbeast/issues/442)) ([5be5766](https://github.com/djm204/frankenbeast/commit/5be576690efbfd379085a307b138f4f0169f6d55))
+* **cli:** persist network config sets ([#440](https://github.com/djm204/frankenbeast/issues/440)) ([a129823](https://github.com/djm204/frankenbeast/commit/a129823aa359f72418148b6a1c2dd23959a96bff))
+* **orchestrator:** bridge provider registries ([#447](https://github.com/djm204/frankenbeast/issues/447)) ([930175f](https://github.com/djm204/frankenbeast/commit/930175f63c617d8767b8598430ac75c649f9d547))
+* **orchestrator:** fail closed when safety-critical modules are absent ([#394](https://github.com/djm204/frankenbeast/issues/394)) ([26eb340](https://github.com/djm204/frankenbeast/commit/26eb340c40fd62049bcdbe85a8194db26834462a))
+* **orchestrator:** operator-auth all control-plane routes + comms endpoints ([#396](https://github.com/djm204/frankenbeast/issues/396)) ([398c752](https://github.com/djm204/frankenbeast/commit/398c7524cd467d18ac03a75c046124104e8342ff))
+
 ## [0.35.5](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.4...franken-orchestrator-v0.35.5) (2026-06-28)
 
 
