@@ -52,6 +52,11 @@ function containerCwd(spec: BeastProcessSpec, policy: SandboxPolicy): string {
   return remapHostWorkspacePath(spec.cwd ?? policy.workspaceHostPath, policy);
 }
 
+function workspaceMount(policy: SandboxPolicy): string {
+  const accessMode = policy.readOnlyWorkspaceMount ? ':ro' : '';
+  return `${policy.workspaceHostPath}:${policy.workspaceContainerPath}${accessMode}`;
+}
+
 export function toDockerSpec(spec: BeastProcessSpec, policy: SandboxPolicy): BeastProcessSpec {
   return {
     command: 'docker',
@@ -60,8 +65,18 @@ export function toDockerSpec(spec: BeastProcessSpec, policy: SandboxPolicy): Bea
       '--rm',
       '--network',
       policy.network,
+      '--memory',
+      policy.resourceLimits.memory,
+      '--cpus',
+      policy.resourceLimits.cpus,
+      '--pids-limit',
+      String(policy.resourceLimits.pidsLimit),
+      '--user',
+      policy.user,
+      '--security-opt',
+      'no-new-privileges',
       '-v',
-      `${policy.workspaceHostPath}:${policy.workspaceContainerPath}`,
+      workspaceMount(policy),
       '-w',
       containerCwd(spec, policy),
       ...dockerEnvArgs(spec, policy),

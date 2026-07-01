@@ -25,6 +25,43 @@ describe('toDockerSpec', () => {
     expect(spec.args).toEqual(expect.arrayContaining(['-v', '/proj:/workspace']));
   });
 
+  it('enforces default resource limits for a workload that attempts to exceed them', () => {
+    const exceedingWorkload = {
+      ...base,
+      args: [
+        '-e',
+        'const chunks=[]; while (true) chunks.push(Buffer.alloc(64 * 1024 * 1024));',
+      ],
+    };
+
+    const spec = toDockerSpec(exceedingWorkload, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
+
+    expect(spec.args).toEqual(expect.arrayContaining([
+      '--memory',
+      DEFAULT_SANDBOX_POLICY.resourceLimits.memory,
+      '--cpus',
+      DEFAULT_SANDBOX_POLICY.resourceLimits.cpus,
+      '--pids-limit',
+      String(DEFAULT_SANDBOX_POLICY.resourceLimits.pidsLimit),
+    ]));
+  });
+
+  it('runs containers as a non-root UID/GID', () => {
+    const spec = toDockerSpec({ ...base, command: 'id', args: ['-u'] }, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
+
+    const userFlag = spec.args.indexOf('--user');
+    expect(userFlag).toBeGreaterThan(-1);
+    const user = spec.args[userFlag + 1];
+    expect(user).toBe(DEFAULT_SANDBOX_POLICY.user);
+    expect(user?.split(':')[0]).not.toBe('0');
+  });
+
+  it('supports an opt-in read-only workspace mount', () => {
+    const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj', readOnlyWorkspaceMount: true });
+
+    expect(spec.args).toEqual(expect.arrayContaining(['-v', '/proj:/workspace:ro']));
+  });
+
   it('passes only allowlisted env via explicit -e values and inherits no host env', () => {
     const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
 

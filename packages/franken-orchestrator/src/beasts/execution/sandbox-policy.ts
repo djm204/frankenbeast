@@ -4,6 +4,15 @@ export interface SandboxPolicy {
   readonly workspaceHostPath: string;
   readonly workspaceContainerPath: '/workspace';
   readonly envAllowlist: readonly string[];
+  readonly user: `${number}:${number}`;
+  readonly resourceLimits: SandboxResourceLimits;
+  readonly readOnlyWorkspaceMount: boolean;
+}
+
+export interface SandboxResourceLimits {
+  readonly memory: string;
+  readonly cpus: string;
+  readonly pidsLimit: number;
 }
 
 export const DEFAULT_BEAST_ENV_ALLOWLIST = [
@@ -28,4 +37,11 @@ export const DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
   workspaceHostPath: process.cwd(),
   workspaceContainerPath: '/workspace',
   envAllowlist: DEFAULT_BEAST_ENV_ALLOWLIST,
+  user: '10001:10001',
+  resourceLimits: {
+    memory: '512m',
+    cpus: '1.0',
+    pidsLimit: 256,
+  },
+  readOnlyWorkspaceMount: false,
 };
