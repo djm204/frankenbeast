@@ -30,6 +30,22 @@ describe('AgentRow', () => {
     expect(screen.getByText('design-interview')).toBeTruthy();
   });
 
+  it('shows execution mode from linked run', () => {
+    render(<AgentRow agent={agent} run={{
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      dispatchedBy: 'api',
+      dispatchedByUser: 'pfk',
+      trackedAgentId: 'agent-1',
+      attemptCount: 1,
+      executionMode: 'container',
+      createdAt: '2026-03-15T10:00:00Z',
+    }} density="comfortable" selected={false} onClick={vi.fn()} />);
+
+    expect(screen.getByText('container mode')).toBeTruthy();
+  });
+
   it('calls onClick when clicked', () => {
     const onClick = vi.fn();
     render(<AgentRow agent={agent} density="compact" selected={false} onClick={onClick} />);

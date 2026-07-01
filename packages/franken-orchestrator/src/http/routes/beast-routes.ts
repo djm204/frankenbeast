@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { execFileSync } from 'node:child_process';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
@@ -129,6 +130,10 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     });
   });
 
+  app.get('/v1/beasts/runtime/container', (c) => {
+    return c.json({ data: getContainerRuntimeStatus() });
+  });
+
   app.post('/v1/beasts/runs', async (c) => {
     const body = validateBody(CreateRunBody, await parseJsonBody(c));
     let run;
@@ -225,4 +230,23 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   });
 
   return app;
+}
+
+function getContainerRuntimeStatus(): { available: boolean; reason?: string } {
+  try {
+    execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 2000,
+    });
+    return { available: true };
+  } catch (error) {
+    const reason = error instanceof Error && error.message
+      ? error.message
+      : 'Docker runtime is unavailable.';
+    return {
+      available: false,
+      reason: `Docker runtime unavailable: ${reason}`,
+    };
+  }
 }

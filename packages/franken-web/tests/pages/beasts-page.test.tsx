@@ -20,6 +20,7 @@ const baseProps = {
   ],
   agentDetail: null,
   catalog: [],
+  runs: [],
   disabled: false,
   error: null,
   logs: [] as string[],
