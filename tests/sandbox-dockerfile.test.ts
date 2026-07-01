@@ -1,6 +1,17 @@
 import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+function hasDocker(): boolean {
+  const result = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  return !result.error && result.status === 0;
+}
+
+const dockerIt = hasDocker() ? it : it.skip;
 
 describe('sandbox Dockerfile', () => {
   const dockerfile = readFileSync(resolve('Dockerfile'), 'utf8');
@@ -9,6 +20,13 @@ describe('sandbox Dockerfile', () => {
     expect(dockerfile).toContain('FROM node:22-bookworm-slim');
     expect(dockerfile).toContain('WORKDIR /workspace');
   });
+
+  dockerIt('actually builds fbeast/sandbox:latest from the repo Dockerfile when Docker is available', () => {
+    execFileSync('docker', ['build', '-t', 'fbeast/sandbox:latest', '-f', 'Dockerfile', '.'], {
+      cwd: resolve('.'),
+      stdio: 'pipe',
+    });
+  }, 60_000);
 
   it('declares a non-root default container UID', () => {
     const userLine = dockerfile.split('\n').find((line) => line.startsWith('USER '));

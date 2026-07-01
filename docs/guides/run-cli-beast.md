@@ -137,7 +137,7 @@ Beast dispatch supports two execution modes:
 | Mode | Boundary |
 |------|----------|
 | `process` | Host process with supervised lifecycle, env allowlist, and project-root cwd containment. This is **not** a hard sandbox. |
-| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root UID/GID `10001:10001`, memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. |
+| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root UID/GID enforcement (defaults to the invoking host UID/GID when non-root, otherwise `10001:10001`), memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. |
 
 Container mode requires Docker and the in-repo sandbox image. Build the default image with:
 
@@ -145,7 +145,7 @@ Container mode requires Docker and the in-repo sandbox image. Build the default 
 docker build -t fbeast/sandbox:latest -f Dockerfile .
 ```
 
-Unit tests do not require a Docker daemon because they assert the generated Docker command and Dockerfile hardening instead of launching Docker.
+Unit tests do not require a Docker daemon because they assert the generated Docker command and Dockerfile hardening instead of launching Docker. Docker-backed integration tests are also present and are skipped automatically when Docker is unavailable; when Docker is installed they build `fbeast/sandbox:latest`, verify writable non-root workspace behavior, and run a memory-exceeding workload under the configured limits.
 
 The default env allowlist is intentionally narrow: `PATH`, `HOME`, `LANG`, `LC_ALL`, `FRANKENBEAST_RUN_CONFIG`, `FRANKENBEAST_SPAWNED`, and the `FRANKENBEAST_MODULE_*` toggles for firewall, skills, memory, planner, critique, governor, and heartbeat. Secrets such as `GITHUB_TOKEN`, provider API keys, and arbitrary shell environment variables are not inherited unless the Beast definition explicitly places them in `spec.env` and the runtime policy allows the key.
 

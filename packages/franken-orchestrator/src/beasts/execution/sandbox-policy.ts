@@ -15,6 +15,15 @@ export interface SandboxResourceLimits {
   readonly pidsLimit: number;
 }
 
+function defaultNonRootUser(): `${number}:${number}` {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : undefined;
+  if (uid !== undefined && gid !== undefined && uid > 0) {
+    return `${uid}:${gid}`;
+  }
+  return '10001:10001';
+}
+
 export const DEFAULT_BEAST_ENV_ALLOWLIST = [
   'PATH',
   'HOME',
@@ -37,7 +46,7 @@ export const DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
   workspaceHostPath: process.cwd(),
   workspaceContainerPath: '/workspace',
   envAllowlist: DEFAULT_BEAST_ENV_ALLOWLIST,
-  user: '10001:10001',
+  user: defaultNonRootUser(),
   resourceLimits: {
     memory: '512m',
     cpus: '1.0',

@@ -25,7 +25,7 @@ describe('toDockerSpec', () => {
     expect(spec.args).toEqual(expect.arrayContaining(['-v', '/proj:/workspace']));
   });
 
-  it('enforces default resource limits for a workload that attempts to exceed them', () => {
+  it('enforces default resource limit flags for a memory-exceeding workload', () => {
     const exceedingWorkload = {
       ...base,
       args: [
