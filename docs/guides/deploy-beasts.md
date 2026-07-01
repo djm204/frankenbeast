@@ -126,13 +126,13 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs \
 2. Click **Create Agent**.
 3. Fill the wizard:
    - **Identity**: name/description for the tracked agent.
-   - **Workflow**: choose the flow (`design-interview`, `chunk-plan`, or `martin-loop`).
+   - **Workflow**: choose one of the deployable Beast catalog flows (`design-interview`, `chunk-plan`, or `martin-loop`). The wizard may also show UI-only presets such as `issues-agent`; those are not deployable Beast catalog entries until their backend definition exists.
    - **LLM Targets**: select provider/model routing.
    - **Modules**: keep guardrail modules enabled unless you intentionally need a narrower run.
    - **Skills** and **Prompts**: attach context and prompt material.
    - **Git**: choose branch/worktree and PR behavior.
 4. Review the generated launch config.
-5. Click **Launch Agent**.
+5. Click **Launch**.
 
 The dashboard creates a tracked agent first. Starting the agent dispatches the linked Beast run. If the agent does not start immediately, select it in the list and click **Start** from the detail panel.
 

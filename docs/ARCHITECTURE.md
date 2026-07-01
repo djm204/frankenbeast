@@ -773,7 +773,7 @@ These are toolkit deployment modes: ways to run or embed Frankenbeast surfaces. 
 
 ### Beast execution modes
 
-The Beast dispatcher supports execution-mode selection per run, independent of whether the run was created from the CLI, API, chat-server, or dashboard.
+Raw CLI/API Beast runs support execution-mode selection per run. Dashboard tracked-agent and chat/WS dispatch paths continue to use each Beast definition's default execution mode until the #455/#457 deploy-beasts follow-ups wire container selection through those entry points.
 
 | Beast execution mode | Boundary | Notes |
 |----------------------|----------|-------|
