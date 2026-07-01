@@ -2,7 +2,7 @@
 
 This guide walks an operator through starting the local dashboard, creating a tracked Beast agent, dispatching a run, monitoring status/logs, and stopping or killing the run.
 
-> **Sprint status note:** this guide is written against current `origin/main` after PR #466 / issue #456 merged. Container execution exists in the Beast CLI/API, but the dashboard execution-mode selector (#457), chat/WS container dispatch wiring (#455), and sandbox image/resource hardening (#459) are still open. Until those land, the dashboard deploy flow creates and controls tracked agents through the default Beast definition execution mode. Use the CLI/API container-mode workaround below when you need an actual `container` run.
+> **Sprint status note:** this guide is written against current `origin/main` after PR #465 / issue #459 and PR #466 / issue #456 merged. Container execution exists in the Beast CLI/API and the in-repo sandbox image/hardening defaults are present, but the dashboard execution-mode selector (#457), chat/WS container dispatch wiring (#455), and live container streaming work (#458) are still open. Until those land, the dashboard deploy flow creates and controls tracked agents through the default Beast definition execution mode. Use the CLI/API container-mode workaround below when you need an actual container run before the dashboard selector lands.
 
 ## What you are deploying
 
@@ -18,7 +18,7 @@ The dashboard talks to `frankenbeast chat-server`, which serves both the chat UI
 - Node.js >= 22 and repo dependencies installed (`npm install`).
 - At least one supported CLI provider works locally for chat/execution.
 - An operator token is configured so Beast control routes are enabled.
-- For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main does **not** include the hardening/image work from #459 yet.
+- For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
 
 Set a local operator token in one shell and reuse the same value for the backend and frontend:
 
@@ -88,11 +88,11 @@ Execution boundary choices are a Beast-run concept, separate from the four toolk
 | Mode | Boundary | Current dashboard status |
 |------|----------|--------------------------|
 | `process` | Host child process with supervised lifecycle, env allowlist, and project-root `cwd` containment. Not a hard sandbox. | Available through the dashboard tracked-agent flow. |
-| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available in CLI/API after #456; dashboard selector is pending #457, so use the workaround below on current main. |
+| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root user policy, memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available in CLI/API after #456; dashboard selector is pending #457, so use the workaround below on current main. |
 
 ### Container-mode workaround until #457 lands
 
-To create an actual container run before the dashboard has a selector, use the CLI or Beast API, then monitor/control the run from the dashboard once it is linked or visible in run state.
+To create an actual container run before the dashboard has a selector, use the CLI or Beast runs API. These raw runs are not tracked-agent dashboard entries today, so monitor and control them with the CLI commands or the `/v1/beasts/runs/*` API until #457/#458 wire container selection and live run streaming into the dashboard.
 
 CLI example:
 
@@ -195,7 +195,7 @@ frankenbeast beasts delete <agent-id>
 `Container mode fails to start`
 
 - Verify Docker is running and the sandbox image named by the runtime policy exists locally.
-- Remember that #459 hardening/image work is still pending on current main.
+- Build the default sandbox image from the repo root if it is missing: `docker build -t fbeast/sandbox:latest -f Dockerfile .`.
 
 `The UI loads but does not connect to the backend`
 
