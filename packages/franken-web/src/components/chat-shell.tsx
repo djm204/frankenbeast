@@ -60,6 +60,51 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
   );
 }
 
+function appendUniqueLogLine(logs: string[], nextLine: string): string[] {
+  const nextIdentity = parseLogIdentity(nextLine);
+  if (nextIdentity && logs.some((line) => {
+    const identity = parseLogIdentity(line);
+    return identity
+      && identity.stream === nextIdentity.stream
+      && identity.message === nextIdentity.message
+      && identity.createdAt === nextIdentity.createdAt;
+  })) {
+    return logs;
+  }
+  return logs[logs.length - 1] === nextLine ? logs : [...logs, nextLine];
+}
+
+function parseLogIdentity(line: string): { stream?: string; message: string; createdAt?: string } | null {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || !('message' in parsed)) {
+      return null;
+    }
+    const candidate = parsed as { stream?: unknown; message?: unknown; createdAt?: unknown };
+    if (typeof candidate.message !== 'string') {
+      return null;
+    }
+    return {
+      ...(typeof candidate.stream === 'string' ? { stream: candidate.stream } : {}),
+      message: candidate.message,
+      ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatStreamedLogLine(event: { stream?: string; line: string; createdAt?: string }): string {
+  if (event.createdAt || event.stream) {
+    return JSON.stringify({
+      ...(event.stream ? { stream: event.stream } : {}),
+      message: event.line,
+      ...(event.createdAt ? { createdAt: event.createdAt } : {}),
+    });
+  }
+  return event.line;
+}
+
 function buildInitAction(
   definitionId: string,
   config: Record<string, unknown>,
@@ -241,15 +286,119 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     }
 
     void refreshBeasts();
-    const interval = window.setInterval(() => {
-      void refreshBeasts();
-    }, 4000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
+
+  useEffect(() => {
+    if (route !== 'beasts' || !beastClient) {
+      return;
+    }
+
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    void beastClient.subscribeToEvents({
+      snapshot: (snapshot) => {
+        if (cancelled || !snapshot.agents) return;
+        setBeastAgents((current) => current.map((agent) => {
+          const next = snapshot.agents?.find((candidate) => candidate.id === agent.id);
+          return next ? { ...agent, ...next } : agent;
+        }));
+        setBeastAgentDetail((current) => {
+          if (!current) return current;
+          const next = snapshot.agents?.find((candidate) => candidate.id === current.agent.id);
+          return next ? { ...current, agent: { ...current.agent, ...next } } : current;
+        });
+      },
+      agentStatus: (event) => {
+        if (cancelled) return;
+        setBeastAgents((current) => current.map((agent) => (agent.id === event.agentId
+          ? { ...agent, status: event.status, ...(event.updatedAt ? { updatedAt: event.updatedAt } : {}) }
+          : agent)));
+        setBeastAgentDetail((current) => (current?.agent.id === event.agentId
+          ? {
+              ...current,
+              agent: {
+                ...current.agent,
+                status: event.status,
+                ...(event.updatedAt ? { updatedAt: event.updatedAt } : {}),
+              },
+            }
+          : current));
+        setBeastError(null);
+      },
+      agentEvent: (event) => {
+        if (cancelled) return;
+        setBeastAgentDetail((current) => {
+          if (!current || current.agent.id !== event.agentId) return current;
+          const nextEvent = {
+            id: event.event.id ?? `stream-${event.agentId}-${event.event.createdAt ?? Date.now()}`,
+            agentId: event.agentId,
+            sequence: event.event.sequence ?? current.events.length + 1,
+            level: event.event.level ?? 'info',
+            type: event.event.type ?? 'agent.event',
+            message: event.event.message ?? '',
+            payload: event.event.payload ?? {},
+            createdAt: event.event.createdAt ?? new Date().toISOString(),
+          };
+          if (current.events.some((existing) => existing.id === nextEvent.id)) return current;
+          return { ...current, events: [...current.events, nextEvent] };
+        });
+      },
+      runStatus: (event) => {
+        if (cancelled) return;
+        setBeastAgentDetail((current) => {
+          if (!current?.run || current.run.run.id !== event.runId) return current;
+          return {
+            ...current,
+            run: {
+              ...current.run,
+              run: {
+                ...current.run.run,
+                status: event.status,
+              },
+            },
+          };
+        });
+      },
+      runLog: (event) => {
+        if (cancelled) return;
+        setBeastAgentDetail((current) => {
+          if (!current?.run || current.run.run.id !== event.runId) return current;
+          return {
+            ...current,
+            run: {
+              ...current.run,
+              logs: appendUniqueLogLine(current.run.logs, formatStreamedLogLine(event)),
+            },
+          };
+        });
+      },
+      error: (error) => {
+        if (!cancelled) {
+          setBeastError(error.message);
+        }
+      },
+    }).then((unsub) => {
+      if (cancelled) {
+        unsub();
+      } else {
+        unsubscribe = unsub;
+      }
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setBeastError(error instanceof Error ? error.message : 'Unable to subscribe to Beast events.');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [route, beastClient]);
 
   useEffect(() => {
     if (!window.location.hash) {

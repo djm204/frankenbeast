@@ -130,6 +130,11 @@ const mockRestartAgent = vi.fn().mockResolvedValue(undefined);
 const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
 const mockStartAgent = vi.fn().mockResolvedValue(undefined);
 const mockStopAgent = vi.fn().mockResolvedValue(undefined);
+let latestBeastEventHandlers: Record<string, (event: unknown) => void> | null = null;
+const mockSubscribeToEvents = vi.fn().mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
+  latestBeastEventHandlers = handlers;
+  return Promise.resolve(vi.fn());
+});
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -191,6 +196,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     stopRun: ReturnType<typeof vi.fn>;
     killRun: ReturnType<typeof vi.fn>;
     restartRun: ReturnType<typeof vi.fn>;
+    subscribeToEvents: typeof mockSubscribeToEvents;
   }) {
     this.getCatalog = mockGetCatalog;
     this.listAgents = mockListAgents;
@@ -208,6 +214,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
     this.restartRun = vi.fn().mockResolvedValue(undefined);
+    this.subscribeToEvents = mockSubscribeToEvents;
   }),
 }));
 
@@ -234,6 +241,11 @@ afterEach(() => {
   cleanup();
   window.location.hash = '';
   vi.clearAllMocks();
+  latestBeastEventHandlers = null;
+  mockSubscribeToEvents.mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
+    latestBeastEventHandlers = handlers;
+    return Promise.resolve(vi.fn());
+  });
   mockListSessions.mockResolvedValue([
     {
       id: 'sess-1',
@@ -369,6 +381,83 @@ describe('ChatShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
+  });
+
+  it('applies Beast SSE status and log updates incrementally', async () => {
+    window.location.hash = '#/beasts';
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockSubscribeToEvents).toHaveBeenCalled();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
+      expect(screen.getByText(/started from chat/)).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.agentStatus?.({
+      agentId: 'agent-1',
+      status: 'running',
+      updatedAt: '2026-03-11T00:00:03.000Z',
+    });
+    latestBeastEventHandlers?.runLog?.({
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+    latestBeastEventHandlers?.runStatus?.({
+      runId: 'run-1',
+      status: 'completed',
+      updatedAt: '2026-03-11T00:00:05.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/container line 1/)).toBeDefined();
+      expect(screen.getAllByText('running').length).toBeGreaterThan(0);
+      expect(screen.getByText('completed')).toBeDefined();
+    });
+  });
+
+  it('deduplicates live log events already returned by the initial REST log load', async () => {
+    window.location.hash = '#/beasts';
+    const persistedLine = JSON.stringify({
+      stream: 'stdout',
+      message: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+    mockGetLogs.mockResolvedValue([persistedLine]);
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/container line 1/)).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.runLog?.({
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/container line 1/)).toHaveLength(1);
+    });
   });
 
   it('renders stopped agents in the beasts list', async () => {

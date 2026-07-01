@@ -89,10 +89,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
       handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
           if (attemptId) {
-            void this.logs.append(run.id, attemptId, 'stdout', line);
+            const createdAt = new Date().toISOString();
+            void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stdout', line },
+              data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
             });
           } else {
             earlyStdoutLines.push(line);
@@ -102,10 +103,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
           stderrTail.push(line);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
-            void this.logs.append(run.id, attemptId, 'stderr', line);
+            const createdAt = new Date().toISOString();
+            void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stderr', line },
+              data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
             });
           } else {
             earlyStderrLines.push(line);
@@ -178,17 +180,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     // Flush early buffered lines to logs and SSE
     for (const line of earlyStdoutLines) {
-      void this.logs.append(run.id, attemptId, 'stdout', line);
+      const createdAt = new Date().toISOString();
+      void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
-        data: { runId: run.id, attemptId, stream: 'stdout', line },
+        data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
       });
     }
     for (const line of earlyStderrLines) {
-      void this.logs.append(run.id, attemptId, 'stderr', line);
+      const createdAt = new Date().toISOString();
+      void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
-        data: { runId: run.id, attemptId, stream: 'stderr', line },
+        data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
       });
     }
 
@@ -211,7 +215,16 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.event',
       data: { runId: run.id, event: startedEvent },
     });
-    await this.logs.append(run.id, attempt.id, 'stdout', `started pid=${handle.pid}`);
+    this.options.eventBus?.publish({
+      type: 'run.status',
+      data: { runId: run.id, status: 'running' as const, updatedAt: startedAt },
+    });
+    const startLogLine = `started pid=${handle.pid}`;
+    await this.logs.append(run.id, attempt.id, 'stdout', startLogLine, startedAt);
+    this.options.eventBus?.publish({
+      type: 'run.log',
+      data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
+    });
     return attempt;
   }
 
@@ -379,7 +392,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.event',
       data: { runId, event: finishEvent },
     });
-    void this.logs.append(runId, attempt.id, 'stderr', stopReason);
+    void this.logs.append(runId, attempt.id, 'stderr', stopReason, finishedAt);
+    this.options.eventBus?.publish({
+      type: 'run.log',
+      data: { runId, attemptId: attempt.id, stream: 'stderr', line: stopReason, createdAt: finishedAt },
+    });
 
     this.options.eventBus?.publish({
       type: 'run.status',

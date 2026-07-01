@@ -203,6 +203,7 @@ describe('ProcessBeastExecutor', () => {
         attempt.id,
         'stdout',
         'hello world',
+        expect.any(String),
       );
     });
 
@@ -229,6 +230,7 @@ describe('ProcessBeastExecutor', () => {
         attempt.id,
         'stderr',
         'something went wrong',
+        expect.any(String),
       );
     });
 
@@ -303,8 +305,8 @@ describe('ProcessBeastExecutor', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // Early lines should have been flushed after attempt creation
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1');
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2');
+      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1', expect.any(String));
+      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2', expect.any(String));
     });
   });
 
@@ -505,8 +507,12 @@ describe('ProcessBeastExecutor', () => {
       cb.onExit(0, null);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'completed',
       });
@@ -526,8 +532,12 @@ describe('ProcessBeastExecutor', () => {
       await executor.stop(run.id, attempt.id);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'stopped',
       });
@@ -547,8 +557,12 @@ describe('ProcessBeastExecutor', () => {
       await executor.kill(run.id, attempt.id);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'stopped',
       });

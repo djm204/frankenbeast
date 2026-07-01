@@ -9,6 +9,7 @@ export class BeastLogStore {
     attemptId: string,
     stream: 'stdout' | 'stderr',
     message: string,
+    createdAt = new Date().toISOString(),
   ): Promise<void> {
     const filePath = this.resolvePath(runId, attemptId);
     try {
@@ -18,7 +19,7 @@ export class BeastLogStore {
         `${JSON.stringify({
           stream,
           message,
-          createdAt: new Date().toISOString(),
+          createdAt,
         })}\n`,
         'utf-8',
       );
