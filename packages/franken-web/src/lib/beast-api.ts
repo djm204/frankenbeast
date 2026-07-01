@@ -46,6 +46,50 @@ export interface BeastRunDetail {
   logs: string[];
 }
 
+export interface BeastSseSnapshot {
+  agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
+}
+
+export interface BeastSseAgentStatusEvent {
+  agentId: string;
+  status: string;
+  updatedAt?: string;
+}
+
+export interface BeastSseAgentEvent {
+  agentId: string;
+  event: Omit<TrackedAgentEvent, 'id' | 'agentId' | 'sequence'> & Partial<TrackedAgentEvent>;
+}
+
+export interface BeastSseRunStatusEvent {
+  runId: string;
+  status: string;
+  updatedAt?: string;
+}
+
+export interface BeastSseRunLogEvent {
+  runId: string;
+  attemptId?: string;
+  stream?: 'stdout' | 'stderr';
+  line: string;
+  createdAt?: string;
+}
+
+export interface BeastSseRunEvent {
+  runId: string;
+  event: Record<string, unknown>;
+}
+
+export interface BeastEventHandlers {
+  snapshot?: (snapshot: BeastSseSnapshot) => void;
+  agentStatus?: (event: BeastSseAgentStatusEvent) => void;
+  agentEvent?: (event: BeastSseAgentEvent) => void;
+  runStatus?: (event: BeastSseRunStatusEvent) => void;
+  runLog?: (event: BeastSseRunLogEvent) => void;
+  runEvent?: (event: BeastSseRunEvent) => void;
+  error?: (error: Error) => void;
+}
+
 export interface TrackedAgentInitAction {
   kind: 'design-interview' | 'chunk-plan' | 'martin-loop';
   command: string;
@@ -251,6 +295,80 @@ export class BeastApiClient {
     });
   }
 
+  async subscribeToEvents(handlers: BeastEventHandlers): Promise<() => void> {
+    let closed = false;
+    let eventSource: EventSource | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastEventId: string | undefined;
+    const parse = <T>(event: MessageEvent): T => JSON.parse(event.data) as T;
+    const rememberEventId = (event: MessageEvent): void => {
+      if (event.lastEventId) lastEventId = event.lastEventId;
+    };
+    const scheduleReconnect = () => {
+      if (closed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect().catch((error: unknown) => {
+          if (!closed) {
+            handlers.error?.(toError(error));
+            scheduleReconnect();
+          }
+        });
+      }, 1_000);
+    };
+
+    const connect = async () => {
+      const body = await this.requestRaw<{ ticket: string }>('/v1/beasts/events/ticket', { method: 'POST' });
+      if (closed) return;
+      eventSource?.close();
+      const query = new URLSearchParams({ ticket: body.ticket });
+      if (lastEventId) query.set('lastEventId', lastEventId);
+      const nextSource = new EventSource(
+        `${this.baseUrl}/v1/beasts/events/stream?${query.toString()}`,
+      );
+      eventSource = nextSource;
+
+      nextSource.addEventListener('snapshot', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.snapshot?.(parse<BeastSseSnapshot>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('agent.status', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.agentStatus?.(parse<BeastSseAgentStatusEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('agent.event', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.agentEvent?.(parse<BeastSseAgentEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('run.status', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.runStatus?.(parse<BeastSseRunStatusEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('run.log', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.runLog?.(parse<BeastSseRunLogEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('run.event', (event) => {
+        rememberEventId(event as MessageEvent);
+        try { handlers.runEvent?.(parse<BeastSseRunEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+      });
+      nextSource.addEventListener('error', () => {
+        if (closed) return;
+        nextSource.close();
+        handlers.error?.(new Error('Beast event stream disconnected; reconnecting'));
+        scheduleReconnect();
+      });
+    };
+
+    await connect();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      eventSource?.close();
+    };
+  }
+
   private async postAction(runId: string, action: 'start' | 'stop' | 'kill' | 'restart'): Promise<BeastRunSummary> {
     return this.request(`/v1/beasts/runs/${encodeURIComponent(runId)}/${action}`, {
       method: 'POST',
@@ -267,6 +385,11 @@ export class BeastApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
+    const body = await this.requestRaw<{ data: T }>(path, init);
+    return body.data;
+  }
+
+  private async requestRaw<T>(path: string, init: RequestInit): Promise<T> {
     const headers = normalizeHeaders(init.headers);
     headers.authorization = `Bearer ${this.operatorToken}`;
 
@@ -277,8 +400,7 @@ export class BeastApiClient {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const body = await response.json() as { data: T };
-    return body.data;
+    return response.json() as Promise<T>;
   }
 
   private async requestVoid(path: string, init: RequestInit): Promise<void> {
@@ -306,4 +428,8 @@ function normalizeHeaders(headers: HeadersInit | undefined): Record<string, stri
     return Object.fromEntries(headers);
   }
   return { ...headers };
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
