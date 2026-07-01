@@ -197,8 +197,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     // Flush early exit if process died before attemptId was set
+    let flushedEarlyExit = false;
     if (earlyExit) {
       this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
+      flushedEarlyExit = true;
     }
 
     const startedEvent = {
@@ -215,6 +217,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.event',
       data: { runId: run.id, event: startedEvent },
     });
+    if (flushedEarlyExit) {
+      return this.repository.getAttempt(attempt.id) ?? attempt;
+    }
     this.options.eventBus?.publish({
       type: 'run.status',
       data: { runId: run.id, status: 'running' as const, updatedAt: startedAt },

@@ -68,6 +68,7 @@ export interface BeastSseRunStatusEvent {
 }
 
 export interface BeastSseRunLogEvent {
+  eventId?: string;
   runId: string;
   attemptId?: string;
   stream?: 'stdout' | 'stderr';
@@ -301,6 +302,10 @@ export class BeastApiClient {
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let lastEventId: string | undefined;
     const parse = <T>(event: MessageEvent): T => JSON.parse(event.data) as T;
+    const parseWithEventId = <T extends object>(event: MessageEvent): T & { eventId?: string } => {
+      const parsed = parse<T>(event);
+      return event.lastEventId ? { ...parsed, eventId: event.lastEventId } : parsed;
+    };
     const rememberEventId = (event: MessageEvent): void => {
       if (event.lastEventId) lastEventId = event.lastEventId;
     };
@@ -346,7 +351,7 @@ export class BeastApiClient {
       });
       nextSource.addEventListener('run.log', (event) => {
         rememberEventId(event as MessageEvent);
-        try { handlers.runLog?.(parse<BeastSseRunLogEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try { handlers.runLog?.(parseWithEventId<BeastSseRunLogEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
       });
       nextSource.addEventListener('run.event', (event) => {
         rememberEventId(event as MessageEvent);
@@ -360,7 +365,12 @@ export class BeastApiClient {
       });
     };
 
-    await connect();
+    await connect().catch((error: unknown) => {
+      if (!closed) {
+        handlers.error?.(toError(error));
+        scheduleReconnect();
+      }
+    });
 
     return () => {
       closed = true;

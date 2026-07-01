@@ -518,6 +518,31 @@ describe('ProcessBeastExecutor', () => {
       });
     });
 
+    it('does not publish running after flushing an early process exit', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          (callbacks as ProcessCallbacks).onExit(0, null);
+          return { pid: 5150 };
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      expect(attempt.status).toBe('completed');
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents.map(([e]) => e.data.status)).toEqual(['completed']);
+      expect(repo.getRun(run.id)).toMatchObject({ status: 'completed' });
+    });
+
     it('publishes run.status event via eventBus on operator stop (finishAttempt)', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
