@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
+import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
 
 export class FileChunkSessionStore {
   constructor(private readonly rootDir: string) {}
@@ -9,23 +10,36 @@ export class FileChunkSessionStore {
   save(session: ChunkSession): string {
     const filePath = this.filePathFor(session.planName, session.chunkId, session.taskId);
     mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify(session, null, 2));
+    atomicWriteFileSync(filePath, JSON.stringify(session, null, 2));
     return filePath;
   }
 
+  /**
+   * Loads a session, degrading gracefully instead of throwing when a file is
+   * corrupt (e.g. from a crash mid-write before atomic writes were adopted,
+   * or external tampering). Corrupt files are quarantined by
+   * readJsonFileOrQuarantine so a subsequent read never trips over them again.
+   */
   load(planName: string, chunkId: string, taskId?: string): ChunkSession | undefined {
     const exactPath = this.filePathFor(planName, chunkId, taskId);
     if (existsSync(exactPath)) {
-      return JSON.parse(readFileSync(exactPath, 'utf-8')) as ChunkSession;
+      const session = readJsonFileOrQuarantine<ChunkSession>(exactPath);
+      if (session) {
+        return session;
+      }
+      // Corrupt and quarantined — fall through and treat as absent.
     }
 
     const legacyPath = this.legacyFilePathFor(planName, chunkId);
     if (existsSync(legacyPath)) {
-      const legacy = JSON.parse(readFileSync(legacyPath, 'utf-8')) as ChunkSession;
-      if (!taskId || legacy.taskId === taskId) {
-        return legacy;
+      const legacy = readJsonFileOrQuarantine<ChunkSession>(legacyPath);
+      if (legacy) {
+        if (!taskId || legacy.taskId === taskId) {
+          return legacy;
+        }
+        return undefined;
       }
-      return undefined;
+      // Corrupt and quarantined — fall through and treat as absent.
     }
 
     const matches = this.list(planName).filter((session) =>
@@ -73,7 +87,12 @@ export class FileChunkSessionStore {
 
       for (const file of readdirSync(planDir)) {
         if (!file.endsWith('.json')) continue;
-        sessions.push(JSON.parse(readFileSync(join(planDir, file), 'utf-8')) as ChunkSession);
+        // Corrupt files are quarantined and skipped instead of aborting the
+        // whole listing — one damaged session must not hide the healthy ones.
+        const session = readJsonFileOrQuarantine<ChunkSession>(join(planDir, file));
+        if (session) {
+          sessions.push(session);
+        }
       }
     }
 

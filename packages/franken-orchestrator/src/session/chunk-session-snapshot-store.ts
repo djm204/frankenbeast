@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
+import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
 
 export class FileChunkSessionSnapshotStore {
   constructor(private readonly rootDir: string) {}
@@ -11,7 +12,7 @@ export class FileChunkSessionSnapshotStore {
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${reason}.json`);
-    writeFileSync(file, JSON.stringify(session, null, 2));
+    atomicWriteFileSync(file, JSON.stringify(session, null, 2));
     return file;
   }
 
@@ -40,19 +41,29 @@ export class FileChunkSessionSnapshotStore {
           .filter((file) => file.endsWith('.json'))
           .map((file) => join(dirPath, file)),
       )
-      .map((filePath) => ({ filePath, session: JSON.parse(readFileSync(filePath, 'utf-8')) as ChunkSession }))
+      // Corrupt snapshots are quarantined and skipped instead of aborting the
+      // whole listing — one damaged snapshot must not hide the healthy ones.
+      .map((filePath) => ({ filePath, session: readJsonFileOrQuarantine<ChunkSession>(filePath) }))
+      .filter((entry): entry is { filePath: string; session: ChunkSession } => entry.session !== undefined)
       .filter(({ session }) => session.chunkId === chunkId)
       .map(({ filePath }) => filePath)
       .sort();
   }
 
+  /**
+   * Restores the most recent snapshot, skipping (and quarantining) any
+   * corrupt files it encounters along the way so a single damaged snapshot
+   * cannot hide older, still-usable ones.
+   */
   restoreLatest(planName: string, chunkId: string, taskId?: string): ChunkSession | undefined {
     const files = this.list(planName, chunkId, taskId);
-    const latest = files.at(-1);
-    if (!latest) {
-      return undefined;
+    for (let i = files.length - 1; i >= 0; i--) {
+      const session = readJsonFileOrQuarantine<ChunkSession>(files[i]!);
+      if (session) {
+        return session;
+      }
     }
-    return JSON.parse(readFileSync(latest, 'utf-8')) as ChunkSession;
+    return undefined;
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
