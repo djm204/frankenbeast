@@ -66,7 +66,49 @@ export async function runPlanning(
     });
     logger.info('Planning: plan created', { iteration: 1, taskCount: plan.tasks.length });
     logger.debug('Planning: plan raw', { plan });
-    return;
+
+    // A graph-builder plan (e.g. issue/chunk-driven CLI runs) is not exempt
+    // from safety review just because it wasn't produced by the planner
+    // module — see issue #20. There is no planner to retry against here, so
+    // this is a single-pass critique gate rather than a replan loop: a
+    // failing or halted review stops planning outright instead of silently
+    // handing an unreviewed plan to execution.
+    const critiqueResult = await critique.reviewPlan(plan);
+    if (critiqueResult.findings.length > 0) {
+      ctx.critiqueFeedback = critiqueResult.findings
+        .map(finding => `${finding.evaluator}: ${finding.message}`)
+        .join('\n');
+    } else {
+      ctx.critiqueFeedback = undefined;
+    }
+
+    ctx.addAudit('critique', 'plan:reviewed', {
+      iteration: 1,
+      verdict: critiqueResult.verdict,
+      score: critiqueResult.score,
+      findingsCount: critiqueResult.findings.length,
+      source: 'graphBuilder',
+    });
+    logger.info('Planning: critique reviewed', {
+      iteration: 1,
+      verdict: critiqueResult.verdict,
+      score: critiqueResult.score,
+    });
+    logger.debug('Planning: critique findings', { findings: critiqueResult.findings });
+
+    if (critiqueResult.halted) {
+      const reason = critiqueResult.haltReason ?? 'critique halted';
+      ctx.addAudit('critique', 'plan:halted', { iteration: 1, reason });
+      logger.warn('Planning: critique halted', { iteration: 1, reason });
+      throw new CritiqueBudgetHaltError(1, reason);
+    }
+
+    if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
+      return; // Plan approved
+    }
+
+    // No planner to iterate against — a single failing review is terminal.
+    throw new CritiqueSpiralError(1, critiqueResult.score);
   }
 
   let lastScore = 0;
