@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.37.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.36.0...franken-orchestrator-v0.37.0) (2026-07-02)
+
+
+### Features
+
+* **web:** add beast execution mode selection ([#469](https://github.com/djm204/frankenbeast/issues/469)) ([be44a79](https://github.com/djm204/frankenbeast/commit/be44a79b26d8c8dd2fcef0626e42541d78d6736d))
+
+
+### Bug Fixes
+
+* address codex sandbox and route follow-ups ([cda3cce](https://github.com/djm204/frankenbeast/commit/cda3ccec1ae728ec75f38bdb93069245bdcf8bd9))
+* **orchestrator:** mark container workspaces git-safe ([#476](https://github.com/djm204/frankenbeast/issues/476)) ([c6fb6a8](https://github.com/djm204/frankenbeast/commit/c6fb6a892748b077443a1f1c924324d19124f348))
+
 ## [0.36.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.5...franken-orchestrator-v0.36.0) (2026-07-01)
 
 
