@@ -84,6 +84,9 @@ export class ApprovalGateway {
   ): Promise<ApprovalResponse> {
     return new Promise<ApprovalResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
+        // Give the channel a chance to release any waiter state for this
+        // request now that nothing is awaiting it anymore (see issue #411).
+        this.channel.cancel?.(requestId);
         reject(new ApprovalTimeoutError(requestId, this.config.timeoutMs));
       }, this.config.timeoutMs);
 
