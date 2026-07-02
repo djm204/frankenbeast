@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.5...franken-observer-v0.7.6) (2026-07-02)
+
+
+### Bug Fixes
+
+* **observer:** sanitize audit run IDs against path traversal ([#449](https://github.com/djm204/frankenbeast/issues/449)) ([34fbe71](https://github.com/djm204/frankenbeast/commit/34fbe719dc0261b3dd55875ec1149c21e8afa2bb))
+
 ## [0.7.5](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.4...franken-observer-v0.7.5) (2026-07-01)
 
 
