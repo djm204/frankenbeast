@@ -59,6 +59,21 @@ const mockListAgents = vi.fn().mockResolvedValue([
   },
 ]);
 
+const mockListRuns = vi.fn().mockResolvedValue([
+  {
+    id: 'run-1',
+    definitionId: 'chunk-plan',
+    status: 'running',
+    dispatchedBy: 'chat',
+    dispatchedByUser: 'chat-session:sess-1',
+    trackedAgentId: 'agent-1',
+    attemptCount: 1,
+    executionMode: 'process',
+    createdAt: '2026-03-11T00:00:02.000Z',
+  },
+]);
+const mockGetContainerRuntimeStatus = vi.fn().mockResolvedValue({ available: true });
+
 const mockGetAgent = vi.fn().mockResolvedValue({
   agent: {
     id: 'agent-1',
@@ -182,6 +197,8 @@ vi.mock('../../src/lib/beast-api.js', () => ({
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
     listAgents: typeof mockListAgents;
+    listRuns: typeof mockListRuns;
+    getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
     getLogs: typeof mockGetLogs;
@@ -200,6 +217,8 @@ vi.mock('../../src/lib/beast-api.js', () => ({
   }) {
     this.getCatalog = mockGetCatalog;
     this.listAgents = mockListAgents;
+    this.listRuns = mockListRuns;
+    this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
     this.getLogs = mockGetLogs;
@@ -277,6 +296,20 @@ afterEach(() => {
       updatedAt: '2026-03-11T00:00:01.000Z',
     },
   ]);
+  mockListRuns.mockResolvedValue([
+    {
+      id: 'run-1',
+      definitionId: 'chunk-plan',
+      status: 'running',
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:sess-1',
+      trackedAgentId: 'agent-1',
+      attemptCount: 1,
+      executionMode: 'process',
+      createdAt: '2026-03-11T00:00:02.000Z',
+    },
+  ]);
+  mockGetContainerRuntimeStatus.mockResolvedValue({ available: true });
   mockGetAgent.mockResolvedValue({
     agent: {
       id: 'agent-1',

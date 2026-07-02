@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
@@ -129,6 +131,10 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     });
   });
 
+  app.get('/v1/beasts/runtime/container', async (c) => {
+    return c.json({ data: await getContainerRuntimeStatus() });
+  });
+
   app.post('/v1/beasts/runs', async (c) => {
     const body = validateBody(CreateRunBody, await parseJsonBody(c));
     let run;
@@ -225,4 +231,50 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   });
 
   return app;
+}
+
+const execFileAsync = promisify(execFile);
+const CONTAINER_RUNTIME_STATUS_CACHE_MS = 30_000;
+
+type ContainerRuntimeStatus = { available: boolean; reason?: string };
+
+let containerRuntimeStatusCache: {
+  readonly checkedAt: number;
+  readonly status: ContainerRuntimeStatus;
+} | undefined;
+let containerRuntimeStatusProbe: Promise<ContainerRuntimeStatus> | undefined;
+
+async function getContainerRuntimeStatus(now = Date.now()): Promise<ContainerRuntimeStatus> {
+  if (containerRuntimeStatusCache && now - containerRuntimeStatusCache.checkedAt < CONTAINER_RUNTIME_STATUS_CACHE_MS) {
+    return containerRuntimeStatusCache.status;
+  }
+
+  containerRuntimeStatusProbe ??= probeContainerRuntime()
+    .then((status) => {
+      containerRuntimeStatusCache = { checkedAt: Date.now(), status };
+      return status;
+    })
+    .finally(() => {
+      containerRuntimeStatusProbe = undefined;
+    });
+
+  return containerRuntimeStatusProbe;
+}
+
+async function probeContainerRuntime(): Promise<ContainerRuntimeStatus> {
+  try {
+    await execFileAsync('docker', ['version', '--format', '{{.Server.Version}}'], {
+      encoding: 'utf8',
+      timeout: 2000,
+    });
+    return { available: true };
+  } catch (error) {
+    const reason = error instanceof Error && error.message
+      ? error.message
+      : 'Docker runtime is unavailable.';
+    return {
+      available: false,
+      reason: `Docker runtime unavailable: ${reason}`,
+    };
+  }
 }

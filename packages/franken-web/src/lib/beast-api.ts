@@ -6,12 +6,20 @@ export interface BeastInterviewPrompt {
   options?: readonly string[];
 }
 
+export type BeastExecutionMode = 'process' | 'container';
+
+export interface BeastContainerRuntimeStatus {
+  available: boolean;
+  reason?: string;
+}
+
 export interface BeastCatalogEntry {
   id: string;
   version?: number;
   label: string;
   description: string;
-  executionModeDefault: 'process' | 'container';
+  executionModeDefault: BeastExecutionMode;
+  containerRuntime?: BeastContainerRuntimeStatus;
   interviewPrompts: BeastInterviewPrompt[];
 }
 
@@ -122,6 +130,7 @@ export interface TrackedAgentSummary {
   initAction: TrackedAgentInitAction;
   initConfig: Record<string, unknown>;
   moduleConfig?: ModuleConfig;
+  executionMode?: BeastExecutionMode;
   chatSessionId?: string;
   dispatchRunId?: string;
   createdAt: string;
@@ -192,6 +201,10 @@ export class BeastApiClient {
     return this.request<BeastCatalogEntry[]>('/v1/beasts/catalog', { method: 'GET' });
   }
 
+  async getContainerRuntimeStatus(): Promise<BeastContainerRuntimeStatus> {
+    return this.request<BeastContainerRuntimeStatus>('/v1/beasts/runtime/container', { method: 'GET' });
+  }
+
   async listRuns(): Promise<BeastRunSummary[]> {
     const body = await this.request<{ runs: BeastRunSummary[] }>('/v1/beasts/runs', { method: 'GET' });
     return body.runs;
@@ -219,7 +232,7 @@ export class BeastApiClient {
     definitionId: string;
     config: Record<string, unknown>;
     trackedAgentId?: string;
-    executionMode?: 'process' | 'container';
+    executionMode?: BeastExecutionMode;
     startNow?: boolean;
     moduleConfig?: ModuleConfig;
   }): Promise<BeastRunSummary> {
@@ -236,6 +249,7 @@ export class BeastApiClient {
     initConfig: Record<string, unknown>;
     chatSessionId?: string;
     moduleConfig?: ModuleConfig;
+    executionMode?: BeastExecutionMode;
   }): Promise<TrackedAgentSummary> {
     return this.request('/v1/beasts/agents', {
       method: 'POST',

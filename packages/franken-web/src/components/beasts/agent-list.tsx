@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
-import type { TrackedAgentSummary } from '../../lib/beast-api';
+import type { BeastRunSummary, TrackedAgentSummary } from '../../lib/beast-api';
 import { AgentRow, type Density } from './agent-row';
 
 interface AgentListProps {
   agents: TrackedAgentSummary[];
+  runs: BeastRunSummary[];
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
   onCreateAgent: () => void;
 }
 
-export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgent }: AgentListProps) {
+export function AgentList({ agents, runs, selectedAgentId, onSelectAgent, onCreateAgent }: AgentListProps) {
   const [density, setDensity] = useState<Density>('comfortable');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -27,6 +28,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
     if (statusFilter && a.status !== statusFilter) return false;
     return true;
   });
+  const runsById = new Map(runs.map((run) => [run.id, run] as const));
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -99,6 +101,7 @@ export function AgentList({ agents, selectedAgentId, onSelectAgent, onCreateAgen
                 <AgentRow
                   key={agent.id}
                   agent={agent}
+                  run={agent.dispatchRunId ? runsById.get(agent.dispatchRunId) : undefined}
                   density={density}
                   selected={agent.id === selectedAgentId}
                   onClick={onSelectAgent}

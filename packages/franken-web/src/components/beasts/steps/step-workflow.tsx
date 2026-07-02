@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useBeastStore } from '../../../stores/beast-store';
 import { PresetCardGroup } from '../shared/preset-card';
+import type { BeastContainerRuntimeStatus, BeastExecutionMode } from '../../../lib/beast-api';
 
 const WORKFLOWS = [
   { id: 'design-interview', title: 'Design Interview', description: 'Launch interactive design session' },
@@ -8,9 +10,28 @@ const WORKFLOWS = [
   { id: 'martin-loop', title: 'Run Chunked Project', description: 'Execute an already-chunked plan' },
 ];
 
-export function StepWorkflow() {
+interface StepWorkflowProps {
+  containerRuntime?: BeastContainerRuntimeStatus;
+}
+
+const DEFAULT_CONTAINER_UNAVAILABLE_REASON = 'Container runtime availability has not been reported by the backend.';
+
+export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
   const { stepValues, setStepValues } = useBeastStore();
-  const values = (stepValues[1] ?? {}) as { workflowType?: string; [key: string]: unknown };
+  const values = (stepValues[1] ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
+  const selectedExecutionMode = values.executionMode ?? 'process';
+  const containerUnavailableReason = containerRuntime?.available === true
+    ? null
+    : (containerRuntime?.reason ?? DEFAULT_CONTAINER_UNAVAILABLE_REASON);
+  const effectiveExecutionMode = selectedExecutionMode === 'container' && containerUnavailableReason
+    ? 'process'
+    : selectedExecutionMode;
+
+  useEffect(() => {
+    if (selectedExecutionMode === 'container' && containerUnavailableReason) {
+      setStepValues(1, { ...values, executionMode: 'process' });
+    }
+  }, [containerUnavailableReason, selectedExecutionMode, setStepValues, values]);
 
   function handleSelect(id: string) {
     setStepValues(1, { ...values, workflowType: id });
@@ -20,9 +41,58 @@ export function StepWorkflow() {
     setStepValues(1, { ...values, [field]: value });
   }
 
+  function updateExecutionMode(executionMode: BeastExecutionMode) {
+    if (executionMode === 'container' && containerUnavailableReason) {
+      return;
+    }
+    setStepValues(1, { ...values, executionMode });
+  }
+
   return (
     <div className="p-8 space-y-6">
       <PresetCardGroup presets={WORKFLOWS} selected={values.workflowType ?? ''} onSelect={handleSelect} />
+
+      <fieldset className="space-y-3 rounded-xl border border-beast-border bg-beast-panel p-4">
+        <legend className="px-1 text-sm font-medium text-beast-text">Execution mode</legend>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className={`rounded-lg border p-4 transition-colors ${effectiveExecutionMode === 'process' ? 'border-beast-accent bg-beast-accent-soft' : 'border-beast-border bg-beast-control'}`}>
+            <input
+              aria-label="Process execution mode"
+              checked={effectiveExecutionMode === 'process'}
+              className="sr-only"
+              name="execution-mode"
+              onChange={() => updateExecutionMode('process')}
+              type="radio"
+              value="process"
+            />
+            <span className="block text-sm font-semibold text-beast-text">Process</span>
+            <span className="mt-1 block text-xs text-beast-muted">Run as a local supervised process.</span>
+          </label>
+          <label
+            className={`rounded-lg border p-4 transition-colors ${containerUnavailableReason ? 'cursor-not-allowed border-beast-border bg-beast-control opacity-60' : effectiveExecutionMode === 'container' ? 'border-beast-accent bg-beast-accent-soft' : 'border-beast-border bg-beast-control'}`}
+            title={containerUnavailableReason ?? 'Run inside the configured container sandbox.'}
+          >
+            <input
+              aria-describedby={containerUnavailableReason ? 'container-mode-disabled-reason' : undefined}
+              aria-label="Container execution mode"
+              checked={effectiveExecutionMode === 'container'}
+              className="sr-only"
+              disabled={Boolean(containerUnavailableReason)}
+              name="execution-mode"
+              onChange={() => updateExecutionMode('container')}
+              type="radio"
+              value="container"
+            />
+            <span className="block text-sm font-semibold text-beast-text">Container</span>
+            <span className="mt-1 block text-xs text-beast-muted">Run inside the configured container sandbox.</span>
+          </label>
+        </div>
+        {containerUnavailableReason && (
+          <p id="container-mode-disabled-reason" className="text-xs text-beast-muted">
+            Container mode unavailable: {containerUnavailableReason}
+          </p>
+        )}
+      </fieldset>
 
       {values.workflowType === 'design-interview' && (
         <div>

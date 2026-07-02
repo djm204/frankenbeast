@@ -12,6 +12,12 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
   }
 
   const workflow = config.workflow as Record<string, unknown> | undefined;
+  if (workflow?.executionMode === 'process' || workflow?.executionMode === 'container') {
+    config.executionMode = workflow.executionMode;
+  } else {
+    config.executionMode = 'process';
+  }
+
   if (workflow?.workflowType === 'chunk-plan' && typeof workflow.docPath === 'string') {
     config.designDocPath = workflow.docPath;
   }

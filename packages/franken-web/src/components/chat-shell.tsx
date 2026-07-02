@@ -9,8 +9,10 @@ import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
 import {
   BeastApiClient,
+  type BeastContainerRuntimeStatus,
   type BeastCatalogEntry,
   type BeastRunDetail,
+  type BeastRunSummary,
   type TrackedAgentDetail,
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
@@ -156,6 +158,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
+  const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
+  const [beastContainerRuntime, setBeastContainerRuntime] = useState<BeastContainerRuntimeStatus | undefined>(undefined);
   const [selectedBeastAgentId, setSelectedBeastAgentId] = useState<string | null>(null);
   const [beastAgentDetail, setBeastAgentDetail] = useState<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
@@ -261,6 +265,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
       setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
       setBeastCatalog([]);
       setBeastAgents([]);
+      setBeastRuns([]);
+      setBeastContainerRuntime(undefined);
       setBeastAgentDetail(null);
       return;
     }
@@ -270,17 +276,24 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
 
     async function refreshBeasts() {
       try {
-        const [catalog, runs] = await Promise.all([
+        const [catalog, agents, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
           client.listAgents(),
+          client.listRuns(),
+          client.getContainerRuntimeStatus().catch((error) => ({
+            available: false,
+            reason: error instanceof Error ? error.message : 'Container runtime status unavailable.',
+          })),
         ]);
         if (cancelled) {
           return;
         }
         setBeastError(null);
         setBeastCatalog(catalog);
-        setBeastAgents(runs);
-        const currentAgentId = selectedBeastAgentId ?? runs[0]?.id ?? null;
+        setBeastAgents(agents);
+        setBeastRuns(runs);
+        setBeastContainerRuntime(containerRuntime);
+        const currentAgentId = selectedBeastAgentId ?? agents[0]?.id ?? null;
         setSelectedBeastAgentId(currentAgentId);
 
         if (currentAgentId) {
@@ -677,6 +690,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             agents={beastAgents}
             agentDetail={beastAgentDetail}
             catalog={beastCatalog}
+            runs={beastRuns}
+            containerRuntime={beastContainerRuntime}
             disabled={!beastClient}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
@@ -689,8 +704,9 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
+              const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              await beastClient.createAgent({ definitionId, initAction, initConfig: config });
+              await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
               setBeastRefreshNonce((current) => current + 1);
             }}
             onDelete={(agentId) => {

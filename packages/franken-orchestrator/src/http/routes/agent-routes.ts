@@ -30,6 +30,7 @@ const CreateAgentBody = z.object({
   initConfig: z.record(z.string(), z.unknown()),
   chatSessionId: z.string().min(1).optional(),
   moduleConfig: ModuleConfigSchema.optional(),
+  executionMode: z.enum(['process', 'container']).optional(),
 }).strict();
 
 export interface AgentRoutesDeps {
@@ -110,6 +111,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
         trackedAgentId: agent.id,
         startNow: true,
+        ...(body.executionMode ? { executionMode: body.executionMode } : {}),
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
