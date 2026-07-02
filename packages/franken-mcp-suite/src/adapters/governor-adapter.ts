@@ -3,7 +3,15 @@ import type { TriggerResult, TriggerSeverity } from '@franken/governor';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
-/** Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover. */
+/**
+ * Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover.
+ * Substring (not word-boundary) matching is deliberate: it fails closed, so
+ * snake_case/camelCase destructive verbs (`drop_table`, `dropTable`) are still
+ * caught. The tradeoff is benign paths containing these substrings
+ * (`src/dropdown.tsx`) also trip — a safe false-positive. Tightening this
+ * heuristic (tokenizer/verb-aware matching, split-flag detection like
+ * `rm -r -f`) is tracked as a follow-up and intentionally out of scope here.
+ */
 const DANGEROUS_PATTERNS = [
   /delete/i,
   /drop/i,
