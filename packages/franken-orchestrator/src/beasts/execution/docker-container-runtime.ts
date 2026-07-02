@@ -38,7 +38,14 @@ function containerCommand(command: string, policy: SandboxPolicy): string {
 }
 
 function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] {
-  const args: string[] = [];
+  const args: string[] = [
+    '-e',
+    'GIT_CONFIG_COUNT=1',
+    '-e',
+    'GIT_CONFIG_KEY_0=safe.directory',
+    '-e',
+    `GIT_CONFIG_VALUE_0=${policy.workspaceContainerPath}`,
+  ];
   for (const key of policy.envAllowlist) {
     const value = spec.env?.[key];
     if (value !== undefined) {

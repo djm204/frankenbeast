@@ -137,7 +137,7 @@ Beast dispatch supports two execution modes:
 | Mode | Boundary |
 |------|----------|
 | `process` | Host process with supervised lifecycle, env allowlist, and project-root cwd containment. This is **not** a hard sandbox. |
-| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root UID/GID enforcement (defaults to the invoking host UID/GID when non-root, otherwise `10001:10001`), memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. |
+| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, git safe-directory configuration for the mounted checkout, non-root UID/GID enforcement (defaults to the invoking host UID/GID when non-root, otherwise `10001:10001`), memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. |
 
 Container mode requires Docker and the in-repo sandbox image. Build the default image with:
 
