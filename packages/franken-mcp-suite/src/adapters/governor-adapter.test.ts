@@ -47,4 +47,16 @@ describe('GovernorAdapter', () => {
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
     expect(result.decision).not.toBe('approved');
   });
+
+  it('exempts non-executing tools on the SHARED path even with dangerous-looking payload', async () => {
+    // The hook path calls the governor directly; the non-executing exemption
+    // must hold here too (not only in the central gate), so storing/logging
+    // risky-looking content is not a false-positive denial.
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    const result = await governor.check({
+      action: 'fbeast_memory_store',
+      context: '{"value":"delete drop truncate rm -rf /"}',
+    });
+    expect(result.decision).toBe('approved');
+  });
 });
