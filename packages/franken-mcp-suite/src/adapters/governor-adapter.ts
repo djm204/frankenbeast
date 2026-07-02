@@ -3,6 +3,51 @@ import type { TriggerResult, TriggerSeverity } from '@franken/governor';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
+/**
+ * fbeast tool/action names that are destructive but whose name the word
+ * patterns below do not catch (e.g. `forget` deletes a memory entry). Treated
+ * as destructive here, in the *shared* governor, so every caller agrees: the
+ * client hook, the public `fbeast_governor_check` tool, the `governor_log`
+ * record, and the central MCP dispatch gate all get the same decision for the
+ * same action.
+ */
+const DESTRUCTIVE_ACTIONS = new Set([
+  'fbeast_memory_forget',
+]);
+
+/**
+ * fbeast tools whose payload is *data to query/analyze/store/log*, not an
+ * operation to authorize. Their input frequently contains dangerous words (the
+ * text being critiqued, the value being stored, the event being logged), so
+ * running the word heuristic over it produces false-positive denials on
+ * legitimate risky content. They are exempt here in the *shared* governor so the
+ * exemption applies identically whether a call is judged by the client hook
+ * (`fbeast-hook pre-tool`), the public `fbeast_governor_check` tool, or the
+ * central MCP dispatch gate — no path can diverge.
+ */
+export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
+  'search_tools',
+  'fbeast_firewall_scan',
+  'fbeast_firewall_scan_file',
+  'fbeast_governor_check',
+  'fbeast_governor_budget',
+  'fbeast_memory_store',
+  'fbeast_memory_query',
+  'fbeast_memory_frontload',
+  'fbeast_plan_decompose',
+  'fbeast_plan_status',
+  'fbeast_plan_validate',
+  'fbeast_critique_evaluate',
+  'fbeast_critique_compare',
+  'fbeast_observer_log',
+  'fbeast_observer_log_cost',
+  'fbeast_observer_cost',
+  'fbeast_observer_trail',
+  'fbeast_skills_list',
+  'fbeast_skills_discover',
+  'fbeast_skills_load',
+]);
+
 /** Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover. */
 const DANGEROUS_PATTERNS = [
   /delete/i,
@@ -48,8 +93,18 @@ function matchesDangerousPattern(text: string): boolean {
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
+  // Non-executing tools are approved without payload governance, so this
+  // exemption holds on every path that reaches the shared governor (hook,
+  // public check tool, central gate) — not just the central dispatch gate.
+  if (NON_EXECUTING_TOOLS.has(action)) {
+    return {
+      decision: 'approved',
+      reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
+    };
+  }
+
   const combined = `${action} ${context}`;
-  const isDestructive = matchesDangerousPattern(combined);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(combined);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
