@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ChunkSessionGc } from '../../../src/session/chunk-session-gc.js';
 import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
-import { createChunkSession } from '../../../src/session/chunk-session.js';
+import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
+import { createChunkSession, chunkSessionStorageKey } from '../../../src/session/chunk-session.js';
 
 describe('ChunkSessionGc', () => {
   it('deletes expired completed sessions and orphaned snapshots but retains recent active ones', () => {
@@ -58,6 +59,48 @@ describe('ChunkSessionGc', () => {
     expect(store.load('demo-plan', 'old_done')).toBeUndefined();
     expect(store.load('demo-plan', 'active')).toBeDefined();
     expect(existsSync(orphanDir)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves snapshots for a session whose primary file is corrupt (quarantined, not deleted)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-gc-quarantine-'));
+    const sessionRoot = join(root, 'chunk-sessions');
+    const snapshotRoot = join(root, 'chunk-session-snapshots');
+    const now = new Date('2026-03-09T12:00:00.000Z');
+
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:torn',
+      chunkId: 'torn',
+      promiseTag: 'IMPL_torn_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+
+    // A snapshot exists for this session and should survive GC even though
+    // the primary session file below is corrupt (crash mid-write) and gets
+    // quarantined rather than parsed — it must not be treated as "gone".
+    const snapshots = new FileChunkSessionSnapshotStore(snapshotRoot);
+    snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const sessionPlanDir = join(sessionRoot, 'demo-plan');
+    mkdirSync(sessionPlanDir, { recursive: true });
+    const sessionKey = chunkSessionStorageKey(session.chunkId, session.taskId);
+    writeFileSync(join(sessionPlanDir, `${sessionKey}.json`), '{"chunkId": "torn", "trunc');
+
+    const gc = new ChunkSessionGc({
+      sessionRoot,
+      snapshotRoot,
+      completedTtlMs: 24 * 60 * 60 * 1000,
+      failedTtlMs: 72 * 60 * 60 * 1000,
+    });
+
+    gc.collect(now);
+
+    const snapshotDir = join(snapshotRoot, 'demo-plan', sessionKey);
+    expect(existsSync(snapshotDir)).toBe(true);
 
     rmSync(root, { recursive: true, force: true });
   });

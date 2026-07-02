@@ -1,10 +1,10 @@
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
 import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
-import { createChunkSession } from '../../../src/session/chunk-session.js';
+import { createChunkSession, chunkSessionStorageKey } from '../../../src/session/chunk-session.js';
 
 describe('FileChunkSessionStore', () => {
   const tmpDirs: string[] = [];
@@ -85,5 +85,204 @@ describe('FileChunkSessionStore', () => {
     const file = snapshots.writeSnapshot(session, 'pre-compaction');
     expect(file).toContain('01_demo');
     expect(snapshots.list('demo-plan', '01_demo')).toHaveLength(1);
+  });
+
+  describe('atomic writes', () => {
+    it('leaves no temp files behind after save()', () => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-session-atomic-'));
+      tmpDirs.push(root);
+      const store = new FileChunkSessionStore(root);
+      const session = createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:01_demo',
+        chunkId: '01_demo',
+        promiseTag: 'IMPL_01_demo_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      });
+
+      const filePath = store.save(session);
+      store.save({ ...session, iterations: 1 });
+
+      const planDir = join(root, 'demo-plan');
+      const leftovers = readdirSync(planDir).filter((f) => join(planDir, f) !== filePath);
+      expect(leftovers).toEqual([]);
+    });
+
+    it('never leaves a partially-written session file visible on disk', () => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-session-torn-'));
+      tmpDirs.push(root);
+      const store = new FileChunkSessionStore(root);
+      const session = createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:01_demo',
+        chunkId: '01_demo',
+        promiseTag: 'IMPL_01_demo_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      });
+
+      const filePath = store.save(session);
+      // A file written via temp+rename is always fully valid JSON on disk —
+      // if the process had crashed mid-write, the target path would still
+      // hold the previous complete content (or not exist), never a torn one.
+      expect(() => JSON.parse(readFileSync(filePath, 'utf-8'))).not.toThrow();
+    });
+  });
+
+  describe('corruption handling', () => {
+    function corruptedFilePath(root: string, planName: string, chunkId: string, taskId: string): string {
+      return join(root, planName, `${chunkSessionStorageKey(chunkId, taskId)}.json`);
+    }
+
+    it('load() quarantines a corrupt session file and returns undefined instead of throwing', () => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-session-corrupt-load-'));
+      tmpDirs.push(root);
+      const planDir = join(root, 'demo-plan');
+      mkdirSync(planDir, { recursive: true });
+      const filePath = corruptedFilePath(root, 'demo-plan', '01_demo', 'impl:01_demo');
+      writeFileSync(filePath, '{"chunkId": "01_demo", "trans'); // truncated mid-write
+
+      const store = new FileChunkSessionStore(root);
+
+      expect(() => store.load('demo-plan', '01_demo', 'impl:01_demo')).not.toThrow();
+      expect(store.load('demo-plan', '01_demo', 'impl:01_demo')).toBeUndefined();
+      expect(existsSync(filePath)).toBe(false);
+      expect(readdirSync(planDir).some((f) => f.includes('.corrupt.'))).toBe(true);
+    });
+
+    it('list() skips a corrupt session file and still returns the healthy ones', () => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-session-corrupt-list-'));
+      tmpDirs.push(root);
+      const store = new FileChunkSessionStore(root);
+      const good = createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:02_demo',
+        chunkId: '02_demo',
+        promiseTag: 'IMPL_02_demo_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      });
+      store.save(good);
+
+      const planDir = join(root, 'demo-plan');
+      const corruptPath = corruptedFilePath(root, 'demo-plan', '01_demo', 'impl:01_demo');
+      writeFileSync(corruptPath, 'not valid json{{{');
+
+      const sessions = store.list('demo-plan');
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.chunkId).toBe('02_demo');
+      expect(existsSync(corruptPath)).toBe(false);
+      expect(readdirSync(planDir).some((f) => f.includes('.corrupt.'))).toBe(true);
+    });
+  });
+});
+
+describe('FileChunkSessionSnapshotStore', () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeSession(root: string) {
+    return createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:01_demo',
+      chunkId: '01_demo',
+      promiseTag: 'IMPL_01_demo_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+  }
+
+  it('writes snapshots atomically, leaving no temp files behind', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-atomic-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+
+    const file = snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const leftovers = readdirSync(dir).filter((f) => join(dir, f) !== file);
+    expect(leftovers).toEqual([]);
+    expect(() => JSON.parse(readFileSync(file, 'utf-8'))).not.toThrow();
+  });
+
+  it('restoreLatest() skips a corrupt snapshot file and returns undefined instead of throwing when none remain', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-corrupt-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    mkdirSync(dir, { recursive: true });
+    const corruptPath = join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json');
+    writeFileSync(corruptPath, '{"chunkId": "01_demo", "trunc');
+
+    expect(() => snapshots.restoreLatest('demo-plan', '01_demo', session.taskId)).not.toThrow();
+    expect(snapshots.restoreLatest('demo-plan', '01_demo', session.taskId)).toBeUndefined();
+    expect(existsSync(corruptPath)).toBe(false);
+    expect(readdirSync(dir).some((f) => f.includes('.corrupt.'))).toBe(true);
+  });
+
+  it('restoreLatest() falls back to the next-most-recent snapshot when the latest is corrupt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-fallback-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'),
+      JSON.stringify({ ...session, compactionGeneration: 0 }),
+    );
+    const corruptPath = join(dir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json');
+    writeFileSync(corruptPath, '{"chunkId": "01_demo", "trunc');
+
+    const restored = snapshots.restoreLatest('demo-plan', '01_demo', session.taskId);
+
+    expect(restored?.compactionGeneration).toBe(0);
+    expect(existsSync(corruptPath)).toBe(false);
+  });
+
+  it('list() without a taskId skips a corrupt snapshot instead of throwing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-corrupt-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptPath = join(dir, '2026-01-03T00-00-00-000Z-gen-2-pre-compaction.json');
+    writeFileSync(corruptPath, 'not valid json{{{');
+
+    expect(() => snapshots.list('demo-plan', '01_demo')).not.toThrow();
+    expect(snapshots.list('demo-plan', '01_demo')).toHaveLength(1);
+  });
+
+  it('list() with a taskId also quarantines a corrupt snapshot instead of returning it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-task-corrupt-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const goodFile = snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptPath = join(dir, '2026-01-03T00-00-00-000Z-gen-2-pre-compaction.json');
+    writeFileSync(corruptPath, 'not valid json{{{');
+
+    const files = snapshots.list('demo-plan', '01_demo', session.taskId);
+
+    expect(files).toEqual([goodFile]);
+    expect(existsSync(corruptPath)).toBe(false);
+    expect(readdirSync(dir).some((f) => f.includes('.corrupt.'))).toBe(true);
   });
 });
