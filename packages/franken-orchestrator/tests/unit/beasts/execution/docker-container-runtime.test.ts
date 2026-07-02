@@ -93,7 +93,16 @@ describe('toDockerSpec', () => {
   it('passes only allowlisted env via explicit -e values and inherits no host env', () => {
     const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
 
-    expect(spec.args).toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG=/workspace/.fbeast/rc.json']));
+    expect(spec.args).toEqual(expect.arrayContaining([
+      '-e',
+      'GIT_CONFIG_COUNT=1',
+      '-e',
+      'GIT_CONFIG_KEY_0=safe.directory',
+      '-e',
+      'GIT_CONFIG_VALUE_0=/workspace',
+      '-e',
+      'FRANKENBEAST_RUN_CONFIG=/workspace/.fbeast/rc.json',
+    ]));
     expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'GITHUB_TOKEN=ghp_should_not_leak']));
     expect(spec.env).toEqual({});
   });
