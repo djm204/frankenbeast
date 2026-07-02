@@ -33,7 +33,20 @@ export interface ObserverTrailEntry {
   eventType: string;
   payload: string;
   hash?: string;
+  parentHash?: string;
   createdAt: string;
+}
+
+export interface ObserverVerifyResult {
+  ok: boolean;
+  checked: number;
+  firstInvalid?: {
+    index: number;
+    expectedHash: string;
+    actualHash?: string | undefined;
+    expectedParentHash?: string | undefined;
+    actualParentHash?: string | undefined;
+  };
 }
 
 export interface ObserverCostInput {
@@ -49,6 +62,7 @@ export interface ObserverAdapter {
   logCost(input: ObserverCostInput): Promise<void>;
   cost(input: { sessionId?: string }): Promise<ObserverCostSummary>;
   trail(sessionId: string): Promise<ObserverTrailEntry[]>;
+  verify(sessionId: string): Promise<ObserverVerifyResult>;
 }
 
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
@@ -60,6 +74,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
   return {
     async log(input) {
       const payload = parseMetadata(input.metadata);
+      const metadata = canonicalMetadata(input.metadata);
       const lastRow = store.db.prepare(
         'SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1',
       ).get(input.sessionId) as { hash: string } | undefined;
@@ -67,10 +82,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       const auditEvent = createAuditEvent(input.event, payload, {
         phase: 'mcp',
         provider: 'fbeast-mcp',
-        input: input.metadata,
+        input: metadata,
       });
 
-      const baseHash = auditEvent.inputHash ?? hashContent(`${input.event}:${input.metadata}`);
+      const baseHash = buildEventBaseHash(input.sessionId, input.event, metadata, auditEvent.inputHash);
       const hash = buildAuditHash(baseHash, lastRow?.hash);
       const result = store.db.prepare(`
         INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
@@ -78,7 +93,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       `).run(
         input.sessionId,
         input.event,
-        JSON.stringify(payload),
+        metadata,
         hash,
         lastRow?.hash ?? null,
       );
@@ -156,23 +171,164 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
     async trail(sessionId) {
       return store.db.prepare(
-        'SELECT event_type AS eventType, payload, hash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+        'SELECT event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
       ).all(sessionId) as ObserverTrailEntry[];
+    },
+
+    async verify(sessionId) {
+      const rows = store.db.prepare(
+        'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+      ).all(sessionId) as AuditTrailRow[];
+      let expectedParentHash: string | undefined;
+      let expectedLegacy16ParentHash: string | undefined;
+
+      for (const [index, row] of rows.entries()) {
+        const metadata = row.payload;
+        const payload = parseMetadata(metadata);
+        const auditEvent = createAuditEvent(row.eventType, payload, {
+          phase: 'mcp',
+          provider: 'fbeast-mcp',
+          input: metadata,
+        });
+        const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
+        const expectedHash = buildAuditHash(baseHash, expectedParentHash);
+        const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
+        const actualParentHash = row.parentHash ?? undefined;
+        const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
+        const matchesLegacy16 = expectedLegacy16Hash !== undefined
+          && actualParentHash === expectedLegacy16ParentHash
+          && row.hash === expectedLegacy16Hash;
+
+        if (!matchesCurrent && !matchesLegacy16) {
+          return {
+            ok: false,
+            checked: index,
+            firstInvalid: {
+              index,
+              expectedHash,
+              actualHash: row.hash,
+              expectedParentHash,
+              actualParentHash,
+            },
+          };
+        }
+
+        if (!matchesCurrent && matchesLegacy16 && !legacy16RowIsBoundToTrail(row, sessionId)) {
+          return {
+            ok: false,
+            checked: index,
+            firstInvalid: {
+              index,
+              expectedHash,
+              actualHash: row.hash,
+              expectedParentHash,
+              actualParentHash,
+            },
+          };
+        }
+
+        if (!matchesCurrent) {
+          migrateAuditRow(store, row.id, expectedHash, expectedParentHash);
+        }
+
+        expectedParentHash = expectedHash;
+        expectedLegacy16ParentHash = expectedLegacy16Hash;
+      }
+
+      return { ok: true, checked: rows.length };
     },
   };
 }
 
+interface AuditTrailRow extends ObserverTrailEntry {
+  id: number;
+}
+
 function buildAuditHash(baseHash: string, parentHash?: string): string {
   if (!parentHash) {
-    return baseHash.slice(0, 16);
+    return baseHash;
+  }
+
+  return hashContent(`${parentHash}:${baseHash}`);
+}
+
+function buildEventBaseHash(sessionId: string, eventType: string, metadata: string, inputHash?: string): string {
+  return hashContent(`${sessionId}:${eventType}:${inputHash ?? ''}:${metadata}`);
+}
+
+function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {
+  const baseHash = (inputHash ?? hashContent('')).slice(0, 16);
+  if (!parentHash) {
+    return baseHash;
   }
 
   return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
 }
 
+function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): string | undefined {
+  if (!isLegacy16Hash(row.hash)) return undefined;
+
+  for (const metadata of legacyMetadataCandidates(row.payload)) {
+    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash);
+    if (row.hash === expected) return expected;
+  }
+
+  return undefined;
+}
+
+function isLegacy16Hash(hash: string | undefined): hash is string {
+  return /^sha256:[a-f0-9]{9}$/.test(hash ?? '');
+}
+
+function legacyMetadataCandidates(storedMetadata: string): string[] {
+  const candidates = [storedMetadata];
+  try {
+    const parsed = JSON.parse(storedMetadata) as unknown;
+    candidates.push(JSON.stringify(parsed, null, 2));
+    if (isPlainObject(parsed)) {
+      candidates.push(prettyOneLineJson(parsed));
+    }
+  } catch {
+    // Non-JSON legacy metadata has no alternate insignificant-whitespace form.
+  }
+
+  return [...new Set(candidates)];
+}
+
+function prettyOneLineJson(value: Record<string, unknown>): string {
+  return `{ ${Object.entries(value)
+    .map(([key, nested]) => `${JSON.stringify(key)}: ${JSON.stringify(nested)}`)
+    .join(', ')} }`;
+}
+
+function legacy16RowIsBoundToTrail(row: AuditTrailRow, sessionId: string): boolean {
+  const payload = parseMetadata(row.payload);
+  if (!isPlainObject(payload)) return false;
+
+  const payloadSession = payload['sessionId'] ?? payload['session_id'];
+  const payloadEvent = payload['eventType'] ?? payload['event_type'] ?? payload['event'];
+  return payloadSession === sessionId && (payloadEvent === undefined || payloadEvent === row.eventType);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {
+  store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
+}
+
 function parseMetadata(metadata: string): unknown {
   try {
     return JSON.parse(metadata);
+  } catch {
+    return metadata;
+  }
+}
+
+function canonicalMetadata(metadata: string): string {
+  try {
+    return JSON.stringify(JSON.parse(metadata));
   } catch {
     return metadata;
   }

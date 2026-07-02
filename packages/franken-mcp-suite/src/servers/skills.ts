@@ -2,10 +2,12 @@
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface SkillsServerDeps {
   skills: SkillsAdapter;
+  observer?: ObserverAdapter;
 }
 
 export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
@@ -101,7 +103,7 @@ export function createSkillsServer(deps: SkillsServerDeps): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-skills', '0.1.0', tools);
+  return createMcpServer('fbeast-skills', '0.1.0', tools, { observer: deps.observer });
 }
 
 if (isMain(import.meta.url)) {
@@ -109,7 +111,8 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const skills = createSkillsAdapter(values['db']!);
-  const server = createSkillsServer({ skills });
+  const observer = createObserverAdapter(values['db']!);
+  const server = createSkillsServer({ skills, observer });
   server.start().catch((err) => {
     console.error('fbeast-skills failed to start:', err);
     process.exit(1);

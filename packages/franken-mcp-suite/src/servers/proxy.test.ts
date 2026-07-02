@@ -44,11 +44,13 @@ describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
   let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
+  let observerLog: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    observerLog = vi.fn().mockResolvedValue({ id: 1, hash: 'h' });
     mockSearchTools.mockReturnValue(FAKE_STUBS);
-    mockCreateAdapterSet.mockReturnValue({} as ReturnType<typeof registry.createAdapterSet>);
+    mockCreateAdapterSet.mockReturnValue({ observer: { log: observerLog } } as ReturnType<typeof registry.createAdapterSet>);
 
     server = createProxyServer({ dbPath: ':memory:' });
     searchToolsDef = server.tools.find((t) => t.name === 'search_tools')!;
@@ -102,6 +104,22 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('search_tools');
     });
 
+    it('does not load adapters just to report unknown tool validation errors', async () => {
+      const result = await executeToolDef.handler({ tool: 'nonexistent_tool', args: {} }) as { isError: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+    });
+
+    it('does not load adapters when proxy meta-tool validation rejects arguments', async () => {
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'bar' }, extra: true });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('unknown property: extra');
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+      expect(observerLog).not.toHaveBeenCalled();
+    });
+
     it('passes args to handler correctly', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
@@ -122,6 +140,51 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
+      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
+      expect(observerLog).not.toHaveBeenCalled();
+    });
+
+    it('audits proxied target tool success', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_call' }));
+      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_result' }));
+    });
+
+    it('preserves proxied results when result audit logging fails', async () => {
+      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
+      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      observerLog
+        .mockResolvedValueOnce({ id: 1, hash: 'h1' })
+        .mockRejectedValueOnce(new Error('audit write failed'));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(result).toEqual(fakeResult);
+      expect(fakeHandler).toHaveBeenCalledOnce();
+      expect(observerLog).toHaveBeenCalledTimes(2);
+    });
+
+    it('executes proxied target tools when pre-call audit logging fails', async () => {
+      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
+      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      observerLog
+        .mockRejectedValueOnce(new Error('audit write failed'))
+        .mockResolvedValueOnce({ id: 2, hash: 'h2' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+
+      expect(result).toEqual(fakeResult);
+      expect(fakeHandler).toHaveBeenCalledWith({ key: 'bar' });
+      expect(observerLog).toHaveBeenCalledTimes(2);
     });
 
     it('rejects proxied calls with missing target required fields', async () => {

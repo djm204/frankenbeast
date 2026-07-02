@@ -2,10 +2,12 @@
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface FirewallServerDeps {
   firewall: FirewallAdapter;
+  observer?: ObserverAdapter;
 }
 
 export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer {
@@ -70,7 +72,7 @@ export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-firewall', '0.1.0', tools);
+  return createMcpServer('fbeast-firewall', '0.1.0', tools, { observer: deps.observer });
 }
 
 if (isMain(import.meta.url)) {
@@ -84,7 +86,8 @@ if (isMain(import.meta.url)) {
   const firewall = createFirewallAdapter(values['db']!, tier, {
     root: process.env['FBEAST_ROOT'] ?? process.cwd(),
   });
-  const server = createFirewallServer({ firewall });
+  const observer = createObserverAdapter(values['db']!);
+  const server = createFirewallServer({ firewall, observer });
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);
     process.exit(1);

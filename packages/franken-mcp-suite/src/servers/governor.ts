@@ -2,10 +2,12 @@
 import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface GovernorServerDeps {
   governor: GovernorAdapter;
+  observer?: ObserverAdapter;
 }
 
 export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer {
@@ -58,7 +60,7 @@ export function createGovernorServer(deps: GovernorServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-governor', '0.1.0', tools);
+  return createMcpServer('fbeast-governor', '0.1.0', tools, { observer: deps.observer });
 }
 
 if (isMain(import.meta.url)) {
@@ -66,7 +68,8 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const governor = createGovernorAdapter(values['db']!);
-  const server = createGovernorServer({ governor });
+  const observer = createObserverAdapter(values['db']!);
+  const server = createGovernorServer({ governor, observer });
   server.start().catch((err) => {
     console.error('fbeast-governor failed to start:', err);
     process.exit(1);
