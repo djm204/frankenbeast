@@ -142,6 +142,43 @@ describe('ChunkSessionGc', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('preserves task-scoped snapshots when only a corrupt legacy session file remains', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-gc-corrupt-legacy-'));
+    const sessionRoot = join(root, 'chunk-sessions');
+    const snapshotRoot = join(root, 'chunk-session-snapshots');
+    const now = new Date('2026-03-09T12:00:00.000Z');
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:legacy',
+      chunkId: 'legacy',
+      promiseTag: 'IMPL_legacy_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+
+    const snapshots = new FileChunkSessionSnapshotStore(snapshotRoot);
+    snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const sessionPlanDir = join(sessionRoot, 'demo-plan');
+    mkdirSync(sessionPlanDir, { recursive: true });
+    writeFileSync(join(sessionPlanDir, `${session.chunkId}.json.corrupt.1.1`), '{"chunkId": "legacy", "trunc');
+
+    const gc = new ChunkSessionGc({
+      sessionRoot,
+      snapshotRoot,
+      completedTtlMs: 24 * 60 * 60 * 1000,
+      failedTtlMs: 72 * 60 * 60 * 1000,
+    });
+
+    gc.collect(now);
+
+    const snapshotDir = join(snapshotRoot, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    expect(existsSync(snapshotDir)).toBe(true);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('drops stale quarantines when expiring a session so its snapshots can be collected', () => {
     const root = mkdtempSync(join(tmpdir(), 'chunk-gc-expire-quarantine-'));
     const sessionRoot = join(root, 'chunk-sessions');

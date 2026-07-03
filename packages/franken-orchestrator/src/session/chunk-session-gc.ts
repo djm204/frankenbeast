@@ -59,6 +59,10 @@ export class ChunkSessionGc {
       const planDir = join(this.config.snapshotRoot, planName);
       if (!statSync(planDir).isDirectory()) continue;
 
+      if (this.store.hasQuarantinedLegacySession(planName)) {
+        continue;
+      }
+
       for (const sessionKey of readdirSync(planDir)) {
         const chunkDir = join(planDir, sessionKey);
         if (!statSync(chunkDir).isDirectory()) continue;

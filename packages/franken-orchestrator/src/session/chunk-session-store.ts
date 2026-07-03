@@ -140,6 +140,32 @@ export class FileChunkSessionStore {
     return [...keys];
   }
 
+  /**
+   * Returns true when a plan contains a quarantined legacy `<chunkId>.json`
+   * file. A corrupt legacy file cannot reveal its `taskId`, so callers that
+   * would otherwise derive task-scoped snapshot keys must conservatively
+   * preserve that plan's snapshots until the operator recovers or deletes the
+   * quarantined session.
+   */
+  hasQuarantinedLegacySession(planName: string): boolean {
+    const planDir = join(this.rootDir, planName);
+    if (!existsSync(planDir)) {
+      return false;
+    }
+
+    for (const file of readdirSync(planDir)) {
+      const key = sessionKeyFromFileName(file);
+      if (!key || file === `${key}.json`) {
+        continue;
+      }
+      if (file.startsWith(`${key}.json.corrupt.`) && decodeURIComponent(key) === key) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private deleteStorageKey(planName: string, key: string): void {
     const planDir = join(this.rootDir, planName);
     if (!existsSync(planDir)) {
