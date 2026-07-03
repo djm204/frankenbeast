@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
@@ -18,6 +18,10 @@ function sessionKeyFromFileName(file: string): string | undefined {
     return undefined;
   }
   return dequarantined.slice(0, -'.json'.length);
+}
+
+function isSessionFileForKey(file: string, key: string): boolean {
+  return file === `${key}.json` || file.startsWith(`${key}.json.corrupt.`);
 }
 
 export class FileChunkSessionStore {
@@ -69,28 +73,19 @@ export class FileChunkSessionStore {
 
   delete(planName: string, chunkId: string, taskId?: string): void {
     if (taskId) {
-      const filePath = this.filePathFor(planName, chunkId, taskId);
-      if (existsSync(filePath)) {
-        rmSync(filePath, { force: true });
-      }
+      this.deleteStorageKey(planName, chunkSessionStorageKey(chunkId, taskId));
       return;
     }
 
     const matches = this.list(planName).filter((session) => session.chunkId === chunkId);
     if (matches.length > 0) {
       for (const session of matches) {
-        const filePath = this.filePathFor(session.planName, session.chunkId, session.taskId);
-        if (existsSync(filePath)) {
-          rmSync(filePath, { force: true });
-        }
+        this.deleteStorageKey(session.planName, chunkSessionStorageKey(session.chunkId, session.taskId));
       }
       return;
     }
 
-    const legacyPath = this.legacyFilePathFor(planName, chunkId);
-    if (existsSync(legacyPath)) {
-      rmSync(legacyPath, { force: true });
-    }
+    this.deleteStorageKey(planName, chunkId);
   }
 
   list(planName?: string): ChunkSession[] {
@@ -117,14 +112,14 @@ export class FileChunkSessionStore {
 
   /**
    * Lists the storage keys of every session file present on disk — including
-   * quarantined (corrupt) ones — without parsing JSON. Callers like garbage
-   * collection use this instead of list() so a session whose primary file is
-   * corrupt (quarantined, not yet recovered) still counts as "present" and
-   * its snapshot history is not deleted as orphaned.
+   * quarantined (corrupt) ones. Callers like garbage collection use this
+   * instead of list() so a session whose primary file is corrupt (quarantined,
+   * not yet recovered) still counts as "present" and its snapshot history is
+   * not deleted as orphaned.
    */
   listStorageKeys(planName?: string): string[] {
     const plans = planName ? [planName] : this.listPlanNames();
-    const keys: string[] = [];
+    const keys = new Set<string>();
 
     for (const plan of plans) {
       const planDir = join(this.rootDir, plan);
@@ -133,12 +128,48 @@ export class FileChunkSessionStore {
       for (const file of readdirSync(planDir)) {
         const key = sessionKeyFromFileName(file);
         if (key) {
-          keys.push(`${plan}/${key}`);
+          keys.add(`${plan}/${key}`);
+          const taskScopedKey = this.taskScopedKeyFromLegacyFile(planDir, file, key);
+          if (taskScopedKey) {
+            keys.add(`${plan}/${taskScopedKey}`);
+          }
         }
       }
     }
 
-    return keys;
+    return [...keys];
+  }
+
+  private deleteStorageKey(planName: string, key: string): void {
+    const planDir = join(this.rootDir, planName);
+    if (!existsSync(planDir)) {
+      return;
+    }
+
+    for (const file of readdirSync(planDir)) {
+      if (isSessionFileForKey(file, key)) {
+        rmSync(join(planDir, file), { force: true });
+      }
+    }
+  }
+
+  private taskScopedKeyFromLegacyFile(planDir: string, file: string, key: string): string | undefined {
+    // Only live legacy files can reveal the task-scoped storage key. Corrupt
+    // quarantines are still represented by their filename-derived legacy key.
+    if (file !== `${key}.json`) {
+      return undefined;
+    }
+
+    try {
+      const session = JSON.parse(readFileSync(join(planDir, file), 'utf-8')) as Partial<ChunkSession>;
+      if (!session.chunkId || !session.taskId) {
+        return undefined;
+      }
+      const taskScopedKey = chunkSessionStorageKey(session.chunkId, session.taskId);
+      return taskScopedKey === key ? undefined : taskScopedKey;
+    } catch {
+      return undefined;
+    }
   }
 
   private filePathFor(planName: string, chunkId: string, taskId?: string): string {

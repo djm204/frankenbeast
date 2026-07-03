@@ -104,4 +104,84 @@ describe('ChunkSessionGc', () => {
 
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('preserves task-scoped snapshots for legacy sessions stored as <chunkId>.json', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-gc-legacy-'));
+    const sessionRoot = join(root, 'chunk-sessions');
+    const snapshotRoot = join(root, 'chunk-session-snapshots');
+    const now = new Date('2026-03-09T12:00:00.000Z');
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:legacy',
+      chunkId: 'legacy',
+      promiseTag: 'IMPL_legacy_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+
+    const snapshots = new FileChunkSessionSnapshotStore(snapshotRoot);
+    snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const sessionPlanDir = join(sessionRoot, 'demo-plan');
+    mkdirSync(sessionPlanDir, { recursive: true });
+    writeFileSync(join(sessionPlanDir, `${session.chunkId}.json`), JSON.stringify(session));
+
+    const gc = new ChunkSessionGc({
+      sessionRoot,
+      snapshotRoot,
+      completedTtlMs: 24 * 60 * 60 * 1000,
+      failedTtlMs: 72 * 60 * 60 * 1000,
+    });
+
+    gc.collect(now);
+
+    const snapshotDir = join(snapshotRoot, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    expect(existsSync(snapshotDir)).toBe(true);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('drops stale quarantines when expiring a session so its snapshots can be collected', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-gc-expire-quarantine-'));
+    const sessionRoot = join(root, 'chunk-sessions');
+    const snapshotRoot = join(root, 'chunk-session-snapshots');
+    const store = new FileChunkSessionStore(sessionRoot);
+    const now = new Date('2026-03-09T12:00:00.000Z');
+    const session = {
+      ...createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:old_done',
+        chunkId: 'old_done',
+        promiseTag: 'IMPL_old_done_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      }),
+      status: 'completed' as const,
+      updatedAt: '2026-03-07T00:00:00.000Z',
+    };
+    store.save(session);
+
+    const snapshots = new FileChunkSessionSnapshotStore(snapshotRoot);
+    snapshots.writeSnapshot(session, 'pre-compaction');
+
+    const sessionKey = chunkSessionStorageKey(session.chunkId, session.taskId);
+    const sessionPlanDir = join(sessionRoot, 'demo-plan');
+    writeFileSync(join(sessionPlanDir, `${sessionKey}.json.corrupt.1.1`), '{"chunkId": "old_done", "trunc');
+
+    const gc = new ChunkSessionGc({
+      sessionRoot,
+      snapshotRoot,
+      completedTtlMs: 24 * 60 * 60 * 1000,
+      failedTtlMs: 72 * 60 * 60 * 1000,
+    });
+
+    gc.collect(now);
+
+    expect(store.listStorageKeys()).toEqual([]);
+    expect(existsSync(join(snapshotRoot, 'demo-plan', sessionKey))).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
 });
