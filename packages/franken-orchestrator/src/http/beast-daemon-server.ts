@@ -102,7 +102,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
 }
 
 async function claimPidFile(pidFile: string): Promise<void> {
-  const existingPid = await readPidFile(pidFile);
+  const existingPid = await readExistingPidFile(pidFile);
   if (existingPid !== undefined) {
     if (isProcessAlive(existingPid)) {
       throw new Error(`beasts-daemon is already running with PID ${existingPid} (${pidFile})`);
@@ -111,6 +111,23 @@ async function claimPidFile(pidFile: string): Promise<void> {
   }
   await mkdir(dirname(pidFile), { recursive: true });
   await writeFile(pidFile, `${process.pid}\n`, { flag: 'wx' });
+}
+
+async function readExistingPidFile(pidFile: string): Promise<number | undefined> {
+  try {
+    const raw = await readFile(pidFile, 'utf8');
+    const pid = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      return pid;
+    }
+    await rm(pidFile, { force: true });
+    return undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 async function readPidFile(pidFile: string): Promise<number | undefined> {

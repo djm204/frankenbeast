@@ -191,6 +191,17 @@ describe('beast daemon', () => {
     });
     await daemon.close();
     expect(existsSync(stale.pidFile)).toBe(false);
+
+    const corrupt = await makePaths();
+    await mkdir(join(corrupt.root, '.frankenbeast'), { recursive: true });
+    await writeFile(corrupt.pidFile, 'not-a-pid\n', { flag: 'wx' });
+    const corruptDaemon = await startBeastDaemon({
+      ...corrupt,
+      operatorToken,
+      port: 0,
+    });
+    await corruptDaemon.close();
+    expect(existsSync(corrupt.pidFile)).toBe(false);
   });
 
   it('releases the pid file when service construction fails', async () => {
