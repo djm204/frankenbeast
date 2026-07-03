@@ -101,7 +101,10 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     });
 
     if (body.autoDispatch === false || !deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
-      return c.json({ data: agent }, 201);
+      const deferredAgent = deps.dispatch && shouldDispatchOnCreate(body.initAction.kind)
+        ? deps.agents.updateAgent(agent.id, { status: 'stopped' })
+        : agent;
+      return c.json({ data: deferredAgent }, 201);
     }
 
     try {

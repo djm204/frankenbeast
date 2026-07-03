@@ -13,6 +13,18 @@ function createProxyApp() {
   });
 }
 
+function createProxyAppWithGatewayTokenOnly() {
+  return createChatApp({
+    sessionStoreDir: '/tmp/chat-app-beast-daemon-proxy-test',
+    llm: { complete: vi.fn().mockResolvedValue('hello') },
+    projectName: 'proxy-test',
+    operatorToken: 'gateway-token',
+    beastDaemon: {
+      baseUrl: 'http://127.0.0.1:4050',
+    },
+  });
+}
+
 describe('chat app beast daemon proxy', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -62,5 +74,47 @@ describe('chat app beast daemon proxy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
     expect(url.toString()).toBe('http://127.0.0.1:4050/v1/beasts/events/stream?ticket=ticket-1');
+  });
+
+  it('injects the effective gateway token for daemon SSE ticket requests', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ticket: 'ticket-1' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyAppWithGatewayTokenOnly();
+
+    const response = await app.request('/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: { 'x-frankenbeast-operator-token': 'gateway-token' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect((init.headers as Headers).get('authorization')).toBe('Bearer gateway-token');
+  });
+
+  it('strips hop-by-hop headers before forwarding daemon requests', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp();
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer daemon-token',
+        connection: 'keep-alive, x-remove-me',
+        'transfer-encoding': 'chunked',
+        'x-remove-me': 'remove-me',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ok: true }),
+    });
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.has('connection')).toBe(false);
+    expect(forwardedHeaders.has('transfer-encoding')).toBe(false);
+    expect(forwardedHeaders.has('x-remove-me')).toBe(false);
+    expect(forwardedHeaders.has('host')).toBe(false);
   });
 });

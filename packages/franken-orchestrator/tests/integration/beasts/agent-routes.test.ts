@@ -320,6 +320,52 @@ describe('agent routes integration', () => {
     expect(runBody.data.run.status).toBe('running');
   });
 
+  it('creates startable deferred tracked agents when auto dispatch is disabled', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Start later',
+            chunkDirectory: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Start later',
+          chunkDirectory: 'docs/chunks',
+        },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; status: string; dispatchRunId?: string } };
+    expect(created.data.status).toBe('stopped');
+    expect(created.data.dispatchRunId).toBeUndefined();
+
+    const startResponse = await app.request(`/v1/beasts/agents/${created.data.id}/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    expect(startResponse.status).toBe(200);
+    const started = await startResponse.json() as { data: { trackedAgentId?: string; status: string } };
+    expect(started.data.trackedAgentId).toBe(created.data.id);
+    expect(started.data.status).toBe('running');
+  });
+
   it('returns tracked agent detail including init metadata and linked run id', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {

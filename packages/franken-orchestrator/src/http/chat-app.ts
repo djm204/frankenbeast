@@ -195,7 +195,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       }),
     }));
   } else if (opts.beastDaemon) {
-    app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!));
+    const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;
+    app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
@@ -229,13 +230,32 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   return app;
 }
 
-async function proxyToBeastDaemon(request: Request, daemon: { baseUrl: string; operatorToken?: string | undefined }): Promise<Response> {
+const HOP_BY_HOP_HEADERS = [
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+] as const;
+
+async function proxyToBeastDaemon(
+  request: Request,
+  daemon: { baseUrl: string; operatorToken?: string | undefined },
+  operatorToken?: string | undefined,
+): Promise<Response> {
   const sourceUrl = new URL(request.url);
   const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
   const headers = new Headers(request.headers);
-  headers.delete('host');
-  if (daemon.operatorToken && !headers.has('authorization')) {
-    headers.set('authorization', `Bearer ${daemon.operatorToken}`);
+  removeHopByHopHeaders(headers);
+  if (!headers.has('authorization')) {
+    const headerToken = headers.get('x-frankenbeast-operator-token')?.trim();
+    const forwardedToken = operatorToken ?? (headerToken ? headerToken : undefined);
+    if (forwardedToken) {
+      headers.set('authorization', `Bearer ${forwardedToken}`);
+    }
   }
 
   const method = request.method;
@@ -245,6 +265,16 @@ async function proxyToBeastDaemon(request: Request, daemon: { baseUrl: string; o
     Object.assign(init, { duplex: 'half' });
   }
   return fetch(targetUrl, init);
+}
+
+function removeHopByHopHeaders(headers: Headers): void {
+  const connectionTokens = headers.get('connection')
+    ?.split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+  for (const header of [...HOP_BY_HOP_HEADERS, 'host', ...connectionTokens]) {
+    headers.delete(header);
+  }
 }
 
 function required<T>(value: T | undefined, field: string): T {

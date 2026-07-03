@@ -147,6 +147,30 @@ describe('beast daemon', () => {
     expect(existsSync(paths.pidFile)).toBe(false);
   });
 
+  it('force-closes active SSE clients on shutdown', async () => {
+    const paths = await makePaths();
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+    });
+
+    const ticketResponse = await fetch(`${daemon.url}/v1/beasts/events/ticket`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+    expect(ticketResponse.status).toBe(200);
+    const ticketBody = await ticketResponse.json() as { ticket: string };
+    const streamResponse = await fetch(`${daemon.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`);
+    expect(streamResponse.status).toBe(200);
+
+    await expect(Promise.race([
+      daemon.close().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 1_000)),
+    ])).resolves.toBe('closed');
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
   it('rejects an already-running pid and removes stale pid files', async () => {
     const live = await makePaths();
     await mkdir(join(live.root, '.frankenbeast'), { recursive: true });

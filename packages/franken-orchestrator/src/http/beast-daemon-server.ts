@@ -92,7 +92,9 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       await stopLiveRuns(services);
       services.dispose();
       if (listening) {
-        await closeHttpServer(server);
+        const closedServer = closeHttpServer(server);
+        server.closeAllConnections();
+        await closedServer;
       }
       await releasePidFile(pidFile);
     },
