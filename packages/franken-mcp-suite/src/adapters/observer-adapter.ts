@@ -180,6 +180,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
       ).all(sessionId) as AuditTrailRow[];
       let expectedParentHash: string | undefined;
+      let previousStoredHash: string | undefined;
       let expectedLegacy16ParentHash: string | undefined;
 
       for (const [index, row] of rows.entries()) {
@@ -192,14 +193,19 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         });
         const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
         const expectedHash = buildAuditHash(baseHash, expectedParentHash);
+        const expectedHashFromStoredParent = buildAuditHash(baseHash, previousStoredHash);
         const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
         const actualParentHash = row.parentHash ?? undefined;
         const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
+        const matchesStoredParent = !matchesCurrent
+          && previousStoredHash !== expectedParentHash
+          && actualParentHash === previousStoredHash
+          && row.hash === expectedHashFromStoredParent;
         const matchesLegacy16 = expectedLegacy16Hash !== undefined
           && actualParentHash === expectedLegacy16ParentHash
           && row.hash === expectedLegacy16Hash;
 
-        if (!matchesCurrent && !matchesLegacy16) {
+        if (!matchesCurrent && !matchesStoredParent && !matchesLegacy16) {
           return {
             ok: false,
             checked: index,
@@ -231,8 +237,9 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
           migrateAuditRow(store, row.id, expectedHash, expectedParentHash);
         }
 
+        previousStoredHash = row.hash;
         expectedParentHash = expectedHash;
-        expectedLegacy16ParentHash = expectedLegacy16Hash;
+        expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
       }
 
       return { ok: true, checked: rows.length };
@@ -273,7 +280,12 @@ function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): str
     if (row.hash === expected) return expected;
   }
 
-  return undefined;
+  // Older loggers hashed the caller's raw metadata but stored JSON.stringify(payload).
+  // Once insignificant whitespace was discarded, some intact legacy hashes cannot be
+  // recomputed from the stored row. Treat only structurally bound JSON-object rows as
+  // plausible legacy entries; the caller still enforces the session/event binding
+  // before migrating them to the current full-hash format.
+  return isPlainObject(parseMetadata(row.payload)) ? row.hash : undefined;
 }
 
 function isLegacy16Hash(hash: string | undefined): hash is string {
