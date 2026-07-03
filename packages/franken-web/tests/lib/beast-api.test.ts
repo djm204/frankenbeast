@@ -179,6 +179,40 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('kills a tracked agent through the agent-specific kill endpoint', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          id: 'run-1',
+          status: 'stopped',
+        },
+      }),
+    });
+
+    await client.killAgent('agent-1');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents/agent-1/kill',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('surfaces a clear error when killing an agent without a linked run', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({
+        error: {
+          code: 'TRACKED_AGENT_NOT_KILLABLE',
+          message: "Tracked agent 'agent-1' has no linked run to kill",
+        },
+      }),
+    });
+
+    await expect(client.killAgent('agent-1')).rejects.toThrow('HTTP 409');
+  });
+
   it('opens the ticket-authenticated Beast event stream', async () => {
     const close = vi.fn();
     const listeners: Record<string, (event: { data: string }) => void> = {};
