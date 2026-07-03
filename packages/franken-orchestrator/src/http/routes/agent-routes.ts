@@ -31,6 +31,7 @@ const CreateAgentBody = z.object({
   chatSessionId: z.string().min(1).optional(),
   moduleConfig: ModuleConfigSchema.optional(),
   executionMode: z.enum(['process', 'container']).optional(),
+  autoDispatch: z.boolean().optional(),
 }).strict();
 
 export interface AgentRoutesDeps {
@@ -99,7 +100,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       },
     });
 
-    if (!deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
+    if (body.autoDispatch === false || !deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
       return c.json({ data: agent }, 201);
     }
 

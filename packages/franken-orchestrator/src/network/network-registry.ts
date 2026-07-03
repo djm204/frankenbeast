@@ -79,7 +79,13 @@ function collectSelectedServiceIds(
     }
 
     for (const dependency of service.dependsOn) {
-      includeService(dependency);
+      const dependencyService = registry.get(dependency);
+      if (!dependencyService) {
+        throw new Error(`Unknown network service: ${dependency}`);
+      }
+      if (dependencyService.enabled(config)) {
+        includeService(dependency);
+      }
     }
 
     selected.add(serviceId);

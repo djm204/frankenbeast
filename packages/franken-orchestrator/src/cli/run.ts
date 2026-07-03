@@ -403,7 +403,7 @@ export async function main(): Promise<void> {
           ? {
               operatorToken: beastOperatorToken,
               beastDaemon: {
-                baseUrl: process.env.FRANKENBEAST_BEAST_DAEMON_URL ?? 'http://127.0.0.1:4050',
+                baseUrl: process.env.FRANKENBEAST_BEAST_DAEMON_URL ?? `http://${config.beastsDaemon?.host ?? '127.0.0.1'}:${config.beastsDaemon?.port ?? 4050}`,
                 operatorToken: beastOperatorToken,
               },
             }

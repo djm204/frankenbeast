@@ -35,6 +35,16 @@ describe('network-registry', () => {
     expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server']);
   });
 
+  it('does not force disabled daemon dependencies into chat-only selections', () => {
+    const config = defaultConfig();
+    config.beastsDaemon.enabled = false;
+    config.dashboard.enabled = false;
+
+    const services = resolveNetworkServices(config, context);
+
+    expect(services.map((service) => service.id)).toEqual(['chat-server']);
+  });
+
   it('projects runtime config for each service', () => {
     const config = defaultConfig();
     config.chat.port = 4242;

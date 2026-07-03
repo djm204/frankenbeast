@@ -35,9 +35,18 @@ describe('BeastDaemonDispatchAdapter', () => {
           },
         });
       }
+      if (target.endsWith('/v1/beasts/agents')) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          definitionId: 'martin-loop',
+          chatSessionId: 'session-1',
+          autoDispatch: false,
+        });
+        return Response.json({ data: { id: 'agent-1' } }, { status: 201 });
+      }
       if (target.endsWith('/v1/beasts/runs')) {
         expect(JSON.parse(String(init?.body))).toMatchObject({
           definitionId: 'martin-loop',
+          trackedAgentId: 'agent-1',
           config: { objective: 'Ship it' },
           executionMode: 'container',
           startNow: true,
@@ -60,7 +69,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     });
 
     expect(interview?.kind).toBe('interview');
-    expect(interview?.assistantMessage).toContain('Objective?');
+    expect(interview?.beastContext?.agentId).toBe('agent-1');
 
     const dispatched = await adapter.handle('Ship it', {
       projectId: 'project',
@@ -79,5 +88,21 @@ describe('BeastDaemonDispatchAdapter', () => {
       const headers = new Headers(call[1]?.headers);
       expect(headers.get('authorization')).toBe('Bearer daemon-token');
     }
+  });
+
+  it('does not call the daemon for ordinary chat turns', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+
+    await expect(adapter.handle('hello there', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+    })).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

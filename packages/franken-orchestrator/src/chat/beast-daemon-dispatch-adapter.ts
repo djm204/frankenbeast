@@ -30,6 +30,11 @@ interface BeastRunResponse {
   readonly status: string;
 }
 
+interface TrackedAgentResponse {
+  readonly id: string;
+  readonly dispatchRunId?: string | undefined;
+}
+
 export interface BeastDaemonDispatchAdapterOptions {
   readonly baseUrl: string;
   readonly operatorToken: string;
@@ -50,7 +55,16 @@ export class BeastDaemonDispatchAdapter {
       return this.resultFromProgress(progress, activeContext, state.sessionId);
     }
 
-    const definitions = await this.listDefinitions();
+    if (!this.isLaunchRequest(input)) {
+      return null;
+    }
+
+    let definitions: BeastDefinitionSummary[];
+    try {
+      definitions = await this.listDefinitions();
+    } catch {
+      return null;
+    }
     const definition = this.matchDefinition(input, definitions);
     if (!definition) {
       return null;
@@ -67,6 +81,7 @@ export class BeastDaemonDispatchAdapter {
       definitionId: definition.id,
       assistantMessage: this.formatPrompt(definition.label, prompt.prompt, prompt.options),
       beastContext: {
+        agentId: await this.createTrackedAgent(definition.id, state.sessionId),
         definitionId: definition.id,
         interviewSessionId: interview.id,
         ...(state.executionMode ? { executionMode: state.executionMode } : {}),
@@ -108,6 +123,7 @@ export class BeastDaemonDispatchAdapter {
       definitionId,
       config: progress.config,
       sessionId,
+      ...(context.agentId ? { trackedAgentId: context.agentId } : {}),
       ...(context.executionMode ? { executionMode: context.executionMode } : {}),
     });
 
@@ -140,10 +156,30 @@ export class BeastDaemonDispatchAdapter {
     return body.data;
   }
 
+  private async createTrackedAgent(definitionId: string, sessionId: string): Promise<string> {
+    const body = await this.request<{ data: TrackedAgentResponse }>('/v1/beasts/agents', {
+      method: 'POST',
+      body: JSON.stringify({
+        definitionId,
+        initAction: {
+          kind: definitionId,
+          command: commandFor(definitionId),
+          config: {},
+          chatSessionId: sessionId,
+        },
+        initConfig: {},
+        chatSessionId: sessionId,
+        autoDispatch: false,
+      }),
+    });
+    return body.data.id;
+  }
+
   private async createRun(request: {
     definitionId: string;
     config: Readonly<Record<string, unknown>>;
     sessionId: string;
+    trackedAgentId?: string | undefined;
     executionMode?: BeastExecutionMode | undefined;
   }): Promise<BeastRunResponse> {
     const body = await this.request<{ data: BeastRunResponse }>('/v1/beasts/runs', {
@@ -152,6 +188,7 @@ export class BeastDaemonDispatchAdapter {
         definitionId: request.definitionId,
         config: request.config,
         startNow: true,
+        ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
         ...(request.executionMode ? { executionMode: request.executionMode } : {}),
       }),
     });
@@ -174,11 +211,11 @@ export class BeastDaemonDispatchAdapter {
     return response.json() as Promise<T>;
   }
 
-  private matchDefinition(input: string, definitions: BeastDefinitionSummary[]): BeastDefinitionSummary | null {
-    if (!BEAST_VERBS.test(input) || !BEAST_NOUNS.test(input)) {
-      return null;
-    }
+  private isLaunchRequest(input: string): boolean {
+    return BEAST_VERBS.test(input) && BEAST_NOUNS.test(input);
+  }
 
+  private matchDefinition(input: string, definitions: BeastDefinitionSummary[]): BeastDefinitionSummary | null {
     const normalized = input.toLowerCase();
     return definitions
       .find((definition) => this.aliasesFor(definition).some((alias) => normalized.includes(alias)))
@@ -225,3 +262,15 @@ export type BeastDispatchPort = {
     executionMode?: BeastExecutionMode | undefined;
   }): Promise<ChatBeastDispatchResult | null>;
 };
+
+function commandFor(definitionId: string): string {
+  switch (definitionId) {
+    case 'design-interview':
+      return '/interview';
+    case 'chunk-plan':
+      return '/plan';
+    case 'martin-loop':
+    default:
+      return definitionId;
+  }
+}

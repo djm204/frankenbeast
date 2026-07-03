@@ -94,11 +94,12 @@ describe('Config loader', () => {
     const config = await loadConfig(makeArgs({
       subcommand: 'network',
       networkAction: 'config',
-      networkSet: ['chat.model=gpt-5', 'comms.slack.enabled=true'],
+      networkSet: ['chat.model=gpt-5', 'comms.slack.enabled=true', 'beastsDaemon.port=4051'],
     }));
 
     expect(config.chat.model).toBe('gpt-5');
     expect(config.comms.slack.enabled).toBe(true);
+    expect(config.beastsDaemon.port).toBe(4051);
   });
 
   it('env vars override file config', async () => {

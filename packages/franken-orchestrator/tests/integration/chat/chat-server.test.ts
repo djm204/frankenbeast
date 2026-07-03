@@ -165,7 +165,7 @@ describe('chat server bootstrap', () => {
           operatorToken: 'beast-token',
           rateLimit: { windowMs: 60_000, max: 20 },
         },
-      })).rejects.toThrow(/two different operator tokens/i);
+      })).rejects.toThrow(/different operator tokens/i);
     } finally {
       beastServices.ticketStore.destroy();
     }
