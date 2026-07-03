@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsc",
     "chat-server": "npm run build && node dist/cli/run.js chat-server",
+    "beasts-daemon": "npm run build && node dist/cli/run.js beasts-daemon",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

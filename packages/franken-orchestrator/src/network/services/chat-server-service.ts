@@ -5,7 +5,7 @@ export const chatServerService: NetworkServiceDefinition = {
   id: 'chat-server',
   displayName: 'Chat Server',
   kind: 'app',
-  dependsOn: [],
+  dependsOn: ['beasts-daemon'],
   configPaths: ['chat.enabled', 'chat.host', 'chat.port', 'chat.model'],
   enabled: (config: OrchestratorConfig) => config.chat.enabled,
   describe: (config: OrchestratorConfig) =>
@@ -36,6 +36,7 @@ export const chatServerService: NetworkServiceDefinition = {
       cwd: context.repoRoot,
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
+        FRANKENBEAST_BEAST_DAEMON_URL: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
       },
     },
   }),

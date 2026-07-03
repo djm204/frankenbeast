@@ -62,6 +62,8 @@ export interface ChatAppOptions {
   dashboardDeps?: DashboardRouteDeps;
   /** Read-only observer/governor/cost analytics aggregation. */
   analyticsDeps?: AnalyticsRouteDeps;
+  /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
+  beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -107,7 +109,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   // (franken-web ChatApiClient, network/chat-attach) plumb the token through.
   // `startChatServer` separately fails closed when chat is exposed without a
   // token (managed mode or non-loopback host).
-  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken;
+  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const operatorSecurity = opts.beastControl?.security ?? transportSecurity;
   // Gate the chat plane and every sensitive control-plane route group behind the
   // same operator token whenever one is configured. Each group mutates process
@@ -129,6 +131,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     // would otherwise slip past auth. This mirrors the beast/agent route guard.
     for (const base of [
       '/v1/chat',
+      '/v1/beasts',
       '/v1/network',
       '/v1/comms',
       '/api/security',
@@ -180,6 +183,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         })),
       }),
     }));
+  } else if (opts.beastDaemon) {
+    app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
@@ -211,6 +216,24 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
 
   return app;
+}
+
+async function proxyToBeastDaemon(request: Request, daemon: { baseUrl: string; operatorToken?: string | undefined }): Promise<Response> {
+  const sourceUrl = new URL(request.url);
+  const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
+  const headers = new Headers(request.headers);
+  headers.delete('host');
+  if (daemon.operatorToken && !headers.has('authorization')) {
+    headers.set('authorization', `Bearer ${daemon.operatorToken}`);
+  }
+
+  const method = request.method;
+  const init: RequestInit = { method, headers };
+  if (method !== 'GET' && method !== 'HEAD') {
+    init.body = request.body;
+    Object.assign(init, { duplex: 'half' });
+  }
+  return fetch(targetUrl, init);
 }
 
 function required<T>(value: T | undefined, field: string): T {

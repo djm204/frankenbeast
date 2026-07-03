@@ -13,6 +13,7 @@ const {
   mockParseArgs,
   mockSessionStart,
   mockStartChatServer,
+  mockStartBeastDaemon,
   MockAdapterLlmClient,
   MockCliLlmAdapter,
   MockSession,
@@ -74,6 +75,12 @@ const {
     close: vi.fn(async () => undefined),
     server: {},
   }));
+  const mockStartBeastDaemon = vi.fn(async () => ({
+    url: 'http://127.0.0.1:4050',
+    pidFile: '/mock/project/.frankenbeast/beasts-daemon.pid',
+    close: vi.fn(async () => undefined),
+    server: {},
+  }));
   const MockAdapterLlmClient = vi.fn(function (this: { complete: typeof mockAdapterComplete }) {
     this.complete = mockAdapterComplete;
   });
@@ -88,6 +95,7 @@ const {
     mockParseArgs,
     mockSessionStart,
     mockStartChatServer,
+    mockStartBeastDaemon,
     MockAdapterLlmClient,
     MockCliLlmAdapter,
     MockSession,
@@ -151,6 +159,10 @@ vi.mock('../../../src/cli/init-command.js', () => ({
 
 vi.mock('../../../src/http/chat-server.js', () => ({
   startChatServer: mockStartChatServer,
+}));
+
+vi.mock('../../../src/http/beast-daemon-server.js', () => ({
+  startBeastDaemon: mockStartBeastDaemon,
 }));
 
 vi.mock('../../../src/skills/providers/cli-provider.js', () => ({
@@ -565,7 +577,9 @@ describe('main() execution', () => {
       allowedOrigins: ['http://localhost:5173'],
       sessionStoreDir: '/mock/project/.fbeast/chat',
       projectName: 'project',
-      beastControl: expect.objectContaining({
+      operatorToken: 'dashboard-operator-token',
+      beastDaemon: expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:4050',
         operatorToken: 'dashboard-operator-token',
       }),
     }));
@@ -625,7 +639,9 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      beastControl: expect.objectContaining({
+      operatorToken: 'root-env-token',
+      beastDaemon: expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:4050',
         operatorToken: 'root-env-token',
       }),
     }));
@@ -682,10 +698,58 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      beastControl: expect.objectContaining({
+      operatorToken: 'dashboard-file-token',
+      beastDaemon: expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:4050',
         operatorToken: 'dashboard-file-token',
       }),
     }));
+  });
+
+  it('dispatches beasts-daemon without creating a Session or REPL', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'beasts-daemon',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: '127.0.0.1',
+      port: 4050,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartBeastDaemon).toHaveBeenCalledWith(expect.objectContaining({
+      root: '/mock/project',
+      beastsDb: '/mock/project/.fbeast/beast.db',
+      beastLogsDir: '/mock/project/.fbeast/.build/beasts/logs',
+      host: '127.0.0.1',
+      port: 4050,
+      operatorToken: 'dashboard-operator-token',
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
   });
 
   it('dispatches beasts commands without creating a Session', async () => {

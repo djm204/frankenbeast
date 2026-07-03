@@ -2,11 +2,11 @@
 
 This guide walks an operator through starting the local dashboard, creating a tracked Beast agent, dispatching a supported run, monitoring status/logs, and stopping or restarting the run.
 
-> **Sprint status note:** this guide is written against current `origin/main` after PR #465 / issue #459 and PR #466 / issue #456 merged. Container execution exists in the Beast CLI/API and the in-repo sandbox image/hardening defaults are present, but the dashboard execution-mode selector (#457), chat/WS container dispatch wiring (#455), and live container streaming work (#458) are still open. Until those land, the dashboard deploy flow creates and controls tracked agents through the default Beast definition execution mode. Use the CLI/API container-mode workaround below when you need an actual container run before the dashboard selector lands.
+> **Status note:** the deploy-beasts MVP is complete. The dashboard can select process/container execution, chat/API dispatch paths preserve execution mode, and live status/log streaming is wired. The standalone `beasts-daemon` is now the default Beast control-plane owner; `chat-server` remains a gateway/client for compatibility.
 
 ## What you are deploying
 
-The dashboard talks to `frankenbeast chat-server`, which serves both the chat UI backend and the secure Beast control API:
+The dashboard talks to two local services when run through `frankenbeast network up`: `beasts-daemon` owns the secure Beast control API, while `chat-server` serves chat/WebSocket routes and can proxy Beast API requests for compatibility:
 
 - `GET /v1/beasts/catalog` lists deployable Beast definitions.
 - `POST /v1/beasts/agents` creates a tracked dashboard agent from the wizard.
@@ -30,25 +30,29 @@ export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 export VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 ```
 
-`chat-server` also discovers the token from the configured secret store, the repo `.env`, or `packages/franken-web/.env.local` using either `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or `VITE_BEAST_OPERATOR_TOKEN`.
+`beasts-daemon` and `chat-server` also discover the token from the configured secret store, the repo `.env`, or `packages/franken-web/.env.local` using either `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or `VITE_BEAST_OPERATOR_TOKEN`.
 
 ## 1. Start the backend
 
 From the repo root:
 
 ```bash
+npm --workspace franken-orchestrator run beasts-daemon
+# in another terminal, for chat/WebSocket/dashboard gateway compatibility:
 npm --workspace franken-orchestrator run chat-server
 ```
 
 Default bind:
 
-- API: `http://127.0.0.1:3737`
+- Beast API: `http://127.0.0.1:4050/v1/beasts/*`
+- Chat/API gateway: `http://127.0.0.1:3737`
 - Chat WebSocket: `ws://127.0.0.1:3737/v1/chat/ws`
-- Beast API: `http://127.0.0.1:3737/v1/beasts/*`
+- Compatibility Beast proxy: `http://127.0.0.1:3737/v1/beasts/*`
 
 Useful overrides:
 
 ```bash
+npm --workspace franken-orchestrator run beasts-daemon -- --port 4051
 npm --workspace franken-orchestrator run chat-server -- --port 4242
 npm --workspace franken-orchestrator run chat-server -- --provider codex
 npm --workspace franken-orchestrator run chat-server -- --allow-origin http://localhost:5173
@@ -69,6 +73,7 @@ If the backend is not on `http://127.0.0.1:3737` while you are serving the dashb
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
+VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
 VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
   npm --workspace @frankenbeast/web run dev
 ```
@@ -90,11 +95,11 @@ Execution boundary choices are a Beast-run concept, separate from the four toolk
 | Mode | Boundary | Current dashboard status |
 |------|----------|--------------------------|
 | `process` | Host child process with supervised lifecycle, env allowlist, and project-root `cwd` containment. Not a hard sandbox. | Available through the dashboard tracked-agent flow for workflows whose wizard payload supplies the required definition fields. |
-| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root user policy, memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available in CLI/API after #456; dashboard selector is pending #457, so use the raw run workaround below on current main. |
+| `container` | Docker-backed run using `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, non-root user policy, memory/CPU/PID limits, `no-new-privileges`, Git safe-directory config for the mounted checkout, and the same env allowlist. Not a micro-VM/gVisor/Firecracker sandbox. | Available through CLI, API, chat dispatch, and dashboard selector. |
 
-### Container-mode workaround until #457 lands
+### Container-mode CLI/API examples
 
-To create an actual container run before the dashboard has a selector, use the CLI or Beast runs API. These raw runs are not tracked-agent dashboard entries today, so monitor and control them with the CLI commands or the `/v1/beasts/runs/*` API until #457/#458 wire container selection and live run streaming into the dashboard.
+The dashboard selector is available, but CLI/API calls are still useful for automation.
 
 CLI example:
 
@@ -107,7 +112,7 @@ frankenbeast beasts create martin-loop --mode container
 API example:
 
 ```bash
-curl -sS http://127.0.0.1:3737/v1/beasts/runs \
+curl -sS http://127.0.0.1:4050/v1/beasts/runs \
   -H "x-frankenbeast-operator-token: $OPERATOR_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -124,7 +129,7 @@ curl -sS http://127.0.0.1:3737/v1/beasts/runs \
 
 ## 4. Create and launch from the dashboard
 
-On current main, the dashboard wizard can create tracked agents for catalog workflows, but its launch payload only maps the strict run fields required by `chunk-plan` (`designDocPath` and `outputDir`). Do not use the wizard to launch `design-interview` or `martin-loop` yet: their strict definitions require fields that the wizard does not currently populate (`goal`/`outputPath` for design interviews and `provider`/`objective`/`chunkDirectory` for Martin Loop). Use the CLI/API examples for those runs until the dashboard launch payload is wired for their definitions.
+Use the dashboard wizard to create a tracked agent, choose the supported execution mode, launch it, and then monitor live run state/logs from the linked agent detail.
 
 1. Open **Beasts** in the left navigation.
 2. Click **Create Agent**.
@@ -158,7 +163,7 @@ If you need to verify from the API:
 curl -sS http://127.0.0.1:3737/v1/beasts/agents \
   -H "x-frankenbeast-operator-token: $OPERATOR_TOKEN"
 
-curl -sS http://127.0.0.1:3737/v1/beasts/runs/<run-id>/logs \
+curl -sS http://127.0.0.1:4050/v1/beasts/runs/<run-id>/logs \
   -H "x-frankenbeast-operator-token: $OPERATOR_TOKEN"
 ```
 
@@ -203,10 +208,6 @@ frankenbeast beasts delete <agent-id>
 `A dashboard launch fails validation for design-interview or martin-loop`
 
 - Expected on current main. The tracked-agent wizard does not yet populate the strict definition fields for those runs. Launch them through the CLI/API with their required config fields instead.
-
-`I cannot choose container mode in the dashboard`
-
-- Expected on current main. PR #466 added CLI/API container mode; #457 is the pending dashboard execution-mode selector. Use the CLI/API workaround above until #457 merges.
 
 `Container mode fails to start`
 

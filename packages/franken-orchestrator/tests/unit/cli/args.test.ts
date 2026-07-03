@@ -55,6 +55,13 @@ describe('parseArgs', () => {
     expect(args.allowOrigin).toBeUndefined();
   });
 
+  it('parses beasts-daemon subcommand with local defaults', () => {
+    const args = parseArgs(['beasts-daemon']);
+    expect(args.subcommand).toBe('beasts-daemon');
+    expect(args.host).toBe('127.0.0.1');
+    expect(args.port).toBe(4050);
+  });
+
   it('parses beasts catalog command', () => {
     const args = parseArgs(['beasts', 'catalog']);
     expect(args.subcommand).toBe('beasts');

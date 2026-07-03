@@ -1,6 +1,5 @@
-import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
@@ -18,6 +17,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -48,6 +48,7 @@ export interface StartChatServerOptions {
   providerRegistry?: ProviderRegistry;
   dashboardDeps?: DashboardRouteDeps;
   analyticsDeps?: AnalyticsRouteDeps;
+  beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
 export interface ChatServerHandle {
@@ -139,9 +140,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
     ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+    ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
   });
   const server = createServer((request, response) => {
-    void handleHttpRequest(app, request, response);
+    void handleHonoHttpRequest(app, request, response);
   });
 
   attachChatWebSocketServer({
@@ -178,74 +180,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     wsUrl,
     close: async () => {
       options.beastControl?.ticketStore.destroy();
-      await closeServer(server);
+      await closeHttpServer(server);
     },
   };
-}
-
-async function handleHttpRequest(app: Hono, request: IncomingMessage, response: ServerResponse): Promise<void> {
-  try {
-    const honoRequest = toRequest(request);
-    const honoResponse = await app.fetch(honoRequest);
-
-    response.statusCode = honoResponse.status;
-    response.statusMessage = honoResponse.statusText;
-    for (const [key, value] of honoResponse.headers.entries()) {
-      response.setHeader(key, value);
-    }
-
-    if (!honoResponse.body) {
-      response.end();
-      return;
-    }
-
-    const body = Buffer.from(await honoResponse.arrayBuffer());
-    response.end(body);
-  } catch (error) {
-    response.statusCode = 500;
-    response.end(error instanceof Error ? error.message : 'Internal Server Error');
-  }
-}
-
-function toRequest(request: IncomingMessage): Request {
-  const host = request.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`;
-  const url = new URL(request.url ?? '/', `http://${host}`);
-  const method = request.method ?? 'GET';
-  const headers = new Headers();
-
-  for (const [key, value] of Object.entries(request.headers)) {
-    if (value === undefined) {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        headers.append(key, item);
-      }
-      continue;
-    }
-    headers.set(key, value);
-  }
-
-  if (method === 'GET' || method === 'HEAD') {
-    return new Request(url, { method, headers });
-  }
-
-  return new Request(url, {
-    method,
-    headers,
-    body: Readable.toWeb(request) as ReadableStream,
-    ...( { duplex: 'half' } as { duplex: 'half' } ),
-  } as RequestInit);
-}
-
-function closeServer(server: HttpServer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
 }

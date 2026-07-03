@@ -13,6 +13,7 @@ const rootPackageJson = JSON.parse(
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
+  const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
 
   // The orchestrator resolves its operator token from the root .env's
   // FRANKENBEAST_BEAST_OPERATOR_TOKEN (or a secret store), but Vite only exposes
@@ -31,6 +32,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
+        '/v1/beasts': {
+          target: beastProxyTarget,
+          changeOrigin: true,
+        },
         '/v1': {
           target: proxyTarget,
           changeOrigin: true,

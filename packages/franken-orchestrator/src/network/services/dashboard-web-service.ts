@@ -5,7 +5,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
   id: 'dashboard-web',
   displayName: 'Dashboard Web',
   kind: 'app',
-  dependsOn: ['chat-server'],
+  dependsOn: ['beasts-daemon', 'chat-server'],
   configPaths: ['dashboard.enabled', 'dashboard.host', 'dashboard.port', 'dashboard.apiUrl'],
   enabled: (config: OrchestratorConfig) => config.dashboard.enabled,
   describe: (config: OrchestratorConfig) =>
@@ -33,6 +33,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
       env: {
         VITE_API_URL: '',
         VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
+        VITE_BEAST_API_PROXY_TARGET: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
       },
     },
   }),
