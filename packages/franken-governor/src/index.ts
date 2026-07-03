@@ -45,6 +45,10 @@ export { GovernorCritiqueAdapter } from './gateway/index.js';
 export type { GovernorCritiqueAdapterDeps } from './gateway/index.js';
 export { createGovernor } from './gateway/index.js';
 export type { CreateGovernorOptions } from './gateway/index.js';
+export { ApprovalWaiterRegistry } from './gateway/index.js';
+
+export { createGovernorApp } from './server/index.js';
+export type { GovernorAppOptions } from './server/index.js';
 
 export type { GovernorMemoryPort, EpisodicTraceRecord } from './audit/index.js';
 export { GovernorAuditRecorder } from './audit/index.js';
@@ -57,3 +61,5 @@ export { CliChannel } from './channels/index.js';
 export type { ReadlineAdapter, CliChannelDeps } from './channels/index.js';
 export { SlackChannel } from './channels/index.js';
 export type { HttpClient, SlackCallbackServer, SlackChannelDeps } from './channels/index.js';
+export { HttpApprovalChannel } from './channels/index.js';
+export type { HttpApprovalChannelDeps } from './channels/index.js';
