@@ -174,11 +174,13 @@ export function filterNetworkServices(
 
     const service = byId.get(serviceId);
     if (!service) {
-      throw new Error(`Unknown network service target: ${serviceId}`);
+      return;
     }
 
     for (const dependency of service.dependsOn) {
-      include(dependency);
+      if (byId.has(dependency)) {
+        include(dependency);
+      }
     }
 
     included.add(serviceId);

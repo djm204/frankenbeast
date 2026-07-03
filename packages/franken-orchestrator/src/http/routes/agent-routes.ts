@@ -65,8 +65,8 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const agent = deps.agents.createAgent({
       definitionId: body.definitionId,
-      source: 'dashboard',
-      createdByUser: 'operator',
+      source: body.chatSessionId ? 'chat' : 'dashboard',
+      createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
       initAction: body.initAction,
       initConfig: body.initConfig,
       ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),

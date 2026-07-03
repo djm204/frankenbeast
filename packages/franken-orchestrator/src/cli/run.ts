@@ -691,6 +691,7 @@ export async function runNetworkCommand(
     }
     deps.print(JSON.stringify({
       network: config.network,
+      beastsDaemon: config.beastsDaemon,
       chat: config.chat,
       dashboard: config.dashboard,
       comms: config.comms,

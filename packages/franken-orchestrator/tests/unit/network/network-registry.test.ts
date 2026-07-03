@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
-import { createNetworkRegistry, resolveNetworkServices } from '../../../src/network/network-registry.js';
+import { createNetworkRegistry, filterNetworkServices, resolveNetworkServices } from '../../../src/network/network-registry.js';
 
 describe('network-registry', () => {
   const context = { repoRoot: '/repo/frankenbeast' };
@@ -43,6 +43,15 @@ describe('network-registry', () => {
     const services = resolveNetworkServices(config, context);
 
     expect(services.map((service) => service.id)).toEqual(['chat-server']);
+  });
+
+  it('filters a chat target without requiring disabled daemon dependencies', () => {
+    const config = defaultConfig();
+    config.beastsDaemon.enabled = false;
+    config.dashboard.enabled = false;
+    const services = resolveNetworkServices(config, context);
+
+    expect(filterNetworkServices(services, 'chat-server').map((service) => service.id)).toEqual(['chat-server']);
   });
 
   it('projects runtime config for each service', () => {

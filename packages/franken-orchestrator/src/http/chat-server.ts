@@ -126,11 +126,11 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
             agentInit: new AgentInitService(options.beastControl.agents, options.beastControl.dispatch),
           }),
         }
-      : options.beastDaemon?.operatorToken
+      : options.beastDaemon && effectiveOperatorToken
         ? {
             beastDispatchAdapter: new BeastDaemonDispatchAdapter({
               baseUrl: options.beastDaemon.baseUrl,
-              operatorToken: options.beastDaemon.operatorToken,
+              operatorToken: effectiveOperatorToken,
             }),
           }
         : {}),

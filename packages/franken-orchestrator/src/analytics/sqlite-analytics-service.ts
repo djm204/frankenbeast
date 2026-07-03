@@ -227,6 +227,19 @@ class SqliteAnalyticsService implements AnalyticsService {
     }
   }
 
+  private hasColumn(table: string, column: string): boolean {
+    if (!existsSync(this.options.dbPath)) {
+      return false;
+    }
+
+    const db = new Database(this.options.dbPath, { readonly: true, fileMustExist: true });
+    try {
+      return hasColumn(db, table, column);
+    } finally {
+      db.close();
+    }
+  }
+
   private readBeastEvents(): AnalyticsEvent[] {
     if (this.options.runs || this.options.agents) {
       const runs = this.options.runs?.listRuns() ?? [];
@@ -238,6 +251,10 @@ class SqliteAnalyticsService implements AnalyticsService {
       return runs
         .filter((run) => run.status === 'failed')
         .map((run) => beastRunToEvent(run, run.trackedAgentId ? agents.get(run.trackedAgentId) : undefined));
+    }
+
+    if (!this.hasColumn('beast_runs', 'tracked_agent_id')) {
+      return [];
     }
 
     const agents = new Map<string, AnalyticsAgentLink>();
@@ -278,6 +295,14 @@ class SqliteAnalyticsService implements AnalyticsService {
 function hasTable(db: Database.Database, table: string): boolean {
   const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { name: string } | undefined;
   return Boolean(row);
+}
+
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  if (!hasTable(db, table)) {
+    return false;
+  }
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
 }
 
 function auditRowToEvent(row: AuditRow): AnalyticsEvent {

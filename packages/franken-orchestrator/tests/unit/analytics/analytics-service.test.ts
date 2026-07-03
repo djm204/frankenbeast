@@ -310,6 +310,31 @@ describe('createSqliteAnalyticsService', () => {
     ]);
   });
 
+  it('ignores legacy Beast run tables that do not have tracked-agent columns yet', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE beast_runs (
+        id TEXT PRIMARY KEY,
+        definition_id TEXT NOT NULL,
+        definition_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        execution_mode TEXT NOT NULL,
+        config_snapshot TEXT NOT NULL,
+        dispatched_by TEXT NOT NULL,
+        dispatched_by_user TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    db.close();
+
+    const service = createSqliteAnalyticsService({ dbPath });
+
+    await expect(service.listEvents({ outcome: 'failed' })).resolves.toMatchObject({ events: [] });
+  });
+
   it('treats timezone-less SQLite timestamps as UTC for time-window cutoffs', async () => {
     previousTz = process.env.TZ;
     process.env.TZ = 'America/Los_Angeles';
