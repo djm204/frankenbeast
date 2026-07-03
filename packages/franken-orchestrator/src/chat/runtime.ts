@@ -3,6 +3,7 @@ import type { TurnRunner, TurnEvent, TurnRunResult } from './turn-runner.js';
 import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { ChatBeastDispatchAdapter } from './beast-dispatch-adapter.js';
+import type { BeastExecutionMode } from '../beasts/types.js';
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -19,6 +20,7 @@ export interface ChatRuntimeState {
   projectId: string;
   transcript: TranscriptMessage[];
   beastContext?: ChatBeastContext | null | undefined;
+  executionMode?: BeastExecutionMode | undefined;
 }
 
 export interface ChatDisplayMessage {
@@ -172,6 +174,7 @@ export class ChatRuntime {
         sessionId: state.sessionId,
         transcript: state.transcript,
         ...(state.beastContext !== undefined ? { beastContext: state.beastContext } : {}),
+        ...(state.executionMode ? { executionMode: state.executionMode } : {}),
       });
       if (beastResult) {
         const transcript = appendTranscript(state.transcript, input, beastResult.assistantMessage);

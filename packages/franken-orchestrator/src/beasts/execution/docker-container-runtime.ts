@@ -1,7 +1,7 @@
 import type { BeastProcessSpec } from '../types.js';
 import type { SandboxPolicy } from './sandbox-policy.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 
 function canonicalExistingPath(path: string): string {
   try {
@@ -52,16 +52,57 @@ function containerCwd(spec: BeastProcessSpec, policy: SandboxPolicy): string {
   return remapHostWorkspacePath(spec.cwd ?? policy.workspaceHostPath, policy);
 }
 
-export function toDockerSpec(spec: BeastProcessSpec, policy: SandboxPolicy): BeastProcessSpec {
+function workspaceMount(policy: SandboxPolicy): string {
+  const accessMode = policy.readOnlyWorkspaceMount ? ':ro' : '';
+  return `${policy.workspaceHostPath}:${policy.workspaceContainerPath}${accessMode}`;
+}
+
+function writableWorkspaceUser(policy: SandboxPolicy): `${number}:${number}` {
+  if (policy.readOnlyWorkspaceMount) {
+    return policy.user;
+  }
+  try {
+    const workspace = statSync(policy.workspaceHostPath);
+    if (workspace.uid > 0) {
+      return `${workspace.uid}:${workspace.gid}`;
+    }
+  } catch {
+    // Fall through to the configured sandbox user when the workspace cannot be
+    // inspected yet. This keeps behavior deterministic for callers that create
+    // the directory later.
+  }
+  return policy.user;
+}
+
+export interface DockerSpecOptions {
+  readonly containerName?: string | undefined;
+}
+
+export function toDockerSpec(
+  spec: BeastProcessSpec,
+  policy: SandboxPolicy,
+  options: DockerSpecOptions = {},
+): BeastProcessSpec {
   return {
     command: 'docker',
     args: [
       'run',
       '--rm',
+      ...(options.containerName ? ['--name', options.containerName] : []),
       '--network',
       policy.network,
+      '--memory',
+      policy.resourceLimits.memory,
+      '--cpus',
+      policy.resourceLimits.cpus,
+      '--pids-limit',
+      String(policy.resourceLimits.pidsLimit),
+      '--user',
+      writableWorkspaceUser(policy),
+      '--security-opt',
+      'no-new-privileges',
       '-v',
-      `${policy.workspaceHostPath}:${policy.workspaceContainerPath}`,
+      workspaceMount(policy),
       '-w',
       containerCwd(spec, policy),
       ...dockerEnvArgs(spec, policy),

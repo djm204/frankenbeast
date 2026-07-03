@@ -115,6 +115,35 @@ describe('AuditTrailStore', () => {
     expect(() => store.exists('../secret')).toThrow(/invalid run id/i);
   });
 
+  it('rejects run IDs that are absolute paths', () => {
+    expect(() => store.save('/etc/passwd', sampleTrail())).toThrow(/invalid run id/i);
+    expect(() => store.load('/etc/passwd')).toThrow(/invalid run id/i);
+    expect(() => store.exists('/etc/passwd')).toThrow(/invalid run id/i);
+    expect(() => store.save('C:\\Windows\\System32\\evil', sampleTrail())).toThrow(/invalid run id/i);
+  });
+
+  it('rejects run IDs with nested path separators', () => {
+    expect(() => store.save('a/b/../../c', sampleTrail())).toThrow(/invalid run id/i);
+    expect(() => store.save('foo/bar/baz', sampleTrail())).toThrow(/invalid run id/i);
+  });
+
+  it('rejects a bare parent-traversal run ID', () => {
+    expect(() => store.save('../x', sampleTrail())).toThrow(/invalid run id/i);
+  });
+
+  it('accepts valid run IDs composed of safe characters', () => {
+    const path = store.save('run-abc123', sampleTrail());
+    expect(path).toContain('run-abc123.json');
+    expect(store.exists('run-abc123')).toBe(true);
+    expect(store.load('run-abc123').getAll()).toHaveLength(4);
+  });
+
+  it('never resolves a persisted file path outside of the audit directory', () => {
+    const auditDir = join(tempDir, '.fbeast', 'audit');
+    const path = store.save('run-1', sampleTrail());
+    expect(path.startsWith(auditDir)).toBe(true);
+  });
+
   it('replayer can load and replay a persisted artifact', () => {
     store.save('run-1', sampleTrail());
     const loaded = store.load('run-1');

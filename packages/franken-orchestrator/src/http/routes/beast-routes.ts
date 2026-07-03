@@ -13,6 +13,55 @@ import type { SseConnectionTicketStore } from '../../beasts/events/sse-connectio
 import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
+import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
+
+type BeastRunResponse = BeastRun & {
+  readonly containerId?: unknown;
+  readonly containerName?: unknown;
+  readonly containerRuntime?: unknown;
+  readonly image?: unknown;
+  readonly containerImage?: unknown;
+  readonly containerNetwork?: unknown;
+  readonly resourceSnapshot?: unknown;
+  readonly resources?: unknown;
+  readonly workspaceHostPath?: unknown;
+  readonly workspaceContainerPath?: unknown;
+};
+
+function runWithContainerFields(run: BeastRun | undefined, attempts: BeastRunAttempt[]): BeastRunResponse | undefined {
+  if (!run || run.executionMode !== 'container') {
+    return run;
+  }
+  const currentAttempt = attempts.find((attempt) => attempt.id === run.currentAttemptId) ?? attempts.at(-1);
+  const metadata = currentAttempt?.executorMetadata;
+  if (!metadata) {
+    return run;
+  }
+  return {
+    ...run,
+    ...(metadata.containerId !== undefined ? { containerId: metadata.containerId } : {}),
+    ...(metadata.containerName !== undefined ? { containerName: metadata.containerName } : {}),
+    ...(metadata.containerRuntime !== undefined ? { containerRuntime: metadata.containerRuntime } : {}),
+    ...(metadata.image !== undefined ? { image: metadata.image } : {}),
+    ...(metadata.containerImage !== undefined ? { containerImage: metadata.containerImage } : {}),
+    ...(metadata.containerNetwork !== undefined ? { containerNetwork: metadata.containerNetwork } : {}),
+    ...(metadata.resourceSnapshot !== undefined ? { resourceSnapshot: metadata.resourceSnapshot } : {}),
+    ...(metadata.resources !== undefined ? { resources: metadata.resources } : {}),
+    ...(metadata.workspaceHostPath !== undefined ? { workspaceHostPath: metadata.workspaceHostPath } : {}),
+    ...(metadata.workspaceContainerPath !== undefined ? { workspaceContainerPath: metadata.workspaceContainerPath } : {}),
+  };
+}
+
+function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunAttempt[] {
+  if (!run || run.executionMode !== 'container') {
+    return [];
+  }
+  return deps.runs.listAttempts(run.id);
+}
+
+function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
+  return runWithContainerFields(run, attemptsForContainerRun(run, deps));
+}
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -104,19 +153,25 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       }
       throw error;
     }
-    return c.json({ data: run }, 201);
+    return c.json({ data: runResponse(run, deps) }, 201);
   });
 
   app.get('/v1/beasts/runs', (c) => {
-    return c.json({ data: { runs: deps.runs.listRuns() } });
+    return c.json({
+      data: {
+        runs: deps.runs.listRuns().map((run) => runResponse(run, deps)),
+      },
+    });
   });
 
   app.get('/v1/beasts/runs/:runId', (c) => {
     const runId = c.req.param('runId');
+    const run = deps.runs.getRun(runId);
+    const attempts = deps.runs.listAttempts(runId);
     return c.json({
       data: {
-        run: deps.runs.getRun(runId),
-        attempts: deps.runs.listAttempts(runId),
+        run: runWithContainerFields(run, attempts),
+        attempts,
         events: deps.runs.listEvents(runId),
       },
     });
@@ -140,22 +195,22 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.post('/v1/beasts/runs/:runId/start', async (c) => {
     const run = await deps.runs.start(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/stop', async (c) => {
     const run = await deps.runs.stop(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/kill', async (c) => {
     const run = await deps.runs.kill(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/restart', async (c) => {
     const run = await deps.runs.restart(c.req.param('runId'), 'operator');
-    return c.json({ data: run });
+    return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/interviews/:definitionId/start', (c) => {

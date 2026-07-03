@@ -5,7 +5,7 @@ import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
-import type { BeastDefinition, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
+import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
 
@@ -25,6 +25,17 @@ export interface ProcessBeastExecutorOptions {
   onRunStatusChange?: (runId: string) => void;
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
+  transformSpec?: (
+    run: BeastRun,
+    originalSpec: BeastProcessSpec,
+    mergedSpec: BeastProcessSpec,
+  ) => BeastProcessSpec;
+  attemptMetadata?: (
+    run: BeastRun,
+    originalSpec: BeastProcessSpec,
+    spawnedSpec: BeastProcessSpec,
+    handle: { pid: number },
+  ) => Readonly<Record<string, unknown>>;
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -64,6 +75,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         FRANKENBEAST_RUN_CONFIG: configFilePath,
       },
     };
+    const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -74,13 +86,14 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     let handle: { pid: number };
     try {
-      handle = await this.supervisor.spawn(mergedSpec, {
+      handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
           if (attemptId) {
-            void this.logs.append(run.id, attemptId, 'stdout', line);
+            const createdAt = new Date().toISOString();
+            void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stdout', line },
+              data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
             });
           } else {
             earlyStdoutLines.push(line);
@@ -90,10 +103,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
           stderrTail.push(line);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
-            void this.logs.append(run.id, attemptId, 'stderr', line);
+            const createdAt = new Date().toISOString();
+            void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stderr', line },
+              data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
             });
           } else {
             earlyStderrLines.push(line);
@@ -155,7 +169,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       status: 'running',
       pid: handle.pid,
       startedAt,
-      executorMetadata: {
+      executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
         backend: 'process',
         command: processSpec.command,
         args: [...processSpec.args],
@@ -166,23 +180,27 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     // Flush early buffered lines to logs and SSE
     for (const line of earlyStdoutLines) {
-      void this.logs.append(run.id, attemptId, 'stdout', line);
+      const createdAt = new Date().toISOString();
+      void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
-        data: { runId: run.id, attemptId, stream: 'stdout', line },
+        data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
       });
     }
     for (const line of earlyStderrLines) {
-      void this.logs.append(run.id, attemptId, 'stderr', line);
+      const createdAt = new Date().toISOString();
+      void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
-        data: { runId: run.id, attemptId, stream: 'stderr', line },
+        data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
       });
     }
 
     // Flush early exit if process died before attemptId was set
+    let flushedEarlyExit = false;
     if (earlyExit) {
       this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
+      flushedEarlyExit = true;
     }
 
     const startedEvent = {
@@ -199,7 +217,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.event',
       data: { runId: run.id, event: startedEvent },
     });
-    await this.logs.append(run.id, attempt.id, 'stdout', `started pid=${handle.pid}`);
+    if (flushedEarlyExit) {
+      return this.repository.getAttempt(attempt.id) ?? attempt;
+    }
+    this.options.eventBus?.publish({
+      type: 'run.status',
+      data: { runId: run.id, status: 'running' as const, updatedAt: startedAt },
+    });
+    const startLogLine = `started pid=${handle.pid}`;
+    await this.logs.append(run.id, attempt.id, 'stdout', startLogLine, startedAt);
+    this.options.eventBus?.publish({
+      type: 'run.log',
+      data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
+    });
     return attempt;
   }
 
@@ -367,7 +397,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.event',
       data: { runId, event: finishEvent },
     });
-    void this.logs.append(runId, attempt.id, 'stderr', stopReason);
+    void this.logs.append(runId, attempt.id, 'stderr', stopReason, finishedAt);
+    this.options.eventBus?.publish({
+      type: 'run.log',
+      data: { runId, attemptId: attempt.id, stream: 'stderr', line: stopReason, createdAt: finishedAt },
+    });
 
     this.options.eventBus?.publish({
       type: 'run.status',

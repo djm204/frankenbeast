@@ -88,6 +88,7 @@ export interface CliArgs {
   initVerify: boolean;
   initRepair: boolean;
   initNonInteractive: boolean;
+  beastExecutionMode?: import('../beasts/types.js').BeastExecutionMode | undefined;
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
@@ -159,11 +160,11 @@ Network Commands:
 
 Beast Commands:
   beasts catalog                      List fixed Beast definitions
-  beasts create <definition-id>       Create a Beast run (alias for spawn)
-  beasts spawn <definition-id>        Spawn a Beast run via interactive prompts
+  beasts create <definition-id>       Create a Beast run (alias for spawn; use --mode process|container)
+  beasts spawn <definition-id>        Spawn a Beast run via interactive prompts (use --mode process|container)
   beasts list                         List Beast runs
-  beasts status <run-id>              Show one Beast run
-  beasts logs <run-id>                Show logs for the current attempt
+  beasts status <run-id>              Show one Beast run, including container fields when present
+  beasts logs <run-id>                Show logs for the current attempt, including container context when present
   beasts stop <run-id>                Stop a running Beast
   beasts kill <run-id>                Force-stop a Beast
   beasts restart <run-id>             Restart a Beast with a new attempt
@@ -183,6 +184,7 @@ Security Commands:
   security set <profile>              Set security profile (strict|standard|permissive)
 
 Module Toggles (for beasts spawn):
+  --mode <mode>                        Execution mode for beasts create/spawn: process|container (default: process)
   --no-firewall                       Disable firewall module
   --no-skills                         Disable skills module
   --no-memory                         Disable memory module
@@ -266,6 +268,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       repo: { type: 'string' },
       'target-upstream': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      mode: { type: 'string' },
       set: { type: 'string', multiple: true },
       'no-firewall': { type: 'boolean', default: false },
       'no-skills': { type: 'boolean', default: false },
@@ -334,6 +337,30 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   }
 
   const provider = values.provider?.toLowerCase() ?? 'claude';
+
+  const beastExecutionModeRaw = values.mode?.toLowerCase();
+  let beastExecutionMode: import('../beasts/types.js').BeastExecutionMode | undefined;
+  if (beastExecutionModeRaw !== undefined) {
+    if (beastExecutionModeRaw !== 'process' && beastExecutionModeRaw !== 'container') {
+      throw new TypeError(`Invalid beast execution mode '${values.mode}'. Valid: process, container`);
+    }
+    beastExecutionMode = beastExecutionModeRaw;
+  }
+
+  if (beastExecutionMode !== undefined && subcommand !== 'beasts') {
+    throw new TypeError('--mode is only supported for beasts commands');
+  }
+
+  if (
+    beastExecutionMode !== undefined
+    && beastAction !== undefined
+    && beastAction !== 'create'
+    && beastAction !== 'spawn'
+    && beastAction !== 'status'
+    && beastAction !== 'logs'
+  ) {
+    throw new TypeError('--mode is only supported for beasts create, spawn, status, and logs');
+  }
 
   const providersRaw = values.providers;
   const providers = providersRaw
@@ -424,6 +451,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     issueRepo: values.repo,
     targetUpstream: values['target-upstream'] ?? undefined,
     dryRun: values['dry-run'] ?? undefined,
+    beastExecutionMode,
     moduleConfig,
   };
 }
