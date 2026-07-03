@@ -210,7 +210,7 @@ describe('ObserverAdapter', () => {
     expect(trail[0]!.payload).toBe(storedMetadata);
   });
 
-  it('migrates legacy 16-character hashes when raw JSON whitespace is unrecoverable', async () => {
+  it('rejects legacy 16-character hashes when stored payload cannot reproduce the legacy hash', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);
     const sessionId = randomUUID();
@@ -231,9 +231,9 @@ describe('ObserverAdapter', () => {
     const verification = await observer.verify(sessionId);
     const trail = await observer.trail(sessionId);
 
-    expect(verification).toEqual({ ok: true, checked: 1 });
-    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(trail[0]!.parentHash).toBeNull();
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+    expect(trail[0]!.hash).toBe(legacyHash);
   });
 
   it('migrates full-hash children chained to legacy parents', async () => {
@@ -329,6 +329,27 @@ describe('ObserverAdapter', () => {
     expect(verification.ok).toBe(false);
     expect(verification.firstInvalid?.index).toBe(0);
     const [row] = await observer.trail('session-b');
+    expect(row!.hash).toBe(legacyHash);
+  });
+
+  it('rejects legacy 16-character audit rows without event binding before migrating', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const metadata = JSON.stringify({ sessionId, tool: 'memory', ok: true });
+    const legacyHash = legacy16AuditHash(metadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', metadata, legacyHash, null);
+    db.close();
+
+    const verification = await observer.verify(sessionId);
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
+    const [row] = await observer.trail(sessionId);
     expect(row!.hash).toBe(legacyHash);
   });
 

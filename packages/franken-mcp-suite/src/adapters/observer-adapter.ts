@@ -247,10 +247,12 @@ function verifyAuditTrail(
     expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
   }
 
-  if (migrate) {
-    for (const migration of pendingMigrations) {
-      migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
-    }
+  if (migrate && pendingMigrations.length > 0) {
+    store.db.transaction((migrations: PendingAuditMigration[]) => {
+      for (const migration of migrations) {
+        migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
+      }
+    })(pendingMigrations);
   }
 
   return { ok: true, checked: rows.length };
@@ -305,12 +307,7 @@ function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): str
     if (row.hash === expected) return expected;
   }
 
-  // Older loggers hashed the caller's raw metadata but stored JSON.stringify(payload).
-  // Once insignificant whitespace was discarded, some intact legacy hashes cannot be
-  // recomputed from the stored row. Treat only structurally bound JSON-object rows as
-  // plausible legacy entries; the caller still enforces the session/event binding
-  // before migrating them to the current full-hash format.
-  return isPlainObject(parseMetadata(row.payload)) ? row.hash : undefined;
+  return undefined;
 }
 
 function isLegacy16Hash(hash: string | undefined): hash is string {
@@ -344,7 +341,7 @@ function legacy16RowIsBoundToTrail(row: AuditTrailRow, sessionId: string): boole
 
   const payloadSession = payload['sessionId'] ?? payload['session_id'];
   const payloadEvent = payload['eventType'] ?? payload['event_type'] ?? payload['event'];
-  return payloadSession === sessionId && (payloadEvent === undefined || payloadEvent === row.eventType);
+  return payloadSession === sessionId && payloadEvent === row.eventType;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
