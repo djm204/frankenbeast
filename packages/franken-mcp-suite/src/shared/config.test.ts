@@ -51,6 +51,37 @@ describe('FbeastConfig', () => {
     expect(cfg.hooks).toBe(true);
   });
 
+  it('loads copied config anchored to the requested root instead of stale raw root', () => {
+    const oldRoot = tmpDir();
+    const newRoot = tmpDir();
+    dirs.push(oldRoot, newRoot);
+
+    const fbDir = join(newRoot, '.fbeast');
+    mkdirSync(fbDir, { recursive: true });
+    writeFileSync(
+      join(fbDir, 'config.json'),
+      JSON.stringify({
+        mode: 'mcp',
+        root: oldRoot,
+        servers: ['memory'],
+        hooks: true,
+        db: '.fbeast/beast.db',
+        beast: { enabled: false, provider: 'anthropic-api', acknowledged_cli_risk: false },
+      }),
+    );
+
+    const cfg = FbeastConfig.load(newRoot);
+    expect(cfg.dbPath).toBe(join(newRoot, '.fbeast', 'beast.db'));
+
+    cfg.hooks = false;
+    cfg.save();
+
+    const newRaw = JSON.parse(readFileSync(join(newRoot, '.fbeast', 'config.json'), 'utf-8'));
+    expect(newRaw.root).toBe(newRoot);
+    expect(newRaw.hooks).toBe(false);
+    expect(existsSync(join(oldRoot, '.fbeast', 'config.json'))).toBe(false);
+  });
+
   it('returns dbPath relative to root', () => {
     const root = tmpDir();
     dirs.push(root);

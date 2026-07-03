@@ -36,14 +36,14 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
-export function createAdapterSet(dbPath: string): AdapterSet {
+export function createAdapterSet(dbPath: string, options: { root?: string | undefined } = {}): AdapterSet {
   return {
     brain: createBrainAdapter(dbPath),
     observer: createObserverAdapter(dbPath),
     governor: createGovernorAdapter(dbPath),
     planner: createPlannerAdapter(dbPath),
     critique: createCritiqueAdapter(),
-    firewall: createFirewallAdapter(dbPath, 'standard'),
+    firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root }),
     skills: createSkillsAdapter(dbPath),
   };
 }

@@ -31,6 +31,8 @@ describe('fbeast init', () => {
 
     expect(existsSync(join(root, '.fbeast', 'config.json'))).toBe(true);
     expect(existsSync(join(root, '.fbeast', 'beast.db'))).toBe(true);
+    const config = JSON.parse(readFileSync(join(root, '.fbeast', 'config.json'), 'utf-8'));
+    expect(config.root).toBe(root);
   });
 
   it('creates .claude dir and drops instructions file', () => {
@@ -360,7 +362,7 @@ describe('fbeast init', () => {
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
     const keys = Object.keys(settings.mcpServers);
     expect(keys).toEqual(['fbeast-proxy']);
-    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join(root, '.fbeast', 'beast.db')] });
+    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join(root, '.fbeast', 'beast.db'), '--root', root] });
     expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
   });
 
@@ -406,6 +408,7 @@ describe('fbeast init', () => {
     const config = readFileSync(join(root, '.codex', 'config.toml'), 'utf-8');
     expect(config.match(/^\[mcp_servers\.[^\]]+]/gm)).toEqual([`[mcp_servers.${codexServerName(root, 'proxy')}]`]);
     expect(config).toContain('command = "fbeast-proxy"');
+    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}", "--root", "${root}"]`);
     expect(config).not.toContain('fbeast-memory');
   });
 

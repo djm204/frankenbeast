@@ -4,10 +4,26 @@ import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
+import { basename, dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+
+export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
+  if (explicitRoot) {
+    return resolve(explicitRoot);
+  }
+
+  const dbDir = dirname(resolve(dbPath));
+  if (basename(dbDir) === '.fbeast') {
+    return dirname(dbDir);
+  }
+
+  return undefined;
+}
 
 export interface ProxyServerDeps {
   dbPath: string;
+  /** Project root used to constrain filesystem-backed proxy tools. */
+  root?: string | undefined;
   /** Governance gate applied to the *resolved* target tool (defaults to the dbPath-backed gate). */
   governance?: GovernanceGate;
   /** Server-side audit sink for resolved tool calls (defaults to the dbPath-backed observer). */
@@ -16,6 +32,7 @@ export interface ProxyServerDeps {
 
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const { dbPath } = deps;
+  const root = deriveProxyRoot(dbPath, deps.root);
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding
@@ -25,7 +42,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
-      cachedAdapters = createAdapterSet(dbPath);
+      cachedAdapters = createAdapterSet(dbPath, { root });
     }
     return cachedAdapters;
   }
@@ -146,9 +163,9 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
 // CLI entry point
 if (isMain(import.meta.url)) {
   const { values } = parseArgs({
-    options: { db: { type: 'string', default: '.fbeast/beast.db' } },
+    options: { db: { type: 'string', default: '.fbeast/beast.db' }, root: { type: 'string' } },
   });
-  const server = createProxyServer({ dbPath: values['db']! });
+  const server = createProxyServer({ dbPath: values['db']!, root: values['root'] });
   server.start().catch((err) => {
     console.error('fbeast-proxy failed to start:', err);
     process.exit(1);

@@ -27,7 +27,7 @@ vi.mock('../shared/tool-registry.js', () => ({
   createAdapterSet: vi.fn(() => ({})),
 }));
 
-import { createProxyServer } from './proxy.js';
+import { createProxyServer, deriveProxyRoot } from './proxy.js';
 import * as registry from '../shared/tool-registry.js';
 
 const mockSearchTools = vi.mocked(registry.searchTools);
@@ -58,6 +58,7 @@ describe('proxy server', () => {
     auditRecord = vi.fn().mockResolvedValue(undefined);
     server = createProxyServer({
       dbPath: ':memory:',
+      root: '/tmp/project-root',
       governance: { check: gateCheck },
       audit: { record: auditRecord },
     });
@@ -103,6 +104,23 @@ describe('proxy server', () => {
 
       const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
       expect(result).toEqual(fakeResult);
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith(':memory:', { root: '/tmp/project-root' });
+    });
+
+    it('derives the project root from legacy proxy registrations that only pass --db', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      const legacyServer = createProxyServer({
+        dbPath: '/tmp/legacy-project/.fbeast/beast.db',
+        governance: { check: gateCheck },
+        audit: { record: auditRecord },
+      });
+      const legacyExecuteTool = legacyServer.tools.find((t) => t.name === 'execute_tool')!;
+
+      await legacyExecuteTool.handler({ tool: 'test_tool', args: { key: 'val' } });
+
+      expect(mockCreateAdapterSet).toHaveBeenCalledWith('/tmp/legacy-project/.fbeast/beast.db', { root: '/tmp/legacy-project' });
     });
 
     it('returns isError response for unknown tool', async () => {
@@ -291,6 +309,16 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deriveProxyRoot', () => {
+    it('prefers explicit root and normalizes it', () => {
+      expect(deriveProxyRoot('/tmp/project/.fbeast/beast.db', '/tmp/explicit/../explicit')).toBe('/tmp/explicit');
+    });
+
+    it('returns undefined for database paths that are not inside a .fbeast directory', () => {
+      expect(deriveProxyRoot('/tmp/project/beast.db')).toBeUndefined();
     });
   });
 });
