@@ -152,6 +152,7 @@ describe('ChatBeastDispatchAdapter', () => {
       projectId: 'proj',
       sessionId: 'chat-1',
       transcript: [],
+      executionMode: 'container',
       beastContext: {
         agentId: 'agent-1',
         definitionId: 'martin-loop',
@@ -164,6 +165,7 @@ describe('ChatBeastDispatchAdapter', () => {
       definitionId: 'martin-loop',
       chatSessionId: 'chat-1',
       config: { provider: 'claude', objective: 'Ship Beast monitoring' },
+      executionMode: 'container',
     });
     expect(dispatched).toMatchObject({
       kind: 'dispatch',

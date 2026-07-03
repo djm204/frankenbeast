@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createCombinedMcpServer } from './beast.js';
+import { DEFAULT_AUDIT_SESSION_ID } from './shared/central-enforcement.js';
 import { createObserverAdapter } from './adapters/observer-adapter.js';
 
 function tmpDbPath(): string {
@@ -34,11 +35,12 @@ describe('combined fbeast MCP server', () => {
     const result = await server.callTool('fbeast_memory_query', { query: `missing-${randomUUID()}` });
 
     expect(result.isError).toBeFalsy();
-    const trail = await createObserverAdapter(dbPath).trail('mcp:fbeast');
-    expect(trail.map((row) => row.eventType)).toEqual(['mcp_tool_call', 'mcp_tool_result']);
+    const trail = await createObserverAdapter(dbPath).trail(DEFAULT_AUDIT_SESSION_ID);
+    expect(trail.map((row) => row.eventType)).toEqual(['tool_call']);
     expect(JSON.parse(trail[0]!.payload)).toEqual(expect.objectContaining({
-      server: 'fbeast',
+      source: 'central-dispatch',
       tool: 'fbeast_memory_query',
+      ok: true,
     }));
   });
 });

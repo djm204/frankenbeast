@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.2...franken-types-v0.7.0) (2026-07-01)
+
+
+### Features
+
+* **orchestrator:** wire container chat dispatch ([#468](https://github.com/djm204/frankenbeast/issues/468)) ([94d0f5e](https://github.com/djm204/frankenbeast/commit/94d0f5e7a55a09e8aa540ce0f9832b975af2e9de))
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
 ## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.1...franken-types-v0.6.2) (2026-06-28)
 
 

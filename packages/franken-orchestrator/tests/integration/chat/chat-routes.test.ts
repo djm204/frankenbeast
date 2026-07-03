@@ -16,6 +16,10 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
+import { ContainerBeastExecutor } from '../../../src/beasts/execution/container-beast-executor.js';
+import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-policy.js';
+import type { BeastProcessSpec } from '../../../src/beasts/types.js';
+import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/http-chat');
@@ -173,6 +177,18 @@ describe('Chat HTTP Routes', () => {
     const catalog = new BeastCatalogService();
     const metrics = new PrometheusBeastMetrics();
     const agents = new AgentService(repository);
+    const fakeContainerSupervisor: ProcessSupervisorLike = {
+      spawn: vi.fn(async (_spec: BeastProcessSpec, _callbacks: ProcessCallbacks) => ({ pid: 8765 })),
+      stop: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+    };
+    const containerExecutor = new ContainerBeastExecutor({
+      repository,
+      logStore,
+      eventBus: new BeastEventBus(),
+      supervisorFactory: () => fakeContainerSupervisor,
+      policy: { ...DEFAULT_SANDBOX_POLICY, image: 'fbeast/sandbox:test', workspaceHostPath: TMP },
+    });
     const executors = {
       process: {
         start: vi.fn(async (run, _definition) => {
@@ -194,11 +210,7 @@ describe('Chat HTTP Routes', () => {
         stop: vi.fn(),
         kill: vi.fn(),
       },
-      container: {
-        start: vi.fn(),
-        stop: vi.fn(),
-        kill: vi.fn(),
-      },
+      container: containerExecutor,
     };
     app = createChatApp({
       sessionStoreDir: join(TMP, 'chat-with-beasts'),
@@ -237,7 +249,7 @@ describe('Chat HTTP Routes', () => {
     const promptOneRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({ content: 'spawn a martin beast' }),
+      body: JSON.stringify({ content: 'spawn a martin beast', executionMode: 'container' }),
     });
     expect(promptOneRes.status).toBe(200);
     const promptOne = await promptOneRes.json();
@@ -288,8 +300,19 @@ describe('Chat HTTP Routes', () => {
       definitionId: 'martin-loop',
       dispatchedBy: 'chat',
       dispatchedByUser: `chat-session:${created.id}`,
+      executionMode: 'container',
       status: 'running',
+      containerId: expect.stringMatching(/^fbeast-run_/),
+      containerRuntime: 'docker',
+      image: 'fbeast/sandbox:test',
+      containerImage: 'fbeast/sandbox:test',
+      resourceSnapshot: { memory: '512m', cpus: '1.0', pidsLimit: 256 },
+      workspaceContainerPath: '/workspace',
     });
+    expect(fakeContainerSupervisor.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'docker' }),
+      expect.any(Object),
+    );
   });
 
   it('uses the default LLM-backed executor for code-request turns', async () => {

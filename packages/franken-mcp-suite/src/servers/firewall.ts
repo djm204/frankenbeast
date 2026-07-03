@@ -1,16 +1,15 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
-import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface FirewallServerDeps {
   firewall: FirewallAdapter;
-  observer?: ObserverAdapter;
 }
 
-export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer {
+export function createFirewallServer(deps: FirewallServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const { firewall } = deps;
   const tools: ToolDef[] = [
     {
@@ -72,7 +71,7 @@ export function createFirewallServer(deps: FirewallServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-firewall', '0.1.0', tools, { observer: deps.observer });
+  return createMcpServer('fbeast-firewall', '0.1.0', tools, options);
 }
 
 if (isMain(import.meta.url)) {
@@ -86,8 +85,7 @@ if (isMain(import.meta.url)) {
   const firewall = createFirewallAdapter(values['db']!, tier, {
     root: process.env['FBEAST_ROOT'] ?? process.cwd(),
   });
-  const observer = createObserverAdapter(values['db']!);
-  const server = createFirewallServer({ firewall, observer });
+  const server = createFirewallServer({ firewall }, createCentralOptions(values['db']!));
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);
     process.exit(1);

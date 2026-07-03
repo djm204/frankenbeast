@@ -39,7 +39,7 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
 
-    const lastEventId = c.req.header('Last-Event-ID');
+    const lastEventId = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId');
 
     return streamSSE(c, async (stream) => {
       // Send initial snapshot if no Last-Event-ID (fresh connect, not reconnect)

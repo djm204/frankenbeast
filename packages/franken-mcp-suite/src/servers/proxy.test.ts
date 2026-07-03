@@ -44,15 +44,23 @@ describe('proxy server', () => {
   let server: ReturnType<typeof createProxyServer>;
   let searchToolsDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
   let executeToolDef: { handler: (args: Record<string, unknown>) => Promise<unknown> };
-  let observerLog: ReturnType<typeof vi.fn>;
+  let gateCheck: ReturnType<typeof vi.fn>;
+  let auditRecord: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    observerLog = vi.fn().mockResolvedValue({ id: 1, hash: 'h' });
     mockSearchTools.mockReturnValue(FAKE_STUBS);
-    mockCreateAdapterSet.mockReturnValue({ observer: { log: observerLog } } as ReturnType<typeof registry.createAdapterSet>);
+    mockCreateAdapterSet.mockReturnValue({} as ReturnType<typeof registry.createAdapterSet>);
 
-    server = createProxyServer({ dbPath: ':memory:' });
+    // Inject spy gate/audit so tests don't touch sqlite and can assert that the
+    // *resolved* target tool (not the execute_tool wrapper) is governed/audited.
+    gateCheck = vi.fn().mockResolvedValue({ decision: 'approved', reason: 'ok' });
+    auditRecord = vi.fn().mockResolvedValue(undefined);
+    server = createProxyServer({
+      dbPath: ':memory:',
+      governance: { check: gateCheck },
+      audit: { record: auditRecord },
+    });
     searchToolsDef = server.tools.find((t) => t.name === 'search_tools')!;
     executeToolDef = server.tools.find((t) => t.name === 'execute_tool')!;
   });
@@ -75,6 +83,15 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('test_tool');
       expect(result.content[0].text).not.toContain('another_tool');
     });
+
+    it('includes target tool input schemas for client-side proxy validation', async () => {
+      mockSearchTools.mockReturnValue([FAKE_STUBS[0]]);
+      const result = await searchToolsDef.handler({}) as { content: Array<{ type: string; text: string }> };
+
+      expect(result.content[0].text).toContain('inputSchema:');
+      expect(result.content[0].text).toContain('"required":["key"]');
+      expect(result.content[0].text).toContain('"key":{"type":"string"');
+    });
   });
 
   describe('execute_tool', () => {
@@ -95,20 +112,9 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('search_tools');
     });
 
-    it('does not load adapters just to report unknown tool validation errors', async () => {
-      const result = await executeToolDef.handler({ tool: 'nonexistent_tool', args: {} }) as { isError: boolean };
-
-      expect(result.isError).toBe(true);
-      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
-    });
-
-    it('does not load adapters when proxy meta-tool validation rejects arguments', async () => {
-      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'bar' }, extra: true });
-
-      expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain('unknown property: extra');
-      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
-      expect(observerLog).not.toHaveBeenCalled();
+    it('audits an unknown-target probe as ok=false', async () => {
+      await executeToolDef.handler({ tool: 'nonexistent_tool', args: { probe: 1 } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'nonexistent_tool', ok: false, decision: 'unknown_tool', args: { probe: 1 } });
     });
 
     it('passes args to handler correctly', async () => {
@@ -131,51 +137,160 @@ describe('proxy server', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
-      expect(mockCreateAdapterSet).not.toHaveBeenCalled();
-      expect(observerLog).not.toHaveBeenCalled();
     });
 
-    it('audits proxied target tool success', async () => {
+    it('governs the RESOLVED target tool, not the execute_tool wrapper (finding round-1)', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
+      expect(gateCheck).toHaveBeenCalledWith({ tool: 'test_tool', args: { key: 'val' } });
+    });
+
+    it('fails closed and skips the handler when the gate denies the target', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } }) as { isError: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('destructive');
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on review_recommended for the target', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockResolvedValue({ decision: 'review_recommended', reason: 'needs review' });
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } }) as { isError: boolean };
+      expect(result.isError).toBe(true);
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the gate throws', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockRejectedValue(new Error('governor down'));
+
+      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } }) as { isError: boolean };
+      expect(result.isError).toBe(true);
+      expect(fakeHandler).not.toHaveBeenCalled();
+    });
+
+    it('audits the resolved target tool and its args after dispatch', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'val' } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'val' } });
+    });
+
+    it('audits a governance denial of the target (ok=false, decision, args)', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'secret' } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'secret' } });
+    });
+
+    it('audits a fail-closed gate error of the target (decision="error")', async () => {
+      const fakeHandler = vi.fn();
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+      gateCheck.mockRejectedValue(new Error('governor down'));
+
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'x' } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'error', args: { key: 'x' } });
+    });
+  });
+
+  // Malformed execute_tool probes are rejected by the factory's argument
+  // validation BEFORE the custom handler runs, so they must be exercised via
+  // server.callTool (the full dispatch path), not the handler directly.
+  describe('wrapper-level audit of malformed proxy probes', () => {
+    it('audits a validation failure on execute_tool (missing required args)', async () => {
+      const res = await server.callTool('execute_tool', { tool: 'test_tool' }) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { tool: 'test_tool' },
+      });
+    });
+
+    it('audits a non-object payload probe (wraps the raw value)', async () => {
+      const res = await server.callTool('execute_tool', null) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'execute_tool',
+        ok: false,
+        decision: 'validation_error',
+        args: { invalid: null },
+      });
+    });
+
+    it('audits an unknown proxy tool probe', async () => {
+      const res = await server.callTool('ghost_tool', { probe: 1 }) as { isError?: boolean };
+      expect(res.isError).toBe(true);
+      expect(auditRecord).toHaveBeenCalledWith({
+        tool: 'ghost_tool',
+        ok: false,
+        decision: 'unknown_tool',
+        args: { probe: 1 },
+      });
+    });
+
+    it('does NOT double-audit a successful execute_tool call at the wrapper level', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+      await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'v' } });
+      // Only the resolved-target record; no generic execute_tool wrapper record.
+      expect(auditRecord).toHaveBeenCalledTimes(1);
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: true, args: { key: 'v' } });
+    });
+
+    it('does NOT audit a read-only search_tools call at the wrapper level', async () => {
+      await server.callTool('search_tools', {});
+      expect(auditRecord).not.toHaveBeenCalled();
+    });
+
+    it('rejects proxied calls with missing target required fields', async () => {
       const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
       vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
 
-      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: {} }) as { isError: boolean; content: Array<{ text: string }> };
 
-      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_call' }));
-      expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'mcp_tool_result' }));
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('missing required property: key');
+      expect(fakeHandler).not.toHaveBeenCalled();
     });
 
-    it('preserves proxied results when result audit logging fails', async () => {
-      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
-      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+    it('rejects proxied calls with target unknown properties', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
       vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
-      observerLog
-        .mockResolvedValueOnce({ id: 1, hash: 'h1' })
-        .mockRejectedValueOnce(new Error('audit write failed'));
 
-      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 'val', extra: true } }) as { isError: boolean; content: Array<{ text: string }> };
 
-      expect(result).toEqual(fakeResult);
-      expect(fakeHandler).toHaveBeenCalledOnce();
-      expect(observerLog).toHaveBeenCalledTimes(2);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('received unknown property: extra');
+      expect(fakeHandler).not.toHaveBeenCalled();
     });
 
-    it('executes proxied target tools when pre-call audit logging fails', async () => {
-      const fakeResult = { content: [{ type: 'text', text: 'ok' }] };
-      const fakeHandler = vi.fn().mockResolvedValue(fakeResult);
+    it('rejects proxied calls with invalid target primitive types', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
       const entry = mockRegistry.get('test_tool')!;
       vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
-      observerLog
-        .mockRejectedValueOnce(new Error('audit write failed'))
-        .mockResolvedValueOnce({ id: 2, hash: 'h2' });
 
-      const result = await executeToolDef.handler({ tool: 'test_tool', args: { key: 'bar' } });
+      const result = await server.callTool('execute_tool', { tool: 'test_tool', args: { key: 42 } }) as { isError: boolean; content: Array<{ text: string }> };
 
-      expect(result).toEqual(fakeResult);
-      expect(fakeHandler).toHaveBeenCalledWith({ key: 'bar' });
-      expect(observerLog).toHaveBeenCalledTimes(2);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('property key must be string');
+      expect(fakeHandler).not.toHaveBeenCalled();
     });
   });
 });

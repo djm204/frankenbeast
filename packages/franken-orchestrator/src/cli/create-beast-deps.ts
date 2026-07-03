@@ -1,6 +1,10 @@
 import { SqliteBrain } from 'franken-brain';
 import { ProviderRegistry } from '../providers/provider-registry.js';
 import {
+  createLlmProvider,
+  type ProviderConfig,
+} from '../providers/provider-config.js';
+import {
   buildMiddlewareChain,
   resolveSecurityConfig,
   type SecurityProfile,
@@ -27,31 +31,13 @@ import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 // fail-closed / config-disable / FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES
 // opt-out handling in dep-factory before it can run (issue #364, ADR-036).
 
-import { ClaudeCliAdapter } from '../providers/claude-cli-adapter.js';
-import { CodexCliAdapter } from '../providers/codex-cli-adapter.js';
-import { GeminiCliAdapter } from '../providers/gemini-cli-adapter.js';
-import { AnthropicApiAdapter } from '../providers/anthropic-api-adapter.js';
-import { OpenAiApiAdapter } from '../providers/openai-api-adapter.js';
-import { GeminiApiAdapter } from '../providers/gemini-api-adapter.js';
-
 import type { BeastLoopDeps, IObserverModule, McpToolInfo } from '../deps.js';
 import type { ILlmProvider } from '@franken/types';
 import type { AggregatedTokenUsage } from '../providers/token-aggregator.js';
 
-// --- Config types ---
+export type { ProviderConfig } from '../providers/provider-config.js';
 
-export interface ProviderConfig {
-  name: string;
-  type:
-    | 'claude-cli'
-    | 'codex-cli'
-    | 'gemini-cli'
-    | 'anthropic-api'
-    | 'openai-api'
-    | 'gemini-api';
-  apiKey?: string;
-  cliPath?: string;
-}
+// --- Config types ---
 
 export interface BeastDepsConfig {
   providers?: ProviderConfig[];
@@ -242,30 +228,14 @@ function collectEnabledMcpTools(skillManager: SkillManager): McpToolInfo[] {
   });
 }
 
-function buildProviderList(
+export function buildProviderList(
   configs?: ProviderConfig[],
 ): ILlmProvider[] {
   if (!configs || configs.length === 0) {
     throw new Error(
-      "No providers configured. Run 'frankenbeast provider add claude' to get started.",
+      'No providers configured. Add a consolidatedProviders entry to your frankenbeast config, for example: '
+        + '{"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}',
     );
   }
-  return configs.map((pc) => {
-    switch (pc.type) {
-      case 'claude-cli':
-        return new ClaudeCliAdapter(pc.cliPath ? { binaryPath: pc.cliPath } : {});
-      case 'codex-cli':
-        return new CodexCliAdapter(pc.cliPath ? { binaryPath: pc.cliPath } : {});
-      case 'gemini-cli':
-        return new GeminiCliAdapter(pc.cliPath ? { binaryPath: pc.cliPath } : {});
-      case 'anthropic-api':
-        return new AnthropicApiAdapter(pc.apiKey ? { apiKey: pc.apiKey } : {});
-      case 'openai-api':
-        return new OpenAiApiAdapter(pc.apiKey ? { apiKey: pc.apiKey } : {});
-      case 'gemini-api':
-        return new GeminiApiAdapter(pc.apiKey ? { apiKey: pc.apiKey } : {});
-      default:
-        throw new Error(`Unknown provider type: ${(pc as { type: string }).type}`);
-    }
-  });
+  return configs.map((pc) => createLlmProvider(pc));
 }

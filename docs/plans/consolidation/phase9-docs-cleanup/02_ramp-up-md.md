@@ -48,8 +48,8 @@ Deterministic guardrails framework for AI agents. Orchestrates multiple LLM prov
 frankenbeast run "fix the login bug"
 
 # Configure providers
-frankenbeast provider add claude
-frankenbeast provider add openai
+# Configure providers in frankenbeast config, for example:
+# {"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}
 
 # Install skills
 frankenbeast skill catalog

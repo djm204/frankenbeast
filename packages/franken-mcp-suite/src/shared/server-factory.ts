@@ -4,8 +4,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { createHash } from 'node:crypto';
-import type { ObserverAdapter } from '../adapters/observer-adapter.js';
 
 export interface ToolContent {
   type: 'text';
@@ -41,10 +39,57 @@ export interface FbeastMcpServer {
   start(): Promise<void>;
 }
 
-export interface AuditOptions {
-  observer?: ObserverAdapter | undefined;
-  getObserver?: (() => ObserverAdapter | undefined) | undefined;
-  sessionId?: string;
+export interface GovernanceDecision {
+  decision: 'approved' | 'review_recommended' | 'denied';
+  reason: string;
+}
+
+/**
+ * Central, in-process governance gate consulted on every dispatched tool call.
+ * This is the server-side enforcement point that does NOT depend on external
+ * client hooks being installed (see ADR-038).
+ */
+export interface GovernanceGate {
+  check(input: {
+    tool: string;
+    args: Record<string, unknown>;
+  }): Promise<GovernanceDecision> | GovernanceDecision;
+}
+
+/**
+ * Best-effort, server-side audit sink invoked after every dispatched tool call
+ * (success or failure). Mirrors the post-tool hook's observer logging so the
+ * central dispatch path produces an audit record even when client hooks are
+ * absent (see ADR-035). Audit failures never fail the tool call.
+ */
+export interface AuditSink {
+  record(input: {
+    tool: string;
+    ok: boolean;
+    /**
+     * Outcome classifier when the call did not run to a normal handler result:
+     * the governance decision (`denied`/`review_recommended`) for a blocked
+     * call, or `error` for a fail-closed gate error. Omitted for handler runs.
+     */
+    decision?: string;
+    /** Validated call arguments, so the trail records *what* was attempted. */
+    args?: Record<string, unknown>;
+  }): Promise<void> | void;
+}
+
+export interface CreateMcpServerOptions {
+  /**
+   * When set, every tool call dispatched through this server is checked by the
+   * gate after argument validation and before the handler runs. Any decision
+   * other than `approved` short-circuits the handler (matching the hook path's
+   * fail-closed enforcement); a gate error also fails closed (denied).
+   */
+  governance?: GovernanceGate;
+  /**
+   * When set, each dispatched tool call is recorded after the handler runs,
+   * giving the central path a server-side audit trail independent of hooks.
+   */
+  audit?: AuditSink;
 }
 
 export function validateToolArguments(
@@ -84,66 +129,86 @@ async function dispatchTool(
   toolMap: Map<string, ToolDef>,
   toolName: string,
   args: unknown,
-  audit?: AuditOptions & { serverName: string },
+  options: CreateMcpServerOptions = {},
 ): Promise<ToolResult> {
-  const startedAt = Date.now();
+  const { governance, audit } = options;
+  // Best-effort server-side audit (never fails the tool call). Records the
+  // attempted args so the trail captures *what* was attempted — including
+  // rejected probes and governance denials, the highest-risk events to
+  // reconstruct. `args` carries the validated payload once available, or the
+  // raw (possibly malformed) payload for pre-validation rejections.
+  const recordAudit = async (input: {
+    ok: boolean;
+    decision?: string;
+    args: Record<string, unknown>;
+  }): Promise<void> => {
+    if (!audit) return;
+    try {
+      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: input.args });
+    } catch (err) {
+      process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  };
+  // Normalize the raw payload to an object so a malformed (null/array/scalar)
+  // probe is still captured in the audit record rather than dropped.
+  const rawArgs: Record<string, unknown> =
+    args !== null && typeof args === 'object' && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : { invalid: args };
+
   const tool = toolMap.get(toolName);
   if (!tool) {
-    await auditToolEvent(audit, 'mcp_tool_validation_failure', toolName, args, {
-      reason: 'unknown_tool',
-      message: `Unknown tool: ${toolName}`,
-    });
+    await recordAudit({ ok: false, decision: 'unknown_tool', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Unknown tool: ${toolName}` }], isError: true };
   }
   // Only an *absent* argument object defaults to {}; an explicit `null` (or any
   // non-object) on the wire must reach the validator and be rejected.
   const validated = validateToolArguments(tool, args === undefined ? {} : args);
   if (!validated.ok) {
-    await auditToolEvent(audit, 'mcp_tool_validation_failure', toolName, args, {
-      reason: 'invalid_arguments',
-      message: validated.message,
-    });
+    await recordAudit({ ok: false, decision: 'validation_error', args: rawArgs });
     return { content: [{ type: 'text' as const, text: `Error: ${validated.message}` }], isError: true };
   }
-  await auditToolEvent(audit, 'mcp_tool_call', toolName, validated.value, {
-    decision: 'validated',
-  });
+  // Central governance gate: enforced server-side regardless of client hooks.
+  // Fails closed — any non-`approved` decision (denied OR review_recommended)
+  // or a gate error blocks the handler, matching the hook path's enforcement
+  // (`cli/hook.ts` rejects every decision other than `approved`).
+  if (governance) {
+    let decision: GovernanceDecision;
+    try {
+      decision = await governance.check({ tool: toolName, args: validated.value });
+    } catch (err) {
+      await recordAudit({ ok: false, decision: 'error', args: validated.value });
+      return {
+        content: [{ type: 'text' as const, text: `Denied by governance (fail-closed): ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+    if (decision.decision !== 'approved') {
+      await recordAudit({ ok: false, decision: decision.decision, args: validated.value });
+      return {
+        content: [{ type: 'text' as const, text: `Denied by governance (${decision.decision}): ${decision.reason}` }],
+        isError: true,
+      };
+    }
+  }
+  let result: ToolResult;
   try {
-    const result = await tool.handler(validated.value);
-    try {
-      await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
-        ok: !result.isError,
-        durationMs: Date.now() - startedAt,
-        outputSummary: summarizeResult(result),
-        outputHash: hashJson(result),
-      });
-    } catch {
-      // Audit persistence must not turn an otherwise successful tool call into an error.
-    }
-    return result;
+    result = await tool.handler(validated.value);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    try {
-      await auditToolEvent(audit, 'mcp_tool_result', toolName, validated.value, {
-        ok: false,
-        durationMs: Date.now() - startedAt,
-        error: message,
-      });
-    } catch {
-      // Preserve the tool handler failure instead of replacing it with an audit failure.
-    }
-    return {
-      content: [{ type: 'text' as const, text: `Error: ${message}` }],
+    result = {
+      content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
       isError: true,
     };
   }
+  await recordAudit({ ok: !result.isError, args: validated.value });
+  return result;
 }
 
 export function createMcpServer(
   name: string,
   version: string,
   tools: ToolDef[],
-  audit?: AuditOptions,
+  options: CreateMcpServerOptions = {},
 ): FbeastMcpServer {
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
   const toolMap = new Map(tools.map((t) => [t.name, t]));
@@ -158,85 +223,16 @@ export function createMcpServer(
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
     const { name: toolName, arguments: args } = request.params;
-    return { ...(await dispatchTool(toolMap, toolName, args, { ...audit, serverName: name })) };
+    return { ...(await dispatchTool(toolMap, toolName, args, options)) };
   });
 
   return {
     name,
     tools,
-    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, { ...audit, serverName: name }),
+    callTool: (toolName, args) => dispatchTool(toolMap, toolName, args, options),
     async start() {
       const transport = new StdioServerTransport();
       await server.connect(transport);
     },
-  };
-}
-
-export async function auditMcpToolExecution(
-  audit: (AuditOptions & { serverName: string }) | undefined,
-  event: string,
-  toolName: string,
-  args: unknown,
-  extra: Record<string, unknown>,
-): Promise<void> {
-  try {
-    const observer = audit?.observer ?? audit?.getObserver?.();
-    const serverName = audit?.serverName;
-    if (!observer || !serverName) return;
-    const auditedArgs = args === undefined ? {} : args;
-
-    await observer.log({
-      event,
-      sessionId: audit?.sessionId ?? `mcp:${serverName}`,
-      metadata: JSON.stringify({
-        server: serverName,
-        tool: toolName,
-        inputHash: hashJson(auditedArgs),
-        inputSummary: summarizeInput(auditedArgs),
-        ...extra,
-      }),
-    });
-  } catch {
-    // MCP audit logging is best-effort: observer resolution and persistence
-    // outages must not block validation responses, tool execution, or
-    // already-completed results.
-  }
-}
-
-async function auditToolEvent(
-  audit: (AuditOptions & { serverName: string }) | undefined,
-  event: string,
-  toolName: string,
-  args: unknown,
-  extra: Record<string, unknown>,
-): Promise<void> {
-  await auditMcpToolExecution(audit, event, toolName, args, extra);
-}
-
-function hashJson(value: unknown): string {
-  return createHash('sha256').update(stableJson(value)).digest('hex');
-}
-
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
-    .join(',')}}`;
-}
-
-function summarizeInput(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return { kind: Array.isArray(value) ? 'array' : typeof value };
-  }
-  return { kind: 'object', keys: Object.keys(value as Record<string, unknown>).sort() };
-}
-
-function summarizeResult(result: ToolResult): Record<string, unknown> {
-  return {
-    contentItems: result.content.length,
-    textBytes: result.content.reduce((sum, item) => sum + Buffer.byteLength(item.text), 0),
-    isError: result.isError === true,
   };
 }

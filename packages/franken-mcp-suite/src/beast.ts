@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createMcpServer, type ToolDef } from './shared/server-factory.js';
+import { createGovernanceGate } from './shared/governance-gate.js';
+import { createAuditSink } from './shared/central-enforcement.js';
 import { isMain } from './shared/is-main.js';
 import { createBrainAdapter } from './adapters/brain-adapter.js';
 import { createObserverAdapter } from './adapters/observer-adapter.js';
@@ -36,7 +38,13 @@ export function createCombinedMcpServer(dbPath: string) {
     ...createSkillsServer({ skills }).tools,
   ];
 
-  return createMcpServer('fbeast', '0.1.0', allTools, { observer });
+  // Central, in-process governance: every aggregate-server tool call is checked
+  // server-side, reusing the same governor the client hook path uses. Enforced
+  // even when no client hooks are installed (ARCH-003 / ADR-038).
+  return createMcpServer('fbeast', '0.1.0', allTools, {
+    governance: createGovernanceGate(governor),
+    audit: createAuditSink(observer),
+  });
 }
 
 if (isMain(import.meta.url)) {

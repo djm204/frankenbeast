@@ -1,16 +1,15 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createBrainAdapter, type BrainAdapter } from '../adapters/brain-adapter.js';
-import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export interface MemoryServerDeps {
   brain: BrainAdapter;
-  observer?: ObserverAdapter;
 }
 
-export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
+export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const { brain } = deps;
 
   const tools: ToolDef[] = [
@@ -108,7 +107,7 @@ export function createMemoryServer(deps: MemoryServerDeps): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-memory', '0.1.0', tools, { observer: deps.observer });
+  return createMcpServer('fbeast-memory', '0.1.0', tools, options);
 }
 
 // CLI entry point
@@ -117,8 +116,7 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const brain = createBrainAdapter(values['db']!);
-  const observer = createObserverAdapter(values['db']!);
-  const server = createMemoryServer({ brain, observer });
+  const server = createMemoryServer({ brain }, createCentralOptions(values['db']!));
   server.start().catch((err) => {
     console.error('fbeast-memory failed to start:', err);
     process.exit(1);

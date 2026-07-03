@@ -1,4 +1,4 @@
-import type { TrackedAgent, TrackedAgentInitActionKind, BeastRun } from '../types.js';
+import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
 
@@ -14,6 +14,7 @@ export interface DispatchTrackedAgentRequest {
   readonly definitionId: string;
   readonly chatSessionId: string;
   readonly config: Readonly<Record<string, unknown>>;
+  readonly executionMode?: BeastExecutionMode | undefined;
 }
 
 export class AgentInitService {
@@ -83,6 +84,7 @@ export class AgentInitService {
       dispatchedByUser: `chat-session:${request.chatSessionId}`,
       trackedAgentId: agentId,
       startNow: true,
+      ...(request.executionMode ? { executionMode: request.executionMode } : {}),
     });
   }
 }

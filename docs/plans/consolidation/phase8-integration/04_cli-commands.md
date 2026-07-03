@@ -15,7 +15,7 @@ Add CLI commands for skill management, provider management, security configurati
 - **Verb-noun pattern**: `frankenbeast <noun> <verb>` (e.g., `skill add`, `provider list`)
 - **Smart defaults**: `frankenbeast run "task"` works with zero config if any provider CLI is logged in
 - **Progressive disclosure**: basic path needs no flags; power users get `--provider`, `--skills`, `--security`
-- **Helpful errors**: if no provider is configured, don't just fail — show `Run 'frankenbeast provider add claude' to get started`
+- **Helpful errors**: if no provider is configured, don't just fail — explain how to add `consolidatedProviders` to the frankenbeast config
 
 ## Implementation
 
@@ -269,8 +269,8 @@ export const HELPFUL_ERRORS = {
   noProviders: `No providers configured.
 
   Get started:
-    frankenbeast provider add claude     # if you have Claude CLI installed
-    frankenbeast provider add openai     # if you have an OpenAI API key
+    # Add providers in frankenbeast config, for example:
+    # {"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}
 
   Then run:
     frankenbeast run "your task here"`,
@@ -286,7 +286,7 @@ export const HELPFUL_ERRORS = {
   providerAuthFailed: (name: string) => `Provider '${name}' authentication failed.
 
   Options:
-    frankenbeast provider add ${name}    # reconfigure
+    # Update consolidatedProviders in frankenbeast config to reconfigure ${name}
     frankenbeast provider list           # check status`,
 };
 ```

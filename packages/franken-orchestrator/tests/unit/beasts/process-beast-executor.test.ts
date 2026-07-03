@@ -203,6 +203,7 @@ describe('ProcessBeastExecutor', () => {
         attempt.id,
         'stdout',
         'hello world',
+        expect.any(String),
       );
     });
 
@@ -229,6 +230,7 @@ describe('ProcessBeastExecutor', () => {
         attempt.id,
         'stderr',
         'something went wrong',
+        expect.any(String),
       );
     });
 
@@ -303,8 +305,8 @@ describe('ProcessBeastExecutor', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // Early lines should have been flushed after attempt creation
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1');
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2');
+      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1', expect.any(String));
+      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2', expect.any(String));
     });
   });
 
@@ -505,11 +507,40 @@ describe('ProcessBeastExecutor', () => {
       cb.onExit(0, null);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'completed',
       });
+    });
+
+    it('does not publish running after flushing an early process exit', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          (callbacks as ProcessCallbacks).onExit(0, null);
+          return { pid: 5150 };
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      const attempt = await executor.start(run, martinLoopDefinition);
+
+      expect(attempt.status).toBe('completed');
+      const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
+      expect(statusEvents.map(([e]) => e.data.status)).toEqual(['completed']);
+      expect(repo.getRun(run.id)).toMatchObject({ status: 'completed' });
     });
 
     it('publishes run.status event via eventBus on operator stop (finishAttempt)', async () => {
@@ -526,8 +557,12 @@ describe('ProcessBeastExecutor', () => {
       await executor.stop(run.id, attempt.id);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'stopped',
       });
@@ -547,8 +582,12 @@ describe('ProcessBeastExecutor', () => {
       await executor.kill(run.id, attempt.id);
 
       const statusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.status');
-      expect(statusEvents).toHaveLength(1);
+      expect(statusEvents).toHaveLength(2);
       expect(statusEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        status: 'running',
+      });
+      expect(statusEvents[1][0].data).toMatchObject({
         runId: run.id,
         status: 'stopped',
       });

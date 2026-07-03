@@ -57,6 +57,22 @@ describe('Config loader', () => {
     expect(config.maxCritiqueIterations).toBe(5);
   });
 
+  it('loads the default operator config file when --config is omitted', async () => {
+    const filePath = join(tmpdir(), `beast-default-config-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({ chat: { model: 'persisted-model' } }));
+
+    const config = await loadConfig(makeArgs(), filePath);
+    expect(config.chat.model).toBe('persisted-model');
+  });
+
+  it('ignores a missing default operator config file', async () => {
+    const filePath = join(tmpdir(), `missing-beast-default-config-${Date.now()}.json`);
+
+    const config = await loadConfig(makeArgs(), filePath);
+    expect(config.chat.model).toBe('claude-sonnet-4-6');
+  });
+
   it('deep merges nested network config from file', async () => {
     const filePath = join(tmpdir(), `beast-network-config-${Date.now()}.json`);
     tmpFiles.push(filePath);

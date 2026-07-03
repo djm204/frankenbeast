@@ -42,6 +42,7 @@ describe('WizardDialog', () => {
     expect(onLaunch).toHaveBeenCalledWith({
       identity: { name: 'Footer Agent' },
       workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
+      executionMode: 'process',
       designDocPath: 'docs/design.md',
       outputDir: 'tasks/chunks',
     });

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
-import { open, readFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
-import { createBeastControlClient } from './beast-control-client.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
@@ -27,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
@@ -40,6 +39,8 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { applyNetworkConfigSets } from '../network/network-config-paths.js';
+import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -53,12 +54,16 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 /**
  * Creates an InterviewIO backed by stdin/stdout.
  */
-export function createStdinIO(): InterviewIO {
+export function createStdinIO(): InterviewIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return {
     ask: (question: string) =>
       new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
     display: (message: string) => console.log(message),
+    close: () => {
+      rl.close();
+      process.stdin.pause();
+    },
   };
 }
 
@@ -100,11 +105,11 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
  * Validates config path and loads config from all sources.
  * Exported for testability.
  */
-export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> {
+export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): Promise<OrchestratorConfig> {
   if (args.config && !existsSync(args.config)) {
     throw new Error(`Config file not found: ${args.config}`);
   }
-  return loadConfig(args);
+  return loadConfig(args, defaultConfigPath);
 }
 
 interface ChatSurfaceDeps {
@@ -238,7 +243,10 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
-  const config = await resolveConfig(args);
+  // Resolve project root — scope plans by name unless --plan-dir overrides
+  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const paths = getProjectPaths(root, planName);
+  const config = await resolveConfig(args, paths.configFile);
 
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
@@ -251,9 +259,6 @@ export async function main(): Promise<void> {
     console.log('Config:', JSON.stringify(config, null, 2));
   }
 
-  // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
-  const paths = getProjectPaths(root, planName);
   scaffoldFrankenbeast(paths);
 
   if (args.subcommand === 'network') {
@@ -262,24 +267,33 @@ export async function main(): Promise<void> {
   }
 
   if (args.subcommand === 'beasts') {
-    await handleBeastCommand({
-      args,
-      io: createStdinIO(),
-      paths,
-      print: console.log,
-      control: createBeastControlClient(paths),
-    });
+    const io = createStdinIO();
+    try {
+      await handleBeastCommand({
+        args,
+        io,
+        paths,
+        print: console.log,
+      });
+    } finally {
+      io.close();
+    }
     return;
   }
 
   if (args.subcommand === 'init') {
-    await handleInitCommand({
-      args,
-      config,
-      io: createStdinIO(),
-      paths,
-      print: console.log,
-    });
+    const io = createStdinIO();
+    try {
+      await handleInitCommand({
+        args,
+        config,
+        io,
+        paths,
+        print: console.log,
+      });
+    } finally {
+      io.close();
+    }
     return;
   }
 
@@ -510,7 +524,7 @@ export async function main(): Promise<void> {
   }
 }
 
-type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir'>;
+type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir' | 'configFile'>;
 
 export interface NetworkCommandSupervisorLike {
   up(options: {
@@ -532,6 +546,26 @@ export interface NetworkCommandDeps {
   printError: (message: string) => void;
   renderHelp: () => string;
   waitForShutdown: () => Promise<void>;
+}
+
+async function persistNetworkConfigSets(args: CliArgs, paths: NetworkPaths): Promise<string> {
+  const configFile = args.config ?? paths.configFile;
+  let fileConfig: Partial<OrchestratorConfig> = {};
+
+  try {
+    fileConfig = JSON.parse(await readFile(configFile, 'utf-8')) as Partial<OrchestratorConfig>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const updatedFileConfig = applyNetworkConfigSets(fileConfig, args.networkSet ?? []);
+  OrchestratorConfigSchema.parse(updatedFileConfig);
+
+  await mkdir(dirname(configFile), { recursive: true });
+  await writeFile(configFile, JSON.stringify(updatedFileConfig, null, 2) + '\n', 'utf-8');
+  return configFile;
 }
 
 function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
@@ -602,6 +636,10 @@ export async function runNetworkCommand(
   }
 
   if (action === 'config') {
+    if (args.networkSet && args.networkSet.length > 0) {
+      const configFile = await persistNetworkConfigSets(args, paths);
+      deps.print(`Saved network config to ${configFile}.`);
+    }
     deps.print(JSON.stringify({
       network: config.network,
       chat: config.chat,
@@ -685,9 +723,31 @@ import { realpathSync } from 'node:fs';
 
 const self = fileURLToPath(import.meta.url);
 const caller = process.argv[1];
+
+export function shouldForceDirectCliExit(argv: readonly string[] = process.argv): boolean {
+  void argv;
+  return false;
+}
+
+export function runDirectCli(
+  entrypoint: () => Promise<void> = main,
+  exit: (code?: number) => never = process.exit,
+  shouldExitOnSuccess: () => boolean = shouldForceDirectCliExit,
+): void {
+  void entrypoint()
+    .then(() => {
+      if (shouldExitOnSuccess()) {
+        // Successful direct CLI invocations exit naturally after command-specific
+        // cleanup disposes blocking handles. Avoid process.exit(0), which can
+        // truncate asynchronous stdout writes for short commands like beasts logs.
+      }
+    })
+    .catch((error) => {
+      console.error('Fatal:', error instanceof Error ? error.message : error);
+      exit(1);
+    });
+}
+
 if (caller && realpathSync(caller) === realpathSync(self)) {
-  main().catch((error) => {
-    console.error('Fatal:', error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
+  runDirectCli();
 }

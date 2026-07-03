@@ -10,7 +10,7 @@ You have access to fbeast MCP tools. Use them as follows:
 ## During execution
 - Call fbeast_observer_log for significant actions
 - Call fbeast_governor_check before destructive/expensive operations
-- Call fbeast_observer_cost periodically to track spend
+- Call fbeast_observer_log_cost after each significant LLM call to record token usage and spend; call fbeast_observer_cost only when you need a summary
 
 ## Before claiming done
 - Call fbeast_critique_evaluate on your output

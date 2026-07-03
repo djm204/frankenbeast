@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { AuditTrail } from './audit-event.js';
 import type { ReplayRecord } from './replay/replay-record.js';
 
@@ -29,6 +29,24 @@ function assertSafeRunId(runId: string): void {
 }
 
 /**
+ * Builds a path under `auditDir` for the given run ID and file suffix.
+ * Defense in depth on top of `assertSafeRunId`: even if the safe-character
+ * pattern were ever loosened, this resolves the final path and asserts it
+ * stays within `auditDir` before returning it, so a crafted run ID can never
+ * cause a save/load/exists call to touch a file outside the audit directory.
+ */
+function safeAuditPath(auditDir: string, runId: string, suffix: string): string {
+  assertSafeRunId(runId);
+  const filePath = join(auditDir, `${runId}${suffix}`);
+  const resolvedDir = resolve(auditDir);
+  const resolvedFile = resolve(filePath);
+  if (resolvedFile !== resolvedDir && !resolvedFile.startsWith(resolvedDir + sep)) {
+    throw new Error(`Invalid run id: ${JSON.stringify(runId)}`);
+  }
+  return filePath;
+}
+
+/**
  * Persists audit trails as JSON files under .fbeast/audit/.
  * One file per run: <runId>.json.
  */
@@ -40,10 +58,9 @@ export class AuditTrailStore {
   }
 
   save(runId: string, trail: AuditTrail, manifest?: readonly ReplayRecord[]): string {
-    assertSafeRunId(runId);
+    const filePath = safeAuditPath(this.auditDir, runId, '.json');
     mkdirSync(this.auditDir, { recursive: true });
 
-    const filePath = join(this.auditDir, `${runId}.json`);
     const artifact: PersistedAuditTrail = {
       version: 1,
       runId,
@@ -52,14 +69,13 @@ export class AuditTrailStore {
     };
     writeFileSync(filePath, JSON.stringify(artifact, null, 2));
     if (manifest) {
-      writeFileSync(join(this.auditDir, `${runId}.replay.json`), JSON.stringify(manifest, null, 2));
+      writeFileSync(safeAuditPath(this.auditDir, runId, '.replay.json'), JSON.stringify(manifest, null, 2));
     }
     return filePath;
   }
 
   load(runId: string): AuditTrail {
-    assertSafeRunId(runId);
-    const filePath = join(this.auditDir, `${runId}.json`);
+    const filePath = safeAuditPath(this.auditDir, runId, '.json');
     if (!existsSync(filePath)) {
       throw new Error(`Audit trail not found: ${filePath}`);
     }
@@ -68,7 +84,6 @@ export class AuditTrailStore {
   }
 
   exists(runId: string): boolean {
-    assertSafeRunId(runId);
-    return existsSync(join(this.auditDir, `${runId}.json`));
+    return existsSync(safeAuditPath(this.auditDir, runId, '.json'));
   }
 }

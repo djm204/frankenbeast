@@ -76,6 +76,7 @@ describe('AgentInitService', () => {
         designDocPath: 'docs/plans/design.md',
         outputDir: 'docs/chunks',
       },
+      executionMode: 'container',
     });
     const detail = agents.getAgentDetail(agent.id);
 
@@ -89,6 +90,7 @@ describe('AgentInitService', () => {
       dispatchedByUser: 'chat-session:sess-1',
       trackedAgentId: agent.id,
       startNow: true,
+      executionMode: 'container',
     });
     expect(run.id).toBe('run-123');
     expect(detail.events.map((event) => event.type)).toContain('agent.dispatch.requested');

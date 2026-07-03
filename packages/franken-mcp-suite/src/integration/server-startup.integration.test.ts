@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
+import { DEFAULT_AUDIT_SESSION_ID } from '../shared/central-enforcement.js';
 
 const PACKAGE_ROOT = process.cwd();
 const DIST_ROOT = join(PACKAGE_ROOT, 'dist');
@@ -92,9 +93,9 @@ describe('declared MCP binaries', () => {
       try {
         const events = db.prepare(
           'SELECT event_type AS eventType FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
-        ).all('mcp:fbeast') as Array<{ eventType: string }>;
+        ).all(DEFAULT_AUDIT_SESSION_ID) as Array<{ eventType: string }>;
 
-        expect(events.map((row) => row.eventType)).toEqual(['mcp_tool_call', 'mcp_tool_result']);
+        expect(events.map((row) => row.eventType)).toEqual(['tool_call']);
       } finally {
         db.close();
       }

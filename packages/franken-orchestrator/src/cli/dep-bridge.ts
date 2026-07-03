@@ -12,23 +12,11 @@ import type {
   ExistingDeps,
   ProviderConfig,
 } from './create-beast-deps.js';
+import { buildProviderConfig } from '../providers/provider-config.js';
+import type { ProviderOverrideConfig } from '../providers/provider-config.js';
 import type { SecurityProfile } from '../middleware/security-profiles.js';
 import type { BeastLoopDeps, IObserverModule } from '../deps.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-
-// ─── Provider name → type detection ───
-
-type ProviderType = ProviderConfig['type'];
-
-function detectProviderType(name: string): ProviderType {
-  const lower = name.toLowerCase();
-  if (lower.includes('claude')) return 'claude-cli';
-  if (lower.includes('codex')) return 'codex-cli';
-  if (lower.includes('gemini')) return 'gemini-cli';
-  if (lower.includes('anthropic')) return 'anthropic-api';
-  if (lower.includes('openai')) return 'openai-api';
-  return 'claude-cli'; // CLI default
-}
 
 // ─── Security tier mapping ───
 
@@ -46,38 +34,55 @@ const SECURITY_TIER_MAP: Record<string, SecurityProfile> = {
  * consolidatedProviders) take precedence over CLI-derived defaults.
  */
 export function bridgeToBeastConfig(options: CliDepOptions, config?: OrchestratorConfig): BeastDepsConfig {
-  // Resolve effective primary provider (runConfig overrides take precedence)
-  const effectiveProvider =
-    options.runConfig?.llmConfig?.default?.provider
-    ?? options.runConfig?.provider
-    ?? options.provider;
+  const consolidatedProviders = config?.consolidatedProviders as ProviderConfig[] | undefined;
 
-  // Build provider list: primary first, then additional (deduplicated)
-  const providerNames: string[] = [];
-  providerNames.push(effectiveProvider);
+  const providers: ProviderConfig[] = consolidatedProviders ?? (() => {
+    // Resolve effective primary provider (runConfig overrides take precedence)
+    const effectiveProvider =
+      options.runConfig?.llmConfig?.default?.provider
+      ?? options.runConfig?.provider
+      ?? options.provider;
+    const effectiveModel =
+      options.runConfig?.llmConfig?.default?.model
+      ?? options.runConfig?.model;
 
-  if (options.providers) {
-    for (const name of options.providers) {
-      if (!providerNames.includes(name)) {
-        providerNames.push(name);
-      }
-    }
-  }
+    const providerOverride = (name: string): ProviderOverrideConfig | undefined => {
+      const override = options.providersConfig?.[name];
+      if (name !== effectiveProvider || !effectiveModel) return override;
 
-  const providers: ProviderConfig[] = providerNames.map((name) => {
-    const config: ProviderConfig = {
-      name,
-      type: detectProviderType(name),
+      return {
+        ...override,
+        model: effectiveModel,
+      };
     };
 
-    // Map providersConfig.command → cliPath
-    const override = options.providersConfig?.[name];
-    if (override?.command) {
-      return { ...config, cliPath: override.command };
+    // Build provider list: primary first, then additional (deduplicated)
+    const providerNames: string[] = [];
+    providerNames.push(effectiveProvider);
+
+    if (options.providers) {
+      for (const name of options.providers) {
+        if (!providerNames.includes(name)) {
+          providerNames.push(name);
+        }
+      }
     }
 
-    return config;
-  });
+    return providerNames.map((name) => {
+      if (name === 'aider') {
+        const override = providerOverride(name);
+        return {
+          name,
+          type: 'claude-cli',
+          ...(override?.command ? { cliPath: override.command } : {}),
+          ...(override?.model ? { model: override.model } : {}),
+          ...(override?.extraArgs ? { extraArgs: override.extraArgs } : {}),
+        };
+      }
+
+      return buildProviderConfig(name, providerOverride(name));
+    });
+  })();
 
   // Security
   const securityProfile: SecurityProfile =
@@ -87,7 +92,7 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
   const dbPath = resolve(options.paths.frankenbeastDir, 'beast.db');
 
   return {
-    providers: (config?.consolidatedProviders as ProviderConfig[] | undefined) ?? providers,
+    providers,
     security: config?.security
       ? {
           profile: (config.security.profile as SecurityProfile) ?? securityProfile,
