@@ -41,7 +41,10 @@ describe('runPlanning with GraphBuilder', () => {
     // Regression guard for issue #20: a graph-builder plan must not bypass
     // critique review just because it wasn't produced by the planner module.
     expect(critique.reviewPlan).toHaveBeenCalledTimes(1);
-    expect(critique.reviewPlan).toHaveBeenCalledWith(ctx.plan);
+    const [reviewedPlan, reviewContext] = vi.mocked(critique.reviewPlan).mock.calls[0]!;
+    expect(reviewedPlan.tasks).toHaveLength(ctx.plan!.tasks.length);
+    expect(reviewedPlan.tasks[0]?.objective).not.toContain('Sample chunk');
+    expect(reviewContext).toEqual({ source: 'graphBuilder', redactedUntrustedChunkContent: true });
   });
 
   it('throws CritiqueSpiralError when critique rejects a graph-builder plan', async () => {
