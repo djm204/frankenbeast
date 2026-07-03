@@ -1,5 +1,5 @@
 import type { BeastContext } from '../context/franken-context.js';
-import type { IPlannerModule, ICritiqueModule, ILogger, PlanIntent } from '../deps.js';
+import type { IPlannerModule, ICritiqueModule, ILogger, PlanGraph, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { NullLogger } from '../logger.js';
@@ -66,7 +66,53 @@ export async function runPlanning(
     });
     logger.info('Planning: plan created', { iteration: 1, taskCount: plan.tasks.length });
     logger.debug('Planning: plan raw', { plan });
-    return;
+
+    // A graph-builder plan (e.g. issue/chunk-driven CLI runs) is not exempt
+    // from safety review just because it wasn't produced by the planner
+    // module — see issue #20. There is no planner to retry against here, so
+    // failing or halted review stops planning outright instead of silently
+    // handing an unreviewed plan to execution. Redact fenced chunk bodies for
+    // this review so raw import examples in chunk specs are not treated as plan
+    // dependencies by deterministic dependency evaluators.
+    const critiqueResult = await critique.reviewPlan(buildGraphBuilderCritiquePlan(plan), {
+      source: 'graphBuilder',
+      redactedUntrustedChunkContent: true,
+    });
+    if (critiqueResult.findings.length > 0) {
+      ctx.critiqueFeedback = critiqueResult.findings
+        .map(finding => `${finding.evaluator}: ${finding.message}`)
+        .join('\n');
+    } else {
+      ctx.critiqueFeedback = undefined;
+    }
+
+    ctx.addAudit('critique', 'plan:reviewed', {
+      iteration: 1,
+      verdict: critiqueResult.verdict,
+      score: critiqueResult.score,
+      findingsCount: critiqueResult.findings.length,
+      source: 'graphBuilder',
+    });
+    logger.info('Planning: critique reviewed', {
+      iteration: 1,
+      verdict: critiqueResult.verdict,
+      score: critiqueResult.score,
+    });
+    logger.debug('Planning: critique findings', { findings: critiqueResult.findings });
+
+    if (critiqueResult.halted) {
+      const reason = critiqueResult.haltReason ?? 'critique halted';
+      ctx.addAudit('critique', 'plan:halted', { iteration: 1, reason });
+      logger.warn('Planning: critique halted', { iteration: 1, reason });
+      throw new CritiqueBudgetHaltError(1, reason);
+    }
+
+    if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
+      return; // Plan approved
+    }
+
+    // No planner to iterate against — a single failing review is terminal.
+    throw new CritiqueSpiralError(1, critiqueResult.score);
   }
 
   let lastScore = 0;
@@ -139,4 +185,22 @@ export async function runPlanning(
 
   // Exhausted iterations
   throw new CritiqueSpiralError(config.maxCritiqueIterations, lastScore);
+}
+
+const CHUNK_CONTENT_BEGIN = 'BEGIN_UNTRUSTED_CHUNK_CONTENT:';
+
+function buildGraphBuilderCritiquePlan(plan: PlanGraph): PlanGraph {
+  return {
+    tasks: plan.tasks.map(task => ({
+      ...task,
+      objective: redactUntrustedChunkContent(task.objective),
+    })),
+  };
+}
+
+function redactUntrustedChunkContent(objective: string): string {
+  const contentStart = objective.indexOf(CHUNK_CONTENT_BEGIN);
+  if (contentStart === -1) return objective;
+
+  return `${objective.slice(0, contentStart)}[untrusted chunk content redacted for plan critique]`;
 }

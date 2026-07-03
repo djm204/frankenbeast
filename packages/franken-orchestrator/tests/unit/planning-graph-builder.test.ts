@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runPlanning } from '../../src/phases/planning.js';
+import { runPlanning, CritiqueSpiralError, CritiqueBudgetHaltError } from '../../src/phases/planning.js';
 import { BeastContext } from '../../src/context/franken-context.js';
 import { ChunkFileGraphBuilder } from '../../src/planning/chunk-file-graph-builder.js';
 import { makePlanner, makeCritique } from '../helpers/stubs.js';
@@ -19,7 +19,7 @@ describe('runPlanning with GraphBuilder', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('uses ChunkFileGraphBuilder to populate ctx.plan without critique', async () => {
+  it('uses ChunkFileGraphBuilder to populate ctx.plan and still runs it through critique', async () => {
     writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
 
     const ctx = new BeastContext('proj', 'sess', 'input');
@@ -38,6 +38,59 @@ describe('runPlanning with GraphBuilder', () => {
       'harden:05_sample',
     ]);
     expect(planner.createPlan).not.toHaveBeenCalled();
-    expect(critique.reviewPlan).not.toHaveBeenCalled();
+    // Regression guard for issue #20: a graph-builder plan must not bypass
+    // critique review just because it wasn't produced by the planner module.
+    expect(critique.reviewPlan).toHaveBeenCalledTimes(1);
+    const [reviewedPlan, reviewContext] = vi.mocked(critique.reviewPlan).mock.calls[0]!;
+    expect(reviewedPlan.tasks).toHaveLength(ctx.plan!.tasks.length);
+    expect(reviewedPlan.tasks[0]?.objective).not.toContain('Sample chunk');
+    expect(reviewContext).toEqual({ source: 'graphBuilder', redactedUntrustedChunkContent: true });
+  });
+
+  it('throws CritiqueSpiralError when critique rejects a graph-builder plan', async () => {
+    writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
+
+    const ctx = new BeastContext('proj', 'sess', 'input');
+    ctx.sanitizedIntent = { goal: 'build from chunks' };
+
+    const planner = makePlanner();
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [{ evaluator: 'safety', severity: 'critical', message: 'unsafe plan' }],
+        score: 0.2,
+      })),
+    });
+    const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
+
+    await expect(
+      runPlanning(ctx, planner, critique, defaultConfig(), undefined, graphBuilder),
+    ).rejects.toThrow(CritiqueSpiralError);
+
+    expect(critique.reviewPlan).toHaveBeenCalledTimes(1);
+    expect(ctx.critiqueFeedback).toBe('safety: unsafe plan');
+  });
+
+  it('throws CritiqueBudgetHaltError when critique halts on a graph-builder plan', async () => {
+    writeFileSync(join(tmpDir, '05_sample.md'), 'Sample chunk', 'utf-8');
+
+    const ctx = new BeastContext('proj', 'sess', 'input');
+    ctx.sanitizedIntent = { goal: 'build from chunks' };
+
+    const planner = makePlanner();
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [],
+        score: 0.1,
+        halted: true,
+        haltReason: 'budget exceeded',
+      })),
+    });
+    const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
+
+    await expect(
+      runPlanning(ctx, planner, critique, defaultConfig(), undefined, graphBuilder),
+    ).rejects.toThrow(CritiqueBudgetHaltError);
   });
 });
