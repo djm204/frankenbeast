@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createMcpServer, type ToolDef } from './shared/server-factory.js';
+import { createGovernanceGate } from './shared/governance-gate.js';
+import { createAuditSink } from './shared/central-enforcement.js';
 import { createBrainAdapter } from './adapters/brain-adapter.js';
 import { createObserverAdapter } from './adapters/observer-adapter.js';
 import { createGovernorAdapter } from './adapters/governor-adapter.js';
@@ -39,7 +41,13 @@ const allTools: ToolDef[] = [
   ...createSkillsServer({ skills }).tools,
 ];
 
-const server = createMcpServer('fbeast', '0.1.0', allTools);
+// Central, in-process governance: every tool call is checked server-side,
+// reusing the same governor the client hook path uses. Enforced even when no
+// client hooks are installed (ARCH-003 / ADR-038).
+const server = createMcpServer('fbeast', '0.1.0', allTools, {
+  governance: createGovernanceGate(governor),
+  audit: createAuditSink(observer),
+});
 
 server.start().catch((err) => {
   console.error('fbeast-mcp failed to start:', err);

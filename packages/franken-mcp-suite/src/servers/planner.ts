@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { parseArgs } from 'node:util';
@@ -8,7 +9,7 @@ export interface PlannerServerDeps {
   planner: PlannerAdapter;
 }
 
-export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
+export function createPlannerServer(deps: PlannerServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const { planner } = deps;
 
   const tools: ToolDef[] = [
@@ -110,7 +111,7 @@ export function createPlannerServer(deps: PlannerServerDeps): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-planner', '0.1.0', tools);
+  return createMcpServer('fbeast-planner', '0.1.0', tools, options);
 }
 
 if (isMain(import.meta.url)) {
@@ -118,7 +119,7 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const planner = createPlannerAdapter(values['db']!);
-  const server = createPlannerServer({ planner });
+  const server = createPlannerServer({ planner }, createCentralOptions(values['db']!));
   server.start().catch((err) => {
     console.error('fbeast-planner failed to start:', err);
     process.exit(1);
