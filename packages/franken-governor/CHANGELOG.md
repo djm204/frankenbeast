@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.4...franken-governor-v0.5.5) (2026-07-03)
+
+
+### Bug Fixes
+
+* **governor:** wire standalone approval HTTP responses to pending waiters ([#452](https://github.com/djm204/frankenbeast/issues/452)) ([786b1a1](https://github.com/djm204/frankenbeast/commit/786b1a17b11ea60718c507fbec28b1e35178d775))
+
 ## [0.5.4](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.3...franken-governor-v0.5.4) (2026-07-01)
 
 

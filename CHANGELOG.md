@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.40.0](https://github.com/djm204/frankenbeast/compare/v0.39.0...v0.40.0) (2026-07-03)
+
+
+### Features
+
+* **orchestrator:** add standalone beast daemon ([#477](https://github.com/djm204/frankenbeast/issues/477)) ([6b770a4](https://github.com/djm204/frankenbeast/commit/6b770a48f33d05e0c91a9b32800499e95049ade1))
+* **web:** add beast execution mode selection ([#469](https://github.com/djm204/frankenbeast/issues/469)) ([be44a79](https://github.com/djm204/frankenbeast/commit/be44a79b26d8c8dd2fcef0626e42541d78d6736d))
+
+
+### Bug Fixes
+
+* address codex sandbox and route follow-ups ([cda3cce](https://github.com/djm204/frankenbeast/commit/cda3ccec1ae728ec75f38bdb93069245bdcf8bd9))
+* **mcp-suite:** audit MCP tool execution ([#445](https://github.com/djm204/frankenbeast/issues/445)) ([23a1e08](https://github.com/djm204/frankenbeast/commit/23a1e086e0d0f697fe2120ca7df204f51206e50e))
+* **mcp-suite:** bind proxy firewall to project root ([#444](https://github.com/djm204/frankenbeast/issues/444)) ([c2592c0](https://github.com/djm204/frankenbeast/commit/c2592c000f4ec19ee37774efaa5c42846e87eb01))
+* **mcp-suite:** enforce governance centrally in MCP dispatch ([#391](https://github.com/djm204/frankenbeast/issues/391)) ([2bcaa6e](https://github.com/djm204/frankenbeast/commit/2bcaa6ede4dc16044cbacd7d32a14bbfdda2c1d6))
+* **mcp-suite:** pass tool payload to governor; fail closed on timeout/empty tool ([#397](https://github.com/djm204/frankenbeast/issues/397)) ([d5736ed](https://github.com/djm204/frankenbeast/commit/d5736edf116d070fae9c38042c961cf15006a350))
+* **orchestrator:** mark container workspaces git-safe ([#476](https://github.com/djm204/frankenbeast/issues/476)) ([c6fb6a8](https://github.com/djm204/frankenbeast/commit/c6fb6a892748b077443a1f1c924324d19124f348))
+* **web:** wire dashboard Kill action to a real agent/run endpoint ([#450](https://github.com/djm204/frankenbeast/issues/450)) ([562ffad](https://github.com/djm204/frankenbeast/commit/562ffad0661821d7be53ce3d93dbb673b40262a5))
+
 ## [0.39.0](https://github.com/djm204/frankenbeast/compare/v0.38.5...v0.39.0) (2026-07-01)
 
 
