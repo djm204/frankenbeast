@@ -47,6 +47,9 @@ export { createGovernor } from './gateway/index.js';
 export type { CreateGovernorOptions } from './gateway/index.js';
 export { ApprovalWaiterRegistry } from './gateway/index.js';
 
+export { createGovernorApp } from './server/index.js';
+export type { GovernorAppOptions } from './server/index.js';
+
 export type { GovernorMemoryPort, EpisodicTraceRecord } from './audit/index.js';
 export { GovernorAuditRecorder } from './audit/index.js';
 
