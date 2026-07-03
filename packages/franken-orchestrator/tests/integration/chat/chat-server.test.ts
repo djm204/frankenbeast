@@ -236,6 +236,45 @@ describe('chat server bootstrap', () => {
     beastServices.dispose();
   });
 
+  it('force-closes active SSE clients on shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const beastServices = createBeastServices({
+      beastsDb: join(TMP, 'beasts.db'),
+      beastLogsDir: join(TMP, 'beast-logs'),
+    });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+      operatorToken: 'shared-token',
+      beastControl: {
+        ...beastServices,
+        security: new TransportSecurityService(),
+        operatorToken: 'shared-token',
+        rateLimit: { windowMs: 60_000, max: 20 },
+      },
+    });
+
+    const ticketResponse = await fetch(`${server.url}/v1/beasts/events/ticket`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer shared-token' },
+    });
+    expect(ticketResponse.status).toBe(200);
+    const ticketBody = await ticketResponse.json() as { ticket: string };
+    const streamResponse = await fetch(`${server.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`, {
+      headers: { authorization: 'Bearer shared-token' },
+    });
+    expect(streamResponse.status).toBe(200);
+
+    await expect(Promise.race([
+      server.close().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 1_000)),
+    ])).resolves.toBe('closed');
+    beastServices.dispose();
+  });
+
   it('refuses to start on a non-loopback host without an operator token', async () => {
     mkdirSync(TMP, { recursive: true });
     await expect(startChatServer({

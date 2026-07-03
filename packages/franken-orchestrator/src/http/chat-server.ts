@@ -195,7 +195,9 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       options.disposeBeastControl?.();
-      await closeHttpServer(server);
+      const closedServer = closeHttpServer(server);
+      server.closeAllConnections();
+      await closedServer;
     },
   };
 }

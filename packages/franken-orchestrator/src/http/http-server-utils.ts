@@ -34,6 +34,14 @@ function toRequest(request: IncomingMessage): Request {
   const url = new URL(request.url ?? '/', `http://${host}`);
   const method = request.method ?? 'GET';
   const headers = new Headers();
+  const abortController = new AbortController();
+
+  const abortRequest = () => abortController.abort();
+  request.once('aborted', abortRequest);
+  request.once('close', abortRequest);
+  if (request.aborted || request.destroyed) {
+    abortRequest();
+  }
 
   for (const [key, value] of Object.entries(request.headers)) {
     if (value === undefined) {
@@ -49,12 +57,13 @@ function toRequest(request: IncomingMessage): Request {
   }
 
   if (method === 'GET' || method === 'HEAD') {
-    return new Request(url, { method, headers });
+    return new Request(url, { method, headers, signal: abortController.signal });
   }
 
   return new Request(url, {
     method,
     headers,
+    signal: abortController.signal,
     body: Readable.toWeb(request) as ReadableStream,
     ...( { duplex: 'half' } as { duplex: 'half' } ),
   } as RequestInit);
