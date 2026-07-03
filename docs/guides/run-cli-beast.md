@@ -137,13 +137,25 @@ Beast dispatch supports two execution modes:
 | Mode | Boundary |
 |------|----------|
 | `process` | Host process with supervised lifecycle, env allowlist, and project-root cwd containment. This is **not** a hard sandbox. |
-| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, and the same env allowlist. |
+| `container` | Docker-backed execution through `docker run --rm --network none`, one explicit workspace mount, `/workspace` working directory, git safe-directory configuration for the mounted checkout, non-root UID/GID enforcement (defaults to the invoking host UID/GID when non-root, otherwise `10001:10001`), memory/CPU/PID limits, `no-new-privileges`, and the same env allowlist. |
 
-Container mode requires Docker and a sandbox image (`fbeast/sandbox:latest` by default in the runtime policy). It does not require a Docker daemon during unit tests because tests assert the generated Docker command instead of launching Docker.
+Container mode requires Docker and the in-repo sandbox image. Build the default image with:
+
+```bash
+docker build -t fbeast/sandbox:latest -f Dockerfile .
+```
+
+The repository includes a root `.dockerignore` for this build context. Keep local secrets and agent state out of the image context by filtering `.env*` (except `.env.example`), `.fbeast/`, `.codex/`, `node_modules/`, `.git/`, build outputs, coverage, and logs before running `docker build`.
+
+Unit tests do not require a Docker daemon because they assert the generated Docker command and Dockerfile hardening instead of launching Docker. Docker-backed integration tests are also present and are skipped automatically when Docker is unavailable; when Docker is installed they build `fbeast/sandbox:latest`, verify writable non-root workspace behavior, and run a memory-exceeding workload under the configured limits.
 
 The default env allowlist is intentionally narrow: `PATH`, `HOME`, `LANG`, `LC_ALL`, `FRANKENBEAST_RUN_CONFIG`, `FRANKENBEAST_SPAWNED`, and the `FRANKENBEAST_MODULE_*` toggles for firewall, skills, memory, planner, critique, governor, and heartbeat. Secrets such as `GITHUB_TOKEN`, provider API keys, and arbitrary shell environment variables are not inherited unless the Beast definition explicitly places them in `spec.env` and the runtime policy allows the key.
 
-`container` mode uses Docker `--network none` to deny container network access. `process` mode does not have OS-level network isolation; use firewall/governor controls as advisory gates only, or choose container mode when network denial is required. Docker `--network none` is not a micro-VM, gVisor, Firecracker, Wasm, or seccomp sandbox.
+`container` mode uses Docker `--network none` to deny container network access and defaults to `--memory 512m --cpus 1.0 --pids-limit 256`. `process` mode does not have OS-level network isolation; use firewall/governor controls as advisory gates only, or choose container mode when network denial is required. Docker `--network none` is not a micro-VM, gVisor, Firecracker, Wasm, or seccomp sandbox.
+
+`SandboxPolicy.readOnlyWorkspaceMount` supports an opt-in `:ro` workspace bind mount for workloads that do not need to write to the checkout. It remains disabled by default because current beast runs write run config, checkpoints, and artifacts under the workspace; a disposable per-run workspace is safer future work for write-heavy tasks.
+
+A franken-governor pre-deploy hook should be integrated at the dispatch/API layer where user, target, budget, and audit context are available. This Docker runtime layer now enforces the concrete container boundary, but it intentionally does not decide deployment approval policy.
 
 ---
 

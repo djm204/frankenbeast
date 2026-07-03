@@ -178,4 +178,285 @@ describe('BeastApiClient', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
   });
+
+  it('opens the ticket-authenticated Beast event stream', async () => {
+    const close = vi.fn();
+    const listeners: Record<string, (event: { data: string }) => void> = {};
+    const MockEventSource = vi.fn().mockImplementation(() => ({
+      addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+        listeners[type] = handler;
+      }),
+      close,
+    }));
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ ticket: 'sse-ticket' }),
+    });
+
+    try {
+      const onRunLog = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runLog: onRunLog });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/v1/beasts/events/ticket',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ authorization: 'Bearer operator-token' }),
+        }),
+      );
+      expect(MockEventSource).toHaveBeenCalledWith(
+        'http://localhost:3000/v1/beasts/events/stream?ticket=sse-ticket',
+      );
+
+      listeners['run.log']?.({ data: JSON.stringify({ runId: 'run-1', stream: 'stdout', line: 'one' }) });
+      expect(onRunLog).toHaveBeenCalledWith({ runId: 'run-1', stream: 'stdout', line: 'one' });
+
+      unsubscribe();
+      expect(close).toHaveBeenCalled();
+    } finally {
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('attaches the EventSource id to parsed run log events', async () => {
+    const close = vi.fn();
+    const listeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
+    const MockEventSource = vi.fn().mockImplementation(() => ({
+      addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
+        listeners[type] = handler;
+      }),
+      close,
+    }));
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ ticket: 'sse-ticket' }),
+    });
+
+    try {
+      const onRunLog = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runLog: onRunLog });
+
+      listeners['run.log']?.({
+        data: JSON.stringify({ runId: 'run-1', stream: 'stdout', line: 'one' }),
+        lastEventId: 'event-42',
+      });
+      expect(onRunLog).toHaveBeenCalledWith({
+        eventId: 'event-42',
+        runId: 'run-1',
+        stream: 'stdout',
+        line: 'one',
+      });
+
+      unsubscribe();
+    } finally {
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('requests a fresh single-use ticket when the Beast event stream disconnects', async () => {
+    vi.useFakeTimers();
+    const closeFirst = vi.fn();
+    const closeSecond = vi.fn();
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn().mockImplementation(() => {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      return {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: listeners.length === 1 ? closeFirst : closeSecond,
+      };
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ error: onError });
+
+      listeners[0]?.error?.({ data: '' });
+      expect(closeFirst).toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('reconnecting') }));
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2',
+      );
+
+      unsubscribe();
+      expect(closeSecond).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('passes the last received SSE event id when reconnecting with a fresh ticket', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
+    const MockEventSource = vi.fn().mockImplementation(() => {
+      const instanceListeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
+      listeners.push(instanceListeners);
+      return {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      };
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), error: vi.fn() });
+
+      listeners[0]?.['run.status']?.({
+        data: JSON.stringify({ runId: 'run-1', status: 'running' }),
+        lastEventId: '42',
+      });
+      listeners[0]?.error?.({ data: '' });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
+      );
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('keeps retrying when a reconnect ticket request fails once', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn().mockImplementation(() => {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      return {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      };
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({ error: { code: 'UNAVAILABLE' } }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-3' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ error: onError });
+
+      listeners[0]?.error?.({ data: '' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'HTTP 500' }));
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-3',
+      );
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('keeps retrying when the initial ticket request fails', async () => {
+    vi.useFakeTimers();
+    const MockEventSource = vi.fn().mockImplementation(() => ({
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+    }));
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 503, json: () => Promise.resolve({ error: { code: 'UNAVAILABLE' } }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ error: onError });
+
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'HTTP 503' }));
+      expect(MockEventSource).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(MockEventSource).toHaveBeenCalledWith(
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2',
+      );
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
 });

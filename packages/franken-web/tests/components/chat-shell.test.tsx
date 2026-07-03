@@ -59,6 +59,21 @@ const mockListAgents = vi.fn().mockResolvedValue([
   },
 ]);
 
+const mockListRuns = vi.fn().mockResolvedValue([
+  {
+    id: 'run-1',
+    definitionId: 'chunk-plan',
+    status: 'running',
+    dispatchedBy: 'chat',
+    dispatchedByUser: 'chat-session:sess-1',
+    trackedAgentId: 'agent-1',
+    attemptCount: 1,
+    executionMode: 'process',
+    createdAt: '2026-03-11T00:00:02.000Z',
+  },
+]);
+const mockGetContainerRuntimeStatus = vi.fn().mockResolvedValue({ available: true });
+
 const mockGetAgent = vi.fn().mockResolvedValue({
   agent: {
     id: 'agent-1',
@@ -130,6 +145,11 @@ const mockRestartAgent = vi.fn().mockResolvedValue(undefined);
 const mockResumeAgent = vi.fn().mockResolvedValue(undefined);
 const mockStartAgent = vi.fn().mockResolvedValue(undefined);
 const mockStopAgent = vi.fn().mockResolvedValue(undefined);
+let latestBeastEventHandlers: Record<string, (event: unknown) => void> | null = null;
+const mockSubscribeToEvents = vi.fn().mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
+  latestBeastEventHandlers = handlers;
+  return Promise.resolve(vi.fn());
+});
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -177,6 +197,8 @@ vi.mock('../../src/lib/beast-api.js', () => ({
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
     listAgents: typeof mockListAgents;
+    listRuns: typeof mockListRuns;
+    getContainerRuntimeStatus: typeof mockGetContainerRuntimeStatus;
     getAgent: typeof mockGetAgent;
     getRun: typeof mockGetRun;
     getLogs: typeof mockGetLogs;
@@ -191,9 +213,12 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     stopRun: ReturnType<typeof vi.fn>;
     killRun: ReturnType<typeof vi.fn>;
     restartRun: ReturnType<typeof vi.fn>;
+    subscribeToEvents: typeof mockSubscribeToEvents;
   }) {
     this.getCatalog = mockGetCatalog;
     this.listAgents = mockListAgents;
+    this.listRuns = mockListRuns;
+    this.getContainerRuntimeStatus = mockGetContainerRuntimeStatus;
     this.getAgent = mockGetAgent;
     this.getRun = mockGetRun;
     this.getLogs = mockGetLogs;
@@ -208,6 +233,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
     this.restartRun = vi.fn().mockResolvedValue(undefined);
+    this.subscribeToEvents = mockSubscribeToEvents;
   }),
 }));
 
@@ -234,6 +260,11 @@ afterEach(() => {
   cleanup();
   window.location.hash = '';
   vi.clearAllMocks();
+  latestBeastEventHandlers = null;
+  mockSubscribeToEvents.mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
+    latestBeastEventHandlers = handlers;
+    return Promise.resolve(vi.fn());
+  });
   mockListSessions.mockResolvedValue([
     {
       id: 'sess-1',
@@ -265,6 +296,20 @@ afterEach(() => {
       updatedAt: '2026-03-11T00:00:01.000Z',
     },
   ]);
+  mockListRuns.mockResolvedValue([
+    {
+      id: 'run-1',
+      definitionId: 'chunk-plan',
+      status: 'running',
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:sess-1',
+      trackedAgentId: 'agent-1',
+      attemptCount: 1,
+      executionMode: 'process',
+      createdAt: '2026-03-11T00:00:02.000Z',
+    },
+  ]);
+  mockGetContainerRuntimeStatus.mockResolvedValue({ available: true });
   mockGetAgent.mockResolvedValue({
     agent: {
       id: 'agent-1',
@@ -299,6 +344,22 @@ afterEach(() => {
   });
   mockResumeAgent.mockReset();
   mockResumeAgent.mockResolvedValue(undefined);
+  mockGetLogs.mockReset();
+  mockGetLogs.mockResolvedValue(['started from chat']);
+  mockGetRun.mockReset();
+  mockGetRun.mockResolvedValue({
+    run: {
+      id: 'run-1',
+      definitionId: 'chunk-plan',
+      status: 'running',
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:sess-1',
+      attemptCount: 1,
+      createdAt: '2026-03-11T00:00:02.000Z',
+    },
+    attempts: [],
+    events: [],
+  });
 });
 
 describe('ChatShell', () => {
@@ -369,6 +430,282 @@ describe('ChatShell', () => {
 
     expect(screen.getByRole('heading', { name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
+  });
+
+  it('applies Beast SSE status and log updates incrementally', async () => {
+    window.location.hash = '#/beasts';
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockSubscribeToEvents).toHaveBeenCalled();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
+      expect(screen.getByText(/started from chat/)).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.agentStatus?.({
+      agentId: 'agent-1',
+      status: 'running',
+      updatedAt: '2026-03-11T00:00:03.000Z',
+    });
+    latestBeastEventHandlers?.runLog?.({
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+    latestBeastEventHandlers?.runStatus?.({
+      runId: 'run-1',
+      status: 'completed',
+      updatedAt: '2026-03-11T00:00:05.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/container line 1/)).toBeDefined();
+      expect(screen.getAllByText('running').length).toBeGreaterThan(0);
+      expect(screen.getByText('completed')).toBeDefined();
+    });
+  });
+
+  it('deduplicates live log events already returned by the REST log load', async () => {
+    window.location.hash = '#/beasts';
+    const persistedLine = JSON.stringify({
+      stream: 'stdout',
+      message: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+    mockGetLogs.mockResolvedValue([persistedLine]);
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/container line 1/)).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.runLog?.({
+      eventId: 'log-event-1',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'container line 1',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/container line 1/)).toHaveLength(1);
+    });
+  });
+
+  it('does not deduplicate distinct log records that share timestamp and contents', async () => {
+    window.location.hash = '#/beasts';
+    mockGetLogs.mockResolvedValue([]);
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockSubscribeToEvents).toHaveBeenCalled();
+    });
+
+    latestBeastEventHandlers?.runLog?.({
+      eventId: 'log-event-1',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'same line',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+    latestBeastEventHandlers?.runLog?.({
+      eventId: 'log-event-2',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      stream: 'stdout',
+      line: 'same line',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/same line/)).toHaveLength(2);
+    });
+  });
+
+  it('refreshes the agent list when SSE reports an unknown agent', async () => {
+    window.location.hash = '#/beasts';
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('agent-1')).toBeDefined();
+    });
+
+    mockListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'dispatching',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: { kind: 'chunk-plan', command: '/plan --design-doc docs/plans/design.md', config: {}, chatSessionId: 'sess-1' },
+        initConfig: {},
+        chatSessionId: 'sess-1',
+        dispatchRunId: 'run-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+      {
+        id: 'agent-2',
+        definitionId: 'chunk-plan',
+        status: 'running',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'chunk-plan', command: '/plan --design-doc docs/next.md', config: {}, chatSessionId: 'sess-1' },
+        initConfig: {},
+        chatSessionId: 'sess-1',
+        dispatchRunId: 'run-2',
+        createdAt: '2026-03-11T00:00:02.000Z',
+        updatedAt: '2026-03-11T00:00:03.000Z',
+      },
+    ]);
+
+    latestBeastEventHandlers?.agentStatus?.({
+      agentId: 'agent-2',
+      status: 'running',
+      updatedAt: '2026-03-11T00:00:03.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('agent-2')).toBeDefined();
+    });
+  });
+
+  it('refreshes selected agent details when a newly linked run emits logs', async () => {
+    window.location.hash = '#/beasts';
+    mockListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'dispatching',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: { kind: 'chunk-plan', command: '/plan --design-doc docs/plans/design.md', config: {}, chatSessionId: 'sess-1' },
+        initConfig: {},
+        chatSessionId: 'sess-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+    ]);
+    mockGetAgent.mockResolvedValue({
+      agent: {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'dispatching',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: { kind: 'chunk-plan', command: '/plan --design-doc docs/plans/design.md', config: {}, chatSessionId: 'sess-1' },
+        initConfig: {},
+        chatSessionId: 'sess-1',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:01.000Z',
+      },
+      events: [],
+    });
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        beastOperatorToken="operator-token"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('No events or logs yet');
+    });
+
+    mockGetAgent.mockResolvedValue({
+      agent: {
+        id: 'agent-1',
+        definitionId: 'chunk-plan',
+        status: 'running',
+        source: 'chat',
+        createdByUser: 'chat-session:sess-1',
+        initAction: { kind: 'chunk-plan', command: '/plan --design-doc docs/plans/design.md', config: {}, chatSessionId: 'sess-1' },
+        initConfig: {},
+        chatSessionId: 'sess-1',
+        dispatchRunId: 'run-2',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:03.000Z',
+      },
+      events: [],
+    });
+    mockGetRun.mockResolvedValue({
+      run: {
+        id: 'run-2',
+        definitionId: 'chunk-plan',
+        status: 'running',
+        dispatchedBy: 'chat',
+        dispatchedByUser: 'chat-session:sess-1',
+        attemptCount: 1,
+        createdAt: '2026-03-11T00:00:02.000Z',
+      },
+      attempts: [],
+      events: [],
+    });
+    mockGetLogs.mockResolvedValue(['linked run log']);
+
+    latestBeastEventHandlers?.agentEvent?.({
+      agentId: 'agent-1',
+      event: {
+        id: 'agent-event-1',
+        sequence: 1,
+        level: 'info',
+        type: 'agent.dispatch.linked',
+        message: 'Dispatch run linked',
+        payload: { runId: 'run-2' },
+        createdAt: '2026-03-11T00:00:03.000Z',
+      },
+    });
+
+    latestBeastEventHandlers?.runLog?.({
+      eventId: 'log-event-1',
+      runId: 'run-2',
+      attemptId: 'attempt-2',
+      stream: 'stdout',
+      line: 'linked run log',
+      createdAt: '2026-03-11T00:00:04.000Z',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/linked run log/)).toBeDefined();
+    });
   });
 
   it('renders stopped agents in the beasts list', async () => {

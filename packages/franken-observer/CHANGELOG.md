@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.4...franken-observer-v0.7.5) (2026-07-01)
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
 ## [0.7.4](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.3...franken-observer-v0.7.4) (2026-06-28)
 
 

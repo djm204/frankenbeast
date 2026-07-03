@@ -181,6 +181,28 @@ describe('Beast SSE routes', () => {
     expect(events.find((e) => e.id === '3')).toBeDefined();
   });
 
+  it('replays missed events via lastEventId query parameter for browser EventSource reconnects', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
+    ctx.bus.publish({ type: 'run.status', data: { runId: 'r1', status: 'active' } });
+
+    const ticket = await issueTicket(ctx.app);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+
+    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`, {
+      signal: controller.signal,
+    });
+    const res = await ctx.app.request(req);
+    const text = await res.text();
+    const events = parseSseEvents(text);
+
+    expect(events.find((e) => e.id === '1')).toBeUndefined();
+    expect(events.find((e) => e.id === '2')).toBeDefined();
+  });
+
   it('does not send snapshot on reconnect with Last-Event-ID', async () => {
     const ctx = createSseApp({
       getSnapshot: () => ({ agents: [] }),

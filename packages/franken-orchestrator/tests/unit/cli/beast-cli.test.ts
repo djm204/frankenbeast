@@ -2,6 +2,11 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { handleBeastCommand } from '../../../src/cli/beast-cli.js';
 import type { CliArgs } from '../../../src/cli/args.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
+import { spawnSync } from 'node:child_process';
+
+vi.mock('node:child_process', () => ({
+  spawnSync: vi.fn(() => ({ status: 0, stderr: '' })),
+}));
 
 const mockServices = vi.hoisted(() => ({
   catalog: {
@@ -14,6 +19,7 @@ const mockServices = vi.hoisted(() => ({
   runs: {
     listRuns: vi.fn(),
     getRun: vi.fn(),
+    listAttempts: vi.fn(),
     readLogs: vi.fn(),
     stop: vi.fn(),
     kill: vi.fn(),
@@ -53,6 +59,7 @@ function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> =
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(spawnSync).mockReturnValue({ status: 0, stderr: '' } as any);
 });
 
 describe('handleBeastCommand() catalog', () => {
@@ -101,6 +108,59 @@ describe('handleBeastCommand() spawn', () => {
     expect(mockServices.dispose).not.toHaveBeenCalled();
   });
 
+  it('passes --mode container through to dispatch after validating Docker', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    mockServices.dispatch.createRun.mockResolvedValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+    const deps = makeDeps({
+      args: {
+        subcommand: 'beasts',
+        beastAction: 'spawn',
+        beastTarget: 'design-interview',
+        beastExecutionMode: 'container',
+      } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(spawnSync).toHaveBeenCalledWith('docker', ['version', '--format', '{{.Server.Version}}'], expect.any(Object));
+    expect(mockServices.dispatch.createRun).toHaveBeenCalledWith(expect.objectContaining({
+      definitionId: 'design-interview',
+      executionMode: 'container',
+      startNow: true,
+    }));
+  });
+
+  it('fails container mode with a clean actionable error when Docker is unavailable', async () => {
+    vi.mocked(spawnSync).mockReturnValue({ status: 1, stderr: 'Cannot connect to the Docker daemon' } as any);
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    const deps = makeDeps({
+      args: {
+        subcommand: 'beasts',
+        beastAction: 'spawn',
+        beastTarget: 'design-interview',
+        beastExecutionMode: 'container',
+      } as CliArgs,
+    });
+
+    await expect(handleBeastCommand(deps)).rejects.toThrow('Container Beast execution requires a working Docker runtime');
+    expect(mockServices.dispatch.createRun).not.toHaveBeenCalled();
+  });
+
   it('disposes services if spawn fails before a run is started', async () => {
     mockServices.catalog.getDefinition.mockReturnValue(undefined);
     const deps = makeDeps({
@@ -132,6 +192,64 @@ describe('handleBeastCommand() spawn', () => {
 
     expect(deps.print).toHaveBeenCalledWith('Spawned design-interview as run-1');
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('handleBeastCommand() status and logs', () => {
+  it('renders current attempt container metadata in status output', async () => {
+    mockServices.runs.getRun.mockReturnValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      executionMode: 'container',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+    mockServices.runs.listAttempts.mockReturnValue([
+      {
+        id: 'attempt-1',
+        runId: 'run-1',
+        attemptNumber: 1,
+        status: 'running',
+        executorMetadata: { containerId: 'abc123', image: 'fbeast/sandbox:latest' },
+      },
+    ]);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'status', beastTarget: 'run-1', beastExecutionMode: 'container' } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    const payload = JSON.parse(vi.mocked(deps.print).mock.calls[0]?.[0] as string);
+    expect(payload.container).toEqual({ containerId: 'abc123', image: 'fbeast/sandbox:latest' });
+    expect(payload.currentAttempt.executorMetadata.containerId).toBe('abc123');
+  });
+
+  it('prefixes container logs with container metadata when available', async () => {
+    mockServices.runs.getRun.mockReturnValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      executionMode: 'container',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+    mockServices.runs.listAttempts.mockReturnValue([
+      {
+        id: 'attempt-1',
+        runId: 'run-1',
+        attemptNumber: 1,
+        status: 'running',
+        executorMetadata: { containerId: 'abc123', image: 'fbeast/sandbox:latest' },
+      },
+    ]);
+    mockServices.runs.readLogs.mockResolvedValue(['line one']);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'logs', beastTarget: 'run-1', beastExecutionMode: 'container' } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(deps.print).toHaveBeenCalledWith(expect.stringContaining('"containerId":"abc123"'));
+    expect(deps.print).toHaveBeenCalledWith(expect.stringContaining('line one'));
   });
 });
 

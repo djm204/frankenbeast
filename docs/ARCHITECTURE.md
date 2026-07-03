@@ -746,6 +746,8 @@ Most inter-module communication uses typed port interfaces defined in each modul
 
 ## Deployment Modes
 
+These are toolkit deployment modes: ways to run or embed Frankenbeast surfaces. Beast *execution modes* are a narrower per-run boundary selected when dispatching a Beast. Do not conflate the two.
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Mode 1: Full Orchestration                         │
@@ -768,6 +770,17 @@ Most inter-module communication uses typed port interfaces defined in each modul
 │  Import planner/observer/critique/governor/brain    │
 └─────────────────────────────────────────────────────┘
 ```
+
+### Beast execution modes
+
+Raw CLI/API Beast runs support execution-mode selection per run. Dashboard tracked-agent and chat/WS dispatch paths continue to use each Beast definition's default execution mode until the #455/#457 deploy-beasts follow-ups wire container selection through those entry points.
+
+| Beast execution mode | Boundary | Notes |
+|----------------------|----------|-------|
+| `process` | Host child process supervised by the Beast runtime. | Uses the Beast env allowlist and project-root `cwd` containment, but remains a host process and is not a hard sandbox. |
+| `container` | Docker-backed child process transformed from the same Beast process spec. | Uses `docker run --rm --network none`, a single explicit workspace mount, `/workspace` working directory remapping, and the same env allowlist. Requires Docker and a suitable sandbox image. Docker `--network none` is not micro-VM, gVisor, Firecracker, Wasm, or seccomp isolation. |
+
+See [ADR-036](adr/036-sandboxed-beast-execution.md) and [Deploy Beasts from the Dashboard](guides/deploy-beasts.md) for the current operator flow and sprint-status caveats.
 
 ## @fbeast/mcp-suite
 

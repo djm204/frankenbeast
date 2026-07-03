@@ -36,6 +36,7 @@ describe('StepReview', () => {
     expect(onLaunch).toHaveBeenCalledWith({
       identity: { name: 'Test Agent', description: 'A test agent' },
       workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
+      executionMode: 'process',
       designDocPath: 'docs/design.md',
       outputDir: 'tasks/chunks',
       llm: { defaultProvider: 'codex', defaultModel: 'gpt-5.1' },

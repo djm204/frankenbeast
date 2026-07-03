@@ -1,0 +1,27 @@
+# Keep the sandbox image build context small and free of local state/secrets.
+.git
+.git/**
+
+.env
+.env.*
+!.env.example
+
+.fbeast
+.fbeast/**
+.codex
+.codex/**
+
+node_modules
+node_modules/**
+packages/*/node_modules
+packages/*/node_modules/**
+
+coverage
+coverage/**
+dist
+dist/**
+packages/*/dist
+packages/*/dist/**
+
+*.log
+npm-debug.log*

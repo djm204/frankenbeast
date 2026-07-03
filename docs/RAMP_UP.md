@@ -150,7 +150,7 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 1. **ProviderRegistry only active in reflection path**: Task execution flows through `CliLlmAdapter → MartinLoop → spawn()`. Multi-provider failover applies to heartbeat/reflection calls only. By design — middleware applies to in-process prompt text, not subprocess stdio.
 2. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
 3. **No `--non-interactive` flag**: Headless usage relies on starting at `plan` or `run` with existing inputs.
-4. **Provider/dashboard CLI commands are stubs**: `frankenbeast provider` and `frankenbeast dashboard` print instructions but don't execute.
+4. **No top-level `provider` or `dashboard` CLI subcommands**: Current subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security` (see `packages/franken-orchestrator/src/cli/args.ts`). Provider/dashboard capabilities are exposed through provider config, `chat-server`, the HTTP dashboard routes, and `franken-web`.
 5. **`--resume` parsed but not a distinct control path**: Checkpoint-based task skipping works from existing checkpoint files.
 
 ## Key Documentation
@@ -159,8 +159,8 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full system overview with Mermaid diagrams |
 | `docs/PROGRESS.md` | PR-by-PR progress tracking, verified test counts, and Phase 8 CLI gap-closure work |
-| `docs/adr/` | ADRs covering monorepo structure, hex architecture, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, pluggable CLI providers, multi-pass planning, chat dispatch, external comms, network operator control plane, and tracked-agent init workflow |
-| `docs/guides/` | quickstart, run-dashboard-chat, add-llm-provider, wrap-external-agent, fix-github-issues |
+| `docs/adr/` | ADRs covering monorepo structure, hex architecture, Hono, shared types, Beast Loop, circuit breakers, CLI execution, Approach C, pluggable CLI providers, multi-pass planning, chat dispatch, external comms, network operator control plane, tracked-agent init workflow, and ADR-036 sandboxed Beast execution |
+| `docs/guides/` | quickstart, run-dashboard-chat, deploy-beasts, add-llm-provider, wrap-external-agent, fix-github-issues |
 | `docs/plans/` | Design docs and implementation plans (MCP, beast-runner, approach-c, CLI E2E, pluggable providers, interview UX, etc.) |
 
 ## Secret Store

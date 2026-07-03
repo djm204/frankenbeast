@@ -1,10 +1,11 @@
-import type { TrackedAgentSummary } from '../../lib/beast-api';
+import type { BeastRunSummary, TrackedAgentSummary } from '../../lib/beast-api';
 import { StatusLight } from './status-light';
 
 export type Density = 'compact' | 'comfortable' | 'detailed';
 
 interface AgentRowProps {
   agent: TrackedAgentSummary;
+  run?: BeastRunSummary;
   density: Density;
   selected: boolean;
   onClick: (agentId: string) => void;
@@ -14,8 +15,9 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
+export function AgentRow({ agent, run, density, selected, onClick }: AgentRowProps) {
   const selectedClass = selected ? 'bg-beast-accent-soft border-beast-accent' : 'border-beast-border';
+  const executionMode = run?.executionMode ?? agent.executionMode;
 
   return (
     <button
@@ -40,6 +42,11 @@ export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
               {Object.values(agent.moduleConfig).filter(Boolean).length} modules
             </span>
           )}
+          {executionMode && (
+            <span className="text-xs px-2.5 py-1 rounded-full bg-beast-control text-beast-muted border border-beast-border">
+              {executionMode} mode
+            </span>
+          )}
         </div>
       )}
 
@@ -47,6 +54,7 @@ export function AgentRow({ agent, density, selected, onClick }: AgentRowProps) {
         <div className="flex items-center gap-4 mt-2 ml-6 text-xs text-beast-subtle">
           <span>by {agent.createdByUser}</span>
           {agent.dispatchRunId && <span>run: {agent.dispatchRunId.slice(0, 8)}…</span>}
+          {executionMode && <span>mode: {executionMode}</span>}
         </div>
       )}
     </button>

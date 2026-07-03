@@ -4,7 +4,8 @@ import { createBeastServices } from '../beasts/create-beast-services.js';
 import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
-import type { BeastRun } from '../beasts/types.js';
+import type { BeastExecutionMode, BeastRun, BeastRunAttempt } from '../beasts/types.js';
+import { spawnSync } from 'node:child_process';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
   dispose?: () => void;
@@ -19,6 +20,64 @@ const liveRunStatuses = new Set<BeastRun['status']>([
 
 function shouldKeepServicesAliveForRun(run: Pick<BeastRun, 'status' | 'currentAttemptId'>): boolean {
   return Boolean(run.currentAttemptId && liveRunStatuses.has(run.status));
+}
+
+function assertContainerRuntimeAvailable(): void {
+  const result = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr?.trim() ?? 'docker version failed';
+    throw new Error(`Container Beast execution requires a working Docker runtime. Install/start Docker and retry, or use --mode process. Details: ${detail}`);
+  }
+}
+
+function latestAttempt(run: BeastRun, attempts: readonly BeastRunAttempt[]): BeastRunAttempt | undefined {
+  return attempts.find((attempt) => attempt.id === run.currentAttemptId)
+    ?? [...attempts].sort((left, right) => right.attemptNumber - left.attemptNumber)[0];
+}
+
+function pickContainerMetadata(metadata: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const entries = Object.entries(metadata).filter(([key]) => (
+    key === 'containerId'
+    || key === 'containerName'
+    || key === 'image'
+    || key === 'resourceSnapshot'
+    || key === 'resources'
+  ));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function statusPayload(run: BeastRun, attempts: readonly BeastRunAttempt[]) {
+  const currentAttempt = latestAttempt(run, attempts);
+  const containerMetadata = run.executionMode === 'container'
+    ? pickContainerMetadata(currentAttempt?.executorMetadata)
+    : undefined;
+  return {
+    ...run,
+    ...(currentAttempt ? { currentAttempt } : {}),
+    ...(containerMetadata
+      ? { container: containerMetadata }
+      : {}),
+  };
+}
+
+function containerLogHeader(run: BeastRun, attempts: readonly BeastRunAttempt[]): string[] {
+  if (run.executionMode !== 'container') {
+    return [];
+  }
+  const metadata = pickContainerMetadata(latestAttempt(run, attempts)?.executorMetadata);
+  if (!metadata) {
+    return [`# Beast container run ${run.id}`, '# Container metadata: unavailable'];
+  }
+  return [
+    `# Beast container run ${run.id}`,
+    `# Container metadata: ${JSON.stringify(metadata)}`,
+  ];
 }
 
 interface BeastCommandDeps {
@@ -63,13 +122,17 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         if (!definition) {
           throw new Error(`Unknown Beast definition: ${args.beastTarget}`);
         }
+        const executionMode: BeastExecutionMode = args.beastExecutionMode ?? 'process';
+        if (executionMode === 'container') {
+          assertContainerRuntimeAvailable();
+        }
         const config = await collectBeastConfig(io, definition);
         const run = await services.dispatch.createRun({
           definitionId: definition.id,
           config,
           dispatchedBy: 'cli',
           dispatchedByUser: actor,
-          executionMode: 'process',
+          executionMode,
           startNow: true,
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
@@ -86,15 +149,19 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         if (!args.beastTarget) {
           throw new Error('beasts status requires a run id');
         }
-        print(JSON.stringify(services.runs.getRun(args.beastTarget), null, 2));
+        const run = services.runs.getRun(args.beastTarget);
+        const attempts = run ? services.runs.listAttempts(args.beastTarget) : [];
+        print(JSON.stringify(run ? statusPayload(run, attempts) : undefined, null, 2));
         return;
       }
       case 'logs': {
         if (!args.beastTarget) {
           throw new Error('beasts logs requires a run id');
         }
+        const run = services.runs.getRun(args.beastTarget);
+        const header = run ? containerLogHeader(run, services.runs.listAttempts(args.beastTarget)) : [];
         const logs = await services.runs.readLogs(args.beastTarget);
-        print(logs.join('\n'));
+        print([...header, ...logs].join('\n'));
         return;
       }
       case 'stop': {

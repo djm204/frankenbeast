@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import type { TrackedAgentDetail, TrackedAgentSummary, BeastCatalogEntry } from '../lib/beast-api';
+import type {
+  BeastCatalogEntry,
+  BeastContainerRuntimeStatus,
+  BeastRunSummary,
+  TrackedAgentDetail,
+  TrackedAgentSummary,
+} from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
 import { WizardDialog } from '../components/beasts/wizard-dialog';
@@ -9,6 +15,8 @@ interface BeastsPageProps {
   agents: TrackedAgentSummary[];
   agentDetail: TrackedAgentDetail | null;
   catalog: BeastCatalogEntry[];
+  runs: BeastRunSummary[];
+  containerRuntime?: BeastContainerRuntimeStatus;
   disabled: boolean;
   error: string | null;
   logs: string[];
@@ -27,6 +35,8 @@ interface BeastsPageProps {
 export function BeastsPage({
   agents,
   agentDetail,
+  runs,
+  containerRuntime,
   disabled,
   error,
   logs,
@@ -88,6 +98,7 @@ export function BeastsPage({
 
       <AgentList
         agents={agents}
+        runs={runs}
         selectedAgentId={selectedAgentId}
         onSelectAgent={onSelectAgent}
         onCreateAgent={handleOpenWizard}
@@ -112,6 +123,7 @@ export function BeastsPage({
         isOpen={showWizard}
         onClose={() => setShowWizard(false)}
         onLaunch={handleLaunch}
+        containerRuntime={containerRuntime}
         launching={launching}
         launchError={launchError}
       />
