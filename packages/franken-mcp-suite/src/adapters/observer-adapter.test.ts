@@ -19,8 +19,7 @@ function legacy16(content: string): string {
 
 function legacy16AuditHash(metadata: string, parentHash?: string): string {
   const inputHash = `sha256:${createHash('sha256').update(metadata).digest('hex')}`;
-  const baseHash = inputHash.slice(0, 16);
-  return parentHash ? legacy16(`${parentHash}:${baseHash}`) : baseHash;
+  return parentHash ? legacy16(`${parentHash}:${inputHash}`) : inputHash.slice(0, 16);
 }
 
 function fullAuditHash(sessionId: string, eventType: string, metadata: string, parentHash?: string): string {
@@ -310,6 +309,29 @@ describe('ObserverAdapter', () => {
     expect(verification.ok).toBe(false);
     expect(verification.firstInvalid?.index).toBe(1);
     expect(trail[0]!.hash).toBe(firstLegacyHash);
+  });
+
+  it('allows appending after intact unbound legacy audit rows without migrating them', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const firstMetadata = JSON.stringify({ tool: 'memory', phase: 'pre-tool' });
+    const firstLegacyHash = legacy16AuditHash(firstMetadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', firstMetadata, firstLegacyHash, null);
+    db.close();
+
+    await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
+    const trail = await observer.trail(sessionId);
+    const verification = await observer.verify(sessionId);
+
+    expect(trail[0]!.hash).toBe(firstLegacyHash);
+    expect(trail[1]!.parentHash).toBe(firstLegacyHash);
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(0);
   });
 
   it('rejects legacy 16-character audit rows without session binding before migrating', async () => {

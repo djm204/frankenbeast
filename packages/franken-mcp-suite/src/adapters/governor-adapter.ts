@@ -43,6 +43,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_observer_log_cost',
   'fbeast_observer_cost',
   'fbeast_observer_trail',
+  'fbeast_observer_verify',
   'fbeast_skills_list',
   'fbeast_skills_discover',
   'fbeast_skills_load',

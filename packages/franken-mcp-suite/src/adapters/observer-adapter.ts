@@ -75,7 +75,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     async log(input) {
       const payload = parseMetadata(input.metadata);
       const metadata = canonicalMetadata(input.metadata);
-      const preflight = verifyAuditTrail(store, input.sessionId, true);
+      const preflight = verifyAuditTrail(store, input.sessionId, {
+        migrate: true,
+        allowUnboundLegacy16Rows: true,
+      });
       if (!preflight.ok) {
         throw new Error(`Cannot append audit row to invalid trail at index ${preflight.firstInvalid?.index ?? 'unknown'}`);
       }
@@ -180,7 +183,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     },
 
     async verify(sessionId) {
-      return verifyAuditTrail(store, sessionId, true);
+      return verifyAuditTrail(store, sessionId, { migrate: true });
     },
   };
 }
@@ -198,7 +201,7 @@ interface PendingAuditMigration {
 function verifyAuditTrail(
   store: ReturnType<typeof createSqliteStore>,
   sessionId: string,
-  migrate: boolean,
+  options: { migrate: boolean; allowUnboundLegacy16Rows?: boolean },
 ): ObserverVerifyResult {
   const rows = store.db.prepare(
     'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
@@ -235,6 +238,12 @@ function verifyAuditTrail(
     }
 
     if (!matchesCurrent && matchesLegacy16 && !legacy16RowIsBoundToTrail(row, sessionId)) {
+      if (options.allowUnboundLegacy16Rows) {
+        previousStoredHash = row.hash;
+        expectedParentHash = expectedHash;
+        expectedLegacy16ParentHash = row.hash;
+        continue;
+      }
       return invalidAuditResult(index, row, expectedHash, expectedParentHash, actualParentHash);
     }
 
@@ -247,7 +256,7 @@ function verifyAuditTrail(
     expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
   }
 
-  if (migrate && pendingMigrations.length > 0) {
+  if (options.migrate && pendingMigrations.length > 0) {
     store.db.transaction((migrations: PendingAuditMigration[]) => {
       for (const migration of migrations) {
         migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
@@ -291,9 +300,9 @@ function buildEventBaseHash(sessionId: string, eventType: string, metadata: stri
 }
 
 function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {
-  const baseHash = (inputHash ?? hashContent('')).slice(0, 16);
+  const baseHash = inputHash ?? hashContent('');
   if (!parentHash) {
-    return baseHash;
+    return baseHash.slice(0, 16);
   }
 
   return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
