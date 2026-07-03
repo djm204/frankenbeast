@@ -5,6 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
+import { DEFAULT_AUDIT_SESSION_ID } from '../shared/central-enforcement.js';
 
 const PACKAGE_ROOT = process.cwd();
 const DIST_ROOT = join(PACKAGE_ROOT, 'dist');
@@ -82,6 +84,21 @@ describe('declared MCP binaries', () => {
       expect(names).toContain('fbeast_firewall_scan');
       expect(names).toContain('fbeast_governor_check');
       expect(names).toContain('fbeast_skills_list');
+
+      await client.callTool({
+        name: 'fbeast_memory_store',
+        arguments: { key: 'combined-audit', value: 'ok', type: 'working' },
+      });
+      const db = new Database(dbPath);
+      try {
+        const events = db.prepare(
+          'SELECT event_type AS eventType FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+        ).all(DEFAULT_AUDIT_SESSION_ID) as Array<{ eventType: string }>;
+
+        expect(events.map((row) => row.eventType)).toEqual(['tool_call']);
+      } finally {
+        db.close();
+      }
     } finally {
       await transport.close();
       rmSync(dbDir, { recursive: true, force: true });

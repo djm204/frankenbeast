@@ -2,13 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { createObserverServer } from './observer.js';
 
 describe('Observer Server', () => {
-  it('exposes 4 tools', () => {
+  it('exposes 5 tools', () => {
     const server = createObserverServer({
       observer: {
         log: vi.fn(),
         logCost: vi.fn(),
         cost: vi.fn(),
         trail: vi.fn(),
+        verify: vi.fn(),
       },
     });
 
@@ -18,6 +19,7 @@ describe('Observer Server', () => {
       'fbeast_observer_log_cost',
       'fbeast_observer_cost',
       'fbeast_observer_trail',
+      'fbeast_observer_verify',
     ]);
   });
 
@@ -41,6 +43,7 @@ describe('Observer Server', () => {
           createdAt: '2026-04-10T00:00:00.000Z',
         },
       ]),
+      verify: vi.fn().mockResolvedValue({ ok: true, checked: 1 }),
     };
 
     const server = createObserverServer({ observer });
@@ -48,6 +51,7 @@ describe('Observer Server', () => {
     const logCostTool = server.tools.find((t) => t.name === 'fbeast_observer_log_cost')!;
     const costTool = server.tools.find((t) => t.name === 'fbeast_observer_cost')!;
     const trailTool = server.tools.find((t) => t.name === 'fbeast_observer_trail')!;
+    const verifyTool = server.tools.find((t) => t.name === 'fbeast_observer_verify')!;
 
     const logResult = await logTool.handler({
       event: 'file_edit',
@@ -77,5 +81,9 @@ describe('Observer Server', () => {
     const trailResult = await trailTool.handler({ sessionId: 'sess-1' });
     expect(observer.trail).toHaveBeenCalledWith('sess-1');
     expect(trailResult.content[0]!.text).toContain('file_edit');
+
+    const verifyResult = await verifyTool.handler({ sessionId: 'sess-1' });
+    expect(observer.verify).toHaveBeenCalledWith('sess-1');
+    expect(verifyResult.content[0]!.text).toContain('verified');
   });
 });

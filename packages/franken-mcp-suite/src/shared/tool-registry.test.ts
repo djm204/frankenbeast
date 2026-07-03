@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { TOOL_STUBS, TOOL_REGISTRY, searchTools } from './tool-registry.js';
 
-const EXPECTED_COUNT = 20;
+const EXPECTED_COUNT = 21;
 
 describe('TOOL_STUBS', () => {
-  it('contains exactly 20 tools', () => {
+  it('contains exactly 21 tools', () => {
     expect(TOOL_STUBS).toHaveLength(EXPECTED_COUNT);
   });
 
@@ -17,7 +17,7 @@ describe('TOOL_STUBS', () => {
 });
 
 describe('TOOL_REGISTRY', () => {
-  it('contains exactly 20 tools', () => {
+  it('contains exactly 21 tools', () => {
     expect(TOOL_REGISTRY.size).toBe(EXPECTED_COUNT);
   });
 
@@ -34,7 +34,7 @@ describe('TOOL_REGISTRY', () => {
     }
   });
 
-  it('TOOL_STUBS and TOOL_REGISTRY contain the same 20 tool names', () => {
+  it('TOOL_STUBS and TOOL_REGISTRY contain the same 21 tool names', () => {
     const stubNames = new Set(TOOL_STUBS.map((s) => s.name));
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
@@ -43,7 +43,7 @@ describe('TOOL_REGISTRY', () => {
 });
 
 describe('searchTools', () => {
-  it('returns all 20 tools when called with no query', () => {
+  it('returns all 21 tools when called with no query', () => {
     expect(searchTools()).toHaveLength(EXPECTED_COUNT);
     expect(searchTools(undefined)).toHaveLength(EXPECTED_COUNT);
   });

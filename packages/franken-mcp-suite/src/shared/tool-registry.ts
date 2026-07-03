@@ -385,6 +385,26 @@ const TOOLS: ToolFull[] = [
       return { content: [{ type: 'text', text: `## Audit Trail (${rows.length} events)\n\n${text}` }] };
     },
   },
+  {
+    name: 'fbeast_observer_verify',
+    server: 'observer',
+    description: 'Verify the full audit hash chain for a session',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session identifier' },
+      },
+      required: ['sessionId'],
+    },
+    makeHandler: ({ observer }) => async (args) => {
+      const sessionId = String(args['sessionId']);
+      const result = await observer.verify(sessionId);
+      if (result.ok) {
+        return { content: [{ type: 'text', text: `Audit chain verified for session ${sessionId}: ${result.checked} events checked.` }] };
+      }
+      return { content: [{ type: 'text', text: `Audit chain verification failed for session ${sessionId} at index ${result.firstInvalid?.index ?? 'unknown'}.` }], isError: true };
+    },
+  },
 
   // --- governor ---
   {
