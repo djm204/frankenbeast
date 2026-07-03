@@ -166,7 +166,7 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
-        await this.handleMessageSend(peer, session, event.clientMessageId, event.content);
+        await this.handleMessageSend(peer, session, event.clientMessageId, event.content, event.executionMode);
         return;
       case 'approval.respond':
         await this.handleApproval(peer, session, event.approved);
@@ -189,6 +189,7 @@ export class ChatSocketController {
     session: ChatSession,
     clientMessageId: string,
     content: string,
+    executionMode?: 'process' | 'container',
   ): Promise<void> {
     this.emit(peer, {
       type: 'message.accepted',
@@ -213,6 +214,7 @@ export class ChatSocketController {
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      ...(executionMode ? { executionMode } : {}),
     });
 
     session.transcript = result.transcript;

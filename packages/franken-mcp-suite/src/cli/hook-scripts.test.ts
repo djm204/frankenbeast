@@ -41,7 +41,9 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "pre-tool" ]; then',
-    '  TOOL_NAME="${3:-}"',
+    '  # Context arrives via env; the tool name is the positional after "--".',
+    '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  TOOL_NAME="${4:-}"',
     '  if [ "$TOOL_NAME" = "hang" ]; then',
     '    sleep 10',
     '    exit 0',
@@ -50,6 +52,12 @@ function installFakeHook(root: string): string {
     "    printf 'destructive action blocked\\n' >&2",
     '    exit 1',
     '  fi',
+    '  case "$CONTEXT" in',
+    '    *"rm -rf"*)',
+    "      printf 'destructive payload blocked\\n' >&2",
+    '      exit 1',
+    '      ;;',
+    '  esac',
     '',
     `  printf '{"allowed":true,"decision":"approved"}\\n'`,
     '  exit 0',
@@ -174,6 +182,155 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('destructive action blocked');
   });
 
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { command: 'rm -rf /important-dir' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not forward apply_patch patch bodies carried in tool_input.command', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    // Codex apply_patch puts the whole patch in tool_input.command; forwarding it
+    // would both false-positive on diff text and persist secrets in governor_log.
+    const result = runScript(preTool, {
+      tool_name: 'apply_patch',
+      tool_input: { command: '*** Begin Patch\n+ rm -rf / and SECRET_TOKEN=abc\n*** End Patch' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not let a leading-dash command be parsed as a hook flag', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { command: '--db=/tmp/x; rm -rf /tmp/y' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('denies a long command whose dangerous suffix is past 4096 chars (no truncation)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { command: `echo ${'A'.repeat(8000)}; rm -rf /tmp/y` },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('normalizes argv arrays so destructive tokens are matched', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { args: ['rm', '-rf', '/tmp/x'] },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('allows benign file paths that contain destructive substrings', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'src/dropdown.tsx' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails closed (denies) when the pre-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+  });
+
   it('keeps allowed pre-tool hooks silent for Codex', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -246,7 +403,7 @@ describe('Codex hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when pre-tool governance times out', () => {
+  it('fails closed (denies) when pre-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -262,8 +419,8 @@ describe('Codex hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
@@ -445,6 +602,137 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toContain('destructive action blocked');
   });
 
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf /important-dir' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive payload blocked');
+  });
+
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not let a leading-dash command be parsed as a hook flag', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Bash',
+      tool_input: { command: '--db=/tmp/x; rm -rf /tmp/y' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive payload blocked');
+  });
+
+  it('denies a long command whose dangerous suffix is past 4096 chars (no truncation)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Bash',
+      tool_input: { command: `echo ${'A'.repeat(8000)}; rm -rf /tmp/y` },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive payload blocked');
+  });
+
+  it('normalizes argv arrays so destructive tokens are matched', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Bash',
+      tool_input: { args: ['rm', '-rf', '/tmp/x'] },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+    expect(result.stderr).toContain('destructive payload blocked');
+  });
+
+  it('allows benign file paths that contain destructive substrings', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'src/dropdown.tsx' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails closed (denies) when the pre-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'claude');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
+  });
+
   it('keeps allowed pre-tool hooks silent for Claude Code', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -481,7 +769,7 @@ describe('Claude Code hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when pre-tool governance times out', () => {
+  it('fails closed (denies) when pre-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -497,8 +785,8 @@ describe('Claude Code hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('fbeast governor blocked');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {
@@ -658,7 +946,130 @@ describe('Gemini hook scripts', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('fails open when before-tool governance times out', () => {
+  it('passes the tool payload through so a benign tool name with destructive input is denied', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'run_shell_command',
+      tool_input: { command: 'rm -rf /important-dir' },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'write_file',
+      tool_input: { file_path: 'docs/safe.md', content: 'rm -rf / and SECRET_TOKEN=abc' },
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows large benign payloads without overflowing argv (ARG_MAX)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'write_file',
+      tool_input: { file_path: 'big.txt', content: 'x'.repeat(300_000) },
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('does not let a leading-dash command be parsed as a hook flag', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'run_shell_command',
+      tool_input: { command: '--db=/tmp/x; rm -rf /tmp/y' },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('denies a long command whose dangerous suffix is past 4096 chars (no truncation)', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'run_shell_command',
+      tool_input: { command: `echo ${'A'.repeat(8000)}; rm -rf /tmp/y` },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('normalizes argv arrays so destructive tokens are matched', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'run_shell_command',
+      tool_input: { args: ['rm', '-rf', '/tmp/x'] },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('allows benign file paths that contain destructive substrings', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_name: 'write_file',
+      tool_input: { file_path: 'src/dropdown.tsx' },
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails closed (denies) when the before-tool tool name is empty', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'gemini');
+
+    const result = runScript(preTool, {
+      tool_input: { command: 'ls' },
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
+  });
+
+  it('fails closed (denies) when before-tool governance times out', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
     const binDir = installFakeHook(root);
@@ -673,8 +1084,8 @@ describe('Gemini hook scripts', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"decision":"deny"');
   });
 
   it('runs fbeast-hook directly when timeout is unavailable and allows governed calls', () => {

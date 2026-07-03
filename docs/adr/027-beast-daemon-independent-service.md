@@ -1,8 +1,23 @@
 # ADR-027: Beast Daemon as Independent Service
 
 - **Date:** 2026-03-16
-- **Status:** Accepted
+- **Status:** Accepted (deferred; follow-up implementation tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
 - **Deciders:** pfk
+
+## 2026-07-01 Deploy-Beasts Decision
+
+ADR-027 remains accepted as the target architecture for an independently
+deployable beast control plane, but it is **deferred until after the current
+deploy-beasts MVP**. The sprint MVP routes dashboard beast deployment through
+the existing `chat-server` so the container-deploy work can land without adding
+a new process boundary.
+
+Follow-on implementation is tracked in
+[#463](https://github.com/djm204/frankenbeast/issues/463). Until that issue is
+implemented, `chat-server` continues to host the beast control APIs used by the
+dashboard, while CLI/direct service paths remain unchanged. ADR-027 should be
+revisited when the daemon becomes active so `docs/RAMP_UP.md` and operator guides
+can be updated to describe the new default route.
 
 ## Context
 

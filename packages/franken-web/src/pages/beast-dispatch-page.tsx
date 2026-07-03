@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   BeastCatalogEntry,
+  BeastExecutionMode,
   BeastInterviewPrompt,
   BeastRunDetail,
   ModuleConfig,
@@ -14,7 +15,7 @@ interface BeastDispatchPageProps {
   disabled: boolean;
   error: string | null;
   onDelete(agentId: string): void;
-  onDispatch(definitionId: string, config: Record<string, unknown>, moduleConfig?: ModuleConfig): void;
+  onDispatch(definitionId: string, config: Record<string, unknown>, moduleConfig?: ModuleConfig, executionMode?: BeastExecutionMode): void;
   onKill(runId: string): void;
   onRestart(agentId: string): void;
   onResume(agentId: string): void;
@@ -29,6 +30,7 @@ interface BeastDispatchPageProps {
 
 type FormState = Record<string, Record<string, string>>;
 type ModuleTogglesState = Record<string, ModuleConfig>;
+type ExecutionModeState = Record<string, BeastExecutionMode>;
 type FormErrors = Record<string, Record<string, string>>;
 
 function buildInitialFormState(catalog: BeastCatalogEntry[]): FormState {
@@ -97,6 +99,7 @@ function canRestartAgent(agent: TrackedAgentSummary): boolean {
 export function BeastDispatchPage(props: BeastDispatchPageProps) {
   const [forms, setForms] = useState<FormState>(() => buildInitialFormState(props.catalog));
   const [moduleToggles, setModuleToggles] = useState<ModuleTogglesState>({});
+  const [executionModes, setExecutionModes] = useState<ExecutionModeState>({});
   const [errors, setErrors] = useState<FormErrors>({});
   const pickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -159,7 +162,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
     }
     const toggles = moduleToggles[definition.id];
     const hasDisabled = toggles && Object.values(toggles).some((v) => v === false);
-    props.onDispatch(definition.id, values, hasDisabled ? toggles : undefined);
+    props.onDispatch(definition.id, values, hasDisabled ? toggles : undefined, executionModes[definition.id] ?? definition.executionModeDefault ?? 'process');
   }
 
   return (
@@ -190,6 +193,37 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                 <span className="sidebar__status">{definition.executionModeDefault}</span>
               </div>
               <p className="beast-card__description">{definition.description}</p>
+              <fieldset className="beast-card__modules">
+                <legend>Execution mode</legend>
+                <label className="beast-module-toggle">
+                  <input
+                    aria-label={`${definition.label} process execution mode`}
+                    checked={(executionModes[definition.id] ?? definition.executionModeDefault) === 'process'}
+                    disabled={props.disabled}
+                    name={`${definition.id}-execution-mode`}
+                    onChange={() => setExecutionModes((current) => ({ ...current, [definition.id]: 'process' }))}
+                    type="radio"
+                  />
+                  <span>process</span>
+                </label>
+                <label className="beast-module-toggle" title={definition.containerRuntime?.available === false ? definition.containerRuntime.reason ?? 'Container runtime unavailable.' : undefined}>
+                  <input
+                    aria-describedby={definition.containerRuntime?.available === false ? `${definition.id}-container-disabled` : undefined}
+                    aria-label={`${definition.label} container execution mode`}
+                    checked={(executionModes[definition.id] ?? definition.executionModeDefault) === 'container'}
+                    disabled={props.disabled || definition.containerRuntime?.available === false}
+                    name={`${definition.id}-execution-mode`}
+                    onChange={() => setExecutionModes((current) => ({ ...current, [definition.id]: 'container' }))}
+                    type="radio"
+                  />
+                  <span>container</span>
+                </label>
+                {definition.containerRuntime?.available === false && (
+                  <small id={`${definition.id}-container-disabled`} className="field-error">
+                    Container unavailable: {definition.containerRuntime.reason ?? 'Container runtime unavailable.'}
+                  </small>
+                )}
+              </fieldset>
               <div className="beast-card__form">
                 {definition.interviewPrompts.map((prompt) => {
                   const inputId = buildPromptId(definition, prompt);

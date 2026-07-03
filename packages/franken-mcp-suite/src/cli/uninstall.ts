@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
+import { codexProjectIds, codexServerNamesForProjectIds } from './codex-server-names.js';
+import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
   root: string;
@@ -13,7 +15,7 @@ export interface UninstallOptions {
   purge?: boolean | undefined;
   ask?: (question: string) => Promise<string>;
   /** Injectable spawn for testing the codex path. */
-  spawn?: (cmd: string, args: string[]) => { status: number | null };
+  spawn?: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string };
 }
 
 export async function runUninstall(options: UninstallOptions): Promise<void> {
@@ -103,9 +105,8 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
 
-const ALL_SERVER_NAMES = [
-  'fbeast-memory', 'fbeast-planner', 'fbeast-critique', 'fbeast-firewall',
-  'fbeast-observer', 'fbeast-governor', 'fbeast-skills', 'fbeast-proxy',
+const ALL_SERVERS: FbeastServer[] = [
+  'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
 ];
 
 const AGENTS_MD_START = '<!-- fbeast-start -->';
@@ -113,12 +114,23 @@ const AGENTS_MD_END = '<!-- fbeast-end -->';
 
 function uninstallCodex(options: {
   root: string;
-  spawnFn: (cmd: string, args: string[]) => { status: number | null };
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string };
 }): void {
   const { root, spawnFn } = options;
 
-  // Remove MCP servers via codex mcp remove
-  for (const name of ALL_SERVER_NAMES) {
+  const projectIds = codexProjectIds(root);
+  const namesToRemove = new Set([
+    ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'standard'),
+    ...codexServerNamesForProjectIds(projectIds, ALL_SERVERS, 'proxy'),
+    ...codexServerNamesFromLocalConfig(root),
+    ...codexServerNamesFromRegisteredDbPaths(root, spawnFn),
+  ]);
+
+  // Remove only this project's MCP servers. Namespaced entries are scoped by a
+  // persisted project id. Pre-persistence entries are removed only when local
+  // config or `codex mcp list --json` ties a fbeast registration to this root's
+  // database (including a moved repo's old database path from .codex/config.toml).
+  for (const name of namesToRemove) {
     spawnFn('codex', ['mcp', 'remove', name]);
   }
 
@@ -159,7 +171,114 @@ function uninstallCodex(options: {
     } catch { /* ignore parse errors */ }
   }
 
+  removeCodexProjectConfigEntries(root);
+
   removeGeneratedHookScripts(root, 'codex');
+}
+
+function codexServerNamesFromLocalConfig(root: string): string[] {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return [];
+
+  const toml = readFileSync(configPath, 'utf-8');
+  return toml.split(/\r?\n/).flatMap((line) => {
+    const header = line.match(/^\s*\[mcp_servers\.(?:"([^"]+)"|([^\]]+))]\s*$/);
+    const name = header?.[1] ?? header?.[2];
+    return typeof name === 'string' && name.startsWith('fbeast-') ? [name] : [];
+  });
+}
+
+function codexDbPathsFromLocalConfig(root: string): string[] {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return [];
+
+  const paths = new Set<string>();
+  const toml = readFileSync(configPath, 'utf-8');
+  for (const line of toml.split(/\r?\n/)) {
+    const args = line.match(/^\s*args\s*=\s*\[(.*)]\s*$/)?.[1];
+    if (!args) continue;
+    const strings = [...args.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => match[1]?.replace(/\\"/g, '"') ?? '');
+    for (let index = 0; index < strings.length - 1; index += 1) {
+      const dbPath = strings[index + 1];
+      if (strings[index] === '--db' && dbPath) paths.add(resolve(dbPath));
+    }
+  }
+  return [...paths];
+}
+
+function removeCodexProjectConfigEntries(root: string): void {
+  const configPath = join(root, '.codex', 'config.toml');
+  if (!existsSync(configPath)) return;
+
+  const existing = readFileSync(configPath, 'utf-8');
+  const cleaned = removeFbeastMcpServerTables(existing).trimEnd();
+  if (cleaned.length === 0) {
+    unlinkSync(configPath);
+  } else {
+    writeFileSync(configPath, `${cleaned}\n`);
+  }
+}
+
+function removeFbeastMcpServerTables(toml: string): string {
+  const lines = toml.split(/\r?\n/);
+  const kept: string[] = [];
+  let dropping = false;
+
+  for (const line of lines) {
+    const header = line.match(/^\s*\[\[?([^\]]+)]\]?\s*$/);
+    if (header?.[1]) {
+      dropping = isFbeastMcpServerSection(header[1]);
+    }
+    if (!dropping) kept.push(line);
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function isFbeastMcpServerSection(section: string): boolean {
+  return /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)(?:\.|$)/.test(section);
+}
+
+function codexServerNamesFromRegisteredDbPaths(
+  root: string,
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stdout?: Buffer | string; stderr?: Buffer | string },
+): string[] {
+  const result = spawnFn('codex', ['mcp', 'list', '--json']);
+  if (result.status !== 0 || result.stdout === undefined) return [];
+
+  let entries: unknown;
+  try {
+    entries = JSON.parse(result.stdout.toString());
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(entries)) return [];
+
+  const dbPaths = new Set([
+    resolve(root, '.fbeast', 'beast.db'),
+    ...codexDbPathsFromLocalConfig(root),
+  ]);
+  return entries.flatMap((entry) => {
+    if (!isObjectRecord(entry)) return [];
+    const name = entry['name'];
+    if (typeof name !== 'string' || !name.startsWith('fbeast-')) return [];
+    return codexEntryTargetsAnyDbPath(entry, dbPaths) ? [name] : [];
+  });
+}
+
+function codexEntryTargetsAnyDbPath(entry: Record<string, unknown>, dbPaths: ReadonlySet<string>): boolean {
+  const candidates = [entry, isObjectRecord(entry['transport']) ? entry['transport'] : undefined]
+    .filter((value): value is Record<string, unknown> => value !== undefined);
+
+  return candidates.some((candidate) => {
+    const args = candidate['args'];
+    if (!Array.isArray(args)) return false;
+    return args.some((arg) => typeof arg === 'string' && dbPaths.has(resolve(arg)));
+  });
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function removeGeneratedHookScripts(root: string, client: 'claude' | 'gemini' | 'codex'): void {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.4](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.3...franken-governor-v0.5.4) (2026-07-01)
+
+
+### Bug Fixes
+
+* **governor:** bind approval response to active request ID ([#392](https://github.com/djm204/frankenbeast/issues/392)) ([05a493c](https://github.com/djm204/frankenbeast/commit/05a493cd133854914d431369c187c8a0e4b8f521))
+* **governor:** fail closed for signed approvals ([#433](https://github.com/djm204/frankenbeast/issues/433)) ([0ae1b31](https://github.com/djm204/frankenbeast/commit/0ae1b316871cab39796c648d55f1f4613f925cd2))
+* **governor:** verify approval signatures over raw body ([#441](https://github.com/djm204/frankenbeast/issues/441)) ([632a904](https://github.com/djm204/frankenbeast/commit/632a9046ff8b206ddb127789d54285db92296594))
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
 ## [0.5.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.2...franken-governor-v0.5.3) (2026-06-28)
 
 

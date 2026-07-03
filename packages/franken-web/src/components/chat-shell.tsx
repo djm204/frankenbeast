@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import brandMark from '../../../../assets/img/frankenbeast-github-logo-478x72.png';
 import { useChatSession } from '../hooks/use-chat-session';
 import { TranscriptPane } from './transcript-pane';
@@ -9,8 +9,10 @@ import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
 import {
   BeastApiClient,
+  type BeastContainerRuntimeStatus,
   type BeastCatalogEntry,
   type BeastRunDetail,
+  type BeastRunSummary,
   type TrackedAgentDetail,
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
@@ -60,6 +62,64 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
   );
 }
 
+function appendUniqueLogLine(logs: string[], nextLine: string): string[] {
+  const nextIdentity = parseLogIdentity(nextLine);
+  if (nextIdentity?.eventId && logs.some((line) => parseLogIdentity(line)?.eventId === nextIdentity.eventId)) {
+    return logs;
+  }
+  if (nextIdentity?.createdAt && logs.some((line) => {
+    const identity = parseLogIdentity(line);
+    return identity
+      && (!identity.eventId || !nextIdentity.eventId)
+      && identity.stream === nextIdentity.stream
+      && identity.message === nextIdentity.message
+      && identity.createdAt === nextIdentity.createdAt;
+  })) {
+    return logs;
+  }
+  return logs[logs.length - 1] === nextLine ? logs : [...logs, nextLine];
+}
+
+function parseLogIdentity(line: string): { eventId?: string; stream?: string; message?: string; createdAt?: string } | null {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const candidate = parsed as { eventId?: unknown; stream?: unknown; message?: unknown; createdAt?: unknown };
+    const identity = {
+      ...(typeof candidate.eventId === 'string' && candidate.eventId.length > 0 ? { eventId: candidate.eventId } : {}),
+      ...(typeof candidate.stream === 'string' ? { stream: candidate.stream } : {}),
+      ...(typeof candidate.message === 'string' ? { message: candidate.message } : {}),
+      ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
+    };
+    return identity.eventId || (identity.message && identity.createdAt) ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAgentEventRunId(payload: unknown): string | null {
+  return typeof payload === 'object'
+    && payload !== null
+    && 'runId' in payload
+    && typeof (payload as { runId?: unknown }).runId === 'string'
+    ? (payload as { runId: string }).runId
+    : null;
+}
+
+function formatStreamedLogLine(event: { eventId?: string; stream?: string; line: string; createdAt?: string }): string {
+  if (event.eventId || event.createdAt || event.stream) {
+    return JSON.stringify({
+      ...(event.eventId ? { eventId: event.eventId } : {}),
+      ...(event.stream ? { stream: event.stream } : {}),
+      message: event.line,
+      ...(event.createdAt ? { createdAt: event.createdAt } : {}),
+    });
+  }
+  return event.line;
+}
+
 function buildInitAction(
   definitionId: string,
   config: Record<string, unknown>,
@@ -98,8 +158,12 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
+  const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
+  const [beastContainerRuntime, setBeastContainerRuntime] = useState<BeastContainerRuntimeStatus | undefined>(undefined);
   const [selectedBeastAgentId, setSelectedBeastAgentId] = useState<string | null>(null);
   const [beastAgentDetail, setBeastAgentDetail] = useState<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
+  const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
+  const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
@@ -186,6 +250,14 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   }, [chatClient, projectId, activeSessionId, sessionSeed]);
 
   useEffect(() => {
+    beastAgentsRef.current = beastAgents;
+  }, [beastAgents]);
+
+  useEffect(() => {
+    beastAgentDetailRef.current = beastAgentDetail;
+  }, [beastAgentDetail]);
+
+  useEffect(() => {
     if (route !== 'beasts') {
       return;
     }
@@ -193,6 +265,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
       setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
       setBeastCatalog([]);
       setBeastAgents([]);
+      setBeastRuns([]);
+      setBeastContainerRuntime(undefined);
       setBeastAgentDetail(null);
       return;
     }
@@ -202,17 +276,24 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
 
     async function refreshBeasts() {
       try {
-        const [catalog, runs] = await Promise.all([
+        const [catalog, agents, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
           client.listAgents(),
+          client.listRuns(),
+          client.getContainerRuntimeStatus().catch((error) => ({
+            available: false,
+            reason: error instanceof Error ? error.message : 'Container runtime status unavailable.',
+          })),
         ]);
         if (cancelled) {
           return;
         }
         setBeastError(null);
         setBeastCatalog(catalog);
-        setBeastAgents(runs);
-        const currentAgentId = selectedBeastAgentId ?? runs[0]?.id ?? null;
+        setBeastAgents(agents);
+        setBeastRuns(runs);
+        setBeastContainerRuntime(containerRuntime);
+        const currentAgentId = selectedBeastAgentId ?? agents[0]?.id ?? null;
         setSelectedBeastAgentId(currentAgentId);
 
         if (currentAgentId) {
@@ -241,15 +322,172 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     }
 
     void refreshBeasts();
-    const interval = window.setInterval(() => {
-      void refreshBeasts();
-    }, 4000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
+
+  useEffect(() => {
+    if (route !== 'beasts' || !beastClient) {
+      return;
+    }
+
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    const requestBeastRefresh = () => setBeastRefreshNonce((current) => current + 1);
+
+    void beastClient.subscribeToEvents({
+      snapshot: (snapshot) => {
+        if (cancelled || !snapshot.agents) return;
+        const currentAgents = beastAgentsRef.current;
+        const currentDetail = beastAgentDetailRef.current;
+        const sawUnknownAgent = snapshot.agents.some((candidate) => !currentAgents.some((agent) => agent.id === candidate.id));
+        const selectedSnapshotAgent = currentDetail
+          ? snapshot.agents.find((candidate) => candidate.id === currentDetail.agent.id)
+          : undefined;
+        const selectedAgentLinkedRun = Boolean(currentDetail && !currentDetail.run && selectedSnapshotAgent?.dispatchRunId);
+        setBeastAgents((current) => {
+          return current.map((agent) => {
+            const next = snapshot.agents?.find((candidate) => candidate.id === agent.id);
+            return next ? { ...agent, ...next } : agent;
+          });
+        });
+        setBeastAgentDetail((current) => {
+          if (!current) return current;
+          const next = snapshot.agents?.find((candidate) => candidate.id === current.agent.id);
+          return next ? { ...current, agent: { ...current.agent, ...next } } : current;
+        });
+        if (sawUnknownAgent || selectedAgentLinkedRun) requestBeastRefresh();
+      },
+      agentStatus: (event) => {
+        if (cancelled) return;
+        const sawKnownAgent = beastAgentsRef.current.some((agent) => agent.id === event.agentId);
+        setBeastAgents((current) => current.map((agent) => {
+          if (agent.id !== event.agentId) return agent;
+          return { ...agent, status: event.status, ...(event.updatedAt ? { updatedAt: event.updatedAt } : {}) };
+        }));
+        setBeastAgentDetail((current) => (current?.agent.id === event.agentId
+          ? {
+              ...current,
+              agent: {
+                ...current.agent,
+                status: event.status,
+                ...(event.updatedAt ? { updatedAt: event.updatedAt } : {}),
+              },
+            }
+          : current));
+        if (!sawKnownAgent) requestBeastRefresh();
+        setBeastError(null);
+      },
+      agentEvent: (event) => {
+        if (cancelled) return;
+        const currentDetail = beastAgentDetailRef.current;
+        const sawSelectedAgent = currentDetail?.agent.id === event.agentId;
+        const linkedRunId = getAgentEventRunId(event.event.payload);
+        const selectedAgentLinkedRun = Boolean(
+          sawSelectedAgent
+          && linkedRunId
+          && currentDetail
+          && currentDetail.agent.dispatchRunId !== linkedRunId
+          && currentDetail.run?.run.id !== linkedRunId,
+        );
+        if (selectedAgentLinkedRun && currentDetail && linkedRunId) {
+          beastAgentDetailRef.current = {
+            ...currentDetail,
+            agent: { ...currentDetail.agent, dispatchRunId: linkedRunId },
+          };
+        }
+        setBeastAgentDetail((current) => {
+          if (!current || current.agent.id !== event.agentId) return current;
+          const nextEvent = {
+            id: event.event.id ?? `stream-${event.agentId}-${event.event.createdAt ?? Date.now()}`,
+            agentId: event.agentId,
+            sequence: event.event.sequence ?? current.events.length + 1,
+            level: event.event.level ?? 'info',
+            type: event.event.type ?? 'agent.event',
+            message: event.event.message ?? '',
+            payload: event.event.payload ?? {},
+            createdAt: event.event.createdAt ?? new Date().toISOString(),
+          };
+          if (current.events.some((existing) => existing.id === nextEvent.id)) return current;
+          return {
+            ...current,
+            agent: linkedRunId ? { ...current.agent, dispatchRunId: linkedRunId } : current.agent,
+            events: [...current.events, nextEvent],
+          };
+        });
+        if (!sawSelectedAgent || selectedAgentLinkedRun) requestBeastRefresh();
+      },
+      runStatus: (event) => {
+        if (cancelled) return;
+        const currentDetail = beastAgentDetailRef.current;
+        const shouldRefreshRun = Boolean(
+          currentDetail
+          && (!currentDetail.run || currentDetail.run.run.id !== event.runId)
+          && currentDetail.agent.dispatchRunId === event.runId,
+        );
+        setBeastAgentDetail((current) => {
+          if (!current?.run || current.run.run.id !== event.runId) {
+            return current;
+          }
+          return {
+            ...current,
+            run: {
+              ...current.run,
+              run: {
+                ...current.run.run,
+                status: event.status,
+              },
+            },
+          };
+        });
+        if (shouldRefreshRun) requestBeastRefresh();
+      },
+      runLog: (event) => {
+        if (cancelled) return;
+        const currentDetail = beastAgentDetailRef.current;
+        const shouldRefreshRun = Boolean(
+          currentDetail
+          && (!currentDetail.run || currentDetail.run.run.id !== event.runId)
+          && currentDetail.agent.dispatchRunId === event.runId,
+        );
+        setBeastAgentDetail((current) => {
+          if (!current?.run || current.run.run.id !== event.runId) {
+            return current;
+          }
+          return {
+            ...current,
+            run: {
+              ...current.run,
+              logs: appendUniqueLogLine(current.run.logs, formatStreamedLogLine(event)),
+            },
+          };
+        });
+        if (shouldRefreshRun) requestBeastRefresh();
+      },
+      error: (error) => {
+        if (!cancelled) {
+          setBeastError(error.message);
+        }
+      },
+    }).then((unsub) => {
+      if (cancelled) {
+        unsub();
+      } else {
+        unsubscribe = unsub;
+      }
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setBeastError(error instanceof Error ? error.message : 'Unable to subscribe to Beast events.');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [route, beastClient]);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -452,6 +690,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             agents={beastAgents}
             agentDetail={beastAgentDetail}
             catalog={beastCatalog}
+            runs={beastRuns}
+            containerRuntime={beastContainerRuntime}
             disabled={!beastClient}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
@@ -464,8 +704,9 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
+              const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              await beastClient.createAgent({ definitionId, initAction, initConfig: config });
+              await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
               setBeastRefreshNonce((current) => current + 1);
             }}
             onDelete={(agentId) => {

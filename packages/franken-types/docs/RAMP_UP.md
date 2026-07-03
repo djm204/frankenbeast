@@ -1,6 +1,6 @@
 # @franken/types Ramp-Up
 
-**Status**: **INTEGRATED (Foundation)** — This is the shared base package for the entire Frankenbeast monorepo. It contains zero-dependency type definitions and branded ID factories used by every other module.
+**Status**: **INTEGRATED (Foundation)** — This is the shared base package for the Frankenbeast monorepo. It contains shared TypeScript definitions, branded ID factories, and runtime Zod schemas used by other modules.
 
 ## Module Overview
 The package ensures architectural consistency across the monorepo by enforcing a shared language for IDs (Project, Session, Task), Result monads, and core pipeline objects like `TokenSpend`.
@@ -38,5 +38,5 @@ npm run test        # vitest run
 ```
 
 ## Dependencies
-- **Runtime**: None.
+- **Runtime**: `zod` (used for runtime schemas/validation exports).
 - **Dev**: `typescript`, `vitest`.

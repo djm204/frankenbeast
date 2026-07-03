@@ -193,8 +193,14 @@ const calc = new CostCalculator(DEFAULT_PRICING)
 calc.calculate({ model: 'claude-sonnet-4-6', promptTokens: 1_000_000, completionTokens: 500_000 })
 // → 10.5  (1M × $3 + 0.5M × $15)
 
-// Sum across all models from a TokenCounter snapshot
-calc.totalCost(counter.grandTotal())
+// Sum across all models from a TokenCounter snapshot.
+// totalCost expects per-model TokenRecord entries, not grandTotal().
+const records = counter.allModels().map((model) => ({
+  model,
+  promptTokens: counter.totalsFor(model).promptTokens,
+  completionTokens: counter.totalsFor(model).completionTokens,
+}))
+calc.totalCost(records)
 
 // Extend the pricing table
 const myPricing = { ...DEFAULT_PRICING, 'my-local-model': { promptPerMillion: 0, completionPerMillion: 0 } }

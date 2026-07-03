@@ -45,6 +45,22 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/approval/respond', () => {
+    function governorSignature(rawBody: string, secret: string): string {
+      return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
+    }
+
+    async function seedResponseApproval(app: ReturnType<typeof createGovernorApp>, requestId: string) {
+      await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          taskId: 'task-1',
+          summary: 'Deploy',
+        }),
+      });
+    }
+
     it('resolves a pending approval', async () => {
       const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
 
@@ -137,13 +153,12 @@ describe('Governor Hono Server', () => {
 
       // Respond with valid signature
       const payload = JSON.stringify({ requestId: 'req-2', decision: 'APPROVE' });
-      const signature = createHmac('sha256', secret).update(payload).digest('hex');
 
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-governor-signature': `sha256=${signature}`,
+          'x-governor-signature': governorSignature(payload, secret),
         },
         body: payload,
       });
@@ -151,7 +166,70 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(200);
     });
 
-    it('rejects invalid signature', async () => {
+    it('verifies approval HMAC over raw body bytes including whitespace', async () => {
+      const secret = 'test-secret';
+      const app = createGovernorApp({ signingSecret: secret });
+      await seedResponseApproval(app, 'req-raw-spacing');
+
+      const payload = '{\n  "requestId" : "req-raw-spacing",\n  "decision" : "APPROVE"\n}';
+
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-governor-signature': governorSignature(payload, secret),
+        },
+        body: payload,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('resolved');
+    });
+
+    it('requires signatures to match the exact raw body instead of parsed key ordering', async () => {
+      const secret = 'test-secret';
+      const app = createGovernorApp({ signingSecret: secret });
+      await seedResponseApproval(app, 'req-key-order');
+
+      const payload = '{"decision":"APPROVE","requestId":"req-key-order"}';
+      const canonicalButDifferentOrder = JSON.stringify({ requestId: 'req-key-order', decision: 'APPROVE' });
+
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-governor-signature': governorSignature(canonicalButDifferentOrder, secret),
+        },
+        body: payload,
+      });
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.message).toBe('Invalid signature');
+    });
+
+    it('accepts normalized sha256 hex signatures through the timing-safe compare path', async () => {
+      const secret = 'test-secret';
+      const app = createGovernorApp({ signingSecret: secret });
+      await seedResponseApproval(app, 'req-upper-hex');
+
+      const payload = JSON.stringify({ requestId: 'req-upper-hex', decision: 'APPROVE' });
+      const signature = governorSignature(payload, secret).toUpperCase();
+
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-governor-signature': signature,
+        },
+        body: payload,
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects invalid signature using timing-safe hex comparison', async () => {
       const app = createGovernorApp({ signingSecret: 'secret' });
 
       await app.request('/v1/approval/request', {
@@ -168,12 +246,30 @@ describe('Governor Hono Server', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-governor-signature': 'sha256=invalid',
+          'x-governor-signature': `sha256=${'0'.repeat(64)}`,
         },
         body: JSON.stringify({ requestId: 'req-3', decision: 'APPROVE' }),
       });
 
       expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.message).toBe('Invalid signature');
+    });
+
+    it('returns a clear 401 for a malformed signature', async () => {
+      const app = createGovernorApp({ signingSecret: 'secret' });
+      const res = await app.request('/v1/approval/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-governor-signature': 'sha256=not-hex',
+        },
+        body: JSON.stringify({ requestId: 'req-malformed', decision: 'APPROVE' }),
+      });
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.message).toBe('Malformed signature');
     });
 
     it('rejects unsigned approval responses when no signing secret is configured', async () => {
@@ -195,6 +291,8 @@ describe('Governor Hono Server', () => {
       });
 
       expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error.message).toBe('Missing signature');
     });
   });
 

@@ -11,6 +11,7 @@ import { StepPrompts } from './steps/step-prompts';
 import { StepGit } from './steps/step-git';
 import { StepReview } from './steps/step-review';
 import { buildWizardLaunchConfig } from './wizard-launch-config';
+import type { BeastContainerRuntimeStatus } from '../../lib/beast-api';
 
 const STEP_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git', 'Review'];
 
@@ -18,11 +19,12 @@ interface WizardDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => void;
+  containerRuntime?: BeastContainerRuntimeStatus;
   launching?: boolean;
   launchError?: string | null;
 }
 
-export function WizardDialog({ isOpen, onClose, onLaunch, launching, launchError }: WizardDialogProps) {
+export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, launching, launchError }: WizardDialogProps) {
   const { wizardStep, highestCompleted, wizardMode, nextStep, prevStep, setWizardStep, toggleWizardMode, stepValues } =
     useBeastStore();
 
@@ -44,7 +46,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, launching, launchError
   function renderStep() {
     switch (wizardStep) {
       case 0: return <StepIdentity />;
-      case 1: return <StepWorkflow />;
+      case 1: return <StepWorkflow containerRuntime={containerRuntime} />;
       case 2: return <StepLlmTargets />;
       case 3: return <StepModules />;
       case 4: return <StepSkills />;
@@ -106,7 +108,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, launching, launchError
             {wizardMode === 'wizard' ? renderStep() : (
               <div className="space-y-8 p-8">
                 <FormSection title="Identity"><StepIdentity /></FormSection>
-                <FormSection title="Workflow"><StepWorkflow /></FormSection>
+                <FormSection title="Workflow"><StepWorkflow containerRuntime={containerRuntime} /></FormSection>
                 <FormSection title="LLM Targets"><StepLlmTargets /></FormSection>
                 <FormSection title="Modules"><StepModules /></FormSection>
                 <FormSection title="Skills"><StepSkills /></FormSection>

@@ -2,7 +2,7 @@ import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
 import { ContainerBeastExecutor } from './execution/container-beast-executor.js';
-import { DEFAULT_SANDBOX_POLICY } from './execution/sandbox-policy.js';
+import { DEFAULT_SANDBOX_POLICY, nonRootUserForWorkspace } from './execution/sandbox-policy.js';
 import { ProcessBeastExecutor } from './execution/process-beast-executor.js';
 import { ProcessSupervisor } from './execution/process-supervisor.js';
 import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
@@ -27,6 +27,7 @@ export interface BeastServiceBundle {
   metrics: PrometheusBeastMetrics;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
+  dispose(): void;
 }
 
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
@@ -54,6 +55,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       policy: {
         ...DEFAULT_SANDBOX_POLICY,
         workspaceHostPath: projectRoot,
+        user: nonRootUserForWorkspace(projectRoot),
       },
     }),
   };
@@ -69,5 +71,9 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     metrics,
     eventBus,
     ticketStore,
+    dispose: () => {
+      ticketStore.destroy();
+      repository.close();
+    },
   };
 }

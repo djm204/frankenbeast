@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
@@ -8,7 +9,7 @@ export interface ObserverServerDeps {
   observer: ObserverAdapter;
 }
 
-export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer {
+export function createObserverServer(deps: ObserverServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const { observer } = deps;
 
   const tools: ToolDef[] = [
@@ -117,7 +118,7 @@ export function createObserverServer(deps: ObserverServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-observer', '0.1.0', tools);
+  return createMcpServer('fbeast-observer', '0.1.0', tools, options);
 }
 
 if (isMain(import.meta.url)) {
@@ -125,7 +126,7 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const observer = createObserverAdapter(values['db']!);
-  const server = createObserverServer({ observer });
+  const server = createObserverServer({ observer }, createCentralOptions(values['db']!));
   server.start().catch((err) => {
     console.error('fbeast-observer failed to start:', err);
     process.exit(1);

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { AgentList } from '../../../src/components/beasts/agent-list';
-import type { TrackedAgentSummary } from '../../../src/lib/beast-api';
+import type { BeastRunSummary, TrackedAgentSummary } from '../../../src/lib/beast-api';
 
 afterEach(cleanup);
 
@@ -22,18 +22,18 @@ const agents: TrackedAgentSummary[] = [
 
 describe('AgentList', () => {
   it('renders all agents', () => {
-    render(<AgentList agents={agents} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+    render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     expect(screen.getByText('agent-1')).toBeTruthy();
     expect(screen.getByText('agent-2')).toBeTruthy();
   });
 
   it('shows empty state when no agents', () => {
-    render(<AgentList agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+    render(<AgentList agents={[]} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     expect(screen.getByText(/no agents yet/i)).toBeTruthy();
   });
 
   it('filters agents by search text', () => {
-    render(<AgentList agents={agents} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+    render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     const search = screen.getByPlaceholderText(/search/i);
     fireEvent.change(search, { target: { value: 'agent-1' } });
     expect(screen.getByText('agent-1')).toBeTruthy();
@@ -41,7 +41,7 @@ describe('AgentList', () => {
   });
 
   it('filters agents by status', () => {
-    render(<AgentList agents={agents} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+    render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
     const statusSelect = screen.getByLabelText(/filter by status/i);
     fireEvent.change(statusSelect, { target: { value: 'running' } });
     expect(screen.getByText('agent-1')).toBeTruthy();
@@ -50,8 +50,29 @@ describe('AgentList', () => {
 
   it('has create agent button in empty state', () => {
     const onCreate = vi.fn();
-    render(<AgentList agents={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={onCreate} />);
+    render(<AgentList agents={[]} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={onCreate} />);
     fireEvent.click(screen.getByText(/create your first agent/i));
     expect(onCreate).toHaveBeenCalled();
+  });
+
+  it('shows execution mode from the agent dispatch run rather than an older run', () => {
+    const linkedAgent = { ...agents[0]!, dispatchRunId: 'run-new' };
+    const runs: BeastRunSummary[] = [
+      {
+        id: 'run-old', definitionId: 'design-interview', status: 'completed', dispatchedBy: 'api',
+        dispatchedByUser: 'pfk', trackedAgentId: 'agent-1', attemptCount: 1, executionMode: 'process',
+        createdAt: '2026-03-15T09:00:00Z',
+      },
+      {
+        id: 'run-new', definitionId: 'design-interview', status: 'running', dispatchedBy: 'api',
+        dispatchedByUser: 'pfk', trackedAgentId: 'agent-1', attemptCount: 1, executionMode: 'container',
+        createdAt: '2026-03-15T10:00:00Z',
+      },
+    ];
+
+    render(<AgentList agents={[linkedAgent]} runs={runs} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+
+    expect(screen.getByText('container mode')).toBeTruthy();
+    expect(screen.queryByText('process mode')).toBeNull();
   });
 });

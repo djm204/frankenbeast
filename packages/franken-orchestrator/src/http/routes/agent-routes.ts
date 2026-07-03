@@ -30,6 +30,7 @@ const CreateAgentBody = z.object({
   initConfig: z.record(z.string(), z.unknown()),
   chatSessionId: z.string().min(1).optional(),
   moduleConfig: ModuleConfigSchema.optional(),
+  executionMode: z.enum(['process', 'container']).optional(),
 }).strict();
 
 export interface AgentRoutesDeps {
@@ -110,6 +111,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
         trackedAgentId: agent.id,
         startNow: true,
+        ...(body.executionMode ? { executionMode: body.executionMode } : {}),
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
@@ -273,6 +275,46 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         message: `Restart requested with new linked run ${run.id}`,
         payload: {
           runId: run.id,
+        },
+      });
+      return c.json({ data: run });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
+  app.post('/v1/beasts/agents/:agentId/kill', async (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = deps.agents.getAgent(agentId);
+      if (!agent.dispatchRunId) {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_KILLABLE',
+          `Tracked agent '${agentId}' has no linked run to kill`,
+        );
+      }
+      if (agent.status !== 'running') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_KILLABLE',
+          `Tracked agent '${agentId}' is not running`,
+        );
+      }
+      const run = await deps.runs.kill(agent.dispatchRunId, 'operator');
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.kill.requested',
+        message: `Kill requested for linked run ${agent.dispatchRunId}`,
+        payload: {
+          runId: agent.dispatchRunId,
         },
       });
       return c.json({ data: run });

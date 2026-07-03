@@ -23,6 +23,49 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
+const GOVERNOR_SIGNATURE_PREFIX = 'sha256=';
+const SHA256_HEX_LENGTH = 64;
+
+type GovernorSignatureVerificationResult =
+  | { ok: true }
+  | { ok: false; reason: 'missing' | 'malformed' | 'invalid' };
+
+function normalizeGovernorSignature(signature: string): Buffer | null {
+  const trimmed = signature.trim();
+  if (!trimmed.toLowerCase().startsWith(GOVERNOR_SIGNATURE_PREFIX)) {
+    return null;
+  }
+
+  const hex = trimmed.slice(GOVERNOR_SIGNATURE_PREFIX.length);
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length !== SHA256_HEX_LENGTH) {
+    return null;
+  }
+
+  return Buffer.from(hex.toLowerCase(), 'hex');
+}
+
+function verifyGovernorSignature(
+  signature: string | undefined,
+  rawBody: Buffer,
+  signingSecret: string,
+): GovernorSignatureVerificationResult {
+  if (!signature) {
+    return { ok: false, reason: 'missing' };
+  }
+
+  const provided = normalizeGovernorSignature(signature);
+  if (!provided) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  const expected = createHmac('sha256', signingSecret).update(rawBody).digest();
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  return { ok: true };
+}
+
 /**
  * Map a raw Slack action_id into a domain decision (ResponseCode).
  * Returns `null` for unrecognized actions so the caller can reject the
@@ -89,7 +132,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
-    const body = await c.req.json();
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
+    let body: { requestId?: string; decision?: string };
+    try {
+      body = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf8')) : {};
+    } catch {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
 
     // Fail closed: unsigned approval responses are rejected unless a signing
     // secret is configured (then verified) or an explicit test flag is set.
@@ -98,17 +147,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         return c.json({ error: { message: 'Signing secret required for approval responses' } }, 401);
       }
     } else {
-      const signature = c.req.header('x-governor-signature');
-      if (!signature) {
+      const verification = verifyGovernorSignature(
+        c.req.header('x-governor-signature'),
+        rawBody,
+        options.signingSecret,
+      );
+      if (!verification.ok && verification.reason === 'missing') {
         return c.json({ error: { message: 'Missing signature' } }, 401);
       }
-
-      const rawBody = JSON.stringify(body);
-      const expected = createHmac('sha256', options.signingSecret)
-        .update(rawBody)
-        .digest('hex');
-
-      if (signature !== `sha256=${expected}`) {
+      if (!verification.ok && verification.reason === 'malformed') {
+        return c.json({ error: { message: 'Malformed signature' } }, 401);
+      }
+      if (!verification.ok) {
         return c.json({ error: { message: 'Invalid signature' } }, 401);
       }
     }

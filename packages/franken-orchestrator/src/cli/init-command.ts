@@ -33,6 +33,24 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     return;
   }
 
+  if (options.args.initNonInteractive) {
+    const verification = await verifyInit({
+      configFile: options.paths.configFile,
+      stateStore,
+    });
+    if (!verification.ok) {
+      throw new Error(
+        [
+          'Cannot run init non-interactively because required init configuration is missing or incomplete:',
+          ...verification.messages.map((message) => `- ${message}`),
+          'Run `frankenbeast init` interactively, or provide a complete config and init state before using `frankenbeast init --non-interactive`.',
+        ].join('\n'),
+      );
+    }
+    options.print(`Init config is already complete at ${options.paths.configFile}.`);
+    return;
+  }
+
   // Interactive and repair paths need the secret store
   const secureBackend = options.config.network.secureBackend ?? 'local-encrypted';
   let passphrase: string | undefined = process.env.FRANKENBEAST_PASSPHRASE;

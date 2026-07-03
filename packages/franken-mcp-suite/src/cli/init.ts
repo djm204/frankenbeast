@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
+import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -31,7 +32,7 @@ export interface InitOptions {
   client?: McpClient;
   mode?: 'standard' | 'proxy';
   /** Inject spawn for testing the codex path. */
-  spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
+  spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string; stdout?: Buffer | string };
 }
 
 export function runInit(options: InitOptions): void {
@@ -133,33 +134,15 @@ function initCodex(options: {
   servers: FbeastServer[];
   hooks: boolean;
   config: FbeastConfig;
-  spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string };
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string; stdout?: Buffer | string };
   mode: 'standard' | 'proxy';
 }): void {
   const { root, servers, hooks, config, spawnFn, mode } = options;
+  ensureCodexProjectId(root);
   const dbPath = join(root, '.fbeast', 'beast.db');
 
-  // Register MCP servers via codex mcp add
-  if (mode === 'proxy') {
-    const result = spawnFn('codex', ['mcp', 'add', 'fbeast-proxy', '--', 'fbeast-proxy', '--db', dbPath, '--root', root]);
-    if (result.status !== 0) {
-      throw new Error(`fbeast init: failed to register fbeast-proxy with codex: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
-    }
-  } else {
-    const failed: string[] = [];
-    for (const srv of servers) {
-      const name = `fbeast-${srv}`;
-      const result = spawnFn('codex', ['mcp', 'add', name, '--', SERVER_BIN_MAP[srv], '--db', dbPath]);
-      if (result.status !== 0) {
-        failed.push(name);
-        console.error(`  ✗ Failed to register ${name}: ${result.stderr?.toString().trim() ?? 'unknown error'}`);
-      }
-    }
-
-    if (failed.length > 0) {
-      throw new Error(`fbeast init: failed to register ${failed.length} server(s) with codex: ${failed.join(', ')}`);
-    }
-  }
+  migrateLegacyCodexServers(root, spawnFn);
+  writeCodexProjectConfig(root, servers, mode, dbPath);
 
   // Drop instructions into AGENTS.md
   writeAgentsMd(root);
@@ -176,8 +159,82 @@ function initCodex(options: {
   console.log(`  Config:   ${config.configPath}`);
   console.log(`  Database: ${config.dbPath}`);
   console.log(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
-  console.log(`  Servers:  ${mode === 'proxy' ? 'fbeast-proxy (proxy mode, registered via codex mcp add)' : `${servers.join(', ')} (registered via codex mcp add)`}`);
+  console.log(`  MCP config: ${join(root, '.codex', 'config.toml')}`);
+  console.log(`  Servers:  ${mode === 'proxy' ? `${codexServerName(root, 'proxy')} (proxy mode, project-scoped)` : `${servers.map((srv) => codexServerName(root, srv)).join(', ')} (project-scoped)`}`);
   if (hooks) console.log(`  Hooks:    enabled (codex hooks.json)`);
+}
+
+function migrateLegacyCodexServers(
+  root: string,
+  spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string; stdout?: Buffer | string },
+): void {
+  const dbPath = join(root, '.fbeast', 'beast.db');
+  const legacyNames = [...ALL_SERVERS.map((srv) => `fbeast-${srv}`), 'fbeast-proxy'];
+
+  for (const name of legacyNames) {
+    const getResult = spawnFn('codex', ['mcp', 'get', name]);
+    if (getResult.status !== 0) continue;
+
+    const output = `${getResult.stdout?.toString() ?? ''}\n${getResult.stderr?.toString() ?? ''}`;
+    if (!output.includes(dbPath)) continue;
+
+    const removeResult = spawnFn('codex', ['mcp', 'remove', name]);
+    if (removeResult.status !== 0) {
+      throw new Error(`fbeast init: failed to remove legacy Codex MCP server ${name}: ${removeResult.stderr?.toString().trim() ?? 'unknown error'}`);
+    }
+  }
+}
+
+function writeCodexProjectConfig(
+  root: string,
+  servers: readonly FbeastServer[],
+  mode: 'standard' | 'proxy',
+  dbPath: string,
+): void {
+  const codexDir = join(root, '.codex');
+  mkdirSync(codexDir, { recursive: true });
+  const configPath = join(codexDir, 'config.toml');
+  const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
+  const cleaned = removeFbeastMcpServerTables(existing).trimEnd();
+  const serverEntries = mode === 'proxy'
+    ? [{ name: codexServerName(root, 'proxy'), command: 'fbeast-proxy' }]
+    : servers.map((srv) => ({ name: codexServerName(root, srv), command: SERVER_BIN_MAP[srv] }));
+  const fbeastConfig = serverEntries.map(({ name, command }) => {
+    const args = mode === 'proxy'
+      ? ['--db', dbPath, '--root', root]
+      : ['--db', dbPath];
+    return [
+      `[mcp_servers.${name}]`,
+      `command = ${tomlString(command)}`,
+      `args = [${args.map(tomlString).join(', ')}]`,
+    ].join('\n');
+  }).join('\n\n');
+  const content = [cleaned, fbeastConfig].filter(Boolean).join('\n\n') + '\n';
+  writeFileSync(configPath, content);
+}
+
+function removeFbeastMcpServerTables(toml: string): string {
+  const lines = toml.split(/\r?\n/);
+  const kept: string[] = [];
+  let dropping = false;
+
+  for (const line of lines) {
+    const header = line.match(/^\s*\[\[?([^\]]+)]\]?\s*$/);
+    if (header?.[1]) {
+      dropping = isFbeastMcpServerSection(header[1]);
+    }
+    if (!dropping) kept.push(line);
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function isFbeastMcpServerSection(section: string): boolean {
+  return /^mcp_servers\.(?:"fbeast-[^"]+"|fbeast-[A-Za-z0-9_-]+)(?:\.|$)/.test(section);
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
 }
 
 // ─── Hook config builders ─────────────────────────────────────────────────────

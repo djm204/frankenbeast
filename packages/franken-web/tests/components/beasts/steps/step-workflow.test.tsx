@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { StepWorkflow } from '../../../../src/components/beasts/steps/step-workflow';
 import { useBeastStore } from '../../../../src/stores/beast-store';
 
@@ -41,6 +41,34 @@ describe('StepWorkflow', () => {
       workflowType: 'chunk-plan',
       docPath: 'docs/design.md',
       outputDir: 'tasks/chunks',
+    });
+  });
+
+  it('stores selected container execution mode when runtime is available', () => {
+    render(<StepWorkflow containerRuntime={{ available: true }} />);
+
+    fireEvent.click(screen.getByLabelText('Container execution mode'));
+
+    expect(useBeastStore.getState().stepValues[1]?.executionMode).toBe('container');
+  });
+
+  it('disables container execution mode with backend reason when unavailable', () => {
+    render(<StepWorkflow containerRuntime={{ available: false, reason: 'Docker daemon is offline' }} />);
+
+    const containerMode = screen.getByLabelText('Container execution mode') as HTMLInputElement;
+    expect(containerMode.disabled).toBe(true);
+    expect(screen.getByText(/Container mode unavailable: Docker daemon is offline/i)).toBeTruthy();
+  });
+
+  it('resets stale container execution mode when runtime becomes unavailable', async () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview', executionMode: 'container' });
+
+    render(<StepWorkflow containerRuntime={{ available: false, reason: 'Docker daemon is offline' }} />);
+
+    expect(screen.getByLabelText('Process execution mode')).toHaveProperty('checked', true);
+    expect(screen.getByLabelText('Container execution mode')).toHaveProperty('checked', false);
+    await waitFor(() => {
+      expect(useBeastStore.getState().stepValues[1]?.executionMode).toBe('process');
     });
   });
 });

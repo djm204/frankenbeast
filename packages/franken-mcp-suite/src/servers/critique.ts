@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { createMcpServer, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createCritiqueAdapter, type CritiqueAdapter } from '../adapters/critique-adapter.js';
 import { parseArgs } from 'node:util';
@@ -8,7 +9,7 @@ export interface CritiqueServerDeps {
   critique: CritiqueAdapter;
 }
 
-export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer {
+export function createCritiqueServer(deps: CritiqueServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
   const { critique } = deps;
   const tools: ToolDef[] = [
     {
@@ -80,7 +81,7 @@ export function createCritiqueServer(deps: CritiqueServerDeps): FbeastMcpServer 
     },
   ];
 
-  return createMcpServer('fbeast-critique', '0.1.0', tools);
+  return createMcpServer('fbeast-critique', '0.1.0', tools, options);
 }
 
 if (isMain(import.meta.url)) {
@@ -88,7 +89,7 @@ if (isMain(import.meta.url)) {
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
   const critique = createCritiqueAdapter();
-  const server = createCritiqueServer({ critique });
+  const server = createCritiqueServer({ critique }, createCentralOptions(values['db']!));
   server.start().catch((err) => {
     console.error('fbeast-critique failed to start:', err);
     process.exit(1);
