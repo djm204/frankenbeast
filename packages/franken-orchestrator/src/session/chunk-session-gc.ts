@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileChunkSessionStore } from './chunk-session-store.js';
-import { chunkSessionStorageKey } from './chunk-session.js';
 
 export interface ChunkSessionGcConfig {
   sessionRoot: string;
@@ -50,12 +49,19 @@ export class ChunkSessionGc {
     }
 
     let removed = 0;
-    const activeSessionKeys = new Set(
-      this.store.list().map((session) => `${session.planName}/${chunkSessionStorageKey(session.chunkId, session.taskId)}`),
-    );
+    // Uses listStorageKeys() rather than list() so a session whose primary
+    // file is corrupt-but-quarantined still counts as present — its snapshot
+    // history must survive until the session itself is recovered or
+    // deliberately deleted, not be wiped out just because the file couldn't
+    // be parsed on this GC pass.
+    const activeSessionKeys = new Set(this.store.listStorageKeys());
     for (const planName of readdirSync(this.config.snapshotRoot)) {
       const planDir = join(this.config.snapshotRoot, planName);
       if (!statSync(planDir).isDirectory()) continue;
+
+      if (this.store.hasQuarantinedLegacySession(planName)) {
+        continue;
+      }
 
       for (const sessionKey of readdirSync(planDir)) {
         const chunkDir = join(planDir, sessionKey);
