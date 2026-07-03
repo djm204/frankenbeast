@@ -266,6 +266,52 @@ describe('ObserverAdapter', () => {
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
   });
 
+  it('migrates an intact legacy tail before appending a new audit row', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const firstMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory', step: 1 });
+    const firstLegacyHash = legacy16AuditHash(firstMetadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', firstMetadata, firstLegacyHash, null);
+    db.close();
+
+    await observer.log({ event: 'tool_result', metadata: JSON.stringify({ tool: 'memory', ok: true }), sessionId });
+    const trail = await observer.trail(sessionId);
+
+    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(trail[0]!.hash).not.toBe(firstLegacyHash);
+    expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+  });
+
+  it('does not rewrite a valid legacy prefix when a later row is invalid', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const firstMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory', step: 1 });
+    const firstLegacyHash = legacy16AuditHash(firstMetadata);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', firstMetadata, firstLegacyHash, null);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_result', JSON.stringify({ tool: 'memory', tampered: true }), 'sha256:badbadbad', firstLegacyHash);
+    db.close();
+
+    const verification = await observer.verify(sessionId);
+    const trail = await observer.trail(sessionId);
+
+    expect(verification.ok).toBe(false);
+    expect(verification.firstInvalid?.index).toBe(1);
+    expect(trail[0]!.hash).toBe(firstLegacyHash);
+  });
+
   it('rejects legacy 16-character audit rows without session binding before migrating', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);

@@ -2,20 +2,26 @@
 import { auditMcpToolExecution, createMcpServer, validateToolArguments, type FbeastMcpServer, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
+import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
 
 export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
   const { dbPath } = deps;
   let cachedAdapters: AdapterSet | undefined;
+  let cachedObserver: ObserverAdapter | undefined;
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
       cachedAdapters = createAdapterSet(dbPath);
+      cachedObserver = cachedAdapters.observer;
     }
     return cachedAdapters;
   }
 
-  const getCachedObserver = () => cachedAdapters?.observer;
+  const getObserver = () => {
+    cachedObserver ??= createObserverAdapter(dbPath);
+    return cachedObserver;
+  };
 
   const tools: ToolDef[] = [
     {
@@ -49,7 +55,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
         const toolArgs = (args['args'] ?? {}) as Record<string, unknown>;
         const entry = TOOL_REGISTRY.get(toolName);
         if (!entry) {
-          await auditMcpToolExecution({ getObserver: getCachedObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
+          await auditMcpToolExecution({ getObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
             reason: 'unknown_tool',
             message: `Unknown tool: ${toolName}`,
             via: 'proxy.execute_tool',
@@ -61,7 +67,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
         }
         const validated = validateToolArguments(entry, toolArgs);
         if (!validated.ok) {
-          await auditMcpToolExecution({ getObserver: getCachedObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
+          await auditMcpToolExecution({ getObserver, serverName: 'fbeast-proxy-target' }, 'mcp_tool_validation_failure', toolName, toolArgs, {
             reason: 'invalid_arguments',
             message: validated.message,
             via: 'proxy.execute_tool',
@@ -93,7 +99,7 @@ export function createProxyServer(deps: { dbPath: string }): FbeastMcpServer {
     },
   ];
 
-  return createMcpServer('fbeast-proxy', '0.1.0', tools, { getObserver: getCachedObserver });
+  return createMcpServer('fbeast-proxy', '0.1.0', tools, { getObserver });
 }
 
 // CLI entry point

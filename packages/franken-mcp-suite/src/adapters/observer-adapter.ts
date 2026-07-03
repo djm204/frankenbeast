@@ -75,6 +75,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     async log(input) {
       const payload = parseMetadata(input.metadata);
       const metadata = canonicalMetadata(input.metadata);
+      const preflight = verifyAuditTrail(store, input.sessionId, true);
+      if (!preflight.ok) {
+        throw new Error(`Cannot append audit row to invalid trail at index ${preflight.firstInvalid?.index ?? 'unknown'}`);
+      }
       const lastRow = store.db.prepare(
         'SELECT hash FROM audit_trail WHERE session_id = ? ORDER BY id DESC LIMIT 1',
       ).get(input.sessionId) as { hash: string } | undefined;
@@ -176,79 +180,100 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     },
 
     async verify(sessionId) {
-      const rows = store.db.prepare(
-        'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
-      ).all(sessionId) as AuditTrailRow[];
-      let expectedParentHash: string | undefined;
-      let previousStoredHash: string | undefined;
-      let expectedLegacy16ParentHash: string | undefined;
-
-      for (const [index, row] of rows.entries()) {
-        const metadata = row.payload;
-        const payload = parseMetadata(metadata);
-        const auditEvent = createAuditEvent(row.eventType, payload, {
-          phase: 'mcp',
-          provider: 'fbeast-mcp',
-          input: metadata,
-        });
-        const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
-        const expectedHash = buildAuditHash(baseHash, expectedParentHash);
-        const expectedHashFromStoredParent = buildAuditHash(baseHash, previousStoredHash);
-        const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
-        const actualParentHash = row.parentHash ?? undefined;
-        const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
-        const matchesStoredParent = !matchesCurrent
-          && previousStoredHash !== expectedParentHash
-          && actualParentHash === previousStoredHash
-          && row.hash === expectedHashFromStoredParent;
-        const matchesLegacy16 = expectedLegacy16Hash !== undefined
-          && actualParentHash === expectedLegacy16ParentHash
-          && row.hash === expectedLegacy16Hash;
-
-        if (!matchesCurrent && !matchesStoredParent && !matchesLegacy16) {
-          return {
-            ok: false,
-            checked: index,
-            firstInvalid: {
-              index,
-              expectedHash,
-              actualHash: row.hash,
-              expectedParentHash,
-              actualParentHash,
-            },
-          };
-        }
-
-        if (!matchesCurrent && matchesLegacy16 && !legacy16RowIsBoundToTrail(row, sessionId)) {
-          return {
-            ok: false,
-            checked: index,
-            firstInvalid: {
-              index,
-              expectedHash,
-              actualHash: row.hash,
-              expectedParentHash,
-              actualParentHash,
-            },
-          };
-        }
-
-        if (!matchesCurrent) {
-          migrateAuditRow(store, row.id, expectedHash, expectedParentHash);
-        }
-
-        previousStoredHash = row.hash;
-        expectedParentHash = expectedHash;
-        expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
-      }
-
-      return { ok: true, checked: rows.length };
+      return verifyAuditTrail(store, sessionId, true);
     },
   };
 }
 
 interface AuditTrailRow extends ObserverTrailEntry {
   id: number;
+}
+
+interface PendingAuditMigration {
+  id: number;
+  hash: string;
+  parentHash: string | undefined;
+}
+
+function verifyAuditTrail(
+  store: ReturnType<typeof createSqliteStore>,
+  sessionId: string,
+  migrate: boolean,
+): ObserverVerifyResult {
+  const rows = store.db.prepare(
+    'SELECT id, event_type AS eventType, payload, hash, parent_hash AS parentHash, created_at AS createdAt FROM audit_trail WHERE session_id = ? ORDER BY id ASC',
+  ).all(sessionId) as AuditTrailRow[];
+  const pendingMigrations: PendingAuditMigration[] = [];
+  let expectedParentHash: string | undefined;
+  let previousStoredHash: string | undefined;
+  let expectedLegacy16ParentHash: string | undefined;
+
+  for (const [index, row] of rows.entries()) {
+    const metadata = row.payload;
+    const payload = parseMetadata(metadata);
+    const auditEvent = createAuditEvent(row.eventType, payload, {
+      phase: 'mcp',
+      provider: 'fbeast-mcp',
+      input: metadata,
+    });
+    const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
+    const expectedHash = buildAuditHash(baseHash, expectedParentHash);
+    const expectedHashFromStoredParent = buildAuditHash(baseHash, previousStoredHash);
+    const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
+    const actualParentHash = row.parentHash ?? undefined;
+    const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
+    const matchesStoredParent = !matchesCurrent
+      && previousStoredHash !== expectedParentHash
+      && actualParentHash === previousStoredHash
+      && row.hash === expectedHashFromStoredParent;
+    const matchesLegacy16 = expectedLegacy16Hash !== undefined
+      && actualParentHash === expectedLegacy16ParentHash
+      && row.hash === expectedLegacy16Hash;
+
+    if (!matchesCurrent && !matchesStoredParent && !matchesLegacy16) {
+      return invalidAuditResult(index, row, expectedHash, expectedParentHash, actualParentHash);
+    }
+
+    if (!matchesCurrent && matchesLegacy16 && !legacy16RowIsBoundToTrail(row, sessionId)) {
+      return invalidAuditResult(index, row, expectedHash, expectedParentHash, actualParentHash);
+    }
+
+    if (!matchesCurrent) {
+      pendingMigrations.push({ id: row.id, hash: expectedHash, parentHash: expectedParentHash });
+    }
+
+    previousStoredHash = row.hash;
+    expectedParentHash = expectedHash;
+    expectedLegacy16ParentHash = matchesLegacy16 ? row.hash : undefined;
+  }
+
+  if (migrate) {
+    for (const migration of pendingMigrations) {
+      migrateAuditRow(store, migration.id, migration.hash, migration.parentHash);
+    }
+  }
+
+  return { ok: true, checked: rows.length };
+}
+
+function invalidAuditResult(
+  index: number,
+  row: AuditTrailRow,
+  expectedHash: string,
+  expectedParentHash: string | undefined,
+  actualParentHash: string | undefined,
+): ObserverVerifyResult {
+  return {
+    ok: false,
+    checked: index,
+    firstInvalid: {
+      index,
+      expectedHash,
+      actualHash: row.hash,
+      expectedParentHash,
+      actualParentHash,
+    },
+  };
 }
 
 function buildAuditHash(baseHash: string, parentHash?: string): string {
