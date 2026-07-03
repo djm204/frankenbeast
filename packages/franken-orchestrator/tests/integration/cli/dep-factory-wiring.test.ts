@@ -268,6 +268,17 @@ describe('dep-factory wiring integration', () => {
       noPr: true, verbose: false, reset: false,
     });
 
+    const knownResult = await deps.critique.reviewPlan({
+      tasks: [
+        {
+          id: 'task-0',
+          objective: 'Implement a workspace-safe refactor without adding imports.',
+          requiredSkills: [],
+          dependsOn: [],
+        },
+      ],
+    });
+
     const result = await deps.critique.reviewPlan({
       tasks: [
         {
@@ -279,8 +290,9 @@ describe('dep-factory wiring integration', () => {
       ],
     });
 
+    expect(knownResult.verdict).toBe('pass');
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('ghost-dependency'))).toBe(true);
+    expect(result.score).toBeLessThan(knownResult.score);
     await finalize();
   });
 

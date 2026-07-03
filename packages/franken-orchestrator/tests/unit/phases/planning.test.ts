@@ -229,6 +229,48 @@ describe('runPlanning', () => {
     ).rejects.toThrow(CritiqueSpiralError);
   });
 
+  it('redacts graph-builder chunk bodies before critique review', async () => {
+    const c = ctx();
+    const graphBuilder = {
+      build: vi.fn(async () => ({
+        tasks: [
+          {
+            id: 'impl:01_example',
+            objective:
+              'Implement the chunk.\n\n' +
+              'BEGIN_UNTRUSTED_CHUNK_CONTENT:01_example\n' +
+              "Example only: import ghostPkg from 'totally-not-a-real-package';\n" +
+              'END_UNTRUSTED_CHUNK_CONTENT:01_example',
+            requiredSkills: ['cli:01_example'],
+            dependsOn: [],
+          },
+        ],
+      })),
+    };
+    const critique = makeCritique();
+
+    await runPlanning(c, makePlanner(), critique, defaultConfig(), undefined, graphBuilder);
+
+    expect(c.plan?.tasks[0]?.objective).toContain('totally-not-a-real-package');
+    expect(critique.reviewPlan).toHaveBeenCalledWith(
+      {
+        tasks: [
+          expect.objectContaining({
+            id: 'impl:01_example',
+            objective: expect.not.stringContaining('totally-not-a-real-package'),
+          }),
+        ],
+      },
+      { source: 'graphBuilder', redactedUntrustedChunkContent: true },
+    );
+    expect(critique.reviewPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: [expect.objectContaining({ objective: expect.stringContaining('untrusted chunk content redacted') })],
+      }),
+      expect.anything(),
+    );
+  });
+
   it('adds audit entries for each iteration', async () => {
     const c = ctx();
     let callCount = 0;
