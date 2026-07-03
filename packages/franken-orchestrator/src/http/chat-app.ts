@@ -62,6 +62,8 @@ export interface ChatAppOptions {
   dashboardDeps?: DashboardRouteDeps;
   /** Read-only observer/governor/cost analytics aggregation. */
   analyticsDeps?: AnalyticsRouteDeps;
+  /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
+  beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -107,7 +109,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   // (franken-web ChatApiClient, network/chat-attach) plumb the token through.
   // `startChatServer` separately fails closed when chat is exposed without a
   // token (managed mode or non-loopback host).
-  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken;
+  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const operatorSecurity = opts.beastControl?.security ?? transportSecurity;
   // Gate the chat plane and every sensitive control-plane route group behind the
   // same operator token whenever one is configured. Each group mutates process
@@ -127,6 +129,18 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     // Register both the exact base path and the wildcard: Hono's `/base/*` does
     // not match the base path itself (e.g. `/api/skills`), so collection roots
     // would otherwise slip past auth. This mirrors the beast/agent route guard.
+    // /v1/beasts/events/stream uses one-shot SSE tickets because browser
+    // EventSource cannot send Authorization headers. Protect other Beast proxy
+    // routes with the shared bearer token, but let ticketed streams reach the
+    // daemon where the ticket is validated.
+    app.use('/v1/beasts', requireAuth());
+    app.use('/v1/beasts/*', async (c, next) => {
+      if (new URL(c.req.url).pathname === '/v1/beasts/events/stream') {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     for (const base of [
       '/v1/chat',
       '/v1/network',
@@ -180,6 +194,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         })),
       }),
     }));
+  } else if (opts.beastDaemon) {
+    const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;
+    app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
@@ -211,6 +228,53 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
 
   return app;
+}
+
+const HOP_BY_HOP_HEADERS = [
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+] as const;
+
+async function proxyToBeastDaemon(
+  request: Request,
+  daemon: { baseUrl: string; operatorToken?: string | undefined },
+  operatorToken?: string | undefined,
+): Promise<Response> {
+  const sourceUrl = new URL(request.url);
+  const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
+  const headers = new Headers(request.headers);
+  removeHopByHopHeaders(headers);
+  if (!headers.has('authorization')) {
+    const headerToken = headers.get('x-frankenbeast-operator-token')?.trim();
+    const forwardedToken = operatorToken ?? (headerToken ? headerToken : undefined);
+    if (forwardedToken) {
+      headers.set('authorization', `Bearer ${forwardedToken}`);
+    }
+  }
+
+  const method = request.method;
+  const init: RequestInit = { method, headers };
+  if (method !== 'GET' && method !== 'HEAD') {
+    init.body = request.body;
+    Object.assign(init, { duplex: 'half' });
+  }
+  return fetch(targetUrl, init);
+}
+
+function removeHopByHopHeaders(headers: Headers): void {
+  const connectionTokens = headers.get('connection')
+    ?.split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+  for (const header of [...HOP_BY_HOP_HEADERS, 'host', ...connectionTokens]) {
+    headers.delete(header);
+  }
 }
 
 function required<T>(value: T | undefined, field: string): T {

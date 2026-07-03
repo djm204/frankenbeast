@@ -29,8 +29,6 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
-import { createBeastServices } from '../beasts/create-beast-services.js';
-import { TransportSecurityService } from '../http/security/transport-security.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
 import { parse as parseDotenv } from 'dotenv';
 import { createSecretStore } from '../network/secret-store.js';
@@ -50,6 +48,9 @@ import {
 } from '../network/network-supervisor-runtime.js';
 import type { ISecretStore } from '../network/secret-store.js';
 import { resolveSecurityConfig } from '../middleware/security-profiles.js';
+import { startBeastDaemon } from '../http/beast-daemon-server.js';
+import { createBeastServices } from '../beasts/create-beast-services.js';
+import { TransportSecurityService } from '../http/security/transport-security.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -261,6 +262,11 @@ export async function main(): Promise<void> {
 
   scaffoldFrankenbeast(paths);
 
+  if (args.subcommand === 'beasts-daemon') {
+    await runBeastDaemonCommand(args, config, root, paths);
+    return;
+  }
+
   if (args.subcommand === 'network') {
     await runNetworkCommand(args, config, root, paths);
     return;
@@ -387,26 +393,39 @@ export async function main(): Promise<void> {
         secretStore: bootSecretStore,
         config,
       });
-      const beastServices = beastOperatorToken ? createBeastServices(paths) : undefined;
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
-        ...(beastServices ? { runs: beastServices.runs, agents: beastServices.agents } : {}),
       });
+      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+      const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
+        ? createBeastServices({
+            beastsDb: join(paths.frankenbeastDir, 'beast.db'),
+            beastLogsDir: paths.beastLogsDir,
+            root,
+          })
+        : undefined;
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
         executionLlm: execLlm,
         projectName: projectId,
-        ...(beastServices && beastOperatorToken
+        ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
+        ...(localBeastServices && beastOperatorToken
           ? {
               beastControl: {
-                ...beastServices,
-                security: new TransportSecurityService(),
+                ...localBeastServices,
                 operatorToken: beastOperatorToken,
-                rateLimit: {
-                  windowMs: 60_000,
-                  max: 20,
-                },
+                security: new TransportSecurityService(),
+                rateLimit: { windowMs: 60_000, max: 20 },
+              },
+              disposeBeastControl: localBeastServices.dispose,
+            }
+          : {}),
+        ...(beastOperatorToken && explicitBeastDaemonUrl
+          ? {
+              beastDaemon: {
+                baseUrl: explicitBeastDaemonUrl,
+                operatorToken: beastOperatorToken,
               },
             }
           : {}),
@@ -526,6 +545,57 @@ export async function main(): Promise<void> {
 
 type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir' | 'configFile'>;
 
+type BeastDaemonPaths = ReturnType<typeof getProjectPaths>;
+
+async function runBeastDaemonCommand(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+  paths: BeastDaemonPaths,
+): Promise<void> {
+  let bootSecretStore: ISecretStore | undefined;
+  try {
+    bootSecretStore = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
+      projectRoot: root,
+      passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+    });
+  } catch {
+    bootSecretStore = undefined;
+  }
+  const operatorToken = await resolveBeastOperatorToken(root, {
+    ...(bootSecretStore ? { secretStore: bootSecretStore } : {}),
+    config,
+  });
+  if (!operatorToken) {
+    throw new Error(
+      'Refusing to start beasts-daemon without an operator token: set '
+      + 'FRANKENBEAST_BEAST_OPERATOR_TOKEN, VITE_BEAST_OPERATOR_TOKEN, '
+      + 'network.operatorTokenRef, or a .env token.',
+    );
+  }
+
+  const daemon = await startBeastDaemon({
+    root,
+    beastsDb: paths.beastsDb,
+    beastLogsDir: paths.beastLogsDir,
+    operatorToken,
+    ...(args.host ? { host: args.host } : {}),
+    ...(args.port !== undefined ? { port: args.port } : {}),
+  });
+  console.log(`Beast daemon listening on ${daemon.url}`);
+
+  const shutdown = async (): Promise<void> => {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    await daemon.close();
+  };
+  const onSignal = (): void => {
+    void shutdown().then(() => process.exit(0));
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+}
+
 export interface NetworkCommandSupervisorLike {
   up(options: {
     services: ResolvedNetworkService[];
@@ -642,6 +712,7 @@ export async function runNetworkCommand(
     }
     deps.print(JSON.stringify({
       network: config.network,
+      beastsDaemon: config.beastsDaemon,
       chat: config.chat,
       dashboard: config.dashboard,
       comms: config.comms,

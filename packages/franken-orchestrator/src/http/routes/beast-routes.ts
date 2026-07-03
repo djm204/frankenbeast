@@ -79,6 +79,7 @@ const CreateRunBody = z.object({
   definitionId: z.string().min(1),
   config: z.record(z.string(), z.unknown()),
   trackedAgentId: z.string().min(1).optional(),
+  chatSessionId: z.string().min(1).optional(),
   executionMode: z.enum(['process', 'container']).optional(),
   startNow: z.boolean().optional(),
   moduleConfig: ModuleConfigSchema.optional(),
@@ -142,8 +143,8 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
       run = await deps.dispatch.createRun({
         definitionId: body.definitionId,
         config: body.config,
-        dispatchedBy: 'api',
-        dispatchedByUser: 'operator',
+        dispatchedBy: body.chatSessionId ? 'chat' : 'api',
+        dispatchedByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
         ...(body.trackedAgentId ? { trackedAgentId: body.trackedAgentId } : {}),
         ...(body.executionMode ? { executionMode: body.executionMode } : {}),
         ...(body.startNow !== undefined ? { startNow: body.startNow } : {}),

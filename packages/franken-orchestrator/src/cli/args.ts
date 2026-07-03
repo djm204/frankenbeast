@@ -9,6 +9,7 @@ export type Subcommand =
   | 'issues'
   | 'chat'
   | 'chat-server'
+  | 'beasts-daemon'
   | 'network'
   | 'skill'
   | 'security'
@@ -92,7 +93,7 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'network', 'skill', 'security']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
@@ -110,6 +111,7 @@ Subcommands:
   issues                  Fetch and filter GitHub issues
   chat                    Interactive chat REPL with ConversationEngine
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
+  beasts-daemon           Run the standalone Beast control-plane daemon
   network                 Manage Frankenbeast request-serving services
   skill                   Manage MCP skill plugins
   security                View or change security profile
@@ -124,8 +126,8 @@ Options:
   --plan-dir <path>       Path to chunk files directory
   --plan-name <name>      Plan name (default: auto-generated from date)
   --config <path>         Path to config file (JSON)
-  --host <host>           Chat server bind host (default: 127.0.0.1)
-  --port <port>           Chat server bind port (default: 3737)
+  --host <host>           Chat/beast daemon bind host (default: 127.0.0.1)
+  --port <port>           Chat/beast daemon bind port (chat default: 3737; beast daemon default: 4050)
   --allow-origin <url>    Allow one additional websocket Origin
   --no-pr                 Skip PR creation
   --verbose               Debug logs + trace viewer
@@ -206,6 +208,7 @@ Examples:
   frankenbeast beasts spawn martin-loop     # spawn a martin-loop beast
   frankenbeast chat-server                  # local chat server
   frankenbeast chat-server --port 4242      # local chat server on custom port
+  frankenbeast beasts-daemon                # standalone Beast API on port 4050
   frankenbeast network up                   # start managed services
   frankenbeast network config --set chat.model=claude-sonnet-4-6
   frankenbeast issues --label critical,high # fetch filtered issues
@@ -228,7 +231,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'network' | 'skill' | 'security';
+    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'beasts-daemon' | 'network' | 'skill' | 'security';
     flagArgs = argv.slice(1);
   }
 
@@ -431,8 +434,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     interviewGoal: values.goal,
     interviewOutput: values.output,
     config: values.config,
-    host: values.host ?? (subcommand === 'chat-server' ? '127.0.0.1' : undefined),
-    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : undefined),
+    host: values.host ?? (subcommand === 'chat-server' || subcommand === 'beasts-daemon' ? '127.0.0.1' : undefined),
+    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined),
     allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,

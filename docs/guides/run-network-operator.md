@@ -8,7 +8,8 @@ This guide starts Frankenbeast through the new `frankenbeast network` operator i
 
 Current default local surface:
 
-- `chat-server`
+- `beasts-daemon` (standalone Beast control plane on `:4050`)
+- `chat-server` (chat/WebSocket backend and Beast API gateway proxy)
 - `dashboard-web`
 
 Optional surfaces activate from config:
@@ -41,6 +42,7 @@ node packages/franken-orchestrator/dist/cli/run.js network status
 ## Stop or Restart Services
 
 ```bash
+node packages/franken-orchestrator/dist/cli/run.js network stop beasts-daemon
 node packages/franken-orchestrator/dist/cli/run.js network stop chat-server
 node packages/franken-orchestrator/dist/cli/run.js network restart dashboard-web
 node packages/franken-orchestrator/dist/cli/run.js network down

@@ -47,8 +47,8 @@ describe('NetworkSupervisor', () => {
     });
     await supervisor.stopAll(state);
 
-    expect(started).toEqual(['chat-server', 'dashboard-web']);
-    expect(stopped).toEqual(['dashboard-web', 'chat-server']);
+    expect(started).toEqual(['beasts-daemon', 'chat-server', 'dashboard-web']);
+    expect(stopped).toEqual(['dashboard-web', 'chat-server', 'beasts-daemon']);
   });
 
   it('writes detached operator state and registers log files', async () => {
@@ -78,7 +78,11 @@ describe('NetworkSupervisor', () => {
 
     const persisted = await stateStore.load();
     expect(persisted?.detached).toBe(true);
-    expect(persisted?.services[0]?.logFile).toMatch(/chat-server\.log$/);
+    expect(persisted?.services.map((service) => service.logFile)).toEqual(expect.arrayContaining([
+      expect.stringMatching(/beasts-daemon\.log$/),
+      expect.stringMatching(/chat-server\.log$/),
+      expect.stringMatching(/dashboard-web\.log$/),
+    ]));
   });
 
   it('marks stored services stale when healthchecks fail', async () => {
@@ -137,7 +141,9 @@ describe('NetworkSupervisor', () => {
       healthcheck: vi.fn(async () => true),
       preflightService: vi.fn(async (service) => service.id === 'chat-server'
         ? { action: 'reuse' as const }
-        : { action: 'start' as const }),
+        : service.id === 'beasts-daemon'
+          ? { action: 'reuse' as const }
+          : { action: 'start' as const }),
       now: () => '2026-03-10T00:00:00.000Z',
     });
 
@@ -151,6 +157,11 @@ describe('NetworkSupervisor', () => {
     expect(startService).toHaveBeenCalledTimes(1);
     expect(startService).toHaveBeenCalledWith(expect.objectContaining({ id: 'dashboard-web' }), expect.any(Object));
     expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'beasts-daemon',
+        pid: 0,
+        status: 'already-running',
+      }),
       expect.objectContaining({
         id: 'chat-server',
         pid: 0,

@@ -61,7 +61,7 @@ packages/franken-orchestrator/src/
 ├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator, LlmPlanner, LlmSkillHandler
 │   └── providers/         # ICliProvider, ProviderRegistry, ClaudeProvider, CodexProvider, GeminiProvider, AiderProvider
 ├── chat/                  # ConversationEngine, IntentRouter, EscalationPolicy, ChatRuntime, ChatAgentExecutor, TurnRunner, session-store, output-sanitizer, chat-runtime-factory
-├── http/                  # chat-server.ts, chat-app.ts, ws-chat-server.ts, sse.ts, middleware.ts (HTTP + WebSocket for franken-web)
+├── http/                  # chat-server.ts, beast-daemon-server.ts, chat-app.ts, ws-chat-server.ts, sse.ts, middleware.ts (HTTP APIs + WebSocket for franken-web)
 ├── cli/                   # run.ts, session.ts, args.ts, config-loader.ts, dep-factory.ts, chat-repl.ts, spinner.ts, review-loop.ts, cleanup.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
@@ -92,8 +92,10 @@ packages/franken-orchestrator/src/
   - `ChatRuntime` orchestrates all turn processing (slash commands, engine dispatch, execution). `ConversationEngine` handles LLM replies. `TurnRunner` handles execution dispatch. `ChatAgentExecutor` implements `ITaskExecutor`
   - `sanitizeChatOutput()` strips raw web search JSON and REMINDER instruction blocks from Claude CLI output
   - `chat-runtime-factory.ts` wires the engine, runtime, and turn runner from config
+- `frankenbeast beasts-daemon` — standalone Beast control plane (default port `4050`) that owns `/v1/beasts/*`, `/v1/beasts/agents/*`, SSE tickets/events, run persistence/logs, PID-file stale detection, and graceful child-run shutdown. PID file: `.frankenbeast/beasts-daemon.pid`.
 - `frankenbeast chat-server` — HTTP + WebSocket server for franken-web dashboard:
   - `startChatServer()` binds TCP, wires auth (session tokens), session persistence, and WebSocket attachment
+  - In managed/default dashboard flows it is a chat/control gateway client of `beasts-daemon`; it proxies `/v1/beasts/*` only after operator auth.
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
@@ -150,7 +152,7 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 1. **ProviderRegistry only active in reflection path**: Task execution flows through `CliLlmAdapter → MartinLoop → spawn()`. Multi-provider failover applies to heartbeat/reflection calls only. By design — middleware applies to in-process prompt text, not subprocess stdio.
 2. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
 3. **No `--non-interactive` flag**: Headless usage relies on starting at `plan` or `run` with existing inputs.
-4. **No top-level `provider` or `dashboard` CLI subcommands**: Current subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security` (see `packages/franken-orchestrator/src/cli/args.ts`). Provider/dashboard capabilities are exposed through provider config, `chat-server`, the HTTP dashboard routes, and `franken-web`.
+4. **No top-level `provider` or `dashboard` CLI subcommands**: Current subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `beasts-daemon`, `network`, `skill`, and `security` (see `packages/franken-orchestrator/src/cli/args.ts`). Provider/dashboard capabilities are exposed through provider config, `chat-server`, the HTTP dashboard routes, and `franken-web`.
 5. **`--resume` parsed but not a distinct control path**: Checkpoint-based task skipping works from existing checkpoint files.
 
 ## Key Documentation

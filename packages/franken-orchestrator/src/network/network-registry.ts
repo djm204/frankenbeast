@@ -1,10 +1,11 @@
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { chatServerService } from './services/chat-server-service.js';
+import { beastsDaemonService } from './services/beasts-daemon-service.js';
 import { dashboardWebService } from './services/dashboard-web-service.js';
 import { commsGatewayService } from './services/comms-gateway-service.js';
 import { composeService } from './services/compose-service.js';
 
-export type NetworkServiceId = 'chat-server' | 'dashboard-web' | 'comms-gateway' | 'compose-infra';
+export type NetworkServiceId = 'beasts-daemon' | 'chat-server' | 'dashboard-web' | 'comms-gateway' | 'compose-infra';
 export type NetworkServiceKind = 'app' | 'infra';
 
 export interface NetworkRegistryContext {
@@ -50,6 +51,7 @@ export interface ResolvedNetworkService extends NetworkServiceDefinition {
 }
 
 const NETWORK_SERVICE_DEFINITIONS: NetworkServiceDefinition[] = [
+  beastsDaemonService,
   chatServerService,
   dashboardWebService,
   commsGatewayService,
@@ -77,6 +79,10 @@ function collectSelectedServiceIds(
     }
 
     for (const dependency of service.dependsOn) {
+      const dependencyService = registry.get(dependency);
+      if (!dependencyService) {
+        throw new Error(`Unknown network service: ${dependency}`);
+      }
       includeService(dependency);
     }
 
@@ -166,11 +172,13 @@ export function filterNetworkServices(
 
     const service = byId.get(serviceId);
     if (!service) {
-      throw new Error(`Unknown network service target: ${serviceId}`);
+      return;
     }
 
     for (const dependency of service.dependsOn) {
-      include(dependency);
+      if (byId.has(dependency)) {
+        include(dependency);
+      }
     }
 
     included.add(serviceId);

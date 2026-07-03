@@ -182,9 +182,10 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 ```bash
 frankenbeast chat              # Interactive chat REPL (uses ConversationEngine)
 frankenbeast chat-server       # HTTP + WebSocket server for franken-web (port 3737)
+frankenbeast beasts-daemon     # Standalone Beast API/control plane (port 4050)
 ```
 
-The chat server is the backend for the franken-web dashboard. Use `--port` and `--host` to override defaults.
+The Beast daemon owns `/v1/beasts/*` state, logs, lifecycle, SSE tickets/events, and PID-file protection at `.frankenbeast/beasts-daemon.pid`. The chat server remains the chat/WebSocket backend and can proxy `/v1/beasts/*` to the daemon for gateway compatibility. Use `--port` and `--host` to override defaults.
 
 ---
 
@@ -237,6 +238,7 @@ frankenbeast network config                # inspect operator config
 | `frankenbeast run` | ✅ |
 | `frankenbeast beasts *` | ✅ |
 | `frankenbeast chat` / `chat-server` | ✅ |
+| `frankenbeast beasts-daemon` | ✅ |
 | `frankenbeast skill *` | ✅ |
 | `frankenbeast security *` | ✅ |
 | `frankenbeast network *` | ✅ |
@@ -254,7 +256,7 @@ npm test -- tests/unit/cli/args.test.ts tests/unit/cli/run.test.ts tests/integra
 npm run typecheck
 ```
 
-The matrix covers parser/config truthfulness, `run` and `run --resume`, required dependency assembly, `beasts`, `skill`, `security`, `network`, `issues`, `chat`, `chat-server`, and the core Beast loop smoke path.
+The matrix covers parser/config truthfulness, `run` and `run --resume`, required dependency assembly, `beasts`, `beasts-daemon`, `skill`, `security`, `network`, `issues`, `chat`, `chat-server`, and the core Beast loop smoke path.
 
 ---
 

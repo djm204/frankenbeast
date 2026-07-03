@@ -29,6 +29,12 @@ export const ChatServiceConfigSchema = z.object({
   model: z.string().min(1).default('claude-sonnet-4-6'),
 });
 
+export const BeastDaemonServiceConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  host: HostSchema,
+  port: PortSchema.default(4050),
+});
+
 export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
@@ -62,6 +68,7 @@ export const CommsServiceConfigSchema = z.object({
 
 export const NetworkConfigSchema = z.object({
   network: NetworkOperatorConfigSchema.default({}),
+  beastsDaemon: BeastDaemonServiceConfigSchema.default({}),
   chat: ChatServiceConfigSchema.default({}),
   dashboard: DashboardServiceConfigSchema.default({}),
   comms: CommsServiceConfigSchema.default({}),

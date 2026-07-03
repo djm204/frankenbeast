@@ -31,6 +31,7 @@ const CreateAgentBody = z.object({
   chatSessionId: z.string().min(1).optional(),
   moduleConfig: ModuleConfigSchema.optional(),
   executionMode: z.enum(['process', 'container']).optional(),
+  autoDispatch: z.boolean().optional(),
 }).strict();
 
 export interface AgentRoutesDeps {
@@ -64,11 +65,12 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
     const agent = deps.agents.createAgent({
       definitionId: body.definitionId,
-      source: 'dashboard',
-      createdByUser: 'operator',
+      source: body.chatSessionId ? 'chat' : 'dashboard',
+      createdByUser: body.chatSessionId ? `chat-session:${body.chatSessionId}` : 'operator',
       initAction: body.initAction,
       initConfig: body.initConfig,
       ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
+      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
       ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
     });
     deps.agents.appendEvent(agent.id, {
@@ -99,8 +101,11 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       },
     });
 
-    if (!deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
-      return c.json({ data: agent }, 201);
+    if (body.autoDispatch === false || !deps.dispatch || !shouldDispatchOnCreate(body.initAction.kind)) {
+      const deferredAgent = deps.dispatch && shouldDispatchOnCreate(body.initAction.kind)
+        ? deps.agents.updateAgent(agent.id, { status: 'stopped' })
+        : agent;
+      return c.json({ data: deferredAgent }, 201);
     }
 
     try {
@@ -428,6 +433,7 @@ async function dispatchDetachedAgent(
     dispatchedByUser: 'operator',
     trackedAgentId: agent.id,
     startNow: true,
+    ...(agent.executionMode ? { executionMode: agent.executionMode } : {}),
     ...(agent.moduleConfig ? { moduleConfig: agent.moduleConfig } : {}),
   });
 }

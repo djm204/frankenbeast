@@ -1,11 +1,11 @@
-import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
+import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
 import { attachChatWebSocketServer } from './ws-chat-server.js';
@@ -18,6 +18,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -42,12 +43,14 @@ export interface StartChatServerOptions {
     setConfig(config: OrchestratorConfig): void;
   };
   beastControl?: BeastRoutesDeps;
+  disposeBeastControl?: (() => void) | undefined;
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
   skillManager?: SkillManager;
   providerRegistry?: ProviderRegistry;
   dashboardDeps?: DashboardRouteDeps;
   analyticsDeps?: AnalyticsRouteDeps;
+  beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
 export interface ChatServerHandle {
@@ -63,6 +66,7 @@ export interface ChatServerHandle {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3737;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
@@ -85,18 +89,21 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   // differ, an operator holding the beast token would pass /v1/beasts/* but get
   // 401s on the control-plane routes (and vice versa). Fail closed at startup
   // rather than ship that split-brain auth.
-  if (
-    options.operatorToken
-    && options.beastControl?.operatorToken
-    && options.operatorToken !== options.beastControl.operatorToken
-  ) {
+  const configuredTokens = [
+    options.operatorToken,
+    options.beastControl?.operatorToken,
+    options.beastDaemon?.operatorToken,
+  ].filter((token): token is string => Boolean(token));
+  const uniqueTokens = new Set(configuredTokens);
+  if (uniqueTokens.size > 1) {
     throw new Error(
       'Refusing to start chat-server with two different operator tokens: '
-      + 'operatorToken and beastControl.operatorToken must match (the control '
-      + 'plane uses a single operator token). Pass one token or make them equal.',
+      + 'operatorToken, beastControl.operatorToken, and beastDaemon.operatorToken '
+      + 'must match (the control plane uses a single operator token). Pass one '
+      + 'token or make them equal.',
     );
   }
-  const effectiveOperatorToken = options.operatorToken ?? options.beastControl?.operatorToken;
+  const effectiveOperatorToken = configuredTokens[0];
   const isManaged = process.env['FRANKENBEAST_NETWORK_MANAGED'] === '1';
   const isExposed = isManaged || !LOOPBACK_HOSTS.has(host);
   if (isExposed && !effectiveOperatorToken && !options.allowUnauthenticatedChatForTests) {
@@ -121,7 +128,14 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
             agentInit: new AgentInitService(options.beastControl.agents, options.beastControl.dispatch),
           }),
         }
-      : {}),
+      : options.beastDaemon && effectiveOperatorToken
+        ? {
+            beastDispatchAdapter: new BeastDaemonDispatchAdapter({
+              baseUrl: options.beastDaemon.baseUrl,
+              operatorToken: effectiveOperatorToken,
+            }),
+          }
+        : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
   const app = createChatApp({
@@ -139,9 +153,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
     ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+    ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
   });
   const server = createServer((request, response) => {
-    void handleHttpRequest(app, request, response);
+    void handleHonoHttpRequest(app, request, response);
   });
 
   attachChatWebSocketServer({
@@ -177,75 +192,32 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
-      await closeServer(server);
+      options.disposeBeastControl?.();
+      const closedServer = closeHttpServer(server);
+      server.closeAllConnections();
+      await closedServer;
     },
   };
 }
 
-async function handleHttpRequest(app: Hono, request: IncomingMessage, response: ServerResponse): Promise<void> {
-  try {
-    const honoRequest = toRequest(request);
-    const honoResponse = await app.fetch(honoRequest);
-
-    response.statusCode = honoResponse.status;
-    response.statusMessage = honoResponse.statusText;
-    for (const [key, value] of honoResponse.headers.entries()) {
-      response.setHeader(key, value);
-    }
-
-    if (!honoResponse.body) {
-      response.end();
-      return;
-    }
-
-    const body = Buffer.from(await honoResponse.arrayBuffer());
-    response.end(body);
-  } catch (error) {
-    response.statusCode = 500;
-    response.end(error instanceof Error ? error.message : 'Internal Server Error');
+async function stopLiveBeastControlRuns(beastControl: BeastRoutesDeps | undefined): Promise<void> {
+  if (!beastControl) {
+    return;
   }
-}
-
-function toRequest(request: IncomingMessage): Request {
-  const host = request.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`;
-  const url = new URL(request.url ?? '/', `http://${host}`);
-  const method = request.method ?? 'GET';
-  const headers = new Headers();
-
-  for (const [key, value] of Object.entries(request.headers)) {
-    if (value === undefined) {
+  for (const run of beastControl.runs.listRuns()) {
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
       continue;
     }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        headers.append(key, item);
+    try {
+      await beastControl.runs.stop(run.id, 'chat-server-shutdown');
+    } catch {
+      try {
+        await beastControl.runs.kill(run.id, 'chat-server-shutdown');
+      } catch {
+        // Continue best-effort shutdown for remaining local Beast runs.
       }
-      continue;
     }
-    headers.set(key, value);
   }
-
-  if (method === 'GET' || method === 'HEAD') {
-    return new Request(url, { method, headers });
-  }
-
-  return new Request(url, {
-    method,
-    headers,
-    body: Readable.toWeb(request) as ReadableStream,
-    ...( { duplex: 'half' } as { duplex: 'half' } ),
-  } as RequestInit);
-}
-
-function closeServer(server: HttpServer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
 }
