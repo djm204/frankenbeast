@@ -47,6 +47,7 @@ describe('BeastDaemonDispatchAdapter', () => {
         expect(JSON.parse(String(init?.body))).toMatchObject({
           definitionId: 'martin-loop',
           trackedAgentId: 'agent-1',
+          chatSessionId: 'session-1',
           config: { objective: 'Ship it' },
           executionMode: 'container',
           startNow: true,

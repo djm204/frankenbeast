@@ -61,6 +61,73 @@ describe('beast daemon', () => {
     }
   });
 
+  it('preserves chat attribution for daemon-created tracked runs', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const app = createBeastDaemonApp({
+      services,
+      operatorToken,
+      startedAt: '2026-07-02T00:00:00.000Z',
+    });
+
+    try {
+      const agentResponse = await app.request('/v1/beasts/agents', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          initAction: {
+            kind: 'martin-loop',
+            command: 'martin-loop',
+            config: {},
+            chatSessionId: 'chat-1',
+          },
+          initConfig: {},
+          chatSessionId: 'chat-1',
+          autoDispatch: false,
+        }),
+      });
+      expect(agentResponse.status).toBe(201);
+      const agentBody = await agentResponse.json() as {
+        data: { id: string; source: string; createdByUser: string; chatSessionId?: string };
+      };
+      expect(agentBody.data).toMatchObject({
+        source: 'chat',
+        createdByUser: 'chat-session:chat-1',
+        chatSessionId: 'chat-1',
+      });
+
+      const runResponse = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+          trackedAgentId: agentBody.data.id,
+          chatSessionId: 'chat-1',
+          startNow: false,
+        }),
+      });
+      expect(runResponse.status).toBe(201);
+      const runBody = await runResponse.json() as {
+        data: { dispatchedBy: string; dispatchedByUser: string; trackedAgentId?: string };
+      };
+      expect(runBody.data).toMatchObject({
+        dispatchedBy: 'chat',
+        dispatchedByUser: 'chat-session:chat-1',
+        trackedAgentId: agentBody.data.id,
+      });
+    } finally {
+      services.dispose();
+    }
+  });
+
   it('claims and releases a pid file while serving HTTP', async () => {
     const paths = await makePaths();
     const daemon = await startBeastDaemon({

@@ -188,6 +188,7 @@ export class BeastDaemonDispatchAdapter {
         definitionId: request.definitionId,
         config: request.config,
         startNow: true,
+        chatSessionId: request.sessionId,
         ...(request.trackedAgentId ? { trackedAgentId: request.trackedAgentId } : {}),
         ...(request.executionMode ? { executionMode: request.executionMode } : {}),
       }),

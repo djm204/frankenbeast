@@ -95,7 +95,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const uniqueTokens = new Set(configuredTokens);
   if (uniqueTokens.size > 1) {
     throw new Error(
-      'Refusing to start chat-server with different operator tokens: '
+      'Refusing to start chat-server with two different operator tokens: '
       + 'operatorToken, beastControl.operatorToken, and beastDaemon.operatorToken '
       + 'must match (the control plane uses a single operator token). Pass one '
       + 'token or make them equal.',
