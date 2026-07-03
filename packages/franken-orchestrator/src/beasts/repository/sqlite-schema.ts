@@ -61,6 +61,7 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     init_config TEXT NOT NULL,
     chat_session_id TEXT,
     dispatch_run_id TEXT,
+    execution_mode TEXT,
     module_config TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

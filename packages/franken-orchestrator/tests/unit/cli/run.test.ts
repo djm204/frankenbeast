@@ -30,11 +30,15 @@ const {
     finalize: mockFinalize,
   }));
   const mockCreateBeastServices = vi.fn(() => ({
+    agents: {},
     catalog: {},
     dispatch: {},
     runs: {},
     interviews: {},
     metrics: {},
+    eventBus: {},
+    ticketStore: { destroy: vi.fn() },
+    dispose: vi.fn(),
   }));
   const mockParseArgs = vi.fn(() => ({
     subcommand: undefined,
@@ -425,6 +429,7 @@ describe('main() execution', () => {
   afterEach(() => {
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
+    delete process.env.FRANKENBEAST_BEAST_DAEMON_URL;
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -578,8 +583,7 @@ describe('main() execution', () => {
       sessionStoreDir: '/mock/project/.fbeast/chat',
       projectName: 'project',
       operatorToken: 'dashboard-operator-token',
-      beastDaemon: expect.objectContaining({
-        baseUrl: 'http://127.0.0.1:4050',
+      beastControl: expect.objectContaining({
         operatorToken: 'dashboard-operator-token',
       }),
     }));
@@ -640,8 +644,7 @@ describe('main() execution', () => {
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       operatorToken: 'root-env-token',
-      beastDaemon: expect.objectContaining({
-        baseUrl: 'http://127.0.0.1:4050',
+      beastControl: expect.objectContaining({
         operatorToken: 'root-env-token',
       }),
     }));
@@ -699,10 +702,56 @@ describe('main() execution', () => {
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       operatorToken: 'dashboard-file-token',
-      beastDaemon: expect.objectContaining({
-        baseUrl: 'http://127.0.0.1:4050',
+      beastControl: expect.objectContaining({
         operatorToken: 'dashboard-file-token',
       }),
+    }));
+  });
+
+  it('proxies chat-server beast routes only when a daemon URL is explicit', async () => {
+    process.env.FRANKENBEAST_BEAST_DAEMON_URL = 'http://127.0.0.1:4999';
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    } as never);
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastDaemon: expect.objectContaining({
+        baseUrl: 'http://127.0.0.1:4999',
+        operatorToken: 'dashboard-operator-token',
+      }),
+    }));
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
+      beastControl: expect.anything(),
     }));
   });
 

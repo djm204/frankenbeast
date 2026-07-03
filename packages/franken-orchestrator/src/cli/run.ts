@@ -49,6 +49,8 @@ import {
 import type { ISecretStore } from '../network/secret-store.js';
 import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
+import { createBeastServices } from '../beasts/create-beast-services.js';
+import { TransportSecurityService } from '../http/security/transport-security.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -394,16 +396,35 @@ export async function main(): Promise<void> {
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
+      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+      const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
+        ? createBeastServices({
+            beastsDb: join(paths.frankenbeastDir, 'beast.db'),
+            beastLogsDir: paths.beastLogsDir,
+            root,
+          })
+        : undefined;
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
         executionLlm: execLlm,
         projectName: projectId,
-        ...(beastOperatorToken
+        ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
+        ...(localBeastServices && beastOperatorToken
           ? {
-              operatorToken: beastOperatorToken,
+              beastControl: {
+                ...localBeastServices,
+                operatorToken: beastOperatorToken,
+                security: new TransportSecurityService(),
+                rateLimit: { windowMs: 60_000, max: 20 },
+              },
+              disposeBeastControl: localBeastServices.dispose,
+            }
+          : {}),
+        ...(beastOperatorToken && explicitBeastDaemonUrl
+          ? {
               beastDaemon: {
-                baseUrl: process.env.FRANKENBEAST_BEAST_DAEMON_URL ?? `http://${config.beastsDaemon?.host ?? '127.0.0.1'}:${config.beastsDaemon?.port ?? 4050}`,
+                baseUrl: explicitBeastDaemonUrl,
                 operatorToken: beastOperatorToken,
               },
             }

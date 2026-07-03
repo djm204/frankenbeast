@@ -70,6 +70,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       initAction: body.initAction,
       initConfig: body.initConfig,
       ...(body.chatSessionId ? { chatSessionId: body.chatSessionId } : {}),
+      ...(body.executionMode ? { executionMode: body.executionMode } : {}),
       ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
     });
     deps.agents.appendEvent(agent.id, {
@@ -392,6 +393,7 @@ async function dispatchDetachedAgent(
     dispatchedByUser: 'operator',
     trackedAgentId: agent.id,
     startNow: true,
+    ...(agent.executionMode ? { executionMode: agent.executionMode } : {}),
     ...(agent.moduleConfig ? { moduleConfig: agent.moduleConfig } : {}),
   });
 }

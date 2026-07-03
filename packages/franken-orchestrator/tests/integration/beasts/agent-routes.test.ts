@@ -74,7 +74,20 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
       kill: vi.fn(),
     },
     container: {
-      start: vi.fn(),
+      start: vi.fn(async (run, _definition) => {
+        const attempt = repository.createAttempt(run.id, {
+          status: 'running',
+          startedAt: '2026-03-11T00:01:00.000Z',
+          executorMetadata: { backend: 'container' },
+        });
+        repository.updateRun(run.id, {
+          status: 'running',
+          startedAt: '2026-03-11T00:01:00.000Z',
+          currentAttemptId: attempt.id,
+          attemptCount: 1,
+        });
+        return attempt;
+      }),
       stop: vi.fn(),
       kill: vi.fn(),
     },
@@ -346,6 +359,7 @@ describe('agent routes integration', () => {
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
         },
+        executionMode: 'container',
         autoDispatch: false,
       }),
     });
@@ -361,9 +375,10 @@ describe('agent routes integration', () => {
     });
 
     expect(startResponse.status).toBe(200);
-    const started = await startResponse.json() as { data: { trackedAgentId?: string; status: string } };
+    const started = await startResponse.json() as { data: { trackedAgentId?: string; status: string; executionMode: string } };
     expect(started.data.trackedAgentId).toBe(created.data.id);
     expect(started.data.status).toBe('running');
+    expect(started.data.executionMode).toBe('container');
   });
 
   it('returns tracked agent detail including init metadata and linked run id', async () => {

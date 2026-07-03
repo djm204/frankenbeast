@@ -43,6 +43,7 @@ export interface StartChatServerOptions {
     setConfig(config: OrchestratorConfig): void;
   };
   beastControl?: BeastRoutesDeps;
+  disposeBeastControl?: (() => void) | undefined;
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
   skillManager?: SkillManager;
@@ -191,6 +192,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     wsUrl,
     close: async () => {
       options.beastControl?.ticketStore.destroy();
+      options.disposeBeastControl?.();
       await closeHttpServer(server);
     },
   };

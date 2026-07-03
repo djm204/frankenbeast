@@ -83,9 +83,7 @@ function collectSelectedServiceIds(
       if (!dependencyService) {
         throw new Error(`Unknown network service: ${dependency}`);
       }
-      if (dependencyService.enabled(config)) {
-        includeService(dependency);
-      }
+      includeService(dependency);
     }
 
     selected.add(serviceId);

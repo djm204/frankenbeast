@@ -35,23 +35,33 @@ describe('network-registry', () => {
     expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server']);
   });
 
-  it('does not force disabled daemon dependencies into chat-only selections', () => {
+  it('includes disabled hard dependencies required by enabled services', () => {
     const config = defaultConfig();
     config.beastsDaemon.enabled = false;
     config.dashboard.enabled = false;
 
     const services = resolveNetworkServices(config, context);
 
-    expect(services.map((service) => service.id)).toEqual(['chat-server']);
+    expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server']);
   });
 
-  it('filters a chat target without requiring disabled daemon dependencies', () => {
+  it('filters a chat target with its hard daemon dependency', () => {
     const config = defaultConfig();
     config.beastsDaemon.enabled = false;
     config.dashboard.enabled = false;
     const services = resolveNetworkServices(config, context);
 
-    expect(filterNetworkServices(services, 'chat-server').map((service) => service.id)).toEqual(['chat-server']);
+    expect(filterNetworkServices(services, 'chat-server').map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server']);
+  });
+
+  it('includes chat hard dependency when dashboard is enabled directly', () => {
+    const config = defaultConfig();
+    config.chat.enabled = false;
+    config.dashboard.enabled = true;
+
+    const services = resolveNetworkServices(config, context);
+
+    expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server', 'dashboard-web']);
   });
 
   it('projects runtime config for each service', () => {
