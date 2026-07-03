@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { Hono } from 'hono';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -21,8 +22,7 @@ export async function handleHonoHttpRequest(app: Hono, request: IncomingMessage,
       return;
     }
 
-    const body = Buffer.from(await honoResponse.arrayBuffer());
-    response.end(body);
+    await pipeline(Readable.fromWeb(honoResponse.body as unknown as import('node:stream/web').ReadableStream), response);
   } catch (error) {
     response.statusCode = 500;
     response.end(error instanceof Error ? error.message : 'Internal Server Error');

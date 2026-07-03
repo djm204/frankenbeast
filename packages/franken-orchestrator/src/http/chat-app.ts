@@ -129,9 +129,20 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     // Register both the exact base path and the wildcard: Hono's `/base/*` does
     // not match the base path itself (e.g. `/api/skills`), so collection roots
     // would otherwise slip past auth. This mirrors the beast/agent route guard.
+    // /v1/beasts/events/stream uses one-shot SSE tickets because browser
+    // EventSource cannot send Authorization headers. Protect other Beast proxy
+    // routes with the shared bearer token, but let ticketed streams reach the
+    // daemon where the ticket is validated.
+    app.use('/v1/beasts', requireAuth());
+    app.use('/v1/beasts/*', async (c, next) => {
+      if (new URL(c.req.url).pathname === '/v1/beasts/events/stream') {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     for (const base of [
       '/v1/chat',
-      '/v1/beasts',
       '/v1/network',
       '/v1/comms',
       '/api/security',

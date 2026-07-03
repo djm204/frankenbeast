@@ -5,6 +5,7 @@ import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
+import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
 import { attachChatWebSocketServer } from './ws-chat-server.js';
@@ -86,18 +87,21 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   // differ, an operator holding the beast token would pass /v1/beasts/* but get
   // 401s on the control-plane routes (and vice versa). Fail closed at startup
   // rather than ship that split-brain auth.
-  if (
-    options.operatorToken
-    && options.beastControl?.operatorToken
-    && options.operatorToken !== options.beastControl.operatorToken
-  ) {
+  const configuredTokens = [
+    options.operatorToken,
+    options.beastControl?.operatorToken,
+    options.beastDaemon?.operatorToken,
+  ].filter((token): token is string => Boolean(token));
+  const uniqueTokens = new Set(configuredTokens);
+  if (uniqueTokens.size > 1) {
     throw new Error(
-      'Refusing to start chat-server with two different operator tokens: '
-      + 'operatorToken and beastControl.operatorToken must match (the control '
-      + 'plane uses a single operator token). Pass one token or make them equal.',
+      'Refusing to start chat-server with different operator tokens: '
+      + 'operatorToken, beastControl.operatorToken, and beastDaemon.operatorToken '
+      + 'must match (the control plane uses a single operator token). Pass one '
+      + 'token or make them equal.',
     );
   }
-  const effectiveOperatorToken = options.operatorToken ?? options.beastControl?.operatorToken;
+  const effectiveOperatorToken = configuredTokens[0];
   const isManaged = process.env['FRANKENBEAST_NETWORK_MANAGED'] === '1';
   const isExposed = isManaged || !LOOPBACK_HOSTS.has(host);
   if (isExposed && !effectiveOperatorToken && !options.allowUnauthenticatedChatForTests) {
@@ -122,7 +126,14 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
             agentInit: new AgentInitService(options.beastControl.agents, options.beastControl.dispatch),
           }),
         }
-      : {}),
+      : options.beastDaemon?.operatorToken
+        ? {
+            beastDispatchAdapter: new BeastDaemonDispatchAdapter({
+              baseUrl: options.beastDaemon.baseUrl,
+              operatorToken: options.beastDaemon.operatorToken,
+            }),
+          }
+        : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
   const app = createChatApp({

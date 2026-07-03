@@ -16,6 +16,7 @@ import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js'
 export interface BeastServicePaths {
   beastsDb: string;
   beastLogsDir: string;
+  root?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -33,7 +34,7 @@ export interface BeastServiceBundle {
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
   const logStore = new BeastLogStore(paths.beastLogsDir);
-  const projectRoot = process.env.FBEAST_ROOT ?? process.cwd();
+  const projectRoot = paths.root ?? process.env.FBEAST_ROOT ?? process.cwd();
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
   const eventBus = new BeastEventBus();

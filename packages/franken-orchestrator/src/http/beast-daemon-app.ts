@@ -43,15 +43,6 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     rateLimit,
   };
 
-  app.route('/', beastRoutes(routeDeps));
-  app.route('/', agentRoutes({
-    agents: services.agents,
-    dispatch: services.dispatch,
-    runs: services.runs,
-    operatorToken: options.operatorToken,
-    security,
-    rateLimit,
-  }));
   app.route('/', createBeastSseRoutes({
     bus: services.eventBus,
     ticketStore: services.ticketStore,
@@ -64,6 +55,15 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
         updatedAt: agent.updatedAt,
       })),
     }),
+  }));
+  app.route('/', beastRoutes(routeDeps));
+  app.route('/', agentRoutes({
+    agents: services.agents,
+    dispatch: services.dispatch,
+    runs: services.runs,
+    operatorToken: options.operatorToken,
+    security,
+    rateLimit,
   }));
 
   return app;

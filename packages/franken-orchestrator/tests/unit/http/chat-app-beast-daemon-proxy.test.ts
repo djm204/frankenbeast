@@ -48,4 +48,19 @@ describe('chat app beast daemon proxy', () => {
     expect(url.toString()).toBe('http://127.0.0.1:4050/v1/beasts/catalog?limit=1');
     expect((init.headers as Headers).get('authorization')).toBe('Bearer daemon-token');
   });
+
+  it('lets ticket-authenticated SSE streams reach the daemon proxy without bearer auth', async () => {
+    const fetchMock = vi.fn(async () => new Response('event: snapshot\ndata: {}\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp();
+
+    const response = await app.request('/v1/beasts/events/stream?ticket=ticket-1');
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe('http://127.0.0.1:4050/v1/beasts/events/stream?ticket=ticket-1');
+  });
 });

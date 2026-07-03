@@ -2,7 +2,7 @@ import type { ConversationEngine } from './conversation-engine.js';
 import type { TurnRunner, TurnEvent, TurnRunResult } from './turn-runner.js';
 import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome } from './types.js';
 import { sanitizeChatOutput } from './output-sanitizer.js';
-import type { ChatBeastDispatchAdapter } from './beast-dispatch-adapter.js';
+import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
 
 const SLASH_COMMANDS = new Set([
@@ -50,7 +50,7 @@ export interface ChatRuntimeResult {
 }
 
 export interface ChatRuntimeOptions {
-  beastDispatchAdapter?: ChatBeastDispatchAdapter;
+  beastDispatchAdapter?: BeastDispatchPort;
   engine: ConversationEngine;
   turnRunner: TurnRunner;
 }
@@ -72,7 +72,7 @@ function stateFromRunResult(runResult: TurnRunResult): string {
 
 export class ChatRuntime {
   private readonly engine: ConversationEngine;
-  private readonly beastDispatchAdapter: ChatBeastDispatchAdapter | undefined;
+  private readonly beastDispatchAdapter: BeastDispatchPort | undefined;
   private readonly turnRunner: TurnRunner;
 
   constructor(options: ChatRuntimeOptions) {

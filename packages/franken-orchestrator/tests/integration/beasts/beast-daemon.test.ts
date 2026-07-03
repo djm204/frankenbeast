@@ -101,4 +101,19 @@ describe('beast daemon', () => {
     await daemon.close();
     expect(existsSync(stale.pidFile)).toBe(false);
   });
+
+  it('releases the pid file when service construction fails', async () => {
+    const paths = await makePaths();
+    const badDbParent = join(paths.root, 'not-a-directory');
+    await writeFile(badDbParent, 'blocking file');
+
+    await expect(startBeastDaemon({
+      ...paths,
+      beastsDb: join(badDbParent, 'beast.db'),
+      operatorToken,
+      port: 0,
+    })).rejects.toThrow();
+
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
 });

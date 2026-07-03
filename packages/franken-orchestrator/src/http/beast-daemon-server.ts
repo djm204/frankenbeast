@@ -38,9 +38,17 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
   const pidFile = options.pidFile ?? defaultBeastDaemonPidFile(options.root);
   await claimPidFile(pidFile);
 
-  const services = options.services ?? createBeastServices(options);
+  let services: BeastServiceBundle | undefined;
   let closed = false;
   let listening = false;
+
+  try {
+    services = options.services ?? createBeastServices(options);
+  } catch (error) {
+    await releasePidFile(pidFile);
+    throw error;
+  }
+
   const app = createBeastDaemonApp({ services, operatorToken: options.operatorToken });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);

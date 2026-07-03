@@ -218,6 +218,98 @@ describe('createSqliteAnalyticsService', () => {
     expect(result.events.map((event) => event.id)).toEqual(['cost:1', 'beast-run:run-early']);
   });
 
+  it('reads failed Beast runs directly from the daemon database without service handles', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE tracked_agents (
+        id TEXT PRIMARY KEY,
+        definition_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_by_user TEXT NOT NULL,
+        init_action TEXT NOT NULL,
+        init_config TEXT NOT NULL,
+        chat_session_id TEXT,
+        dispatch_run_id TEXT,
+        module_config TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE beast_runs (
+        id TEXT PRIMARY KEY,
+        tracked_agent_id TEXT,
+        definition_id TEXT NOT NULL,
+        definition_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        execution_mode TEXT NOT NULL,
+        config_snapshot TEXT NOT NULL,
+        dispatched_by TEXT NOT NULL,
+        dispatched_by_user TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        current_attempt_id TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_heartbeat_at TEXT,
+        stop_reason TEXT,
+        latest_exit_code INTEGER
+      );
+    `);
+    db.prepare(`
+      INSERT INTO tracked_agents (
+        id, definition_id, source, status, created_by_user, init_action, init_config,
+        chat_session_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'agent-1',
+      'martin-loop',
+      'chat',
+      'failed',
+      'operator',
+      '{}',
+      '{}',
+      'session-beast',
+      '2026-04-28T12:00:00.000Z',
+      '2026-04-28T12:00:00.000Z',
+    );
+    db.prepare(`
+      INSERT INTO beast_runs (
+        id, tracked_agent_id, definition_id, definition_version, status, execution_mode,
+        config_snapshot, dispatched_by, dispatched_by_user, created_at, finished_at,
+        attempt_count, latest_exit_code
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'run-failed',
+      'agent-1',
+      'martin-loop',
+      1,
+      'failed',
+      'container',
+      JSON.stringify({ objective: 'ship' }),
+      'chat',
+      'chat-session:session-beast',
+      '2026-04-28T12:00:00.000Z',
+      '2026-04-28T12:01:00.000Z',
+      1,
+      99,
+    );
+    db.close();
+
+    const service = createSqliteAnalyticsService({ dbPath });
+    const result = await service.listEvents({ outcome: 'failed' });
+
+    expect(result.events).toEqual([
+      expect.objectContaining({
+        id: 'beast-run:run-failed',
+        source: 'beast',
+        sessionId: 'session-beast',
+        summary: 'Beast run run-failed failed with exit code 99',
+      }),
+    ]);
+  });
+
   it('treats timezone-less SQLite timestamps as UTC for time-window cutoffs', async () => {
     previousTz = process.env.TZ;
     process.env.TZ = 'America/Los_Angeles';

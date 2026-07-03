@@ -71,4 +71,35 @@ describe('startChatServer comms pass-through', () => {
     expect(opts).not.toHaveProperty('commsConfig');
     expect(opts).not.toHaveProperty('commsRuntime');
   });
+
+  it('accepts a beastDaemon operator token for managed startup and chat app auth', async () => {
+    const previous = process.env['FRANKENBEAST_NETWORK_MANAGED'];
+    process.env['FRANKENBEAST_NETWORK_MANAGED'] = '1';
+    try {
+      handle = await startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir: '/tmp/chat-server-daemon-test',
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        beastDaemon: {
+          baseUrl: 'http://127.0.0.1:4050',
+          operatorToken: 'daemon-token',
+        },
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env['FRANKENBEAST_NETWORK_MANAGED'];
+      } else {
+        process.env['FRANKENBEAST_NETWORK_MANAGED'] = previous;
+      }
+    }
+
+    expect(mockedCreateChatApp).toHaveBeenCalledOnce();
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts.beastDaemon).toEqual({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+  });
 });

@@ -50,6 +50,33 @@ interface FirewallRow {
   created_at: string;
 }
 
+interface BeastRunAnalyticsRow {
+  id: string;
+  tracked_agent_id: string | null;
+  definition_id: string;
+  definition_version: number;
+  status: string;
+  execution_mode: string;
+  config_snapshot: string;
+  dispatched_by: string;
+  dispatched_by_user: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  current_attempt_id: string | null;
+  attempt_count: number;
+  last_heartbeat_at: string | null;
+  stop_reason: string | null;
+  latest_exit_code: number | null;
+}
+
+interface TrackedAgentAnalyticsRow {
+  id: string;
+  chat_session_id: string | null;
+}
+
+type AnalyticsAgentLink = Pick<TrackedAgent, 'id' | 'chatSessionId'>;
+
 export interface SqliteAnalyticsServiceOptions {
   dbPath: string;
   runs?: BeastRunService | undefined;
@@ -201,15 +228,50 @@ class SqliteAnalyticsService implements AnalyticsService {
   }
 
   private readBeastEvents(): AnalyticsEvent[] {
-    const runs = this.options.runs?.listRuns() ?? [];
-    const agents = new Map<string, TrackedAgent>();
-    for (const agent of this.options.agents?.listAgents() ?? []) {
-      agents.set(agent.id, agent);
+    if (this.options.runs || this.options.agents) {
+      const runs = this.options.runs?.listRuns() ?? [];
+      const agents = new Map<string, TrackedAgent>();
+      for (const agent of this.options.agents?.listAgents() ?? []) {
+        agents.set(agent.id, agent);
+      }
+
+      return runs
+        .filter((run) => run.status === 'failed')
+        .map((run) => beastRunToEvent(run, run.trackedAgentId ? agents.get(run.trackedAgentId) : undefined));
     }
 
-    return runs
-      .filter((run) => run.status === 'failed')
-      .map((run) => beastRunToEvent(run, run.trackedAgentId ? agents.get(run.trackedAgentId) : undefined));
+    const agents = new Map<string, AnalyticsAgentLink>();
+    for (const row of this.readRows<TrackedAgentAnalyticsRow>('tracked_agents', `
+      SELECT id, chat_session_id
+      FROM tracked_agents
+    `)) {
+      agents.set(row.id, {
+        id: row.id,
+        ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
+      });
+    }
+
+    return this.readRows<BeastRunAnalyticsRow>('beast_runs', `
+      SELECT id,
+             tracked_agent_id,
+             definition_id,
+             definition_version,
+             status,
+             execution_mode,
+             config_snapshot,
+             dispatched_by,
+             dispatched_by_user,
+             created_at,
+             started_at,
+             finished_at,
+             current_attempt_id,
+             attempt_count,
+             last_heartbeat_at,
+             stop_reason,
+             latest_exit_code
+      FROM beast_runs
+      WHERE status = 'failed'
+    `).map((row) => beastRunToEvent(beastRunFromRow(row), row.tracked_agent_id ? agents.get(row.tracked_agent_id) : undefined));
   }
 }
 
@@ -305,7 +367,29 @@ function firewallRowToEvent(row: FirewallRow): AnalyticsEvent {
   };
 }
 
-function beastRunToEvent(run: BeastRun, agent: TrackedAgent | undefined): AnalyticsEvent {
+function beastRunFromRow(row: BeastRunAnalyticsRow): BeastRun {
+  return {
+    id: row.id,
+    ...(row.tracked_agent_id ? { trackedAgentId: row.tracked_agent_id } : {}),
+    definitionId: row.definition_id,
+    definitionVersion: row.definition_version,
+    status: row.status as BeastRun['status'],
+    executionMode: row.execution_mode as BeastRun['executionMode'],
+    configSnapshot: parseJson(row.config_snapshot) as Readonly<Record<string, unknown>>,
+    dispatchedBy: row.dispatched_by as BeastRun['dispatchedBy'],
+    dispatchedByUser: row.dispatched_by_user,
+    createdAt: row.created_at,
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+    ...(row.current_attempt_id ? { currentAttemptId: row.current_attempt_id } : {}),
+    attemptCount: row.attempt_count,
+    ...(row.last_heartbeat_at ? { lastHeartbeatAt: row.last_heartbeat_at } : {}),
+    ...(row.stop_reason ? { stopReason: row.stop_reason } : {}),
+    ...(row.latest_exit_code !== null ? { latestExitCode: row.latest_exit_code } : {}),
+  };
+}
+
+function beastRunToEvent(run: BeastRun, agent: AnalyticsAgentLink | undefined): AnalyticsEvent {
   return {
     id: `beast-run:${run.id}`,
     timestamp: run.finishedAt ?? run.startedAt ?? run.createdAt,
