@@ -199,6 +199,43 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('stops local beast-control runs before closing', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const beastServices = createBeastServices({
+      beastsDb: join(TMP, 'beasts.db'),
+      beastLogsDir: join(TMP, 'beast-logs'),
+    });
+    const run = await beastServices.dispatch.createRun({
+      definitionId: 'design-interview',
+      config: {
+        goal: 'Close safely',
+        outputPath: 'docs/design.md',
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      startNow: false,
+    });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+      operatorToken: 'shared-token',
+      beastControl: {
+        ...beastServices,
+        security: new TransportSecurityService(),
+        operatorToken: 'shared-token',
+        rateLimit: { windowMs: 60_000, max: 20 },
+      },
+    });
+
+    await server.close();
+
+    expect(beastServices.runs.getRun(run.id).status).toBe('stopped');
+    beastServices.dispose();
+  });
+
   it('refuses to start on a non-loopback host without an operator token', async () => {
     mkdirSync(TMP, { recursive: true });
     await expect(startChatServer({

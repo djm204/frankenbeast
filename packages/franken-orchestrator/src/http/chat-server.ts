@@ -66,6 +66,7 @@ export interface ChatServerHandle {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3737;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
@@ -191,9 +192,30 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       options.disposeBeastControl?.();
       await closeHttpServer(server);
     },
   };
+}
+
+async function stopLiveBeastControlRuns(beastControl: BeastRoutesDeps | undefined): Promise<void> {
+  if (!beastControl) {
+    return;
+  }
+  for (const run of beastControl.runs.listRuns()) {
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      continue;
+    }
+    try {
+      await beastControl.runs.stop(run.id, 'chat-server-shutdown');
+    } catch {
+      try {
+        await beastControl.runs.kill(run.id, 'chat-server-shutdown');
+      } catch {
+        // Continue best-effort shutdown for remaining local Beast runs.
+      }
+    }
+  }
 }
