@@ -6,20 +6,19 @@
 
 > **Implementation status:** Implemented after the original ADR acceptance. The repository now ships the standalone `frankenbeast beasts-daemon` subcommand, a default `:4050` Beast API server, and `.frankenbeast/beasts-daemon.pid` lifecycle management; the historical implementation gap was tracked in [#495](https://github.com/djm204/frankenbeast/issues/495). `chat-server` can still instantiate beast services in-process for its own route, so operator docs should distinguish daemon deployment from chat-server-local wiring.
 
-## 2026-07-01 Deploy-Beasts Decision
+## 2026-07-01 Deploy-Beasts Decision (historical)
 
-ADR-027 remains accepted as the target architecture for an independently
-deployable beast control plane, but it is **deferred until after the current
-deploy-beasts MVP**. The sprint MVP routes dashboard beast deployment through
-the existing `chat-server` so the container-deploy work can land without adding
-a new process boundary.
+ADR-027 remained accepted as the target architecture for an independently
+deployable beast control plane, but was temporarily **deferred until after the
+deploy-beasts MVP**. That sprint routed dashboard beast deployment through the
+existing `chat-server` so the container-deploy work could land without adding a
+new process boundary.
 
-Follow-on implementation is tracked in
-[#463](https://github.com/djm204/frankenbeast/issues/463). Until that issue is
-implemented, `chat-server` continues to host the beast control APIs used by the
-dashboard, while CLI/direct service paths remain unchanged. ADR-027 should be
-revisited when the daemon becomes active so `docs/RAMP_UP.md` and operator guides
-can be updated to describe the new default route.
+Follow-on implementation was tracked in
+[#463](https://github.com/djm204/frankenbeast/issues/463), which is now closed.
+The standalone daemon route is implemented; `chat-server` may still host local
+beast APIs for its own process route, but this section is retained only as the
+historical deferral note that preceded the daemon implementation.
 
 ## Context
 

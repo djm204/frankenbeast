@@ -64,7 +64,7 @@ The strategic decision is to cut the redundant packages, absorb infrastructure c
 |---------|-------------|
 | `frankenfirewall` | Absorbed into orchestrator as LLM middleware (input validation + output filtering). 2-3 functions, not a package. |
 | `franken-skills` | Replaced by marketplace-first MCP skill discovery + directory-based `mcp.json` configs. Provider adapters query native marketplaces; users can also add custom MCP servers. Optional `context.md` for team-specific conventions. |
-| `franken-mcp` | Historical target: gone. Post-facto outcome: `franken-mcp-suite` remains in the workspace as the `fbeast` CLI/MCP suite package, while the orchestrator still connects to MCP servers as a client via `@modelcontextprotocol/sdk`. |
+| `franken-mcp` | Historical target: gone. Post-facto outcome: `franken-mcp-suite` remains in the workspace as the `fbeast` CLI/MCP suite package and uses the MCP SDK for its shipped servers; the orchestrator-side MCP adapter remains fail-closed until a live MCP transport/server is configured. |
 | `franken-heartbeat` | Split. Reflection → critique evaluator. Checkpointing → orchestrator. Periodic self-assessment → orchestrator config flag. |
 | `franken-comms` | Absorbed into orchestrator. Slack/Discord/Telegram/WhatsApp adapters, ChatGateway, session mapping, signature verification all move to `orchestrator/src/comms/`. Bidirectional comms preserved. **ChatSocketBridge replaced with direct in-process ChatRuntime integration** — eliminates the localhost WebSocket hop between comms and chat (see Comms Absorption below). |
 

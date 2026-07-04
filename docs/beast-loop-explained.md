@@ -117,7 +117,8 @@ while tasks remain pending:
     → check if task requires HITL approval (governor gate)
     → execute task
     → record trace to memory
-    → mark task as completed
+    if task succeeded → mark task as completed
+    if task failed → record failure; leave it out of the completed set
     if no ready tasks found → deadlock detected → stop
 ```
 
@@ -201,7 +202,7 @@ Checks cumulative token spend against a USD budget limit. When the limit is exce
 
 ### Heartbeat Pulse
 
-**Source:** `franken-orchestrator/src/adapters/reflection-heartbeat-adapter.ts`, invoked through `deps.heartbeat.pulse()` from `franken-orchestrator/src/beast-loop.ts`
+**Source:** `franken-orchestrator/src/adapters/reflection-heartbeat-adapter.ts`; closure heartbeat is invoked through `deps.heartbeat.pulse()` from `franken-orchestrator/src/phases/closure.ts`, while optional phase-boundary reflection is invoked from `franken-orchestrator/src/beast-loop.ts`
 
 Runs during the Closure phase and, when `enableReflection` is configured, after planning/execution phase boundaries. The current default adapter is lightweight: if no reflection function is configured it returns an empty pulse with `No reflection configured.` Target reflection implementations should follow a cost-conscious pattern:
 

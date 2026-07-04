@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Approach A ([ADR-007](007-cli-skill-execution-type.md)) provided CLI skill primitives (`CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`) that absorb the Martin loop into the orchestrator. However, the build-runner still reimplements plan decomposition, checkpoint tracking, and PR creation outside the orchestrator. There is no path from "I have an idea" to "here's a PR" without the human writing all intermediate artifacts (chunk files, build-runner scripts).
+Approach A ([ADR-007](007-cli-skill-execution-type.md)) provided CLI skill primitives (`CliSkillExecutor`, the historical `RalphLoop` now implemented as `MartinLoop`, and `GitBranchIsolator`) that absorb the CLI repeat-until-promise loop into the orchestrator. However, the build-runner still reimplements plan decomposition, checkpoint tracking, and PR creation outside the orchestrator. There is no path from "I have an idea" to "here's a PR" without the human writing all intermediate artifacts (chunk files, build-runner scripts).
 
 We needed the orchestrator to own the full pipeline: accept an idea in any form, decompose it into executable chunks, run them through the existing CLI skill pipeline, checkpoint progress for crash recovery, and create a PR at the end.
 
@@ -36,7 +36,7 @@ Additional components:
 - Per-commit checkpoint granularity enables crash recovery without losing passing work
 - Full automation possible: idea → interview → decomposition → implementation → PR
 - Build-runner becomes a thin shell over `BeastLoop.run()`, eliminating logic duplication
-- Reuses existing Approach A infrastructure: `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, observer tracing, circuit breakers
+- Reuses existing Approach A infrastructure: `CliSkillExecutor`, the historical `RalphLoop` now implemented as `MartinLoop`, `GitBranchIsolator`, observer tracing, circuit breakers
 
 **Negative:**
 - LLM decomposition quality depends on prompt engineering — poor decomposition produces poor chunk ordering
