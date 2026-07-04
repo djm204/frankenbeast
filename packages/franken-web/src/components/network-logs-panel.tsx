@@ -1,6 +1,6 @@
 interface NetworkLogsPanelProps {
   logs: string[];
-  services: Array<{ id: string; status: string }>;
+  services: Array<{ id: string; status: string; inProcess?: boolean; hostServiceId?: string }>;
   selectedServiceId?: string;
   isLoading?: boolean;
   error?: string | null;
@@ -15,6 +15,8 @@ export function NetworkLogsPanel({
   error = null,
   onSelectService,
 }: NetworkLogsPanelProps) {
+  const loggableServices = services.filter((service) => !service.inProcess || service.hostServiceId);
+
   return (
     <section className="rail-card network-logs">
       <div className="rail-card__header">
@@ -29,7 +31,7 @@ export function NetworkLogsPanel({
           value={selectedServiceId ?? ''}
         >
           <option value="">Select a service</option>
-          {services.map((service) => (
+          {loggableServices.map((service) => (
             <option key={service.id} value={service.id}>
               {service.id} ({service.status})
             </option>
@@ -39,7 +41,7 @@ export function NetworkLogsPanel({
       <div className="network-logs__list">
         {isLoading ? <p>Loading logs...</p> : null}
         {!isLoading && error ? <p role="alert">{error}</p> : null}
-        {!isLoading && !error && logs.length > 0 ? logs.map((log) => <code key={log}>{log}</code>) : null}
+        {!isLoading && !error && logs.length > 0 ? logs.map((log, index) => <code key={`${index}:${log}`}>{log}</code>) : null}
         {!isLoading && !error && logs.length === 0 ? <p>{selectedServiceId ? 'No logs found.' : 'No logs selected.'}</p> : null}
       </div>
     </section>

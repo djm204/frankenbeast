@@ -231,6 +231,8 @@ describe('NetworkPage', () => {
         services={[
           { id: 'chat-server', status: 'running' },
           { id: 'dashboard', status: 'stopped' },
+          { id: 'orphan-in-process', status: 'running', inProcess: true },
+          { id: 'comms-gateway', status: 'running', inProcess: true, hostServiceId: 'chat-server' },
         ]}
         status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
       />,
@@ -239,5 +241,7 @@ describe('NetworkPage', () => {
     fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });
 
     expect(onSelectLogService).toHaveBeenCalledWith('chat-server');
+    expect(screen.queryByRole('option', { name: 'orphan-in-process (running)' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'comms-gateway (running)' })).toBeDefined();
   });
 });
