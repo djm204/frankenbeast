@@ -214,8 +214,13 @@ Default pricing (USD, 2025-Q4):
 | `claude-opus-4-6` | $15.00 | $75.00 |
 | `claude-sonnet-4-6` | $3.00 | $15.00 |
 | `claude-haiku-4-5` | $0.80 | $4.00 |
+| `claude` (alias for sonnet) | $3.00 | $15.00 |
 | `gpt-4o` | $5.00 | $15.00 |
 | `gpt-4o-mini` | $0.15 | $0.60 |
+| `gemini-2.0-flash` | $0.10 | $0.40 |
+| `gemini` (alias for flash) | $0.10 | $0.40 |
+| `codex` | $5.00 | $15.00 |
+| `aider` (uses sonnet by default) | $3.00 | $15.00 |
 
 ### `CircuitBreaker`
 
@@ -755,14 +760,14 @@ EVAL=true npm run test:eval
 npm run test:watch
 ```
 
-249 unit tests. All adapters and integrations are tested with injectable `fetch` functions — no network calls in CI.
+The package ships an extensive unit test suite. All adapters and integrations are tested with injectable `fetch` functions — no network calls in CI.
 
 ---
 
 ## Building
 
 ```bash
-npm run build       # CJS + ESM + DTS → dist/
+npm run build       # tsc → dist/ (ESM + DTS)
 npm run typecheck   # tsc --noEmit
 ```
 
@@ -770,12 +775,10 @@ Output:
 
 ```
 dist/index.js      # ESM
-dist/index.cjs     # CommonJS
 dist/index.d.ts    # TypeScript declarations
-dist/index.d.cts   # CJS declarations
 ```
 
-The package exports are configured so that `types` is resolved first, making the package compatible with all TypeScript `moduleResolution` modes.
+The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The `exports` map has `types` and `import` conditions but no `require` entry, so the package cannot be `require()`d from CommonJS — consumers must use `import` (or a dynamic `import()` from CJS).
 
 ---
 
