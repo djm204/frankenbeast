@@ -424,11 +424,26 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
   async function approve(approved: boolean): Promise<void> {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== 1) {
+    if (!sessionId) {
       return;
     }
 
     setStatus('sending');
+    if (!socket || socket.readyState !== 1) {
+      try {
+        await clientRef.current.approve(sessionId, approved);
+        const refreshed = await clientRef.current.getSession(sessionId);
+        setMessages(applySessionSnapshot(refreshed));
+        setPendingApproval(refreshed.pendingApproval ?? null);
+        setTokenTotals(refreshed.tokenTotals);
+        setCostUsd(refreshed.costUsd);
+        setStatus('idle');
+      } catch {
+        setStatus('error');
+      }
+      return;
+    }
+
     socket.send(JSON.stringify({
       type: 'approval.respond',
       approved,
