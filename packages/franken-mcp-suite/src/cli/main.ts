@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { DEFAULT_BEAST_PROVIDER, formatSupportedBeastProviders } from './beast-mode.js';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
 
@@ -74,36 +75,42 @@ switch (subcommand) {
     const { createInterface } = await import('node:readline');
     const { spawnSync: spawn } = await import('node:child_process');
     const root = process.cwd();
-    await runBeastMode(process.argv.slice(4), {
-      root,
-      confirm: (msg) => {
-        const rl = createInterface({ input: process.stdin, output: process.stdout });
-        return new Promise<boolean>((resolve) => {
-          rl.question(msg + ' ', (answer) => {
-            rl.close();
-            resolve(answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes');
+    try {
+      await runBeastMode(process.argv.slice(4), {
+        root,
+        confirm: (msg) => {
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          return new Promise<boolean>((resolve) => {
+            rl.question(msg + ' ', (answer) => {
+              rl.close();
+              resolve(answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes');
+            });
           });
-        });
-      },
-      exec: async (cmd, args) => {
-        const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
-        if (result.error) {
-          const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
-          throw new Error(
-            isNotFound
-              ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
-              : `${cmd} failed: ${result.error.message}`,
-          );
-        }
-        if (result.status !== 0) {
-          throw new Error(
-            result.signal
-              ? `${cmd} killed by signal ${result.signal}`
-              : `${cmd} exited with ${result.status}`,
-          );
-        }
-      },
-    });
+        },
+        exec: async (cmd, args) => {
+          const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+          if (result.error) {
+            const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
+            throw new Error(
+              isNotFound
+                ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
+                : `${cmd} failed: ${result.error.message}`,
+            );
+          }
+          if (result.status !== 0) {
+            throw new Error(
+              result.signal
+                ? `${cmd} killed by signal ${result.signal}`
+                : `${cmd} exited with ${result.status}`,
+            );
+          }
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`fbeast mcp beast: ${message}`);
+      process.exit(1);
+    }
     break;
   }
   default:
@@ -119,7 +126,7 @@ switch (subcommand) {
     console.log('  mcp uninstall --client=<name>   Target a specific client');
     console.log('  mcp uninstall --purge           Also remove stored data');
     console.log('  mcp beast                       Activate Beast mode');
-    console.log('  mcp beast --provider=<name>     LLM provider: anthropic-api (default), codex-cli, claude-cli');
+    console.log(`  mcp beast --provider=<name>     LLM provider: ${formatSupportedBeastProviders()} (default: ${DEFAULT_BEAST_PROVIDER})`);
     console.log('');
     console.log('All other commands are forwarded to frankenbeast.');
     console.log('Run: frankenbeast --help');

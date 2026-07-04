@@ -58,6 +58,33 @@ describe('runBeastMode', () => {
     expect(deps.confirm).not.toHaveBeenCalled();
   });
 
+  it('activates beast mode with explicit codex-cli provider without prompting', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const deps = makeDeps(root);
+
+    await runBeastMode(['--provider=codex-cli'], deps);
+
+    const raw = JSON.parse(readFileSync(join(root, '.fbeast', 'config.json'), 'utf-8'));
+    expect(raw.beast.provider).toBe('codex-cli');
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.exec).toHaveBeenCalledWith('frankenbeast', ['beasts', 'catalog']);
+  });
+
+  it('rejects invalid provider values before saving config', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const deps = makeDeps(root);
+
+    await expect(runBeastMode(['--provider=codex'], deps)).rejects.toThrow(
+      'Invalid beast provider "codex". Valid providers: anthropic-api, codex-cli, claude-cli',
+    );
+
+    expect(existsSync(join(root, '.fbeast', 'config.json'))).toBe(false);
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.exec).not.toHaveBeenCalled();
+  });
+
   it('requires confirmation for claude-cli provider', async () => {
     const root = tmpDir();
     dirs.push(root);

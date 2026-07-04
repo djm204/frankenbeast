@@ -21,6 +21,24 @@ describe('fbeast main CLI', () => {
     expect(runUninstall).toHaveBeenCalledWith(expect.objectContaining({ client: 'codex' }));
   });
 
+  it('prints concise invalid beast provider errors and exits non-zero', async () => {
+    process.argv = ['node', 'fbeast', 'mcp', 'beast', '--provider=bogus'];
+
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    expect(mockError).toHaveBeenCalledWith(
+      'fbeast mcp beast: Invalid beast provider "bogus". Valid providers: anthropic-api, codex-cli, claude-cli',
+    );
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
   it('passes through non-mcp commands to frankenbeast', async () => {
     const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));

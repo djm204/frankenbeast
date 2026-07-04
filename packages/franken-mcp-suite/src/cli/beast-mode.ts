@@ -2,6 +2,24 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FbeastConfig } from '../shared/config.js';
 
+export const SUPPORTED_BEAST_PROVIDERS = ['anthropic-api', 'codex-cli', 'claude-cli'] as const;
+export type BeastProvider = (typeof SUPPORTED_BEAST_PROVIDERS)[number];
+export const DEFAULT_BEAST_PROVIDER: BeastProvider = 'anthropic-api';
+
+export function formatSupportedBeastProviders(): string {
+  return SUPPORTED_BEAST_PROVIDERS.join(', ');
+}
+
+function parseBeastProvider(value: string): BeastProvider {
+  if ((SUPPORTED_BEAST_PROVIDERS as readonly string[]).includes(value)) {
+    return value as BeastProvider;
+  }
+
+  throw new Error(
+    `Invalid beast provider "${value}". Valid providers: ${formatSupportedBeastProviders()}`,
+  );
+}
+
 export interface BeastModeDeps {
   root: string;
   confirm(message: string): Promise<boolean>;
@@ -9,7 +27,9 @@ export interface BeastModeDeps {
 }
 
 export async function runBeastMode(argv: string[], deps: BeastModeDeps): Promise<void> {
-  const provider = argv.find((arg) => arg.startsWith('--provider='))?.split('=')[1] ?? 'anthropic-api';
+  const provider = parseBeastProvider(
+    argv.find((arg) => arg.startsWith('--provider='))?.split('=')[1] ?? DEFAULT_BEAST_PROVIDER,
+  );
 
   const config = existsSync(join(deps.root, '.fbeast', 'config.json'))
     ? FbeastConfig.load(deps.root)
