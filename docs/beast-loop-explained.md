@@ -18,7 +18,8 @@ User Input
   → Plan rejected? ──── re-plan ─┘
   → Plan approved
   → Execute tasks sequentially in topo order
-      → Task fails? ── fail current run (target: recovery classifies/injects fix; #496)
+      → Task fails? ── record failed task; continue independent ready tasks
+          (target: recovery classifies/injects fix; #496)
       → Governor blocks? ── HITL approval ── proceed or abort
       → Loop detected? ── Observer fires event ── halt
       → Budget exceeded? ── Circuit breaker trips ── HITL escalation
@@ -124,9 +125,14 @@ while tasks remain pending:
 
 The live orchestrator execution phase is sequential: it runs ready tasks one at a time in topological order. Planner strategy modules describe additional target execution modes, but parallel waves and recursive expansion are not wired into `BeastLoop`/`runExecution` yet; that implementation gap is tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
 
-**Linear** (`franken-planner/src/planners/linear.ts`) — current live behavior
+**Sequential topological execution** (`franken-orchestrator/src/phases/execution.ts`) — current live behavior
 - Tasks execute one at a time in topological order
-- First failure stops the entire sequence
+- A failed task is recorded but not added to the completed set
+- Independent ready tasks can still run; dependents of the failed task are later skipped as unmet dependencies
+
+**Linear planner strategy** (`franken-planner/src/planners/linear.ts`) — planner strategy module, not the live orchestrator execution loop
+- Tasks execute one at a time in topological order
+- First failure stops the strategy sequence
 
 **Parallel** (`franken-planner/src/planners/parallel.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks execute in concurrent "waves"

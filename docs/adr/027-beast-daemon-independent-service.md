@@ -1,10 +1,10 @@
 # ADR-027: Beast Daemon as Independent Service
 
 - **Date:** 2026-03-16
-- **Status:** Accepted (deferred; follow-up implementation tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
+- **Status:** Accepted (implemented; follow-up tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
 - **Deciders:** pfk
 
-> **Implementation status:** Accepted target architecture, not live behavior. The standalone `frankenbeast beasts-daemon` process, `:4050` API, and daemon PID lifecycle are not implemented yet; the gap is documented in [#495](https://github.com/djm204/frankenbeast/issues/495). Until the implementation lands, `chat-server` continues to instantiate beast services in-process.
+> **Implementation status:** Implemented after the original ADR acceptance. The repository now ships the standalone `frankenbeast beasts-daemon` subcommand, a default `:4050` Beast API server, and `.frankenbeast/beasts-daemon.pid` lifecycle management; the historical implementation gap was tracked in [#495](https://github.com/djm204/frankenbeast/issues/495). `chat-server` can still instantiate beast services in-process for its own route, so operator docs should distinguish daemon deployment from chat-server-local wiring.
 
 ## 2026-07-01 Deploy-Beasts Decision
 
