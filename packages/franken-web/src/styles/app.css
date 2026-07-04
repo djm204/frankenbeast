@@ -839,6 +839,7 @@ button {
 
 .analytics-header,
 .analytics-filter-bar,
+.analytics-pagination,
 .analytics-panel,
 .analytics-metric,
 .analytics-drawer {
@@ -909,10 +910,28 @@ button {
 
 .analytics-filter-bar {
   display: grid;
-  grid-template-columns: minmax(12rem, 1.1fr) minmax(12rem, 1.1fr) minmax(10rem, 0.8fr) minmax(10rem, 0.7fr);
+  grid-template-columns: minmax(12rem, 1.1fr) minmax(12rem, 1.1fr) minmax(10rem, 0.8fr) minmax(10rem, 0.7fr) minmax(9rem, 0.6fr);
   gap: 0.8rem;
   padding: 1rem;
   border-radius: 1.15rem;
+}
+
+.analytics-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 1.15rem;
+  color: var(--text-muted);
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.analytics-pagination__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .analytics-filter-bar .field-stack {
@@ -1094,6 +1113,15 @@ button {
   .analytics-table-grid,
   .analytics-filter-bar {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .analytics-pagination__actions {
+    justify-content: space-between;
   }
 
   .session-switcher,

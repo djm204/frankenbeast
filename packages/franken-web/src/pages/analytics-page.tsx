@@ -30,8 +30,13 @@ const TIME_WINDOWS = [
   { value: 'all', label: 'All time' },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 50;
+
 export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [filters, setFilters] = useState<AnalyticsFilters>({ timeWindow: '24h' });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [sessions, setSessions] = useState<AnalyticsSessionOption[]>([]);
   const [eventPage, setEventPage] = useState<AnalyticsEventPage | null>(null);
@@ -48,7 +53,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     void Promise.allSettled([
       client.fetchSummary(filters),
       client.fetchSessions(filters),
-      client.fetchEvents(filters),
+      client.fetchEvents({ ...filters, page, pageSize }),
     ]).then(([summaryResult, sessionsResult, eventsResult]) => {
       if (cancelled) return;
       const errors = [summaryResult, sessionsResult, eventsResult]
@@ -73,9 +78,15 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [client, filters]);
+  }, [client, filters, page, pageSize]);
 
   const events = eventPage?.events ?? [];
+  const totalEvents = eventPage?.total ?? 0;
+  const currentPage = eventPage?.page ?? page;
+  const currentPageSize = eventPage?.pageSize ?? pageSize;
+  const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
+  const canGoPrevious = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
   const activityEvents = useMemo(
     () => events.filter((event) => event.outcome === 'approved' && event.source !== 'governor'),
     [events],
@@ -100,6 +111,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       ...current,
       ...next,
     }));
+    setPage(1);
+  }
+
+  function updatePageSize(nextPageSize: number) {
+    setPageSize(nextPageSize);
+    setPage(1);
   }
 
   return (
@@ -109,7 +126,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
           <p className="eyebrow">Analytics</p>
           <h2>Observer Activity</h2>
         </div>
-        <p>{eventPage?.total ?? 0} normalized events</p>
+        <p>{totalEvents} normalized events</p>
       </section>
 
       {loadError && <div className="analytics-alert">{loadError}</div>}
@@ -184,6 +201,46 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
             ))}
           </select>
         </label>
+
+        <label className="field-stack">
+          <span>Page size</span>
+          <select
+            aria-label="Page size"
+            className="field-control"
+            value={pageSize}
+            onChange={(event) => updatePageSize(Number(event.target.value))}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option} per page
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      <section className="analytics-pagination" aria-label="Analytics pagination">
+        <div>
+          Page {currentPage} of {totalPages} · {totalEvents} events
+        </div>
+        <div className="analytics-pagination__actions">
+          <button
+            className="button button--secondary button--small"
+            disabled={!canGoPrevious}
+            type="button"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Previous
+          </button>
+          <button
+            className="button button--secondary button--small"
+            disabled={!canGoNext}
+            type="button"
+            onClick={() => setPage((current) => current + 1)}
+          >
+            Next
+          </button>
+        </div>
       </section>
 
       {isLoading ? (

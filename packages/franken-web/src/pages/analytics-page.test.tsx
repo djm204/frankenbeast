@@ -95,7 +95,56 @@ describe('AnalyticsPage', () => {
 
     await waitFor(() => {
       expect(client.fetchSummary).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
-      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1 }));
+    });
+  });
+
+  it('navigates event pages and exposes disabled pagination states', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEvents)
+      .mockResolvedValueOnce({ total: 75, page: 1, pageSize: 50, events: [] })
+      .mockResolvedValueOnce({ total: 75, page: 2, pageSize: 50, events: [] });
+
+    render(<AnalyticsPage client={client} />);
+
+    const previous = await screen.findByRole('button', { name: 'Previous' });
+    const next = screen.getByRole('button', { name: 'Next' });
+    expect(previous).toHaveProperty('disabled', true);
+    expect(next).toHaveProperty('disabled', false);
+    expect(screen.getByText('Page 1 of 2 · 75 events')).toBeTruthy();
+
+    fireEvent.click(next);
+
+    await waitFor(() => {
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 50 }));
+    });
+    expect(await screen.findByText('Page 2 of 2 · 75 events')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
+  });
+
+  it('resets to the first page when filters or page size change', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEvents)
+      .mockResolvedValueOnce({ total: 75, page: 1, pageSize: 50, events: [] })
+      .mockResolvedValueOnce({ total: 75, page: 2, pageSize: 50, events: [] })
+      .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 50, events: [] })
+      .mockResolvedValueOnce({ total: 1, page: 1, pageSize: 25, events: [] });
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+    });
+
+    fireEvent.change(screen.getByLabelText('Session'), { target: { value: 'session-a' } });
+    await waitFor(() => {
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1, pageSize: 50 }));
+    });
+
+    fireEvent.change(screen.getByLabelText('Page size'), { target: { value: '25' } });
+    await waitFor(() => {
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1, pageSize: 25 }));
     });
   });
 

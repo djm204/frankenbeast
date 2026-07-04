@@ -36,8 +36,10 @@ describe('AnalyticsApiClient', () => {
     const client = new AnalyticsApiClient(BASE_URL);
 
     await expect(client.fetchSessions({ timeWindow: '24h' })).resolves.toEqual([{ id: 'session-a' }]);
-    await expect(client.fetchEvents({ toolQuery: 'observer' })).resolves.toMatchObject({ total: 1 });
+    await expect(client.fetchEvents({ toolQuery: 'observer', page: 2, pageSize: 25 })).resolves.toMatchObject({ total: 1 });
     await expect(client.fetchEventDetail('audit:1')).resolves.toMatchObject({ id: 'audit:1' });
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/analytics/events?toolQuery=observer&page=2&pageSize=25`);
   });
 
   it('throws on failed responses', async () => {
