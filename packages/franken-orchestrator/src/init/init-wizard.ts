@@ -10,7 +10,15 @@ export interface InitWizardResult {
   state: InitState;
 }
 
-export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'discord' | 'secret-backend';
+export type InitWizardScope =
+  | 'modules'
+  | 'provider'
+  | 'security'
+  | 'slack'
+  | 'discord'
+  | 'telegram'
+  | 'whatsapp'
+  | 'secret-backend';
 
 interface RunInitWizardOptions {
   io: InterviewIO;
@@ -89,6 +97,19 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
         botTokenRef: stateValue(state, 'comms.discord.botTokenRef') as string | undefined,
         publicKeyRef: stateValue(state, 'comms.discord.publicKeyRef') as string | undefined,
       },
+      telegram: {
+        ...baseConfig.comms.telegram,
+        enabled: state.selectedCommsTransports.includes('telegram'),
+        botTokenRef: stateValue(state, 'comms.telegram.botTokenRef') as string | undefined,
+      },
+      whatsapp: {
+        ...baseConfig.comms.whatsapp,
+        enabled: state.selectedCommsTransports.includes('whatsapp'),
+        accessTokenRef: stateValue(state, 'comms.whatsapp.accessTokenRef') as string | undefined,
+        phoneNumberIdRef: stateValue(state, 'comms.whatsapp.phoneNumberIdRef') as string | undefined,
+        appSecretRef: stateValue(state, 'comms.whatsapp.appSecretRef') as string | undefined,
+        verifyTokenRef: stateValue(state, 'comms.whatsapp.verifyTokenRef') as string | undefined,
+      },
     },
   });
 }
@@ -103,7 +124,9 @@ function isSecretBackendOnlyScope(scope: readonly InitWizardScope[] | undefined)
 
 export async function runInitWizard(options: RunInitWizardOptions): Promise<InitWizardResult> {
   const config = options.baseConfig ?? defaultConfig();
-  const scope = new Set<InitWizardScope>(options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord']);
+  const scope = new Set<InitWizardScope>(
+    options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord', 'telegram', 'whatsapp'],
+  );
   const secretBackendOnly = isSecretBackendOnlyScope(options.scope);
 
   let enableChat = moduleDefault(options.initialState, config, 'chat');
@@ -267,6 +290,62 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           const currentPublicKeyRef = String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? '');
           if (!scope.has('discord') || currentPublicKeyRef.length === 0) {
             answers['comms.discord.publicKeyRef'] = await askText(options.io, 'Discord public key ref', currentPublicKeyRef);
+          }
+        }
+      }
+
+      if (transport.id === 'telegram') {
+        if (options.secretStore) {
+          const rawBotToken = await askText(options.io, 'Enter your Telegram bot token:', '');
+          if (rawBotToken.length > 0) {
+            await options.secretStore.store('comms.telegram.botTokenRef', rawBotToken);
+            answers['comms.telegram.botTokenRef'] = 'comms.telegram.botTokenRef';
+          }
+        } else {
+          const currentBotTokenRef = String(stateValue(options.initialState, 'comms.telegram.botTokenRef') ?? '');
+          if (!scope.has('telegram') || currentBotTokenRef.length === 0) {
+            answers['comms.telegram.botTokenRef'] = await askText(options.io, 'Telegram bot token ref', currentBotTokenRef);
+          }
+        }
+      }
+
+      if (transport.id === 'whatsapp') {
+        if (options.secretStore) {
+          const rawAccessToken = await askText(options.io, 'Enter your WhatsApp access token:', '');
+          if (rawAccessToken.length > 0) {
+            await options.secretStore.store('comms.whatsapp.accessTokenRef', rawAccessToken);
+            answers['comms.whatsapp.accessTokenRef'] = 'comms.whatsapp.accessTokenRef';
+          }
+          const rawPhoneNumberId = await askText(options.io, 'Enter your WhatsApp phone number ID:', '');
+          if (rawPhoneNumberId.length > 0) {
+            answers['comms.whatsapp.phoneNumberIdRef'] = rawPhoneNumberId;
+          }
+          const rawAppSecret = await askText(options.io, 'Enter your WhatsApp app secret:', '');
+          if (rawAppSecret.length > 0) {
+            await options.secretStore.store('comms.whatsapp.appSecretRef', rawAppSecret);
+            answers['comms.whatsapp.appSecretRef'] = 'comms.whatsapp.appSecretRef';
+          }
+          const rawVerifyToken = await askText(options.io, 'Enter your WhatsApp verify token:', '');
+          if (rawVerifyToken.length > 0) {
+            await options.secretStore.store('comms.whatsapp.verifyTokenRef', rawVerifyToken);
+            answers['comms.whatsapp.verifyTokenRef'] = 'comms.whatsapp.verifyTokenRef';
+          }
+        } else {
+          const currentAccessTokenRef = String(stateValue(options.initialState, 'comms.whatsapp.accessTokenRef') ?? '');
+          if (!scope.has('whatsapp') || currentAccessTokenRef.length === 0) {
+            answers['comms.whatsapp.accessTokenRef'] = await askText(options.io, 'WhatsApp access token ref', currentAccessTokenRef);
+          }
+          const currentPhoneNumberIdRef = String(stateValue(options.initialState, 'comms.whatsapp.phoneNumberIdRef') ?? '');
+          if (!scope.has('whatsapp') || currentPhoneNumberIdRef.length === 0) {
+            answers['comms.whatsapp.phoneNumberIdRef'] = await askText(options.io, 'WhatsApp phone number ID ref', currentPhoneNumberIdRef);
+          }
+          const currentAppSecretRef = String(stateValue(options.initialState, 'comms.whatsapp.appSecretRef') ?? '');
+          if (!scope.has('whatsapp') || currentAppSecretRef.length === 0) {
+            answers['comms.whatsapp.appSecretRef'] = await askText(options.io, 'WhatsApp app secret ref', currentAppSecretRef);
+          }
+          const currentVerifyTokenRef = String(stateValue(options.initialState, 'comms.whatsapp.verifyTokenRef') ?? '');
+          if (!scope.has('whatsapp') || currentVerifyTokenRef.length === 0) {
+            answers['comms.whatsapp.verifyTokenRef'] = await askText(options.io, 'WhatsApp verify token ref', currentVerifyTokenRef);
           }
         }
       }

@@ -75,6 +75,33 @@ describe('verifyInit', () => {
     expect(result.messages.join('\n')).not.toContain('Discord');
   });
 
+  it('validates enabled Telegram and WhatsApp transports', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = true;
+    config.comms.telegram.enabled = true;
+    config.comms.whatsapp.enabled = true;
+    config.comms.whatsapp.accessTokenRef = 'op://whatsapp/access-token';
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: ['comms'],
+      selectedCommsTransports: ['telegram', 'whatsapp'],
+    });
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join('\n')).toContain('Telegram config is incomplete: missing botTokenRef');
+    expect(result.messages.join('\n')).toContain('WhatsApp config is incomplete: missing phoneNumberIdRef, appSecretRef, verifyTokenRef');
+  });
+
   it('repair revisits only failing sections and preserves valid answers', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');

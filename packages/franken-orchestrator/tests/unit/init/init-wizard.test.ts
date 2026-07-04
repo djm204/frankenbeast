@@ -142,6 +142,8 @@ describe('runInitWizard – with secretStore and Slack enabled', () => {
       'xoxb-abc',     // Slack bot token (raw value)
       'signsecret',   // Slack signing secret (raw value)
       'n',            // Enable Discord?
+      'n',            // Enable Telegram?
+      'n',            // Enable WhatsApp?
       '',             // Operator token (blank → auto)
     ]);
     const secretStore = makeSecretStore({ available: true });
@@ -169,6 +171,8 @@ describe('runInitWizard – with secretStore and Discord enabled', () => {
       '1234567890',      // Discord application ID
       'discord-bot-tok', // Discord bot token (raw value)
       'pubkey-abc',      // Discord public key (raw value)
+      'n',               // Enable Telegram?
+      'n',               // Enable WhatsApp?
       '',                // Operator token (blank → auto)
     ]);
     const secretStore = makeSecretStore({ available: true });
@@ -179,6 +183,44 @@ describe('runInitWizard – with secretStore and Discord enabled', () => {
     expect(secretStore.stored.has('comms.discord.publicKeyRef')).toBe(false);
     expect(result.config.comms.discord.botTokenRef).toBe('comms.discord.botTokenRef');
     expect(result.config.comms.discord.publicKeyRef).toBe('pubkey-abc');
+  });
+});
+
+describe('runInitWizard – with Telegram and WhatsApp enabled', () => {
+  it('prompts for runtime-supported Telegram and WhatsApp secrets', async () => {
+    const io = makeIO([
+      'y',                    // Enable Chat?
+      'y',                    // Enable Dashboard?
+      'y',                    // Enable Comms?
+      'claude',               // Default provider
+      'secure',               // Security mode
+      'n',                    // Enable Slack?
+      'n',                    // Enable Discord?
+      'y',                    // Enable Telegram?
+      'telegram-bot-token',   // Telegram bot token (raw value)
+      'y',                    // Enable WhatsApp?
+      'wa-access-token',      // WhatsApp access token (raw value)
+      'wa-phone-number-id',   // WhatsApp phone number ID
+      'wa-app-secret',        // WhatsApp app secret (raw value)
+      'wa-verify-token',      // WhatsApp verify token (raw value)
+      '',                     // Operator token (blank → auto)
+    ]);
+    const secretStore = makeSecretStore({ available: true });
+    const state = createEmptyInitState('/tmp/test-config.json');
+
+    const result = await runInitWizard({ io, initialState: state, secretStore });
+
+    expect(result.config.comms.telegram.enabled).toBe(true);
+    expect(result.config.comms.telegram.botTokenRef).toBe('comms.telegram.botTokenRef');
+    expect(secretStore.stored.get('comms.telegram.botTokenRef')).toBe('telegram-bot-token');
+    expect(result.config.comms.whatsapp.enabled).toBe(true);
+    expect(result.config.comms.whatsapp.accessTokenRef).toBe('comms.whatsapp.accessTokenRef');
+    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe('wa-phone-number-id');
+    expect(result.config.comms.whatsapp.appSecretRef).toBe('comms.whatsapp.appSecretRef');
+    expect(result.config.comms.whatsapp.verifyTokenRef).toBe('comms.whatsapp.verifyTokenRef');
+    expect(secretStore.stored.get('comms.whatsapp.accessTokenRef')).toBe('wa-access-token');
+    expect(secretStore.stored.get('comms.whatsapp.appSecretRef')).toBe('wa-app-secret');
+    expect(secretStore.stored.get('comms.whatsapp.verifyTokenRef')).toBe('wa-verify-token');
   });
 });
 

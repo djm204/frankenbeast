@@ -42,6 +42,11 @@ describe('network-config-paths', () => {
     expect(isSensitiveConfigPath('comms.slack.signingSecretRef')).toBe(true);
     expect(isSensitiveConfigPath('comms.discord.botTokenRef')).toBe(true);
     expect(isSensitiveConfigPath('comms.discord.publicKeyRef')).toBe(false);
+    expect(isSensitiveConfigPath('comms.telegram.botTokenRef')).toBe(true);
+    expect(isSensitiveConfigPath('comms.whatsapp.accessTokenRef')).toBe(true);
+    expect(isSensitiveConfigPath('comms.whatsapp.phoneNumberIdRef')).toBe(false);
+    expect(isSensitiveConfigPath('comms.whatsapp.appSecretRef')).toBe(true);
+    expect(isSensitiveConfigPath('comms.whatsapp.verifyTokenRef')).toBe(true);
     expect(isSensitiveConfigPath('chat.model')).toBe(false);
   });
 });

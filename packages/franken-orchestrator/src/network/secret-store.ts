@@ -74,6 +74,11 @@ export interface ResolvedSecrets {
   slackBotToken?: string | undefined;
   slackSigningSecret?: string | undefined;
   discordBotToken?: string | undefined;
+  telegramBotToken?: string | undefined;
+  whatsappAccessToken?: string | undefined;
+  whatsappPhoneNumberId?: string | undefined;
+  whatsappAppSecret?: string | undefined;
+  whatsappVerifyToken?: string | undefined;
 }
 
 export class SecretResolver {
@@ -105,12 +110,34 @@ export class SecretResolver {
       ? await this.store.resolve(config.comms.discord.botTokenRef)
       : undefined;
 
+    const telegramBotToken = config.comms.telegram.enabled && config.comms.telegram.botTokenRef
+      ? await this.store.resolve(config.comms.telegram.botTokenRef)
+      : undefined;
+
+    const whatsappAccessToken = config.comms.whatsapp.enabled && config.comms.whatsapp.accessTokenRef
+      ? await this.store.resolve(config.comms.whatsapp.accessTokenRef)
+      : undefined;
+    const whatsappPhoneNumberId = config.comms.whatsapp.enabled && config.comms.whatsapp.phoneNumberIdRef
+      ? await this.store.resolve(config.comms.whatsapp.phoneNumberIdRef)
+      : undefined;
+    const whatsappAppSecret = config.comms.whatsapp.enabled && config.comms.whatsapp.appSecretRef
+      ? await this.store.resolve(config.comms.whatsapp.appSecretRef)
+      : undefined;
+    const whatsappVerifyToken = config.comms.whatsapp.enabled && config.comms.whatsapp.verifyTokenRef
+      ? await this.store.resolve(config.comms.whatsapp.verifyTokenRef)
+      : undefined;
+
     return {
       operatorToken,
       orchestratorToken,
       slackBotToken,
       slackSigningSecret,
       discordBotToken,
+      telegramBotToken,
+      whatsappAccessToken,
+      whatsappPhoneNumberId,
+      whatsappAppSecret,
+      whatsappVerifyToken,
     };
   }
 }
