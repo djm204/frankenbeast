@@ -140,11 +140,25 @@ describe('Integration — ParallelPlanner', () => {
     const graph = PlanGraph.empty()
       .addTask(makeTask('a'))
       .addTask(makeTask('b'));
-    const executor = vi.fn().mockImplementation((t: Task) => Promise.resolve(ok(t.id)));
+    let approvedSiblingCompleted = false;
+    const executor = vi.fn().mockImplementation((t: Task) => {
+      if (t.id === createTaskId('a')) {
+        return new Promise<TaskResult>((resolve) => {
+          setTimeout(() => {
+            approvedSiblingCompleted = true;
+            resolve(ok(t.id));
+          }, 10);
+        });
+      }
+      return Promise.resolve(ok(t.id));
+    });
     const selfCritique: SelfCritiqueModule = {
-      verifyRationale: vi.fn()
-        .mockResolvedValueOnce({ verdict: 'approved' })
-        .mockResolvedValueOnce({ verdict: 'rejected', reason: 'unsafe rationale' }),
+      verifyRationale: vi.fn().mockImplementation((rationale) => {
+        if (rationale.taskId === createTaskId('b')) {
+          return Promise.resolve({ verdict: 'rejected', reason: 'unsafe rationale' });
+        }
+        return Promise.resolve({ verdict: 'approved' });
+      }),
     };
 
     const result = await buildParallelPlanner(graph, executor, selfCritique).plan('...');
@@ -152,6 +166,7 @@ describe('Integration — ParallelPlanner', () => {
     expect(result.status).toBe('rationale_rejected');
     if (result.status !== 'rationale_rejected') throw new Error('unexpected');
     expect(result.taskId).toBe(createTaskId('b'));
+    expect(approvedSiblingCompleted).toBe(true);
   });
 
   it('collects results from all tasks in a completed plan', async () => {

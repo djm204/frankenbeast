@@ -30,7 +30,7 @@ export class ParallelPlanner implements PlanningStrategy {
       // Run all ready tasks concurrently; convert ordinary task exceptions into
       // failures, but let governance rejections propagate to the Planner so they
       // retain first-class non-retryable semantics across strategies.
-      const waveResults = await Promise.all(
+      const settledWaveResults = await Promise.allSettled(
         ready.map((task) =>
           context.executor(task).catch((err: unknown) => {
             if (err instanceof RationaleRejectedError) {
@@ -45,6 +45,25 @@ export class ParallelPlanner implements PlanningStrategy {
           })
         )
       );
+
+      const rejectedRationale = settledWaveResults.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && result.reason instanceof RationaleRejectedError
+      );
+      if (rejectedRationale) {
+        throw rejectedRationale.reason;
+      }
+
+      const waveResults = settledWaveResults.map((result) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        }
+
+        // The executor wrapper above converts ordinary exceptions into task
+        // failures, so any remaining rejection is unexpected and should keep
+        // the strategy contract honest instead of fabricating a task id.
+        throw result.reason;
+      });
 
       allResults.push(...waveResults);
 
