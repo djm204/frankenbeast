@@ -88,7 +88,7 @@ export class TransportSecurityService {
   verifySocketRequest(options: VerifySocketRequestOptions) {
     const allowedOrigins = options.allowedOrigins ?? [];
     if (allowedOrigins.length > 0) {
-      if (!options.origin || !allowedOrigins.includes(options.origin)) {
+      if (options.origin && !allowedOrigins.includes(options.origin)) {
         return { ok: false as const, status: 403 as const };
       }
     }

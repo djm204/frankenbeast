@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -532,6 +532,30 @@ describe('discoverResumeTarget', () => {
     expect(inferResumeBaseBranch(root)).toBeUndefined();
 
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('resolveDashboardAllowedOrigins', () => {
+  it('includes localhost as an alias for loopback dashboard defaults', () => {
+    expect(resolveDashboardAllowedOrigins({
+      dashboard: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 5173,
+        apiUrl: 'http://127.0.0.1:3737',
+      },
+    } as never)).toEqual(['http://127.0.0.1:5173', 'http://localhost:5173']);
+  });
+
+  it('does not add a localhost alias for non-loopback dashboard hosts', () => {
+    expect(resolveDashboardAllowedOrigins({
+      dashboard: {
+        enabled: true,
+        host: 'dashboard.example.com',
+        port: 5173,
+        apiUrl: 'http://127.0.0.1:3737',
+      },
+    } as never)).toEqual(['http://dashboard.example.com:5173']);
   });
 });
 
@@ -997,7 +1021,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       host: '127.0.0.1',
       port: 3737,
-      allowedOrigins: ['http://localhost:5173'],
+      allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
       sessionStoreDir: '/mock/project/.fbeast/chat',
       projectName: 'project',
       operatorToken: 'dashboard-operator-token',

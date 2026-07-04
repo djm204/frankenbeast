@@ -261,6 +261,19 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
   return loadConfig(args, defaultConfigPath);
 }
 
+export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
+  if (!config.dashboard?.enabled) {
+    return [];
+  }
+
+  const { host, port } = config.dashboard;
+  const origins = [`http://${host}:${port}`];
+  if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') {
+    origins.push(`http://localhost:${port}`);
+  }
+  return origins;
+}
+
 interface ChatSurfaceDeps {
   chatLlm: AdapterLlmClient;
   execLlm: AdapterLlmClient;
@@ -728,12 +741,9 @@ export async function main(): Promise<void> {
             root,
           })
         : undefined;
-      const dashboardOrigin = config.dashboard?.enabled
-        ? `http://${config.dashboard.host}:${config.dashboard.port}`
-        : undefined;
       const allowedOrigins = Array.from(new Set([
         ...(args.allowOrigin ? [args.allowOrigin] : []),
-        ...(dashboardOrigin ? [dashboardOrigin] : []),
+        ...resolveDashboardAllowedOrigins(config),
       ]));
       const server = await startChatServer({
         sessionStoreDir,
