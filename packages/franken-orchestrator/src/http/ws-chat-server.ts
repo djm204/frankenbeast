@@ -12,6 +12,7 @@ import {
 } from './ws-chat-auth.js';
 import {
   ClientSocketEventSchema,
+  type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
 
@@ -140,7 +141,7 @@ export class ChatSocketController {
       return;
     }
 
-    let event;
+    let event: ClientSocketEvent;
     try {
       event = ClientSocketEventSchema.parse(JSON.parse(raw));
     } catch {
@@ -166,7 +167,13 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
-        await this.handleMessageSend(peer, session, event.clientMessageId, event.content, event.executionMode);
+        await this.handleMessageSend(
+          peer,
+          session,
+          event.clientMessageId,
+          event.content,
+          'executionMode' in event ? event.executionMode : undefined,
+        );
         return;
       case 'approval.respond':
         await this.handleApproval(peer, session, event.approved);

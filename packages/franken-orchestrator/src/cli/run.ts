@@ -261,6 +261,23 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
   return loadConfig(args, defaultConfigPath);
 }
 
+export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
+  if (!config.dashboard?.enabled) {
+    return [];
+  }
+
+  const { host, port } = config.dashboard;
+  const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  const origins = [`http://${originHost}:${port}`];
+  if (host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0.0.0.0') {
+    origins.push(`http://localhost:${port}`);
+  }
+  if (host === '0.0.0.0') {
+    origins.push(`http://127.0.0.1:${port}`);
+  }
+  return origins;
+}
+
 interface ChatSurfaceDeps {
   chatLlm: AdapterLlmClient;
   execLlm: AdapterLlmClient;
@@ -728,6 +745,10 @@ export async function main(): Promise<void> {
             root,
           })
         : undefined;
+      const allowedOrigins = Array.from(new Set([
+        ...(args.allowOrigin ? [args.allowOrigin] : []),
+        ...resolveDashboardAllowedOrigins(config),
+      ]));
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
@@ -765,7 +786,7 @@ export async function main(): Promise<void> {
         ...(commsConfig ? { commsConfig } : {}),
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
-        ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
+        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
         // Consolidated deps — skill/dashboard routes activate when providers are configured
         ...(skillManager ? { skillManager } : {}),
         ...(providerRegistry ? { providerRegistry } : {}),

@@ -258,6 +258,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     turnRunner: runtime.turnRunner,
     sessionTokenSecret: tokenSecret,
     ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
+    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
