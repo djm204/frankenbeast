@@ -159,6 +159,41 @@ describe('AnalyticsPage', () => {
     expect(client.fetchSessions).toHaveBeenCalledTimes(1);
   });
 
+  it('clears stale events when a page fetch fails', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEvents)
+      .mockResolvedValueOnce({
+        total: 75,
+        page: 1,
+        pageSize: 50,
+        events: [
+          {
+            id: 'audit:first-page',
+            timestamp: '2026-04-28T12:00:00.000Z',
+            sessionId: 'session-a',
+            toolName: 'fbeast_observer_log',
+            source: 'observer',
+            category: 'tool_call',
+            outcome: 'approved',
+            summary: 'First page event',
+            severity: 'info',
+            raw: { event: 'tool_call' },
+            links: {},
+          },
+        ],
+      })
+      .mockRejectedValueOnce(new Error('HTTP 500'));
+
+    render(<AnalyticsPage client={client} />);
+    expect(await screen.findByText('First page event')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('HTTP 500')).toBeTruthy();
+    expect(screen.queryByText('First page event')).toBeNull();
+    expect(screen.getByText('Page 2 of 1 · 0 events')).toBeTruthy();
+  });
+
   it('resets to the first page when filters or page size change', async () => {
     const client = mockClient();
     vi.mocked(client.fetchEvents)

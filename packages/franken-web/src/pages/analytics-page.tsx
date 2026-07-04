@@ -82,6 +82,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       setEventPage(eventsResult);
     }).catch((error: unknown) => {
       if (cancelled) return;
+      setEventPage(null);
       setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
     }).finally(() => {
       if (!cancelled) {
