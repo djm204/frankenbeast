@@ -25,6 +25,7 @@ export interface ProcessBeastExecutorOptions {
   onRunStatusChange?: (runId: string) => void;
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
+  runConfigDir?: string;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -55,12 +56,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     this.supervisor.validateCwd?.(processSpec.cwd);
 
     // Write configSnapshot to a JSON file for the spawned process to load
-    const configRoot = resolve(processSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
-    const configDir = join(
-      configRoot,
-      '.fbeast',
-      '.build',
-      'run-configs',
+    const configDir = resolve(
+      this.options.runConfigDir ??
+      join(processSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
     );
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);

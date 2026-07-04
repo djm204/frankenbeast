@@ -1,3 +1,4 @@
+import { join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
@@ -34,7 +35,8 @@ export interface BeastServiceBundle {
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
   const logStore = new BeastLogStore(paths.beastLogsDir);
-  const projectRoot = paths.root ?? process.env.FBEAST_ROOT ?? process.cwd();
+  const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
+  const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
   const eventBus = new BeastEventBus();
@@ -47,6 +49,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor({ projectRoot }), {
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
       eventBus,
+      runConfigDir,
     }),
     container: new ContainerBeastExecutor({
       repository,
