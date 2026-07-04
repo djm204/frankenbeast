@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -108,6 +108,7 @@ export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'design
 export interface ResumeTarget {
   planName: string;
   checkpointFile: string;
+  planDir?: string;
 }
 
 export function discoverResumeTarget(root: string): ResumeTarget | undefined {
@@ -116,6 +117,7 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
 
   try {
     for (const entry of readdirSync(buildDir)) {
+      if (entry === '.checkpoint') continue;
       if (!entry.endsWith('.checkpoint')) continue;
       const checkpointFile = join(buildDir, entry);
       const stats = statSync(checkpointFile);
@@ -130,15 +132,30 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
 
   if (!newest) return undefined;
 
-  const fileName = newest.checkpointFile.split('/').pop() ?? '';
+  const fileName = basename(newest.checkpointFile);
   const planName = fileName.replace(/\.checkpoint$/i, '');
-  if (!planName || planName === '.checkpoint') return undefined;
+  if (!planName) return undefined;
 
-  return { planName, checkpointFile: newest.checkpointFile };
+  const scopedPlanDir = join(root, '.fbeast', 'plans', planName);
+  const customPlanDir = join(root, planName);
+  const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
+    ? customPlanDir
+    : undefined;
+
+  return { planName, checkpointFile: newest.checkpointFile, ...(planDir ? { planDir } : {}) };
+}
+
+function isConventionalBaseBranch(branch: string): boolean {
+  return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
 }
 
 export function inferResumeBaseBranch(root: string): string {
   try {
+    const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
     const reflog = execFileSync('git', ['reflog', '--format=%gs'], {
       cwd: root,
       encoding: 'utf-8',
@@ -146,8 +163,13 @@ export function inferResumeBaseBranch(root: string): string {
     });
     for (const line of reflog.split('\n')) {
       const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
-      if (match?.[1] && match[1] !== 'HEAD') {
-        return match[1];
+      if (!match) continue;
+      const [, fromBranch, toBranch] = match;
+      if (toBranch === currentBranch && isConventionalBaseBranch(toBranch)) {
+        return toBranch;
+      }
+      if (fromBranch && fromBranch !== 'HEAD') {
+        return fromBranch;
       }
     }
   } catch {
@@ -302,9 +324,12 @@ export async function main(): Promise<void> {
   const resumeTarget = args.resume && !args.planDir && !args.planName
     ? discoverResumeTarget(root)
     : undefined;
+  const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? resumeTarget?.planName ?? generatePlanName(args.designDoc));
+  const planName = planDirOverride
+    ? undefined
+    : (args.planName ?? resumeTarget?.planName ?? generatePlanName(args.designDoc));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
 
@@ -574,7 +599,9 @@ export async function main(): Promise<void> {
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
-    ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+    ...(planDirOverride !== undefined
+      ? { planDirOverride }
+      : {}),
     // Issue-specific config
     issueLabel: args.issueLabel,
     issueMilestone: args.issueMilestone,

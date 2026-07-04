@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
@@ -301,6 +302,45 @@ describe('discoverResumeTarget', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('ignores newer legacy checkpoints when selecting a plan-scoped checkpoint', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-legacy-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+
+    const legacy = join(buildDir, '.checkpoint');
+    const scoped = join(buildDir, 'plan-existing.checkpoint');
+    writeFileSync(scoped, 'impl:01:done');
+    writeFileSync(legacy, 'impl:02:done');
+    utimesSync(scoped, new Date('2026-03-07T00:00:00Z'), new Date('2026-03-07T00:00:00Z'));
+    utimesSync(legacy, new Date('2026-03-09T00:00:00Z'), new Date('2026-03-09T00:00:00Z'));
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plan-existing',
+      checkpointFile: scoped,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves a custom plan directory when a matching root directory exists', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const customPlanDir = join(root, 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(customPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: customPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('returns undefined when no plan-scoped checkpoints exist', () => {
     const root = join(tmpdir(), `frankenbeast-resume-empty-${Date.now()}`);
     mkdirSync(join(root, '.fbeast', '.build'), { recursive: true });
@@ -313,6 +353,35 @@ describe('discoverResumeTarget', () => {
   it('falls back to main when resume base-branch reflog inference is unavailable', () => {
     const root = join(tmpdir(), `frankenbeast-resume-no-git-${Date.now()}`);
     mkdirSync(root, { recursive: true });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('infers the pre-feature base branch while currently on a feature branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-feature-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('uses the current base branch after checkout returns from a feature branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
 
     expect(inferResumeBaseBranch(root)).toBe('main');
 
