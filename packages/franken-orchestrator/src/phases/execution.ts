@@ -65,13 +65,14 @@ export async function runExecution(
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
   const completedOutputs = new Map<string, unknown>();
+  ctx.plan = { tasks: mergeCheckpointRecoveryTasks(ctx.plan.tasks, checkpoint) };
   validateAcyclicPlan(ctx.plan.tasks);
   const knownTaskIds = new Set(ctx.plan.tasks.map((t) => t.id));
 
   // Simple topological execution: keep a keyed FIFO queue so plan refreshes can
   // atomically add newly discovered tasks without duplicating overlapping work.
   const pending = new Map(ctx.plan.tasks.map((task) => [task.id, task]));
-  const recoveryAttempts = new Map<string, number>();
+  const recoveryAttempts = seedRecoveryAttempts(ctx.plan.tasks);
   const terminalSkipped = new Set<string>();
   const terminalFailures = new Set<string>();
   let iterations = 0;
@@ -164,6 +165,7 @@ export async function runExecution(
     } else if (outcome.status === 'failure') {
       const recovered = await recoverFailedTask({
         ctx,
+        governor,
         memory,
         task,
         error: new Error(outcome.error ?? 'Task failed'),
@@ -173,12 +175,14 @@ export async function runExecution(
         terminalSkipped,
         terminalFailures,
         recoveryAttempts,
+        checkpoint,
         logger,
       });
 
       if (recovered) {
         maxIterations += 2;
       } else {
+        await recordFailureTrace(memory, task, outcome.error ?? 'Task failed');
         outcomes.push(outcome);
         terminalFailures.add(task.id);
       }
@@ -203,6 +207,7 @@ export async function runExecution(
 
 interface RecoveryAttemptInput {
   readonly ctx: BeastContext;
+  readonly governor: IGovernorModule;
   readonly memory: IMemoryModule;
   readonly task: PlanTask;
   readonly error: Error;
@@ -212,20 +217,50 @@ interface RecoveryAttemptInput {
   readonly terminalSkipped: ReadonlySet<string>;
   readonly terminalFailures: ReadonlySet<string>;
   readonly recoveryAttempts: Map<string, number>;
+  readonly checkpoint?: ICheckpointStore | undefined;
   readonly logger: ILogger;
 }
 
 async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> {
-  const { ctx, memory, task, error, pending, completed, knownTaskIds, terminalSkipped, terminalFailures, recoveryAttempts, logger } = input;
+  const {
+    ctx,
+    governor,
+    memory,
+    task,
+    error,
+    pending,
+    completed,
+    knownTaskIds,
+    terminalSkipped,
+    terminalFailures,
+    recoveryAttempts,
+    checkpoint,
+    logger,
+  } = input;
   if (!ctx.plan) return false;
 
-  const attempt = (recoveryAttempts.get(task.id) ?? 0) + 1;
-  recoveryAttempts.set(task.id, attempt);
+  if (isRecoveryFixTaskId(task.id)) {
+    ctx.addAudit('orchestrator', 'recovery:failed', {
+      failedTaskId: task.id,
+      error: error.message,
+      terminal: true,
+      reason: 'recovery-task-failed',
+    });
+    logger.warn('Execution: generated recovery task failed terminally', {
+      failedTaskId: task.id,
+      error: error.message,
+    });
+    return false;
+  }
+
+  const recoveryTaskId = rootRecoveryTaskId(task.id);
+  const attempt = (recoveryAttempts.get(recoveryTaskId) ?? 0) + 1;
+  recoveryAttempts.set(recoveryTaskId, attempt);
 
   try {
     const recoveryController = new RecoveryController(createRecoveryMemoryAdapter(memory, ctx.projectId));
     const recoveredGraph = await recoveryController.recover(
-      createTaskId(task.id),
+      createTaskId(recoveryTaskId),
       error,
       toRecoveryGraph(ctx.plan.tasks),
       attempt,
@@ -234,6 +269,7 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
     validateAcyclicPlan(recoveredTasks);
 
     ctx.plan = { tasks: recoveredTasks };
+    persistRecoveryTasks(checkpoint, recoveredTasks);
 
     for (const recoveredTask of recoveredTasks) {
       knownTaskIds.add(recoveredTask.id);
@@ -247,14 +283,18 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
       }
     }
 
-    ctx.circuitBreakerTripped = false;
+    if (terminalSkipped.size === 0 && terminalFailures.size === 0) {
+      ctx.circuitBreakerTripped = false;
+    }
     ctx.addAudit('orchestrator', 'recovery:injected', {
       failedTaskId: task.id,
+      recoveryTaskId,
       attempt,
       tasks: recoveredTasks.length,
     });
     logger.warn('Execution: recovery injected fix-it task', {
       failedTaskId: task.id,
+      recoveryTaskId,
       attempt,
       tasks: recoveredTasks.length,
     });
@@ -264,14 +304,34 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
     const knownTerminal =
       recoveryErrorObject instanceof UnknownErrorEscalatedError ||
       recoveryErrorObject instanceof MaxRecoveryAttemptsError;
+    if (recoveryErrorObject instanceof UnknownErrorEscalatedError) {
+      const approval = await governor.requestApproval({
+        taskId: task.id,
+        summary: `Unknown execution error requires operator decision: ${error.message}`,
+        requiresHitl: true,
+      });
+      ctx.governorApproval = approval.decision === 'approved';
+      ctx.addAudit('governor', 'recovery:unknown-error-escalated', {
+        taskId: task.id,
+        decision: approval.decision,
+        reason: approval.reason,
+      });
+      logger.warn('Execution: unknown recovery error escalated to governor', {
+        taskId: task.id,
+        decision: approval.decision,
+        reason: approval.reason,
+      });
+    }
     ctx.addAudit('orchestrator', 'recovery:failed', {
       failedTaskId: task.id,
+      recoveryTaskId,
       attempt,
       error: recoveryErrorObject.message,
       terminal: knownTerminal,
     });
     logger.warn('Execution: recovery unavailable', {
       failedTaskId: task.id,
+      recoveryTaskId,
       attempt,
       error: recoveryErrorObject.message,
     });
@@ -397,6 +457,95 @@ function mergeDependencies(primary: readonly string[], secondary: readonly strin
   return [...new Set([...primary, ...secondary])];
 }
 
+const RECOVERY_TASK_CHECKPOINT_PREFIX = 'recovery-task:';
+
+function isRecoveryFixTaskId(taskId: string): boolean {
+  return /^fix-.+-attempt-\d+$/u.test(taskId);
+}
+
+function rootRecoveryTaskId(taskId: string): string {
+  let current = taskId;
+  while (true) {
+    const match = current.match(/^fix-(.+)-attempt-\d+$/u);
+    if (!match) return current;
+    current = match[1]!;
+  }
+}
+
+function persistRecoveryTasks(checkpoint: ICheckpointStore | undefined, tasks: readonly PlanTask[]): void {
+  if (!checkpoint) return;
+  for (const task of tasks) {
+    checkpoint.write(`${RECOVERY_TASK_CHECKPOINT_PREFIX}${encodeRecoveryTask(task)}`);
+  }
+}
+
+function mergeCheckpointRecoveryTasks(tasks: readonly PlanTask[], checkpoint: ICheckpointStore | undefined): PlanTask[] {
+  if (!checkpoint) return [...tasks];
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  for (const entry of checkpoint.readAll()) {
+    if (!entry.startsWith(RECOVERY_TASK_CHECKPOINT_PREFIX)) continue;
+    const recoveredTask = decodeRecoveryTask(entry.slice(RECOVERY_TASK_CHECKPOINT_PREFIX.length));
+    if (recoveredTask) {
+      byId.set(recoveredTask.id, recoveredTask);
+    }
+  }
+  return [...byId.values()];
+}
+
+function encodeRecoveryTask(task: PlanTask): string {
+  return Buffer.from(JSON.stringify(task), 'utf8').toString('base64url');
+}
+
+function decodeRecoveryTask(payload: string): PlanTask | undefined {
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Partial<PlanTask>;
+    if (
+      typeof parsed.id === 'string' &&
+      typeof parsed.objective === 'string' &&
+      Array.isArray(parsed.requiredSkills) &&
+      parsed.requiredSkills.every((skill): skill is string => typeof skill === 'string') &&
+      Array.isArray(parsed.dependsOn) &&
+      parsed.dependsOn.every((dep): dep is string => typeof dep === 'string')
+    ) {
+      return {
+        id: parsed.id,
+        objective: parsed.objective,
+        requiredSkills: parsed.requiredSkills,
+        dependsOn: parsed.dependsOn,
+      };
+    }
+  } catch {
+    // Ignore corrupt checkpoint recovery entries; the base plan still executes.
+  }
+  return undefined;
+}
+
+function seedRecoveryAttempts(tasks: readonly PlanTask[]): Map<string, number> {
+  const attempts = new Map<string, number>();
+
+  for (const task of tasks) {
+    const match = task.id.match(/^fix-(.+)-attempt-(\d+)$/u);
+    if (!match) continue;
+
+    const failedTaskId = rootRecoveryTaskId(match[1]!);
+    const attempt = Number(match[2]);
+    if (!Number.isSafeInteger(attempt) || attempt < 1) continue;
+
+    attempts.set(failedTaskId, Math.max(attempts.get(failedTaskId) ?? 0, attempt));
+  }
+
+  return attempts;
+}
+
+async function recordFailureTrace(memory: IMemoryModule, task: PlanTask, summary: string): Promise<void> {
+  await memory.recordTrace({
+    taskId: task.id,
+    summary,
+    outcome: 'failure',
+    timestamp: new Date().toISOString(),
+  });
+}
+
 function collectNewRefreshTasks(
   latestTasks: readonly PlanTask[],
   knownTaskIds: ReadonlySet<string>,
@@ -481,8 +630,9 @@ async function executeTask(
   try {
     // Dirty file resume: recover partial work from a crashed run.
     // Keep this inside try/catch so recovery failures are captured as task failures.
-    if (checkpoint && cliExecutor && checkpoint.lastCommit(task.id, 'impl')) {
-      await cliExecutor.recoverDirtyFiles(task.id, 'impl', checkpoint, logger);
+    const dirtyRecoveryStage = task.id.startsWith('harden:') || task.id.startsWith('fix-harden:') ? 'harden' : 'impl';
+    if (checkpoint && cliExecutor && checkpoint.lastCommit(task.id, dirtyRecoveryStage)) {
+      await cliExecutor.recoverDirtyFiles(task.id, dirtyRecoveryStage, checkpoint, logger);
     }
 
     // Check HITL requirement
@@ -629,12 +779,6 @@ async function executeTask(
     const errorMsg = errorObject.message;
     ctx.addAudit('executor', 'task:failed', { taskId: task.id, error: errorMsg });
     logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
-    await memory.recordTrace({
-      taskId: task.id,
-      summary: errorMsg,
-      outcome: 'failure',
-      timestamp: new Date().toISOString(),
-    });
     logger.debug('Execution: task timing', {
       taskId: task.id,
       durationMs: Date.now() - startTime,
