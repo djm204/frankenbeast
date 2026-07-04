@@ -11,6 +11,7 @@ function fakeGit(): GitBranchIsolator {
     getWorkingDir: () => process.cwd(),
     getStatus: () => '',
     resetHard: () => undefined,
+    cleanUntracked: () => undefined,
     autoCommit: () => false,
     getCurrentHead: () => 'HEAD',
     getDiffStat: () => '',

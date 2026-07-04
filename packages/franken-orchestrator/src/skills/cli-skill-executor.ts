@@ -253,6 +253,12 @@ export class CliSkillExecutor {
     };
     const upstreamAbortSignal = config.martin?.abortSignal;
     let upstreamAbortHandler: (() => void) | undefined;
+    const cleanupUpstreamAbortHandler = (): void => {
+      if (upstreamAbortSignal && upstreamAbortHandler) {
+        upstreamAbortSignal.removeEventListener('abort', upstreamAbortHandler);
+        upstreamAbortHandler = undefined;
+      }
+    };
     if (upstreamAbortSignal?.aborted) {
       budgetAbortController.abort(upstreamAbortSignal.reason);
     } else if (upstreamAbortSignal) {
@@ -277,6 +283,7 @@ export class CliSkillExecutor {
     const preCost = this.computeCurrentCost();
     const preCheck = this.observer.breaker.check(preCost);
     if (preCheck.tripped) {
+      cleanupUpstreamAbortHandler();
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
       return {
         output: `Budget exceeded: $${preCheck.spendUsd.toFixed(2)} / $${preCheck.limitUsd.toFixed(2)}`,
@@ -288,6 +295,7 @@ export class CliSkillExecutor {
     try {
       this.git.isolate(chunkId);
     } catch (err) {
+      cleanupUpstreamAbortHandler();
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(
         `Git isolation failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
@@ -319,9 +327,9 @@ export class CliSkillExecutor {
         this.logger?.warn('MartinLoop: provider rate limited', { chunkId, provider }, 'martin');
         return config.martin?.onRateLimit?.(provider);
       },
-      onProviderAttempt: (provider: string, iteration: number) => {
+      onProviderAttempt: (provider: string, iteration: number, renderedPrompt?: string) => {
         activeProvider = provider;
-        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider);
+        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider, renderedPrompt);
         const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
         if (estimatedBudgetResult.tripped) {
           abortForBudget(estimatedBudgetResult);
@@ -497,9 +505,7 @@ export class CliSkillExecutor {
       );
     } finally {
       clearInterval(budgetPoll);
-      if (upstreamAbortSignal && upstreamAbortHandler) {
-        upstreamAbortSignal.removeEventListener('abort', upstreamAbortHandler);
-      }
+      cleanupUpstreamAbortHandler();
     }
 
     if (budgetAbortResult) {
@@ -688,10 +694,10 @@ export class CliSkillExecutor {
     return this.observer.costCalc.totalCost(entries);
   }
 
-  private estimateUpcomingIterationCost(config: MartinLoopConfig, provider = config.provider): number {
+  private estimateUpcomingIterationCost(config: MartinLoopConfig, provider = config.provider, prompt = config.prompt): number {
     return this.observer.costCalc.totalCost([{
       model: provider,
-      promptTokens: Math.ceil(config.prompt.length / 4),
+      promptTokens: Math.ceil(prompt.length / 4),
       completionTokens: Math.max(config.maxTurns, 1) * 1_000,
     }]);
   }
@@ -699,6 +705,7 @@ export class CliSkillExecutor {
   private resetBudgetAbortedWorktree(): void {
     if (this.git.getStatus().length === 0) return;
     this.git.resetHard(this.git.getCurrentHead());
+    this.git.cleanUntracked();
   }
 
   private recordSessionCommit(taskId: string, commitHash: string): void {

@@ -359,6 +359,10 @@ function spawnIteration(
       escalationTimers.length = 0;
     };
 
+    const clearProviderTimeout = (): void => {
+      clearTimeout(timer);
+    };
+
     const fail = (err: Error): void => {
       if (settled) return;
       settled = true;
@@ -369,6 +373,7 @@ function spawnIteration(
 
     const onAbort = (): void => {
       aborted = true;
+      clearProviderTimeout();
       try { child.kill('SIGTERM'); } catch { /* already dead */ }
       escalationTimers.push(setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
@@ -378,6 +383,7 @@ function spawnIteration(
           const remaining = streamBuffer.flush();
           for (const line of remaining) cleanParts.push(line);
         }
+        clearTimers();
         finish({
           stdout,
           stderr: `${stderr}\n[MartinLoop] iteration aborted`,
@@ -436,7 +442,6 @@ export class MartinLoop {
       const startTime = Date.now();
 
       const resolved = this.registry.get(activeProvider);
-      config.onProviderAttempt?.(activeProvider, iteration);
       let renderedPrompt = config.prompt;
       let sessionContinue = false;
 
@@ -445,6 +450,8 @@ export class MartinLoop {
         renderedPrompt = rendered.prompt;
         sessionContinue = rendered.sessionContinue;
       }
+
+      config.onProviderAttempt?.(activeProvider, iteration, renderedPrompt);
 
       let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string };
       try {
@@ -456,6 +463,10 @@ export class MartinLoop {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
         continue;
+      }
+
+      if (config.abortSignal?.aborted) {
+        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
       }
 
       const durationMs = Date.now() - startTime;
