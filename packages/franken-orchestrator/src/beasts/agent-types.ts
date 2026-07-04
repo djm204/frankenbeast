@@ -30,6 +30,7 @@ export interface TrackedAgentInitAction {
 
 export interface TrackedAgent {
   readonly id: string;
+  readonly name?: string | undefined;
   readonly definitionId: string;
   readonly source: BeastDispatchSource;
   readonly status: TrackedAgentStatus;

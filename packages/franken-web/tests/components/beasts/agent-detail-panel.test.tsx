@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { AgentDetailPanel } from '../../../src/components/beasts/agent-detail-panel';
 import { useBeastStore } from '../../../src/stores/beast-store';
 
@@ -28,11 +28,13 @@ const handlers = {
   onDelete: vi.fn(),
   onKill: vi.fn(),
   onClose: vi.fn(),
+  onSaveConfig: vi.fn(),
 };
 
 describe('AgentDetailPanel', () => {
   beforeEach(() => {
     useBeastStore.getState().resetEdit();
+    vi.resetAllMocks();
   });
 
   it('renders readonly view by default', () => {
@@ -67,5 +69,98 @@ describe('AgentDetailPanel', () => {
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
     fireEvent.click(screen.getByLabelText('Close panel'));
     expect(handlers.onClose).toHaveBeenCalled();
+  });
+
+  it('persists edits through onSaveConfig and returns to readonly mode', async () => {
+    handlers.onSaveConfig.mockResolvedValueOnce(undefined);
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Updated agent' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(handlers.onSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ name: 'Updated agent' })));
+    await waitFor(() => expect(screen.getByText('Overview')).toBeTruthy());
+  });
+
+  it('initializes identity edits from initConfig.identity without adding absent moduleConfig', async () => {
+    handlers.onSaveConfig.mockResolvedValueOnce(undefined);
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          initConfig: { identity: { name: 'Wizard agent', description: 'Wizard description' } },
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByText('Edit'));
+
+    expect(screen.getByDisplayValue('Wizard agent')).toBeTruthy();
+    expect(screen.getByDisplayValue('Wizard description')).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue('Wizard description'), { target: { value: 'Updated description' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(handlers.onSaveConfig).toHaveBeenCalled());
+    const savedValues = handlers.onSaveConfig.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(savedValues).toMatchObject({ name: 'Wizard agent', description: 'Updated description' });
+    expect(savedValues).not.toHaveProperty('moduleConfig');
+  });
+
+  it('resets stale edit values when the selected agent changes', () => {
+    const { rerender } = render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Unsaved old agent' } });
+
+    rerender(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-2',
+          initConfig: { identity: { name: 'Second agent', description: 'Second description' } },
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    expect(screen.getByDisplayValue('Second agent')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Unsaved old agent')).toBeNull();
+  });
+
+  it('keeps edit mode open and surfaces save errors', async () => {
+    handlers.onSaveConfig.mockRejectedValueOnce(new Error('HTTP 500'));
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Updated agent' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
+    expect(screen.getByText('Identity')).toBeTruthy();
+  });
+
+  it('keeps edit mode visible while save is pending', async () => {
+    let rejectSave: ((error: Error) => void) | undefined;
+    handlers.onSaveConfig.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectSave = reject;
+    }));
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Slow save' } });
+    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getByText('Readonly'));
+
+    expect(screen.getByText('Identity')).toBeTruthy();
+    rejectSave?.(new Error('HTTP 500'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
   });
 });

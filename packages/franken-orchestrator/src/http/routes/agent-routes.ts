@@ -34,6 +34,12 @@ const CreateAgentBody = z.object({
   autoDispatch: z.boolean().optional(),
 }).strict();
 
+const PatchAgentConfigBody = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  moduleConfig: ModuleConfigSchema.optional(),
+}).strict();
+
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
@@ -164,6 +170,49 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     }
   });
 
+  app.patch('/v1/beasts/agents/:agentId/config', async (c) => {
+    const agentId = c.req.param('agentId');
+    const body = validateBody(PatchAgentConfigBody, await parseJsonBody(c));
+    try {
+      const current = deps.agents.getAgent(agentId);
+      const hasIdentityPatch = body.name !== undefined || body.description !== undefined;
+      const updated = deps.agents.updateAgent(agentId, {
+        ...(hasIdentityPatch ? { initConfig: patchInitConfigIdentity(current.initConfig, body) } : {}),
+        ...(body.moduleConfig !== undefined ? { moduleConfig: body.moduleConfig } : {}),
+      });
+      if (body.moduleConfig !== undefined && current.dispatchRunId) {
+        const run = deps.runs.getRun(current.dispatchRunId);
+        if (run && deps.runs.listAttempts(run.id).length === 0) {
+          deps.runs.updateConfigSnapshot(run.id, {
+            ...run.configSnapshot,
+            modules: body.moduleConfig,
+          });
+        }
+      }
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.config.updated',
+        message: 'Updated tracked agent configuration from the dashboard',
+        payload: {
+          fields: [
+            ...(hasIdentityPatch ? ['identity'] : []),
+            ...(body.moduleConfig !== undefined ? ['moduleConfig'] : []),
+          ],
+        },
+      });
+      return c.json({ data: updated });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
   app.post('/v1/beasts/agents/:agentId/start', async (c) => {
     const agentId = c.req.param('agentId');
     try {
@@ -177,13 +226,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
 
       if (agent.dispatchRunId) {
-        const run = await deps.runs.start(agent.dispatchRunId, 'operator');
+        const existingRun = deps.runs.getRun(agent.dispatchRunId);
+        const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+          ? await dispatchDetachedAgent(deps, agentId)
+          : await deps.runs.start(agent.dispatchRunId, 'operator');
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.start.requested',
-          message: `Start requested for linked run ${agent.dispatchRunId}`,
+          message: `Start requested for linked run ${run.id}`,
           payload: {
-            runId: agent.dispatchRunId,
+            runId: run.id,
           },
         });
         return c.json({ data: run });
@@ -253,13 +305,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     try {
       const agent = deps.agents.getAgent(agentId);
       if (agent.dispatchRunId) {
-        const run = await deps.runs.restart(agent.dispatchRunId, 'operator');
+        const existingRun = deps.runs.getRun(agent.dispatchRunId);
+        const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+          ? await dispatchReplacementAgentRun(deps, agentId, existingRun)
+          : await deps.runs.restart(agent.dispatchRunId, 'operator');
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.restart.requested',
-          message: `Restart requested for linked run ${agent.dispatchRunId}`,
+          message: `Restart requested for linked run ${run.id}`,
           payload: {
-            runId: agent.dispatchRunId,
+            runId: run.id,
           },
         });
         return c.json({ data: run });
@@ -353,13 +408,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' is not stopped`,
         );
       }
-      const run = await deps.runs.start(agent.dispatchRunId, 'operator');
+      const existingRun = deps.runs.getRun(agent.dispatchRunId);
+      const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+        ? await dispatchDetachedAgent(deps, agentId)
+        : await deps.runs.start(agent.dispatchRunId, 'operator');
       deps.agents.appendEvent(agentId, {
         level: 'info',
         type: 'agent.resume.requested',
-        message: `Resume requested for linked run ${agent.dispatchRunId}`,
+        message: `Resume requested for linked run ${run.id}`,
         payload: {
-          runId: agent.dispatchRunId,
+          runId: run.id,
         },
       });
       return c.json({ data: run });
@@ -411,6 +469,44 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
   return kind === 'chunk-plan' || kind === 'martin-loop' || kind === 'design-interview';
+}
+
+function patchInitConfigIdentity(
+  initConfig: Readonly<Record<string, unknown>>,
+  patchBody: z.infer<typeof PatchAgentConfigBody>,
+): Readonly<Record<string, unknown>> {
+  const currentIdentity = isRecord(initConfig.identity) ? initConfig.identity : {};
+  return {
+    ...initConfig,
+    identity: {
+      ...currentIdentity,
+      ...(patchBody.name !== undefined ? { name: patchBody.name } : {}),
+      ...(patchBody.description !== undefined ? { description: patchBody.description } : {}),
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function shouldDispatchFreshRunForModuleConfig(
+  agent: ReturnType<AgentService['getAgent']>,
+  run: ReturnType<BeastRunService['getRun']>,
+): boolean {
+  if (!run || agent.moduleConfig === undefined || run.attemptCount === 0) return false;
+  return JSON.stringify(run.configSnapshot.modules ?? {}) !== JSON.stringify(agent.moduleConfig);
+}
+
+async function dispatchReplacementAgentRun(
+  deps: AgentRoutesDeps,
+  agentId: string,
+  existingRun: ReturnType<BeastRunService['getRun']>,
+) {
+  if (existingRun?.status === 'running') {
+    await deps.runs.stop(existingRun.id, 'operator');
+  }
+  return dispatchDetachedAgent(deps, agentId);
 }
 
 async function dispatchDetachedAgent(

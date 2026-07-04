@@ -27,6 +27,7 @@ interface BeastsPageProps {
   onKill: (agentId: string) => void;
   onRestart: (agentId: string) => void;
   onResume: (agentId: string) => void;
+  onSaveAgentConfig: (agentId: string, values: Record<string, unknown>) => Promise<void>;
   onSelectAgent: (agentId: string) => void;
   onStart: (agentId: string) => void;
   onStop: (agentId: string) => void;
@@ -47,6 +48,7 @@ export function BeastsPage({
   onKill,
   onRestart,
   onResume,
+  onSaveAgentConfig,
   onSelectAgent,
   onStart,
   onStop,
@@ -114,6 +116,7 @@ export function BeastsPage({
           onStop={() => onStop(agentDetail.agent.id)}
           onRestart={() => onRestart(agentDetail.agent.id)}
           onResume={() => onResume(agentDetail.agent.id)}
+          onSaveConfig={(values) => onSaveAgentConfig(agentDetail.agent.id, values)}
           onDelete={() => onDelete(agentDetail.agent.id)}
           onKill={() => onKill(agentDetail.agent.id)}
         />

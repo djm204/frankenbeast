@@ -6,11 +6,13 @@ import { useBeastStore } from '../../stores/beast-store';
 interface AgentDetailEditProps {
   onSave: (values: Record<string, unknown>) => void;
   onCancel: () => void;
+  error?: string | null;
+  saving?: boolean;
 }
 
 const MODULE_KEYS = ['firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat'] as const;
 
-export function AgentDetailEdit({ onSave, onCancel }: AgentDetailEditProps) {
+export function AgentDetailEdit({ onSave, onCancel, error, saving = false }: AgentDetailEditProps) {
   const { editValues, isEditDirty, setEditField } = useBeastStore();
   const values = editValues ?? {};
 
@@ -21,6 +23,7 @@ export function AgentDetailEdit({ onSave, onCancel }: AgentDetailEditProps) {
         <button
           type="button"
           onClick={onCancel}
+          disabled={saving}
           className="px-3 py-1.5 text-xs rounded-lg text-beast-muted hover:text-beast-text hover:bg-beast-elevated transition-colors"
         >
           Cancel
@@ -28,12 +31,18 @@ export function AgentDetailEdit({ onSave, onCancel }: AgentDetailEditProps) {
         <button
           type="button"
           onClick={() => onSave(values)}
-          disabled={!isEditDirty}
+          disabled={!isEditDirty || saving}
           className="px-3 py-1.5 text-xs rounded-lg bg-beast-accent text-beast-bg font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-beast-accent-strong transition-colors"
         >
-          Save
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
+
+      {error && (
+        <div role="alert" className="px-4 py-2 text-xs bg-red-900/30 border-b border-red-700 text-red-300">
+          {error}
+        </div>
+      )}
 
       <ScrollArea.Root className="flex-1 overflow-hidden">
         <ScrollArea.Viewport className="h-full w-full">
@@ -94,7 +103,7 @@ export function AgentDetailEdit({ onSave, onCancel }: AgentDetailEditProps) {
                           >
                             <input
                               type="checkbox"
-                              checked={Boolean((values.moduleConfig as Record<string, boolean> | undefined)?.[key])}
+                              checked={(values.moduleConfig as Record<string, boolean> | undefined)?.[key] !== false}
                               onChange={(e) => {
                                 const current = (values.moduleConfig as Record<string, boolean>) ?? {};
                                 setEditField('moduleConfig', { ...current, [key]: e.target.checked });

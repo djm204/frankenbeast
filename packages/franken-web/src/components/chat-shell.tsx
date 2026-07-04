@@ -166,6 +166,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
+  const selectedBeastAgentIdRef = useRef<string | null>(null);
+  const shouldAutoSelectBeastAgentRef = useRef(true);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
     mode: 'secure',
     secureBackend: 'local-encrypted',
@@ -262,6 +264,10 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   }, [beastAgentDetail]);
 
   useEffect(() => {
+    selectedBeastAgentIdRef.current = selectedBeastAgentId;
+  }, [selectedBeastAgentId]);
+
+  useEffect(() => {
     if (route !== 'beasts') {
       return;
     }
@@ -297,7 +303,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
         setBeastAgents(agents);
         setBeastRuns(runs);
         setBeastContainerRuntime(containerRuntime);
-        const currentAgentId = selectedBeastAgentId ?? agents[0]?.id ?? null;
+        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
         setSelectedBeastAgentId(currentAgentId);
 
         if (currentAgentId) {
@@ -701,6 +707,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             logs={beastAgentDetail?.run?.logs ?? []}
             selectedAgentId={selectedBeastAgentId}
             onClose={() => {
+              shouldAutoSelectBeastAgentRef.current = false;
+              selectedBeastAgentIdRef.current = null;
               setSelectedBeastAgentId(null);
               setBeastAgentDetail(null);
             }}
@@ -746,7 +754,19 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setBeastError(err instanceof Error ? err.message : 'Unable to resume tracked agent.');
               });
             }}
+            onSaveAgentConfig={async (agentId, values) => {
+              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
+              setBeastError(null);
+              await beastClient.patchAgentConfig(agentId, values);
+              const detail = await beastClient.getAgent(agentId);
+              if (selectedBeastAgentIdRef.current === agentId) {
+                setBeastAgentDetail(detail);
+              }
+              setBeastRefreshNonce((current) => current + 1);
+            }}
             onSelectAgent={(agentId) => {
+              shouldAutoSelectBeastAgentRef.current = true;
+              selectedBeastAgentIdRef.current = agentId;
               setSelectedBeastAgentId(agentId);
             }}
             onStart={(agentId) => {

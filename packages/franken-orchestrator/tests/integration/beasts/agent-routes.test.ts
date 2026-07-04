@@ -907,6 +907,118 @@ describe('agent routes integration', () => {
     expect(detailResponse.status).toBe(404);
   });
 
+  it('patches tracked agent identity and module configuration', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: ['Bearer', operatorToken].join(' '),
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: {},
+        },
+        initConfig: {
+          identity: { name: 'Old name', description: 'Old description' },
+          workflow: { workflowType: 'design-interview' },
+        },
+        autoDispatch: false,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const patchResponse = await app.request(`/v1/beasts/agents/${created.data.id}/config`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        name: 'Updated name',
+        description: 'Updated description',
+        moduleConfig: { firewall: false, memory: true },
+      }),
+    });
+
+    expect(patchResponse.status).toBe(200);
+    const patched = await patchResponse.json() as {
+      data: { name?: string; initConfig: { identity: { name: string; description: string }; workflow: unknown }; moduleConfig: unknown };
+    };
+    expect(patched.data.name).toBe('Updated name');
+    expect(patched.data.initConfig.identity).toEqual({ name: 'Updated name', description: 'Updated description' });
+    expect(patched.data.initConfig.workflow).toEqual({ workflowType: 'design-interview' });
+    expect(patched.data.moduleConfig).toEqual({ firewall: false, memory: true });
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    const detail = await detailResponse.json() as { data: { events: AgentEvent[] } };
+    expectEventsToIncludeTypes(detail.data.events, ['agent.config.updated']);
+  });
+
+  it('preserves started run snapshots and applies module edits through a replacement restart', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: ['Bearer', operatorToken].join(' '),
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          identity: { name: 'Linked run agent' },
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+          modules: { firewall: true, memory: false },
+        },
+        moduleConfig: { firewall: true, memory: false },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; dispatchRunId?: string } };
+    expect(created.data.dispatchRunId).toBeTruthy();
+
+    const patchResponse = await app.request('/v1/beasts/agents/' + created.data.id + '/config', {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        moduleConfig: { firewall: false, memory: true },
+      }),
+    });
+    expect(patchResponse.status).toBe(200);
+
+    const runResponse = await app.request('/v1/beasts/runs/' + created.data.dispatchRunId, {
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    expect(runResponse.status).toBe(200);
+    const runDetail = await runResponse.json() as { data: { run: { configSnapshot: { modules?: unknown } } } };
+    expect(runDetail.data.run.configSnapshot.modules).toEqual({ firewall: true, memory: false });
+
+    const restartResponse = await app.request('/v1/beasts/agents/' + created.data.id + '/restart', {
+      method: 'POST',
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    expect(restartResponse.status).toBe(200);
+    const restarted = await restartResponse.json() as { data: { id: string; configSnapshot: { modules?: unknown } } };
+    expect(restarted.data.id).not.toBe(created.data.dispatchRunId);
+    expect(restarted.data.configSnapshot.modules).toEqual({ firewall: false, memory: true });
+  });
+
   it('returns 404 for unknown tracked agents', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
 
