@@ -34,7 +34,7 @@ export class FactualityEvaluator implements Evaluator {
 
     return {
       evaluatorName: this.name,
-      verdict: 'pass',
+      verdict: findings.length === 0 ? 'pass' : 'warn',
       score,
       findings,
     };

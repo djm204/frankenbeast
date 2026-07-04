@@ -1,2 +1,2 @@
-/** Binary verdict for evaluation results. */
-export type Verdict = 'pass' | 'fail';
+/** Evaluation verdict. Warnings indicate non-critical findings. */
+export type Verdict = 'pass' | 'warn' | 'fail';

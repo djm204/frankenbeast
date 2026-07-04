@@ -35,7 +35,7 @@ export class ADRComplianceEvaluator implements Evaluator {
 
     return {
       evaluatorName: this.name,
-      verdict: findings.length === 0 ? 'pass' : 'fail',
+      verdict: findings.length === 0 ? 'pass' : 'warn',
       score,
       findings,
     };

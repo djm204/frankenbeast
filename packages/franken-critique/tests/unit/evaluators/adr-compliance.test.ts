@@ -48,6 +48,8 @@ describe('ADRComplianceEvaluator', () => {
 
     const result = await evaluator.evaluate(createInput('// @ts-nocheck\nconst x: any = 1;'));
 
+    expect(result.verdict).toBe('warn');
+    expect(result.score).toBe(0.5);
     expect(result.findings.length).toBeGreaterThan(0);
     expect(result.findings[0]!.message).toContain('adr-001');
   });

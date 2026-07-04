@@ -35,7 +35,7 @@ describe('FactualityEvaluator', () => {
     expect(result.score).toBe(1);
   });
 
-  it('passes when content references matching ADR topics', async () => {
+  it('warns when content references matching ADR topics', async () => {
     const port = createMockMemoryPort([
       { id: 'adr-001', title: 'Use TypeScript', content: 'All code must be TypeScript', relevanceScore: 0.9 },
     ]);
@@ -43,7 +43,8 @@ describe('FactualityEvaluator', () => {
 
     const result = await evaluator.evaluate(createInput('const x: number = 1;'));
 
-    expect(result.verdict).toBe('pass');
+    expect(result.verdict).toBe('warn');
+    expect(result.score).toBeLessThan(1);
   });
 
   it('calls searchADRs with content-derived query', async () => {
@@ -73,6 +74,7 @@ describe('FactualityEvaluator', () => {
       createInput('const fs = require("fs");'),
     );
 
+    expect(result.verdict).toBe('warn');
     expect(result.findings.length).toBeGreaterThan(0);
     expect(result.findings[0]!.message).toContain('ADR');
   });
