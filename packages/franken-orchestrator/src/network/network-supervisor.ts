@@ -140,6 +140,12 @@ export class NetworkSupervisor {
     }
 
     await this.deps.stopService(hostState);
+    const stopped = await this.waitForStopped(hostState);
+    if (!stopped) {
+      throw new Error(
+        `Cannot enable ${serviceState.id}: host service ${hostServiceId} did not stop before restart; stop that process and retry.`,
+      );
+    }
     const restartedHost = await this.startManagedService(hostService, detached, startedAt);
     services[hostIndex] = restartedHost;
     return this.waitForHealthy(restartedHost);
@@ -324,6 +330,18 @@ export class NetworkSupervisor {
   private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
     for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
       if (await this.deps.healthcheck(service)) {
+        return true;
+      }
+      if (attempt < this.startupAttempts - 1) {
+        await sleep(this.startupDelayMs);
+      }
+    }
+    return false;
+  }
+
+  private async waitForStopped(service: ManagedNetworkServiceState): Promise<boolean> {
+    for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
+      if (!await this.deps.healthcheck(service)) {
         return true;
       }
       if (attempt < this.startupAttempts - 1) {

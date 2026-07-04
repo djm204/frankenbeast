@@ -268,10 +268,16 @@ describe('NetworkSupervisor', () => {
       ],
     });
     const startService = vi.fn(async () => ({ pid: 601 }));
-    const stopService = vi.fn(async () => undefined);
+    let hostStopped = false;
+    const stopService = vi.fn(async () => {
+      hostStopped = true;
+    });
     const healthcheck = vi.fn(async (service) => {
       if (service.id === 'comms-gateway') {
         return startService.mock.calls.some(([startedService]) => startedService.id === 'chat-server');
+      }
+      if (service.id === 'chat-server' && service.pid === 500 && hostStopped) {
+        return false;
       }
       return true;
     });

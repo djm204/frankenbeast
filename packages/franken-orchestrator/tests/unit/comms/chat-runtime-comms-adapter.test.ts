@@ -219,6 +219,37 @@ describe('ChatRuntimeCommsAdapter', () => {
     );
   });
 
+  it('does not treat stale approval metadata as pending after approval state resolves', async () => {
+    store._sessions.set('approved-sess', {
+      sessionId: 'approved-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: { description: 'deploy production', requestedAt: '2026-03-10T00:00:00.000Z' },
+    });
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'reply', content: 'No approval pending' }],
+      events: [],
+      pendingApproval: true,
+      state: 'active',
+      tier: null,
+      transcript: [],
+    });
+
+    await adapter.processInbound({
+      sessionId: 'approved-sess',
+      channelType: 'slack',
+      text: '/status',
+      externalUserId: 'U123',
+    });
+
+    expect(runtime.run).toHaveBeenCalledWith('/status', expect.objectContaining({ pendingApproval: false }));
+    expect(store.save).toHaveBeenCalledWith(
+      'approved-sess',
+      expect.objectContaining({ pendingApproval: null }),
+    );
+  });
+
   it('normalizes and persists channel routing metadata for Slack and Discord adapters', async () => {
     const result = await adapter.processInbound({
       sessionId: 'route-sess',
