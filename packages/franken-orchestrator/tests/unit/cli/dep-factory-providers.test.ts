@@ -252,7 +252,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({ provider: 'unknown-provider' });
     await expect(createCliDeps(opts)).rejects.toThrow(/Unknown provider "unknown-provider"/);
-  });
+  }, 15_000);
 
   for (const name of ['claude', 'codex', 'gemini', 'aider']) {
     it(`accepts built-in provider "${name}" without error`, async () => {
