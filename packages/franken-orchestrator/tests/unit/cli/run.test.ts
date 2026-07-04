@@ -203,6 +203,18 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
     providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+    network: { mode: 'secure', secureBackend: 'local-encrypted' },
+    beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+    chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'claude-sonnet-4-6' },
+    dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+    comms: {
+      enabled: false,
+      host: '127.0.0.1',
+      port: 3200,
+      orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+      slack: { enabled: false },
+      discord: { enabled: false },
+    },
   })),
 }));
 
@@ -219,6 +231,7 @@ vi.mock('node:readline', () => ({
 import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { loadConfig } from '../../../src/cli/config-loader.js';
 import { createInterface } from 'node:readline';
 
 // ── Tests ──
@@ -589,6 +602,74 @@ describe('main() execution', () => {
     }));
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
+    logSpy.mockRestore();
+  });
+
+  it('passes comms config to chat-server when managed comms is enabled', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'claude-sonnet-4-6' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 3200,
+        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        slack: { enabled: true },
+        discord: { enabled: false },
+      },
+    });
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: '127.0.0.1',
+      port: 3737,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      commsConfig: expect.objectContaining({
+        channels: expect.objectContaining({
+          slack: expect.objectContaining({ enabled: true }),
+          discord: expect.objectContaining({ enabled: false }),
+        }),
+      }),
+    }));
     logSpy.mockRestore();
   });
 

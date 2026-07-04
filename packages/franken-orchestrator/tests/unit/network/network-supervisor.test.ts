@@ -279,7 +279,7 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
-  it('stops the in-process comms gateway through its host service', async () => {
+  it('stops the in-process comms gateway without terminating its host service', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
     const logStore = new NetworkLogStore(join(workDir, 'logs'));
@@ -325,8 +325,13 @@ describe('NetworkSupervisor', () => {
 
     await supervisor.stop('comms-gateway');
 
-    expect(stopped).toEqual(['comms-gateway', 'dashboard-web', 'chat-server']);
-    await expect(stateStore.load()).resolves.toBeUndefined();
+    expect(stopped).toEqual(['comms-gateway']);
+    await expect(stateStore.load()).resolves.toEqual(expect.objectContaining({
+      services: expect.arrayContaining([
+        expect.objectContaining({ id: 'chat-server' }),
+        expect.objectContaining({ id: 'dashboard-web' }),
+      ]),
+    }));
   });
 
   it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {

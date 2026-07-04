@@ -57,6 +57,29 @@ describe('startChatServer comms pass-through', () => {
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
   });
 
+  it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {
+    const commsConfig: CommsConfig = {
+      orchestrator: {},
+      channels: {},
+    };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-comms-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig,
+    });
+
+    expect(mockedCreateChatApp).toHaveBeenCalledOnce();
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts).toHaveProperty('commsConfig', commsConfig);
+    expect(opts.commsRuntime).toEqual(expect.objectContaining({
+      processInbound: expect.any(Function),
+    }));
+  });
+
   it('does not pass commsConfig or commsRuntime when not provided', async () => {
     handle = await startChatServer({
       host: '127.0.0.1',

@@ -204,12 +204,11 @@ export class NetworkSupervisor {
     const targetService = target === 'all'
       ? undefined
       : state.services.find((service) => service.id === target);
-    const effectiveTarget = targetService?.inProcess && targetService.hostServiceId
-      ? targetService.hostServiceId
-      : target;
     const selected = target === 'all'
       ? state.services
-      : collectDependents(state.services, effectiveTarget);
+      : targetService?.inProcess
+        ? [targetService]
+        : collectDependents(state.services, target);
 
     for (const service of [...selected].reverse()) {
       await this.deps.stopService(service);

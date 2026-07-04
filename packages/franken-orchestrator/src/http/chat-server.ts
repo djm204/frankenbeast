@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
+import type { ChatSession } from '../chat/types.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
@@ -14,6 +15,7 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { BeastRoutesDeps } from './routes/beast-routes.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
+import { ChatRuntimeCommsAdapter } from '../comms/core/chat-runtime-comms-adapter.js';
 import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
@@ -70,6 +72,65 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
+}
+
+function createCommsRuntimeAdapter(
+  runtime: ChatRuntimeBundle['runtime'],
+  sessionStore: ISessionStore,
+  projectName: string,
+): CommsRuntimePort {
+  return new ChatRuntimeCommsAdapter(runtime, {
+    load: async (id) => {
+      const session = sessionStore.get(id);
+      if (!session) {
+        return null;
+      }
+      return {
+        sessionId: session.id,
+        projectId: session.projectId,
+        transcript: session.transcript,
+        state: session.state,
+        ...(session.beastContext ? { beastContext: session.beastContext } : {}),
+      };
+    },
+    create: async (id, data) => {
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id,
+        projectId: projectName,
+        transcript: [],
+        state: 'active',
+        tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      sessionStore.save(session);
+      return {
+        sessionId: id,
+        projectId: projectName,
+        transcript: [],
+        state: 'active',
+        ...data,
+      };
+    },
+    save: async (id, data) => {
+      const existing = sessionStore.get(id);
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id,
+        projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),
+        transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : (existing?.transcript ?? []),
+        state: typeof data.state === 'string' ? data.state : (existing?.state ?? 'active'),
+        tokenTotals: existing?.tokenTotals ?? { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: existing?.costUsd ?? 0,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        ...(data.beastContext ? { beastContext: data.beastContext as ChatSession['beastContext'] } : existing?.beastContext ? { beastContext: existing.beastContext } : {}),
+      };
+      sessionStore.save(session);
+    },
+  });
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -138,6 +199,8 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
+  const commsRuntime = options.commsRuntime
+    ?? (options.commsConfig ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.projectName) : undefined);
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -148,7 +211,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
-    ...(options.commsRuntime ? { commsRuntime: options.commsRuntime } : {}),
+    ...(commsRuntime ? { commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),

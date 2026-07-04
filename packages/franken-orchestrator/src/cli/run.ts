@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
 import { parse as parseDotenv } from 'dotenv';
-import { createSecretStore } from '../network/secret-store.js';
+import { createSecretStore, SecretResolver } from '../network/secret-store.js';
 import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
 import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
@@ -51,6 +51,7 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import type { CommsConfig } from '../comms/config/comms-config.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -393,6 +394,7 @@ export async function main(): Promise<void> {
         secretStore: bootSecretStore,
         config,
       });
+      const managedCommsConfig = await resolveManagedCommsConfig(config, bootSecretStore);
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
@@ -429,6 +431,7 @@ export async function main(): Promise<void> {
               },
             }
           : {}),
+        ...(managedCommsConfig ? { commsConfig: managedCommsConfig } : {}),
         networkControl: {
           root,
           frankenbeastDir: paths.frankenbeastDir,
@@ -546,6 +549,34 @@ export async function main(): Promise<void> {
 type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir' | 'configFile'>;
 
 type BeastDaemonPaths = ReturnType<typeof getProjectPaths>;
+
+async function resolveManagedCommsConfig(
+  config: OrchestratorConfig,
+  secretStore: ISecretStore | undefined,
+): Promise<CommsConfig | undefined> {
+  if (!config.comms.enabled && !config.comms.slack.enabled && !config.comms.discord.enabled) {
+    return undefined;
+  }
+
+  const secrets = secretStore ? await new SecretResolver(secretStore).resolveAll(config) : {};
+  return {
+    orchestrator: {
+      ...(secrets.orchestratorToken ? { token: secrets.orchestratorToken } : {}),
+    },
+    channels: {
+      slack: {
+        enabled: config.comms.slack.enabled,
+        ...(secrets.slackBotToken ? { token: secrets.slackBotToken } : {}),
+        ...(secrets.slackSigningSecret ? { signingSecret: secrets.slackSigningSecret } : {}),
+      },
+      discord: {
+        enabled: config.comms.discord.enabled,
+        ...(secrets.discordBotToken ? { token: secrets.discordBotToken } : {}),
+        ...(config.comms.discord.publicKeyRef ? { publicKey: config.comms.discord.publicKeyRef } : {}),
+      },
+    },
+  };
+}
 
 async function runBeastDaemonCommand(
   args: CliArgs,
