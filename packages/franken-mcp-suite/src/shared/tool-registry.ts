@@ -102,17 +102,15 @@ const TOOLS: ToolFull[] = [
   {
     name: 'fbeast_memory_frontload',
     server: 'memory',
-    description: 'Load all memory entries for project context',
+    description: 'Load all memory entries from this database',
     inputSchema: {
       type: 'object',
       properties: {
-        projectId: { type: 'string', description: 'Project identifier (for future multi-project support)' },
+        projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
       },
-      required: ['projectId'],
     },
-    makeHandler: ({ brain }) => async (args) => {
-      const projectId = String(args['projectId']);
-      const sections = await brain.frontload(projectId);
+    makeHandler: ({ brain }) => async () => {
+      const sections = await brain.frontload();
       if (sections.length === 0) {
         return { content: [{ type: 'text', text: 'No memory entries stored yet.' }] };
       }

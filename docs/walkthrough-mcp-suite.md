@@ -265,7 +265,7 @@ Once installed, Claude Code has access to these tools:
 
 | Tool | Server | Description |
 |------|--------|-------------|
-| `fbeast_memory_frontload` | memory | Load all working + episodic memory as context |
+| `fbeast_memory_frontload` | memory | Load all working + episodic memory from this database as context |
 | `fbeast_memory_store` | memory | Store a key/value entry (working or episodic) |
 | `fbeast_memory_query` | memory | Search memory by keyword |
 | `fbeast_memory_forget` | memory | Delete a working memory entry |
