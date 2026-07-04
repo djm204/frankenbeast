@@ -1,10 +1,10 @@
 # ADR-027: Beast Daemon as Independent Service
 
 - **Date:** 2026-03-16
-- **Status:** Accepted (implemented; follow-up tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
+- **Status:** Accepted (partially implemented; follow-up tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
 - **Deciders:** pfk
 
-> **Implementation status:** Implemented after the original ADR acceptance. The repository now ships the standalone `frankenbeast beasts-daemon` subcommand, a default `:4050` Beast API server, and `.frankenbeast/beasts-daemon.pid` lifecycle management; the historical implementation gap was tracked in [#495](https://github.com/djm204/frankenbeast/issues/495). `chat-server` can still instantiate beast services in-process for its own route, so operator docs should distinguish daemon deployment from chat-server-local wiring.
+> **Implementation status:** Partially implemented after the original ADR acceptance. The repository now ships the standalone `frankenbeast beasts-daemon` subcommand, a default `:4050` Beast API server, and `.frankenbeast/beasts-daemon.pid` lifecycle management; the historical implementation gap was tracked in [#495](https://github.com/djm204/frankenbeast/issues/495). The daemon starts through explicit `beasts-daemon`/`network` commands today; automatic lazy-start from CLI beast commands and chat dispatch remains target architecture. `chat-server` can still instantiate beast services in-process unless `FRANKENBEAST_BEAST_DAEMON_URL` points it at an external daemon, so operator docs should distinguish daemon deployment from chat-server-local wiring.
 
 ## 2026-07-01 Deploy-Beasts Decision (historical)
 
@@ -16,9 +16,10 @@ new process boundary.
 
 Follow-on implementation was tracked in
 [#463](https://github.com/djm204/frankenbeast/issues/463), which is now closed.
-The standalone daemon route is implemented; `chat-server` may still host local
-beast APIs for its own process route, but this section is retained only as the
-historical deferral note that preceded the daemon implementation.
+The standalone daemon route is partially implemented; `chat-server` may still host
+local beast APIs for its own process route, and automatic daemon lazy-start from
+CLI beast commands or chat dispatch remains target-only. This section is retained
+as the historical deferral note that preceded the explicit daemon commands.
 
 ## Context
 
@@ -54,7 +55,7 @@ The daemon owns:
 
 The daemon's lifecycle:
 - Starts with `frankenbeast network up` or `frankenbeast beasts-daemon`
-- Lazy-starts when any consumer first needs it (CLI spawn, chat dispatch)
+- Target-only: lazy-starts when any consumer first needs it (CLI spawn, chat dispatch)
 - Stops with `frankenbeast network down` or direct SIGTERM
 - PID file at `.frankenbeast/beasts-daemon.pid` prevents double-starts
 
