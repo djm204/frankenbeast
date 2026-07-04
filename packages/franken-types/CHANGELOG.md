@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.2...franken-types-v0.7.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **network:** track in-process comms gateway ([#487](https://github.com/djm204/frankenbeast/issues/487)) ([b3d7a3b](https://github.com/djm204/frankenbeast/commit/b3d7a3be68dabbfcf3ff6e967ab73b4c0d29677f))
+
 ## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.1...franken-types-v0.7.2) (2026-07-04)
 
 
