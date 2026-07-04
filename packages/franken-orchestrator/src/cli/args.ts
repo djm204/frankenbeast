@@ -100,6 +100,12 @@ const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
+const STRING_OPTIONS = new Set([
+  'base-dir', 'base-branch', 'budget', 'provider', 'providers', 'design-doc', 'plan-dir', 'plan-name', 'output-dir',
+  'goal', 'output', 'config', 'host', 'port', 'allow-origin', 'label', 'milestone', 'search', 'assignee', 'limit',
+  'repo', 'mode', 'set',
+]);
+const BOOLEAN_SHORT_OPTIONS = new Set(['d']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -229,6 +235,51 @@ export function printUsage(): void {
   console.log(USAGE);
 }
 
+function splitSkillAddArgs(args: string[]): { parsedFlagArgs: string[]; rawSkillAddCommandArgs: string[] } {
+  let positionalCount = 0;
+  let commandIndex = args.length;
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) break;
+
+    if (arg === '--') {
+      continue;
+    }
+
+    if (positionalCount < 3 && arg.startsWith('--')) {
+      const optionName = arg.slice(2).split('=', 1)[0] ?? '';
+      if (STRING_OPTIONS.has(optionName) && !arg.includes('=')) {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (positionalCount < 3 && arg.startsWith('-') && !arg.startsWith('--')) {
+      const shortName = arg.slice(1, 2);
+      if (BOOLEAN_SHORT_OPTIONS.has(shortName)) {
+        continue;
+      }
+    }
+
+    positionalCount += 1;
+    if (positionalCount === 3) {
+      commandIndex = i;
+      break;
+    }
+  }
+
+  let rawSkillAddCommandArgs = args.slice(commandIndex + 1);
+  if (rawSkillAddCommandArgs[0] === '--') {
+    rawSkillAddCommandArgs = rawSkillAddCommandArgs.slice(1);
+  }
+
+  return {
+    parsedFlagArgs: args.slice(0, commandIndex + 1),
+    rawSkillAddCommandArgs,
+  };
+}
+
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Extract subcommand if first positional arg matches
   let subcommand: Subcommand;
@@ -242,11 +293,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let rawSkillAddCommandArgs: string[] | undefined;
   let parsedFlagArgs = flagArgs;
   if (subcommand === 'skill' && flagArgs[0] === 'add') {
-    rawSkillAddCommandArgs = flagArgs.slice(3);
-    if (rawSkillAddCommandArgs[0] === '--') {
-      rawSkillAddCommandArgs = rawSkillAddCommandArgs.slice(1);
-    }
-    parsedFlagArgs = flagArgs.slice(0, 3);
+    const split = splitSkillAddArgs(flagArgs);
+    parsedFlagArgs = split.parsedFlagArgs;
+    rawSkillAddCommandArgs = split.rawSkillAddCommandArgs;
   }
 
   const { values, positionals } = nodeParseArgs({
