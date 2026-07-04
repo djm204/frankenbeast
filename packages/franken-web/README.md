@@ -40,7 +40,7 @@ The frontend automatically resolves the API URL at runtime:
 - Otherwise requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
 - Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
 
-Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to `https://127.0.0.1:3737` by default.
+Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
 If you use a non-default backend port:
 

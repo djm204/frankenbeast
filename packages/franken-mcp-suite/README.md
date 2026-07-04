@@ -67,7 +67,7 @@ Start the web UI in another terminal:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-Open the Vite URL, usually `http://127.0.0.1:5173/`. `dev:chat` proxies API calls to the chat server on `https://127.0.0.1:3737` by default.
+Open the Vite URL, usually `http://127.0.0.1:5173/`. `dev:chat` proxies API calls to the local chat server on `http://127.0.0.1:3737`; production deployments should use a TLS-terminated frontend/API URL instead of the local dev proxy.
 
 If the backend uses a different port:
 

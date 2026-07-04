@@ -39,7 +39,7 @@ export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: z.string().url().default('https://127.0.0.1:3737'),
+  apiUrl: z.string().url().default('http://127.0.0.1:3737'),
 });
 
 export const SlackChannelConfigSchema = z.object({
@@ -73,7 +73,7 @@ export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
   host: HostSchema,
   port: PortSchema.default(3200),
-  orchestratorWsUrl: z.string().url().default('wss://127.0.0.1:3737/v1/chat/ws'),
+  orchestratorWsUrl: z.string().url().default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
   slack: SlackChannelConfigSchema.default({}),
   discord: DiscordChannelConfigSchema.default({}),
