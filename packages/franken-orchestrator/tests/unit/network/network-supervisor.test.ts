@@ -210,8 +210,72 @@ describe('NetworkSupervisor', () => {
         id: 'comms-gateway',
         pid: 0,
         status: 'already-running',
+        inProcess: true,
       }),
     ]));
+  });
+
+  it('probes in-process comms health before reporting it ready', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.telegram.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    const stopService = vi.fn(async () => undefined);
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(async () => ({ pid: 501 })),
+      stopService,
+      healthcheck: vi.fn(async (service) => service.id !== 'comms-gateway'),
+      now: () => '2026-03-10T00:00:00.000Z',
+      startupAttempts: 1,
+    });
+
+    await expect(supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    })).rejects.toThrow(/Service comms-gateway failed healthcheck/);
+
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+  });
+
+  it('allows reused pid-zero services to stop because they are not in-process markers', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const stopService = vi.fn(async () => undefined);
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: true,
+      startedAt: '2026-03-10T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 0,
+          detached: true,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'already-running',
+        },
+      ],
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(),
+      stopService,
+      healthcheck: vi.fn(async () => true),
+    });
+
+    await supervisor.stop('chat-server');
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
   });
 
   it('rejects stopping an in-process service as an independent process', async () => {
@@ -240,6 +304,7 @@ describe('NetworkSupervisor', () => {
           dependsOn: ['chat-server'],
           startedAt: '2026-03-10T00:00:00.000Z',
           status: 'already-running',
+          inProcess: true,
         },
       ],
     });

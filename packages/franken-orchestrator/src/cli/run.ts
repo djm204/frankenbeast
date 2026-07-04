@@ -719,6 +719,7 @@ export interface NetworkCommandSupervisorLike {
     mode: 'secure' | 'insecure';
     secureBackend: string;
   }): Promise<{ services: { id: string; url?: string | undefined; status?: 'started' | 'already-running' | undefined }[] }>;
+  stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
   down(): Promise<void>;
   status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
   stop(target: string | 'all'): Promise<void>;
@@ -897,7 +898,7 @@ export async function runNetworkCommand(
     }
     if (!args.networkDetached) {
       await deps.waitForShutdown();
-      await supervisor.stop(args.networkTarget ?? 'all');
+      await supervisor.stopAll(state);
     }
     return;
   }

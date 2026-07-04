@@ -81,17 +81,23 @@ export class NetworkSupervisor {
     try {
       for (const service of options.services) {
         if (service.runtimeConfig.inProcess === true) {
-          services.push({
+          const serviceState: ManagedNetworkServiceState = {
             id: service.id,
             pid: 0,
             detached: options.detached,
             dependsOn: [...service.dependsOn],
             startedAt,
             status: 'already-running',
+            inProcess: true,
             ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
-          });
+          };
+          services.push(serviceState);
+          const healthy = await this.waitForHealthy(serviceState);
+          if (!healthy) {
+            throw new Error(`Service ${service.id} failed healthcheck during startup`);
+          }
           continue;
         }
 
@@ -113,6 +119,7 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : existingService?.url ? { url: existingService.url } : {}),
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
+            ...(existingService?.inProcess ? { inProcess: existingService.inProcess } : {}),
           });
           continue;
         }
@@ -270,5 +277,5 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isInProcessService(service: ManagedNetworkServiceState): boolean {
-  return service.pid <= 0 && service.status === 'already-running';
+  return service.inProcess === true;
 }
