@@ -133,6 +133,19 @@ describe('network-registry', () => {
     });
   });
 
+  it('forwards an explicit config path to spawned chat servers', () => {
+    const services = resolveNetworkServices(defaultConfig(), {
+      repoRoot: '/repo/frankenbeast',
+      configFile: '/tmp/custom-frankenbeast.json',
+    });
+    const chatServer = services.find((service) => service.id === 'chat-server');
+
+    expect(chatServer?.runtimeConfig.process?.args).toEqual(expect.arrayContaining([
+      '--config',
+      '/tmp/custom-frankenbeast.json',
+    ]));
+  });
+
   it('provides explanation strings for help and status', () => {
     const registry = createNetworkRegistry();
 
