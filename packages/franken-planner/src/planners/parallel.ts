@@ -1,3 +1,4 @@
+import { RationaleRejectedError } from '../core/errors.js';
 import type { PlanResult, TaskId, TaskResult } from '../core/types.js';
 import type { PlanGraph } from '../core/dag.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
@@ -26,14 +27,22 @@ export class ParallelPlanner implements PlanningStrategy {
 
       if (ready.length === 0) break; // no progress — cycle guard (should not happen in a valid DAG)
 
-      // Run all ready tasks concurrently; wrap executor so Promise.all never rejects
+      // Run all ready tasks concurrently; convert ordinary task exceptions into
+      // failures, but let governance rejections propagate to the Planner so they
+      // retain first-class non-retryable semantics across strategies.
       const waveResults = await Promise.all(
         ready.map((task) =>
-          context.executor(task).catch((err: unknown) => ({
-            status: 'failure' as const,
-            taskId: task.id,
-            error: err instanceof Error ? err : new Error(String(err)),
-          }))
+          context.executor(task).catch((err: unknown) => {
+            if (err instanceof RationaleRejectedError) {
+              throw err;
+            }
+
+            return {
+              status: 'failure' as const,
+              taskId: task.id,
+              error: err instanceof Error ? err : new Error(String(err)),
+            };
+          })
         )
       );
 

@@ -10,6 +10,7 @@ import { PlanGraph } from '../../src/core/dag';
 import { createTaskId } from '../../src/core/types';
 import type { Task, TaskResult } from '../../src/core/types';
 import type { GuardrailsModule } from '../../src/modules/mod01';
+import type { SelfCritiqueModule } from '../../src/modules/mod07';
 import type { GraphBuilder, TaskExecutor } from '../../src/planners/types';
 import type { MemoryModule } from '../../src/modules/mod03';
 
@@ -35,7 +36,11 @@ function stubMemory(): MemoryModule {
   };
 }
 
-function buildParallelPlanner(graph: PlanGraph, executor: TaskExecutor): Planner {
+function buildParallelPlanner(
+  graph: PlanGraph,
+  executor: TaskExecutor,
+  selfCritique?: SelfCritiqueModule
+): Planner {
   const recovery = new RecoveryController(stubMemory());
   return new Planner(
     stubGuardrails(),
@@ -43,7 +48,8 @@ function buildParallelPlanner(graph: PlanGraph, executor: TaskExecutor): Planner
     executor,
     new StubHITLGate(),
     new ParallelPlanner(),
-    recovery
+    recovery,
+    selfCritique
   );
 }
 
@@ -128,6 +134,24 @@ describe('Integration — ParallelPlanner', () => {
     const result = await buildParallelPlanner(graph, executor).plan('...');
 
     expect(result.status).toBe('failed');
+  });
+
+  it('returns rationale_rejected when CoT rejects a task rationale', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'));
+    const executor = vi.fn().mockImplementation((t: Task) => Promise.resolve(ok(t.id)));
+    const selfCritique: SelfCritiqueModule = {
+      verifyRationale: vi.fn()
+        .mockResolvedValueOnce({ verdict: 'approved' })
+        .mockResolvedValueOnce({ verdict: 'rejected', reason: 'unsafe rationale' }),
+    };
+
+    const result = await buildParallelPlanner(graph, executor, selfCritique).plan('...');
+
+    expect(result.status).toBe('rationale_rejected');
+    if (result.status !== 'rationale_rejected') throw new Error('unexpected');
+    expect(result.taskId).toBe(createTaskId('b'));
   });
 
   it('collects results from all tasks in a completed plan', async () => {
