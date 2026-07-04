@@ -237,8 +237,9 @@ export function printUsage(): void {
   console.log(USAGE);
 }
 
-function splitSkillAddArgs(args: string[]): { parsedFlagArgs: string[]; rawSkillAddCommandArgs: string[] } {
+function splitSkillAddArgs(args: string[]): { isSkillAdd: boolean; parsedFlagArgs: string[]; rawSkillAddCommandArgs: string[] } {
   let positionalCount = 0;
+  let isSkillAdd = false;
   let commandIndex = args.length;
 
   for (let i = 0; i < args.length; i += 1) {
@@ -265,6 +266,12 @@ function splitSkillAddArgs(args: string[]): { parsedFlagArgs: string[]; rawSkill
     }
 
     positionalCount += 1;
+    if (positionalCount === 1) {
+      if (arg !== 'add') {
+        return { isSkillAdd: false, parsedFlagArgs: args, rawSkillAddCommandArgs: [] };
+      }
+      isSkillAdd = true;
+    }
     if (positionalCount === 3) {
       commandIndex = i;
       break;
@@ -277,6 +284,7 @@ function splitSkillAddArgs(args: string[]): { parsedFlagArgs: string[]; rawSkill
   }
 
   return {
+    isSkillAdd,
     parsedFlagArgs: args.slice(0, commandIndex + 1),
     rawSkillAddCommandArgs,
   };
@@ -333,10 +341,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
 
   let rawSkillAddCommandArgs: string[] | undefined;
   let parsedFlagArgs = flagArgs;
-  if (subcommand === 'skill' && flagArgs[0] === 'add') {
+  if (subcommand === 'skill') {
     const split = splitSkillAddArgs(flagArgs);
-    parsedFlagArgs = split.parsedFlagArgs;
-    rawSkillAddCommandArgs = split.rawSkillAddCommandArgs;
+    if (split.isSkillAdd) {
+      parsedFlagArgs = split.parsedFlagArgs;
+      rawSkillAddCommandArgs = split.rawSkillAddCommandArgs;
+    }
   }
 
   const { values, positionals } = nodeParseArgs({
