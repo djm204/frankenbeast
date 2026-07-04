@@ -323,7 +323,12 @@ describe('useChatSession', () => {
     mockGetSession.mockResolvedValueOnce({
       id: 'chat-1',
       projectId: 'test-proj',
-      transcript: [],
+      transcript: [{
+        id: 'server-assistant',
+        role: 'assistant',
+        content: 'Ready to deploy',
+        timestamp: '2026-03-09T00:00:07Z',
+      }],
       state: 'approved',
       pendingApproval: null,
       socketToken: 'signed-token',
@@ -338,9 +343,9 @@ describe('useChatSession', () => {
     });
 
     expect(result.current.messages).toContainEqual(expect.objectContaining({
-      id: 'assistant-streamed',
       content: 'Ready to deploy',
     }));
+    expect(result.current.messages.filter((message) => message.content === 'Ready to deploy')).toHaveLength(1);
     expect(result.current.pendingApproval).toBeNull();
   });
 

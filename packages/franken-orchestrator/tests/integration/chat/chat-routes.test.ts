@@ -446,6 +446,61 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.pendingApproval).toBeNull();
   });
 
+  it('POST /v1/chat/sessions/:id/approve handles state-only pending approvals', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-state-only-pending',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'approval' as const, content: 'Approved.' }],
+        events: [],
+        pendingApproval: false,
+        state: 'approved',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: 'test-secret-for-http-routes',
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.state).toBe('approved');
+    expect(runtime.run).toHaveBeenCalledWith('/approve', expect.objectContaining({
+      pendingApproval: true,
+    }));
+    expect(session.state).toBe('approved');
+    expect(session.pendingApproval).toBeNull();
+  });
+
   it('POST /v1/chat/sessions/:id/approve does not downgrade approved sessions when runtime reports active', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {

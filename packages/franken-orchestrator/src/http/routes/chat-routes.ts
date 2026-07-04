@@ -119,14 +119,14 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    if (!session.pendingApproval) {
+    if (!session.pendingApproval && session.state !== 'pending_approval') {
       return c.json({ data: { id: session.id, approved, state: session.state } });
     }
 
     if (approved) {
       const result = await runtime.run('/approve', {
         sessionId: session.id,
-        pendingApproval: Boolean(session.pendingApproval),
+        pendingApproval: Boolean(session.pendingApproval) || session.state === 'pending_approval',
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),

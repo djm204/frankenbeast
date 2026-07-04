@@ -176,10 +176,27 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
 function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
   const snapshot = applySessionSnapshot(session);
   const snapshotById = new Map(snapshot.map((message) => [message.id, message]));
+  const snapshotEquivalentCounts = new Map<string, number>();
+  for (const message of snapshot) {
+    const key = `${message.role}\u0000${message.content}`;
+    snapshotEquivalentCounts.set(key, (snapshotEquivalentCounts.get(key) ?? 0) + 1);
+  }
   const seen = new Set<string>();
-  const merged = current.map((message) => {
-    seen.add(message.id);
-    return snapshotById.get(message.id) ?? message;
+  const merged = current.flatMap((message) => {
+    const snapshotMessage = snapshotById.get(message.id);
+    if (snapshotMessage) {
+      seen.add(message.id);
+      return [snapshotMessage];
+    }
+
+    const key = `${message.role}\u0000${message.content}`;
+    const equivalentCount = snapshotEquivalentCounts.get(key) ?? 0;
+    if (equivalentCount > 0) {
+      snapshotEquivalentCounts.set(key, equivalentCount - 1);
+      return [];
+    }
+
+    return [message];
   });
 
   return [
