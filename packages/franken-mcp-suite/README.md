@@ -90,7 +90,7 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 | `fbeast-firewall` | `fbeast_firewall_scan`, `fbeast_firewall_scan_file` | Prompt injection detection (standard/strict tiers) |
 | `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
-All servers share `.fbeast/beast.db` (SQLite, WAL mode).
+All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
 
 ## Combined server
 
