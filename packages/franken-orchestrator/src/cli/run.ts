@@ -185,7 +185,7 @@ function isConventionalBaseBranch(branch: string): boolean {
   return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
 }
 
-export function inferResumeBaseBranch(root: string): string {
+export function inferResumeBaseBranch(root: string): string | undefined {
   try {
     const currentBranch = execFileSync('git', ['branch', '--show-current'], {
       cwd: root,
@@ -215,7 +215,7 @@ export function inferResumeBaseBranch(root: string): string {
     // Fall through to the conventional default when reflog is unavailable.
   }
 
-  return 'main';
+  return undefined;
 }
 
 /**
@@ -360,7 +360,7 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
-  const resumeTarget = args.resume && !args.planDir && !args.planName
+  const resumeTarget = args.resume && !args.planDir && !args.planName && (!args.subcommand || args.subcommand === 'run')
     ? discoverResumeTarget(root)
     : undefined;
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
@@ -368,6 +368,8 @@ export async function main(): Promise<void> {
   // Resolve project root — scope plans by name unless --plan-dir overrides
   const planName = planDirOverride
     ? undefined
+    : args.subcommand === 'issues'
+      ? undefined
     : (args.planName ?? resumeTarget?.planName ?? generatePlanName(args.designDoc));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
@@ -614,7 +616,7 @@ export async function main(): Promise<void> {
   // feature branch, so infer the original base from git reflog unless the
   // user supplied an explicit --base-branch override.
   const baseBranch = args.resume && !args.baseBranch
-    ? inferResumeBaseBranch(root)
+    ? (inferResumeBaseBranch(root) ?? await resolveBaseBranch(root, args.baseBranch, io))
     : await resolveBaseBranch(root, args.baseBranch, io);
 
   // Determine phases

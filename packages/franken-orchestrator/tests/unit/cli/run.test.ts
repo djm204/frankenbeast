@@ -71,8 +71,10 @@ const {
     initNonInteractive: false,
   }));
   const mockSessionStart = vi.fn(async () => ({ status: 'completed' as const }));
-  const MockSession = vi.fn(function (this: { start: typeof mockSessionStart }) {
+  const mockSessionRunIssues = vi.fn(async () => ({ status: 'completed' as const }));
+  const MockSession = vi.fn(function (this: { start: typeof mockSessionStart; runIssues: typeof mockSessionRunIssues }) {
     this.start = mockSessionStart;
+    this.runIssues = mockSessionRunIssues;
   });
   const mockStartChatServer = vi.fn(async () => ({
     url: 'http://127.0.0.1:3737',
@@ -369,11 +371,11 @@ describe('discoverResumeTarget', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('falls back to main when resume base-branch reflog inference is unavailable', () => {
+  it('defers to the normal base resolver when resume base-branch reflog inference is unavailable', () => {
     const root = join(tmpdir(), `frankenbeast-resume-no-git-${Date.now()}`);
     mkdirSync(root, { recursive: true });
 
-    expect(inferResumeBaseBranch(root)).toBe('main');
+    expect(inferResumeBaseBranch(root)).toBeUndefined();
 
     rmSync(root, { recursive: true, force: true });
   });
@@ -697,13 +699,64 @@ describe('main() execution', () => {
     await main();
 
     expect(getProjectPaths).toHaveBeenCalledWith(root, 'plan-2026-03-07-pluggable-providers');
-    expect(resolveBaseBranch).not.toHaveBeenCalled();
+    expect(resolveBaseBranch).toHaveBeenCalledWith(root, undefined, expect.any(Object));
     expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
       baseBranch: 'main',
       entryPhase: 'execute',
       resume: true,
       paths: expect.objectContaining({
         plansDir: `${root}/.fbeast/plans/plan-2026-03-07-pluggable-providers`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('does not scope issue resumes to an unrelated execution checkpoint', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-issues-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+    writeFileSync(join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint'), 'impl:04:done');
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'issues',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: true,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, undefined);
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      entryPhase: 'execute',
+      resume: true,
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans`,
       }),
     }));
 
