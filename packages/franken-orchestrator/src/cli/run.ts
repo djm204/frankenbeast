@@ -220,6 +220,18 @@ async function resolveConfiguredSecret(
   return webEnvValue?.trim() ? webEnvValue.trim() : undefined;
 }
 
+async function resolveConfiguredPublicValue(
+  root: string,
+  ref: string | undefined,
+  secretStore: ISecretStore | undefined,
+): Promise<string | undefined> {
+  const resolved = await resolveConfiguredSecret(root, ref, secretStore);
+  if (resolved || !ref) {
+    return resolved;
+  }
+  return /^[A-Z_][A-Z0-9_]*$/.test(ref) ? undefined : ref;
+}
+
 async function createChatSurfaceDeps(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -617,7 +629,7 @@ async function resolveManagedCommsConfig(
     ?? await resolveConfiguredSecret(root, config.comms.slack.signingSecretRef, secretStore);
   const discordBotToken = secrets.discordBotToken
     ?? await resolveConfiguredSecret(root, config.comms.discord.botTokenRef, secretStore);
-  const discordPublicKey = await resolveConfiguredSecret(root, config.comms.discord.publicKeyRef, secretStore);
+  const discordPublicKey = await resolveConfiguredPublicValue(root, config.comms.discord.publicKeyRef, secretStore);
   return {
     orchestrator: {
       ...(secrets.orchestratorToken ? { token: secrets.orchestratorToken } : {}),

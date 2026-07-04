@@ -18,7 +18,25 @@ export interface CommsSession {
   transcript: Array<{ role: string; content: string; timestamp: string }>;
   state: string;
   beastContext?: unknown;
+  routingMetadata?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+function normalizeRoutingMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const normalized = { ...metadata };
+  if (normalized.channelId === undefined && typeof metadata.externalChannelId === 'string') {
+    normalized.channelId = metadata.externalChannelId;
+  }
+  if (normalized.threadTs === undefined && typeof metadata.externalThreadId === 'string') {
+    normalized.threadTs = metadata.externalThreadId;
+  }
+  if (normalized.threadId === undefined && typeof metadata.externalThreadId === 'string') {
+    normalized.threadId = metadata.externalThreadId;
+  }
+  return normalized;
 }
 
 export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
@@ -49,15 +67,20 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
 
     // Run through ChatRuntime
     const result = await this.runtime.run(input.text, state);
+    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session.routingMetadata);
+    const pendingApproval = result.pendingApproval
+      ? result.pendingApprovalDescription
+        ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+        : session.pendingApproval ?? null
+      : null;
 
     // Persist updated session
     await this.sessionStore.save(input.sessionId, {
       ...session,
       transcript: result.transcript,
       state: result.state,
-      pendingApproval: result.pendingApproval && result.pendingApprovalDescription
-        ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
-        : null,
+      pendingApproval,
+      ...(routingMetadata ? { routingMetadata } : {}),
       beastContext: result.beastContext !== undefined ? result.beastContext : session.beastContext,
     });
 
@@ -69,8 +92,8 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
     if (display?.kind) {
       out.status = display.kind as OutboundMessageStatus;
     }
-    if (input.metadata) {
-      out.metadata = input.metadata;
+    if (routingMetadata) {
+      out.metadata = routingMetadata;
     }
 
     // Add approval buttons when the runtime signals a pending approval
