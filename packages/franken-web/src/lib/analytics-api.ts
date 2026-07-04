@@ -11,6 +11,11 @@ export interface AnalyticsFilters {
   timeWindow?: string;
 }
 
+export interface AnalyticsEventFilters extends AnalyticsFilters {
+  page?: number;
+  pageSize?: number;
+}
+
 export interface AnalyticsSummary {
   totalEvents: number;
   uniqueSessions: number;
@@ -74,7 +79,7 @@ export class AnalyticsApiClient {
     return response.sessions;
   }
 
-  async fetchEvents(filters: AnalyticsFilters): Promise<AnalyticsEventPage> {
+  async fetchEvents(filters: AnalyticsEventFilters): Promise<AnalyticsEventPage> {
     return this.fetchJson<AnalyticsEventPage>(`/api/analytics/events${queryString(filters)}`);
   }
 
@@ -92,12 +97,14 @@ export class AnalyticsApiClient {
   }
 }
 
-function queryString(filters: AnalyticsFilters): string {
+function queryString(filters: AnalyticsEventFilters): string {
   const params = new URLSearchParams();
   if (filters.sessionId) params.set('sessionId', filters.sessionId);
   if (filters.toolQuery) params.set('toolQuery', filters.toolQuery);
   if (filters.outcome) params.set('outcome', filters.outcome);
   if (filters.timeWindow) params.set('timeWindow', filters.timeWindow);
+  if (filters.page) params.set('page', String(filters.page));
+  if (filters.pageSize) params.set('pageSize', String(filters.pageSize));
   const value = params.toString();
   return value ? `?${value}` : '';
 }

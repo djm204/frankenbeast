@@ -30,28 +30,32 @@ const TIME_WINDOWS = [
   { value: 'all', label: 'All time' },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 50;
+
 export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [filters, setFilters] = useState<AnalyticsFilters>({ timeWindow: '24h' });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [sessions, setSessions] = useState<AnalyticsSessionOption[]>([]);
   const [eventPage, setEventPage] = useState<AnalyticsEventPage | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [isEventsLoading, setIsEventsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setLoadError(null);
+    setOverviewError(null);
 
     void Promise.allSettled([
       client.fetchSummary(filters),
       client.fetchSessions(filters),
-      client.fetchEvents(filters),
-    ]).then(([summaryResult, sessionsResult, eventsResult]) => {
+    ]).then(([summaryResult, sessionsResult]) => {
       if (cancelled) return;
-      const errors = [summaryResult, sessionsResult, eventsResult]
+      const errors = [summaryResult, sessionsResult]
         .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
         .map((result) => result.reason instanceof Error ? result.reason.message : 'Unable to load analytics.');
       if (summaryResult.status === 'fulfilled') {
@@ -60,14 +64,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
       }
-      if (eventsResult.status === 'fulfilled') {
-        setEventPage(eventsResult.value);
-      }
-      setLoadError(errors.length > 0 ? errors.join('; ') : null);
-    }).finally(() => {
-      if (!cancelled) {
-        setIsLoading(false);
-      }
+      setOverviewError(errors.length > 0 ? errors.join('; ') : null);
     });
 
     return () => {
@@ -75,7 +72,37 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     };
   }, [client, filters]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setIsEventsLoading(true);
+    setEventsError(null);
+
+    void client.fetchEvents({ ...filters, page, pageSize }).then((eventsResult) => {
+      if (cancelled) return;
+      setEventPage(eventsResult);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setEventPage((current) => current ? { ...current, events: [] } : null);
+      setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
+    }).finally(() => {
+      if (!cancelled) {
+        setIsEventsLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, filters, page, pageSize]);
+
   const events = eventPage?.events ?? [];
+  const totalEvents = eventPage?.total ?? 0;
+  const currentPage = page;
+  const currentPageSize = eventPage?.pageSize ?? pageSize;
+  const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
+  const canGoPrevious = currentPage > 1 && !isEventsLoading;
+  const canGoNext = currentPage < totalPages && !isEventsLoading;
+  const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
   const activityEvents = useMemo(
     () => events.filter((event) => event.outcome === 'approved' && event.source !== 'governor'),
     [events],
@@ -100,6 +127,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       ...current,
       ...next,
     }));
+    setPage(1);
+  }
+
+  function updatePageSize(nextPageSize: number) {
+    setPageSize(nextPageSize);
+    setPage(1);
   }
 
   return (
@@ -109,7 +142,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
           <p className="eyebrow">Analytics</p>
           <h2>Observer Activity</h2>
         </div>
-        <p>{eventPage?.total ?? 0} normalized events</p>
+        <p>{totalEvents} normalized events</p>
       </section>
 
       {loadError && <div className="analytics-alert">{loadError}</div>}
@@ -184,9 +217,49 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
             ))}
           </select>
         </label>
+
+        <label className="field-stack">
+          <span>Page size</span>
+          <select
+            aria-label="Page size"
+            className="field-control"
+            value={pageSize}
+            onChange={(event) => updatePageSize(Number(event.target.value))}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option} per page
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
 
-      {isLoading ? (
+      <section className="analytics-pagination" aria-label="Analytics pagination">
+        <div>
+          Page {currentPage} of {totalPages} · {totalEvents} events
+        </div>
+        <div className="analytics-pagination__actions">
+          <button
+            className="button button--secondary button--small"
+            disabled={!canGoPrevious}
+            type="button"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Previous
+          </button>
+          <button
+            className="button button--secondary button--small"
+            disabled={!canGoNext}
+            type="button"
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+          >
+            Next
+          </button>
+        </div>
+      </section>
+
+      {isEventsLoading ? (
         <section className="empty-state">Loading analytics...</section>
       ) : (
         <section className="analytics-table-grid">
