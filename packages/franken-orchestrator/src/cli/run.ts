@@ -267,9 +267,13 @@ export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): stri
   }
 
   const { host, port } = config.dashboard;
-  const origins = [`http://${host}:${port}`];
-  if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') {
+  const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  const origins = [`http://${originHost}:${port}`];
+  if (host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0.0.0.0') {
     origins.push(`http://localhost:${port}`);
+  }
+  if (host === '0.0.0.0') {
+    origins.push(`http://127.0.0.1:${port}`);
   }
   return origins;
 }
