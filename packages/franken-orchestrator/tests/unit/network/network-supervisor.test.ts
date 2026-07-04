@@ -182,6 +182,9 @@ describe('NetworkSupervisor', () => {
     config.comms.telegram.enabled = true;
     const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
     const startService = vi.fn(async (service) => ({ pid: service.id === 'dashboard-web' ? 202 : 201 }));
+    const preflightService = vi.fn(async (service) => service.id === 'comms-gateway'
+      ? { action: 'conflict' as const, reason: 'Port conflict for comms-gateway on 127.0.0.1:3200' }
+      : { action: 'start' as const });
 
     const supervisor = new NetworkSupervisor({
       stateStore,
@@ -189,6 +192,7 @@ describe('NetworkSupervisor', () => {
       startService,
       stopService: vi.fn(async () => undefined),
       healthcheck: vi.fn(async () => true),
+      preflightService,
       now: () => '2026-03-10T00:00:00.000Z',
     });
 
@@ -200,6 +204,7 @@ describe('NetworkSupervisor', () => {
     });
 
     expect(startService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }), expect.any(Object));
+    expect(preflightService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }));
     expect(state.services).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'comms-gateway',

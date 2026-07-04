@@ -143,29 +143,31 @@ describe('verifyInit', () => {
     expect(prompts.some((prompt) => prompt.includes('Default provider'))).toBe(false);
   });
 
-  it('repair maps Telegram and WhatsApp verification issues to their transport scopes', async () => {
+  it('repair keeps config-enabled transports even when init state is stale', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');
     const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const config = defaultConfig();
     config.comms.enabled = true;
+    config.comms.slack.enabled = true;
+    config.comms.slack.appId = 'existing-app';
+    config.comms.slack.botTokenRef = 'op://slack/bot-token';
+    config.comms.slack.signingSecretRef = 'op://slack/signing-secret';
     config.comms.telegram.enabled = true;
-    config.comms.whatsapp.enabled = true;
     await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     await stateStore.save({
       ...createEmptyInitState(configFile),
       selectedModules: ['comms'],
-      selectedCommsTransports: ['telegram', 'whatsapp'],
+      selectedCommsTransports: ['slack'],
       completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
+      answers: {
+        'comms.slack.appId': 'existing-app',
+        'comms.slack.botTokenRef': 'op://slack/bot-token',
+        'comms.slack.signingSecretRef': 'op://slack/signing-secret',
+      },
     });
-    const { io, prompts } = scriptedIo(
-      'op://telegram/bot-token',
-      'op://whatsapp/access-token',
-      'wa-phone-number-id',
-      'op://whatsapp/app-secret',
-      'op://whatsapp/verify-token',
-    );
+    const { io, prompts } = scriptedIo('op://telegram/bot-token');
 
     const result = await runRepairInit({
       configFile,
@@ -173,12 +175,10 @@ describe('verifyInit', () => {
       io,
     });
 
+    expect(result.config.comms.slack.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(true);
     expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
-    expect(result.config.comms.whatsapp.accessTokenRef).toBe('op://whatsapp/access-token');
-    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe('wa-phone-number-id');
-    expect(result.config.comms.whatsapp.appSecretRef).toBe('op://whatsapp/app-secret');
-    expect(result.config.comms.whatsapp.verifyTokenRef).toBe('op://whatsapp/verify-token');
-    expect(prompts.every((prompt) => !prompt.includes('Enable Slack'))).toBe(true);
-    expect(prompts.every((prompt) => !prompt.includes('Enable Discord'))).toBe(true);
+    expect(result.state.selectedCommsTransports).toEqual(['slack', 'telegram']);
+    expect(prompts).toEqual(['Telegram bot token ref']);
   });
 });

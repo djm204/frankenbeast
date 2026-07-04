@@ -51,6 +51,7 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -173,6 +174,66 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   } catch {
     return undefined;
   }
+}
+
+async function resolveCommsSecret(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  if (secretStore) {
+    try {
+      const resolved = await secretStore.resolve(ref);
+      if (resolved?.trim()) {
+        return resolved.trim();
+      }
+    } catch {
+      // Fall through to environment lookup for deploys that keep refs as env var names.
+    }
+  }
+  return process.env[ref]?.trim() || undefined;
+}
+
+async function buildChatServerCommsConfig(
+  config: OrchestratorConfig,
+  secretStore: ISecretStore | undefined,
+): Promise<CommsConfig | undefined> {
+  if (!config.comms.enabled
+    && !config.comms.slack.enabled
+    && !config.comms.discord.enabled
+    && !config.comms.telegram.enabled
+    && !config.comms.whatsapp.enabled) {
+    return undefined;
+  }
+
+  return CommsConfigSchema.parse({
+    orchestrator: {
+      wsUrl: config.comms.orchestratorWsUrl,
+      token: await resolveCommsSecret(config.comms.orchestratorTokenRef, secretStore),
+    },
+    channels: {
+      slack: {
+        enabled: config.comms.slack.enabled,
+        token: await resolveCommsSecret(config.comms.slack.botTokenRef, secretStore),
+        signingSecret: await resolveCommsSecret(config.comms.slack.signingSecretRef, secretStore),
+      },
+      discord: {
+        enabled: config.comms.discord.enabled,
+        token: await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore),
+        publicKey: config.comms.discord.publicKeyRef,
+      },
+      telegram: {
+        enabled: config.comms.telegram.enabled,
+        botToken: await resolveCommsSecret(config.comms.telegram.botTokenRef, secretStore),
+      },
+      whatsapp: {
+        enabled: config.comms.whatsapp.enabled,
+        accessToken: await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore),
+        phoneNumberId: config.comms.whatsapp.phoneNumberIdRef,
+        appSecret: await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore),
+        verifyToken: await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore),
+      },
+    },
+  });
 }
 
 async function createChatSurfaceDeps(
@@ -396,6 +457,7 @@ export async function main(): Promise<void> {
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
+      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore);
       const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({
@@ -438,6 +500,7 @@ export async function main(): Promise<void> {
             mutableConfig = nextConfig;
           },
         },
+        ...(commsConfig ? { commsConfig } : {}),
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),

@@ -1,5 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
@@ -14,6 +16,11 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { BeastRoutesDeps } from './routes/beast-routes.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
+import {
+  ChatRuntimeCommsAdapter,
+  type CommsSession,
+  type CommsSessionStore,
+} from '../comms/core/chat-runtime-comms-adapter.js';
 import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
@@ -70,6 +77,42 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
+}
+
+class FileCommsSessionStore implements CommsSessionStore {
+  constructor(
+    private readonly storeDir: string,
+    private readonly projectId: string,
+  ) {}
+
+  async load(id: string): Promise<CommsSession | null> {
+    try {
+      return JSON.parse(readFileSync(this.filePath(id), 'utf-8')) as CommsSession;
+    } catch {
+      return null;
+    }
+  }
+
+  async create(id: string, data: Record<string, unknown>): Promise<CommsSession> {
+    const session: CommsSession = {
+      sessionId: id,
+      projectId: this.projectId,
+      transcript: [],
+      state: 'active',
+      ...data,
+    };
+    await this.save(id, session);
+    return session;
+  }
+
+  async save(id: string, data: Record<string, unknown>): Promise<void> {
+    mkdirSync(this.storeDir, { recursive: true });
+    writeFileSync(this.filePath(id), JSON.stringify(data, null, 2), 'utf-8');
+  }
+
+  private filePath(id: string): string {
+    return join(this.storeDir, `${encodeURIComponent(id)}.json`);
+  }
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -138,6 +181,13 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
+  const commsRuntime = options.commsRuntime
+    ?? (options.commsConfig
+      ? new ChatRuntimeCommsAdapter(
+          runtime.runtime,
+          new FileCommsSessionStore(join(options.sessionStoreDir, 'comms'), options.projectName),
+        )
+      : undefined);
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -148,7 +198,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
-    ...(options.commsRuntime ? { commsRuntime: options.commsRuntime } : {}),
+    ...(commsRuntime ? { commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),

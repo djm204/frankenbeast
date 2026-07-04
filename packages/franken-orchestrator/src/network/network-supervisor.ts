@@ -80,6 +80,21 @@ export class NetworkSupervisor {
 
     try {
       for (const service of options.services) {
+        if (service.runtimeConfig.inProcess === true) {
+          services.push({
+            id: service.id,
+            pid: 0,
+            detached: options.detached,
+            dependsOn: [...service.dependsOn],
+            startedAt,
+            status: 'already-running',
+            ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+            ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+            ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+          });
+          continue;
+        }
+
         const preflight = await this.resolvePreflight(service);
         if (preflight.action === 'conflict') {
           throw new Error(preflight.reason ?? `Port conflict for ${service.id}`);
@@ -98,21 +113,6 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : existingService?.url ? { url: existingService.url } : {}),
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
-          });
-          continue;
-        }
-
-        if (service.runtimeConfig.inProcess === true) {
-          services.push({
-            id: service.id,
-            pid: 0,
-            detached: options.detached,
-            dependsOn: [...service.dependsOn],
-            startedAt,
-            status: 'already-running',
-            ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
-            ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
-            ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
           });
           continue;
         }

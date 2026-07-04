@@ -86,29 +86,29 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
       slack: {
         ...baseConfig.comms.slack,
         enabled: state.selectedCommsTransports.includes('slack'),
-        appId: stateValue(state, 'comms.slack.appId') as string | undefined,
-        botTokenRef: stateValue(state, 'comms.slack.botTokenRef') as string | undefined,
-        signingSecretRef: stateValue(state, 'comms.slack.signingSecretRef') as string | undefined,
+        appId: stateValue<string>(state, 'comms.slack.appId') ?? baseConfig.comms.slack.appId,
+        botTokenRef: stateValue<string>(state, 'comms.slack.botTokenRef') ?? baseConfig.comms.slack.botTokenRef,
+        signingSecretRef: stateValue<string>(state, 'comms.slack.signingSecretRef') ?? baseConfig.comms.slack.signingSecretRef,
       },
       discord: {
         ...baseConfig.comms.discord,
         enabled: state.selectedCommsTransports.includes('discord'),
-        applicationId: stateValue(state, 'comms.discord.applicationId') as string | undefined,
-        botTokenRef: stateValue(state, 'comms.discord.botTokenRef') as string | undefined,
-        publicKeyRef: stateValue(state, 'comms.discord.publicKeyRef') as string | undefined,
+        applicationId: stateValue<string>(state, 'comms.discord.applicationId') ?? baseConfig.comms.discord.applicationId,
+        botTokenRef: stateValue<string>(state, 'comms.discord.botTokenRef') ?? baseConfig.comms.discord.botTokenRef,
+        publicKeyRef: stateValue<string>(state, 'comms.discord.publicKeyRef') ?? baseConfig.comms.discord.publicKeyRef,
       },
       telegram: {
         ...baseConfig.comms.telegram,
         enabled: state.selectedCommsTransports.includes('telegram'),
-        botTokenRef: stateValue(state, 'comms.telegram.botTokenRef') as string | undefined,
+        botTokenRef: stateValue<string>(state, 'comms.telegram.botTokenRef') ?? baseConfig.comms.telegram.botTokenRef,
       },
       whatsapp: {
         ...baseConfig.comms.whatsapp,
         enabled: state.selectedCommsTransports.includes('whatsapp'),
-        accessTokenRef: stateValue(state, 'comms.whatsapp.accessTokenRef') as string | undefined,
-        phoneNumberIdRef: stateValue(state, 'comms.whatsapp.phoneNumberIdRef') as string | undefined,
-        appSecretRef: stateValue(state, 'comms.whatsapp.appSecretRef') as string | undefined,
-        verifyTokenRef: stateValue(state, 'comms.whatsapp.verifyTokenRef') as string | undefined,
+        accessTokenRef: stateValue<string>(state, 'comms.whatsapp.accessTokenRef') ?? baseConfig.comms.whatsapp.accessTokenRef,
+        phoneNumberIdRef: stateValue<string>(state, 'comms.whatsapp.phoneNumberIdRef') ?? baseConfig.comms.whatsapp.phoneNumberIdRef,
+        appSecretRef: stateValue<string>(state, 'comms.whatsapp.appSecretRef') ?? baseConfig.comms.whatsapp.appSecretRef,
+        verifyTokenRef: stateValue<string>(state, 'comms.whatsapp.verifyTokenRef') ?? baseConfig.comms.whatsapp.verifyTokenRef,
       },
     },
   });
@@ -219,7 +219,7 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
       }
       const targetedTransportOnly = activeTransportScope !== undefined && activeTransportScope.includes(transport.id);
       const enabled = targetedTransportOnly
-        ? transportDefault(options.initialState, config, transport.id)
+        ? config.comms[transport.id].enabled
         : await askBoolean(
           options.io,
           `Enable ${transport.label}? [y/N]`,
