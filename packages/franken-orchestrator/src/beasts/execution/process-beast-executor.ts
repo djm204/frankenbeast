@@ -4,6 +4,7 @@ import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
+import { createBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -37,6 +38,7 @@ export interface ProcessBeastExecutorOptions {
     spawnedSpec: BeastProcessSpec,
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
+  worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -53,12 +55,28 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
-    this.supervisor.validateCwd?.(processSpec.cwd);
+    const worktree = createBeastWorktree(
+      this.options.worktreeIsolation,
+      run.trackedAgentId ?? run.id,
+      processSpec.cwd,
+    );
+    const isolatedSpec = worktree
+      ? {
+          ...processSpec,
+          cwd: worktree.worktreePath,
+          env: {
+            ...processSpec.env,
+            FRANKENBEAST_WORKTREE_PATH: worktree.worktreePath,
+            FRANKENBEAST_WORKTREE_BRANCH: worktree.branchName,
+          },
+        }
+      : processSpec;
+    this.supervisor.validateCwd?.(isolatedSpec.cwd);
 
     // Write configSnapshot to a JSON file for the spawned process to load
     const configDir = resolve(
       this.options.runConfigDir ??
-      join(processSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
+      join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
     );
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);
@@ -66,9 +84,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     this.configFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
-      ...processSpec,
+      ...isolatedSpec,
       env: {
-        ...processSpec.env,
+        ...isolatedSpec.env,
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
       },
@@ -171,6 +189,15 @@ export class ProcessBeastExecutor implements BeastExecutor {
         backend: 'process',
         command: processSpec.command,
         args: [...processSpec.args],
+        ...(worktree
+          ? {
+              worktreeIsolation: true,
+              worktreePath: worktree.worktreePath,
+              worktreeBranch: worktree.branchName,
+              worktreeAgentId: worktree.agentId,
+              worktreeProjectRoot: worktree.projectRoot,
+            }
+          : {}),
       },
     });
 

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -96,6 +97,55 @@ describe('AgentService', () => {
     expect(linked.dispatchRunId).toBe(run.id);
     expect(detail.agent.dispatchRunId).toBe(run.id);
     expect(detail.events).toEqual([event]);
+  });
+
+  it('removes tracked worktree allocation when soft-deleting a stopped agent', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const runGit = vi.fn((_args: readonly string[]) => 'beast/agent-cleanup');
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', { runGit });
+    const worktreePath = join(workDir, '.frankenbeast', '.worktrees', 'agent-cleanup');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const agent = service.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: { chunkDirectory: 'docs/chunks' },
+      },
+      initConfig: { chunkDirectory: 'docs/chunks' },
+    });
+    const run = repository.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+    repository.createAttempt(run.id, {
+      status: 'stopped',
+      executorMetadata: {
+        worktreeIsolation: true,
+        worktreePath,
+        worktreeBranch: 'beast/agent-cleanup',
+        worktreeAgentId: 'agent-cleanup',
+        worktreeProjectRoot: workDir,
+      },
+    });
+    service.linkRun(agent.id, run.id);
+    service.updateAgent(agent.id, { status: 'stopped' });
+
+    service.softDeleteAgent(agent.id);
+
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', worktreePath], workDir);
+    expect(runGit).toHaveBeenCalledWith(['branch', '-D', 'beast/agent-cleanup'], workDir);
   });
 
   it('hides soft-deleted tracked agents from list and detail lookups', async () => {
