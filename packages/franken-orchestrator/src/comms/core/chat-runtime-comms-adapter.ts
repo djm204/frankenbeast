@@ -41,7 +41,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
     // Build runtime state
     const state: ChatRuntimeState = {
       sessionId: input.sessionId,
-      pendingApproval: session.state === 'pending_approval',
+      pendingApproval: Boolean(session.pendingApproval) || session.state === 'pending_approval',
       projectId: session.projectId,
       transcript: session.transcript as ChatRuntimeState['transcript'],
       beastContext: session.beastContext as ChatRuntimeState['beastContext'],
@@ -55,7 +55,10 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       ...session,
       transcript: result.transcript,
       state: result.state,
-      beastContext: result.beastContext,
+      pendingApproval: result.pendingApproval && result.pendingApprovalDescription
+        ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+        : null,
+      beastContext: result.beastContext !== undefined ? result.beastContext : session.beastContext,
     });
 
     // Map to comms outbound format

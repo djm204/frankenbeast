@@ -90,7 +90,8 @@ function createCommsRuntimeAdapter(
         projectId: session.projectId,
         transcript: session.transcript,
         state: session.state,
-        ...(session.beastContext ? { beastContext: session.beastContext } : {}),
+        pendingApproval: session.pendingApproval ?? null,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
       };
     },
     create: async (id, data) => {
@@ -126,7 +127,12 @@ function createCommsRuntimeAdapter(
         costUsd: existing?.costUsd ?? 0,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
-        ...(data.beastContext ? { beastContext: data.beastContext as ChatSession['beastContext'] } : existing?.beastContext ? { beastContext: existing.beastContext } : {}),
+        pendingApproval: data.pendingApproval === undefined
+          ? existing?.pendingApproval ?? null
+          : data.pendingApproval as ChatSession['pendingApproval'],
+        beastContext: data.beastContext === undefined
+          ? existing?.beastContext ?? null
+          : data.beastContext as ChatSession['beastContext'],
       };
       sessionStore.save(session);
     },

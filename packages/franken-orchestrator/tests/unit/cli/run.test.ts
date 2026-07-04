@@ -673,6 +673,102 @@ describe('main() execution', () => {
     logSpy.mockRestore();
   });
 
+  it('resolves managed comms channel refs from root env when the secret store is unavailable', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-comms-env`);
+    tempDirs.push(root);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, '.env'),
+      [
+        'SLACK_BOT_TOKEN=xoxb-root-token',
+        'SLACK_SIGNING_SECRET=root-signing-secret',
+        'DISCORD_BOT_TOKEN=discord-root-token',
+        'DISCORD_PUBLIC_KEY=0123456789abcdef',
+      ].join('\n'),
+    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'claude-sonnet-4-6' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 3200,
+        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        slack: {
+          enabled: true,
+          botTokenRef: 'SLACK_BOT_TOKEN',
+          signingSecretRef: 'SLACK_SIGNING_SECRET',
+        },
+        discord: {
+          enabled: true,
+          botTokenRef: 'DISCORD_BOT_TOKEN',
+          publicKeyRef: 'DISCORD_PUBLIC_KEY',
+        },
+      },
+    });
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: '127.0.0.1',
+      port: 3737,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      commsConfig: expect.objectContaining({
+        channels: expect.objectContaining({
+          slack: expect.objectContaining({
+            enabled: true,
+            token: 'xoxb-root-token',
+            signingSecret: 'root-signing-secret',
+          }),
+          discord: expect.objectContaining({
+            enabled: true,
+            token: 'discord-root-token',
+            publicKey: '0123456789abcdef',
+          }),
+        }),
+      }),
+    }));
+    logSpy.mockRestore();
+  });
+
   it('prefers the root .env beast operator token for chat-server', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}`);
     tempDirs.push(root);

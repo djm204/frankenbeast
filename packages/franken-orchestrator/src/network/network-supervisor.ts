@@ -102,7 +102,12 @@ export class NetworkSupervisor {
     try {
       for (const service of options.services) {
         if (service.runtimeConfig.inProcess) {
-          services.push(this.createInProcessState(service, startedAt, options.detached));
+          const serviceState = this.createInProcessState(service, startedAt, options.detached);
+          services.push(serviceState);
+          const healthy = await this.waitForHealthy(serviceState);
+          if (!healthy) {
+            throw new Error(`Service ${service.id} failed healthcheck during startup`);
+          }
           continue;
         }
 
@@ -204,11 +209,15 @@ export class NetworkSupervisor {
     const targetService = target === 'all'
       ? undefined
       : state.services.find((service) => service.id === target);
+    if (targetService?.inProcess) {
+      throw new Error(
+        `Cannot stop in-process service ${targetService.id} independently; stop its host service ${targetService.hostServiceId ?? 'process'} or all services instead`,
+      );
+    }
+
     const selected = target === 'all'
       ? state.services
-      : targetService?.inProcess
-        ? [targetService]
-        : collectDependents(state.services, target);
+      : collectDependents(state.services, target);
 
     for (const service of [...selected].reverse()) {
       await this.deps.stopService(service);

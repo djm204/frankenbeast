@@ -176,6 +176,50 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
+async function readEnvValueFromFile(filePath: string, key: string): Promise<string | undefined> {
+  try {
+    const contents = await readFile(filePath, 'utf8');
+    const parsed = parseDotenv(contents);
+    return parsed[key];
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveConfiguredSecret(
+  root: string,
+  ref: string | undefined,
+  secretStore: ISecretStore | undefined,
+): Promise<string | undefined> {
+  if (!ref) {
+    return undefined;
+  }
+
+  if (secretStore) {
+    try {
+      const storeValue = await secretStore.resolve(ref);
+      if (storeValue?.trim()) {
+        return storeValue.trim();
+      }
+    } catch {
+      // Secret store unavailable (e.g. missing CLI binary) — fall through to env vars.
+    }
+  }
+
+  const envValue = process.env[ref]?.trim();
+  if (envValue) {
+    return envValue;
+  }
+
+  const rootEnvValue = await readEnvValueFromFile(join(root, '.env'), ref);
+  if (rootEnvValue?.trim()) {
+    return rootEnvValue.trim();
+  }
+
+  const webEnvValue = await readEnvValueFromFile(join(root, 'packages', 'franken-web', '.env.local'), ref);
+  return webEnvValue?.trim() ? webEnvValue.trim() : undefined;
+}
+
 async function createChatSurfaceDeps(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -394,7 +438,7 @@ export async function main(): Promise<void> {
         secretStore: bootSecretStore,
         config,
       });
-      const managedCommsConfig = await resolveManagedCommsConfig(config, bootSecretStore);
+      const managedCommsConfig = await resolveManagedCommsConfig(config, bootSecretStore, root);
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
@@ -553,12 +597,20 @@ type BeastDaemonPaths = ReturnType<typeof getProjectPaths>;
 async function resolveManagedCommsConfig(
   config: OrchestratorConfig,
   secretStore: ISecretStore | undefined,
+  root: string,
 ): Promise<CommsConfig | undefined> {
   if (!config.comms.enabled && !config.comms.slack.enabled && !config.comms.discord.enabled) {
     return undefined;
   }
 
   const secrets = secretStore ? await new SecretResolver(secretStore).resolveAll(config) : {};
+  const slackBotToken = secrets.slackBotToken
+    ?? await resolveConfiguredSecret(root, config.comms.slack.botTokenRef, secretStore);
+  const slackSigningSecret = secrets.slackSigningSecret
+    ?? await resolveConfiguredSecret(root, config.comms.slack.signingSecretRef, secretStore);
+  const discordBotToken = secrets.discordBotToken
+    ?? await resolveConfiguredSecret(root, config.comms.discord.botTokenRef, secretStore);
+  const discordPublicKey = await resolveConfiguredSecret(root, config.comms.discord.publicKeyRef, secretStore);
   return {
     orchestrator: {
       ...(secrets.orchestratorToken ? { token: secrets.orchestratorToken } : {}),
@@ -566,13 +618,13 @@ async function resolveManagedCommsConfig(
     channels: {
       slack: {
         enabled: config.comms.slack.enabled,
-        ...(secrets.slackBotToken ? { token: secrets.slackBotToken } : {}),
-        ...(secrets.slackSigningSecret ? { signingSecret: secrets.slackSigningSecret } : {}),
+        ...(slackBotToken ? { token: slackBotToken } : {}),
+        ...(slackSigningSecret ? { signingSecret: slackSigningSecret } : {}),
       },
       discord: {
         enabled: config.comms.discord.enabled,
-        ...(secrets.discordBotToken ? { token: secrets.discordBotToken } : {}),
-        ...(config.comms.discord.publicKeyRef ? { publicKey: config.comms.discord.publicKeyRef } : {}),
+        ...(discordBotToken ? { token: discordBotToken } : {}),
+        ...(discordPublicKey ? { publicKey: discordPublicKey } : {}),
       },
     },
   };

@@ -177,6 +177,46 @@ describe('ChatRuntimeCommsAdapter', () => {
       { id: 'approve', label: 'Approve', style: 'primary' },
       { id: 'reject', label: 'Reject', style: 'danger' },
     ]);
+    expect(store.save).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({
+        pendingApproval: expect.objectContaining({
+          description: 'rm -rf /',
+          requestedAt: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it('persists explicit null beast context returned by the runtime', async () => {
+    store._sessions.set('beast-sess', {
+      sessionId: 'beast-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'active',
+      beastContext: { definitionId: 'martin-loop', interviewSessionId: 'interview-1', status: 'interviewing' },
+    });
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'reply', content: 'started run' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active',
+      tier: null,
+      transcript: [],
+      beastContext: null,
+    });
+
+    await adapter.processInbound({
+      sessionId: 'beast-sess',
+      channelType: 'slack',
+      text: 'ship it',
+      externalUserId: 'U123',
+    });
+
+    expect(store.save).toHaveBeenCalledWith(
+      'beast-sess',
+      expect.objectContaining({ beastContext: null }),
+    );
   });
 
   it('does not add approval buttons when not pending', async () => {
