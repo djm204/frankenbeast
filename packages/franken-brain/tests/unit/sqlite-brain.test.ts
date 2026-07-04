@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type { EpisodicEvent, ExecutionState, BrainSnapshot } from '@franken/types';
@@ -437,6 +440,27 @@ describe('SqliteBrain', () => {
       tmpBrain.working.set('test', 'value');
       expect(tmpBrain.working.get('test')).toBe('value');
       tmpBrain.close();
+    });
+
+    it('hydrates persisted working memory from an existing SQLite file', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        first.working.set('adrs', ['ADR-001']);
+        first.working.set('rules', { review: 'required' });
+        first.flush();
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('adrs')).toEqual(['ADR-001']);
+        expect(reopened.working.get('rules')).toEqual({ review: 'required' });
+        expect(reopened.working.usage().entries).toBe(2);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('defaults to in-memory database', () => {

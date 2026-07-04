@@ -42,7 +42,23 @@ class SqliteWorkingMemory implements IWorkingMemory {
   constructor(
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
-  ) {}
+  ) {
+    this.loadFromDb();
+  }
+
+  /** Hydrate in-memory state from persisted SQLite working_memory rows. */
+  private loadFromDb(): void {
+    const rows = this.db
+      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string }>;
+    const snap: Record<string, unknown> = {};
+
+    for (const row of rows) {
+      snap[row.key] = JSON.parse(row.value) as unknown;
+    }
+
+    this.restore(snap);
+  }
 
   /** Flush in-memory Map to SQLite working_memory table (called on checkpoint). */
   flushToDb(): void {
