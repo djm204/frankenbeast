@@ -413,6 +413,42 @@ describe('runExecution', () => {
     expect(c.errorContext![0]).toBeInstanceOf(Error);
     expect(c.errorContext![0]!.message).toBe('boom');
     expect(c.circuitBreakerTripped).toBe(true);
+    expect(c.audit.find(a => a.action === 'recovery:failed')).toBeDefined();
+  });
+
+  it('injects a fix-it task and retries when a failed task matches a known error', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.status)).toEqual(['success', 'success']);
+    expect(outcomes[0]!.taskId).toBe('fix-t1-attempt-1');
+    expect(outcomes[0]!.output).toBeInstanceOf(Map);
+    expect(outcomes[1]).toEqual({ taskId: 't1', status: 'success', output: 'retry-output' });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(c.plan?.tasks).toEqual([
+      { id: 'fix-t1-attempt-1', objective: 'free temporary files before retrying', requiredSkills: [], dependsOn: [] },
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: ['fix-t1-attempt-1'] },
+    ]);
+    expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
+    expect(c.circuitBreakerTripped).toBe(false);
   });
 
   // ── CLI skill routing tests ──

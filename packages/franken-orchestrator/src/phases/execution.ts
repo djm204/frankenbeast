@@ -15,6 +15,16 @@ import type {
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import { NullLogger } from '../logger.js';
+import {
+  RecoveryController,
+  PlanGraph as RecoveryPlanGraph,
+  createTaskId,
+  UnknownErrorEscalatedError,
+  MaxRecoveryAttemptsError,
+  type KnownError,
+  type MemoryModule as RecoveryMemoryModule,
+  type Task as RecoveryTask,
+} from 'franken-planner';
 
 export class HitlRejectedError extends Error {
   constructor(
@@ -61,6 +71,7 @@ export async function runExecution(
   // Simple topological execution: keep a keyed FIFO queue so plan refreshes can
   // atomically add newly discovered tasks without duplicating overlapping work.
   const pending = new Map(ctx.plan.tasks.map((task) => [task.id, task]));
+  const recoveryAttempts = new Map<string, number>();
   let iterations = 0;
   let maxIterations = Math.max(pending.size * 2, 10); // safety guard
 
@@ -133,9 +144,9 @@ export async function runExecution(
       cliExecutor,
       checkpoint,
     );
-    outcomes.push(outcome);
 
     if (outcome.status === 'success') {
+      outcomes.push(outcome);
       // Persist the task output before the done marker so a crash after marking
       // done can still rehydrate dependency outputs for downstream tasks.
       checkpoint?.writeTaskOutput?.(task.id, outcome.output);
@@ -144,6 +155,25 @@ export async function runExecution(
       checkpoint?.write(`${task.id}:done`);
       completed.add(task.id);
       completedOutputs.set(task.id, outcome.output);
+    } else if (outcome.status === 'skipped') {
+      outcomes.push(outcome);
+    } else if (outcome.status === 'failure') {
+      const recovered = await recoverFailedTask({
+        ctx,
+        memory,
+        task,
+        error: new Error(outcome.error ?? 'Task failed'),
+        pending,
+        completed,
+        recoveryAttempts,
+        logger,
+      });
+
+      if (recovered) {
+        maxIterations += 2;
+      } else {
+        outcomes.push(outcome);
+      }
     }
   }
 
@@ -161,6 +191,170 @@ export async function runExecution(
   });
 
   return outcomes;
+}
+
+interface RecoveryAttemptInput {
+  readonly ctx: BeastContext;
+  readonly memory: IMemoryModule;
+  readonly task: PlanTask;
+  readonly error: Error;
+  readonly pending: Map<string, PlanTask>;
+  readonly completed: ReadonlySet<string>;
+  readonly recoveryAttempts: Map<string, number>;
+  readonly logger: ILogger;
+}
+
+async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> {
+  const { ctx, memory, task, error, pending, completed, recoveryAttempts, logger } = input;
+  if (!ctx.plan) return false;
+
+  const attempt = (recoveryAttempts.get(task.id) ?? 0) + 1;
+  recoveryAttempts.set(task.id, attempt);
+
+  try {
+    const recoveryController = new RecoveryController(createRecoveryMemoryAdapter(memory, ctx.projectId));
+    const recoveredGraph = await recoveryController.recover(
+      createTaskId(task.id),
+      error,
+      toRecoveryGraph(ctx.plan.tasks),
+      attempt,
+    );
+    const recoveredTasks = fromRecoveryGraph(recoveredGraph);
+    validateAcyclicPlan(recoveredTasks);
+
+    ctx.plan = { tasks: recoveredTasks };
+
+    for (const recoveredTask of recoveredTasks) {
+      if (!completed.has(recoveredTask.id) && !pending.has(recoveredTask.id)) {
+        pending.set(recoveredTask.id, recoveredTask);
+      }
+    }
+
+    ctx.circuitBreakerTripped = false;
+    ctx.addAudit('orchestrator', 'recovery:injected', {
+      failedTaskId: task.id,
+      attempt,
+      tasks: recoveredTasks.length,
+    });
+    logger.warn('Execution: recovery injected fix-it task', {
+      failedTaskId: task.id,
+      attempt,
+      tasks: recoveredTasks.length,
+    });
+    return true;
+  } catch (recoveryError) {
+    const recoveryErrorObject = recoveryError instanceof Error ? recoveryError : new Error(String(recoveryError));
+    const knownTerminal =
+      recoveryErrorObject instanceof UnknownErrorEscalatedError ||
+      recoveryErrorObject instanceof MaxRecoveryAttemptsError;
+    ctx.addAudit('orchestrator', 'recovery:failed', {
+      failedTaskId: task.id,
+      attempt,
+      error: recoveryErrorObject.message,
+      terminal: knownTerminal,
+    });
+    logger.warn('Execution: recovery unavailable', {
+      failedTaskId: task.id,
+      attempt,
+      error: recoveryErrorObject.message,
+    });
+    return false;
+  }
+}
+
+function createRecoveryMemoryAdapter(memory: IMemoryModule, projectId: string): RecoveryMemoryModule {
+  return {
+    async getADRs() {
+      const context = await memory.getContext(projectId);
+      return context.adrs.map((adr) => ({ id: adr, title: adr, status: 'accepted' as const, decision: adr }));
+    },
+    async getKnownErrors() {
+      const context = await memory.getContext(projectId);
+      return context.knownErrors.map(toKnownError);
+    },
+    async getProjectContext() {
+      const context = await memory.getContext(projectId);
+      return { projectName: projectId, adrs: [], rules: [...context.rules] };
+    },
+  };
+}
+
+function toKnownError(entry: string): KnownError {
+  const parsed = parseKnownError(entry);
+  return {
+    pattern: parsed.pattern,
+    description: parsed.description,
+    fixSuggestion: parsed.fixSuggestion,
+  };
+}
+
+function parseKnownError(entry: string): KnownError {
+  const trimmed = entry.trim();
+  const json = tryParseKnownErrorJson(trimmed);
+  if (json) return json;
+
+  const arrowMatch = trimmed.match(/^(.*?)\s*(?:=>|->)\s*(.*?)$/u);
+  if (arrowMatch) {
+    return {
+      pattern: arrowMatch[1]!.trim(),
+      description: arrowMatch[1]!.trim(),
+      fixSuggestion: arrowMatch[2]!.trim(),
+    };
+  }
+
+  return {
+    pattern: trimmed,
+    description: trimmed,
+    fixSuggestion: `Fix known error before retrying the failed task: ${trimmed}`,
+  };
+}
+
+function tryParseKnownErrorJson(entry: string): KnownError | undefined {
+  try {
+    const parsed = JSON.parse(entry) as Partial<KnownError>;
+    if (
+      typeof parsed.pattern === 'string' &&
+      typeof parsed.description === 'string' &&
+      typeof parsed.fixSuggestion === 'string'
+    ) {
+      return parsed as KnownError;
+    }
+  } catch {
+    // Plain-text known error entries are the common memory context shape.
+  }
+  return undefined;
+}
+
+function toRecoveryGraph(tasks: readonly PlanTask[]): RecoveryPlanGraph {
+  const nodes = new Map<ReturnType<typeof createTaskId>, RecoveryTask>();
+  const edges = new Map<ReturnType<typeof createTaskId>, Set<ReturnType<typeof createTaskId>>>();
+
+  for (const task of tasks) {
+    const recoveryTask = toRecoveryTask(task);
+    nodes.set(recoveryTask.id, recoveryTask);
+    edges.set(recoveryTask.id, new Set(task.dependsOn.map(dep => createTaskId(dep))));
+  }
+
+  return RecoveryPlanGraph.createWithRawEdges(nodes, edges);
+}
+
+function toRecoveryTask(task: PlanTask): RecoveryTask {
+  return {
+    id: createTaskId(task.id),
+    objective: task.objective,
+    requiredSkills: [...task.requiredSkills],
+    dependsOn: task.dependsOn.map(dep => createTaskId(dep)),
+    status: 'pending',
+  };
+}
+
+function fromRecoveryGraph(graph: RecoveryPlanGraph): PlanTask[] {
+  return graph.topoSort().map((task: RecoveryTask) => ({
+    id: task.id,
+    objective: task.objective,
+    requiredSkills: [...task.requiredSkills],
+    dependsOn: graph.getDependencies(task.id),
+  }));
 }
 
 function collectNewRefreshTasks(
