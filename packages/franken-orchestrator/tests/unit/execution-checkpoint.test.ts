@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { runExecution } from '../../src/phases/execution.js';
 import { BeastContext } from '../../src/context/franken-context.js';
 import {
@@ -13,7 +13,7 @@ import type { ICheckpointStore, SkillInput, SkillResult } from '../../src/deps.j
 import type { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
 
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 function makeCheckpoint(overrides: Partial<ICheckpointStore> = {}): ICheckpointStore {
@@ -494,14 +494,14 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     };
   }
 
-  const mockedExecSync = vi.mocked(execSync);
+  const mockedExecFileSync = vi.mocked(execFileSync);
 
   function mockVerifyPass(): void {
-    mockedExecSync.mockImplementation(() => 'ok');
+    mockedExecFileSync.mockImplementation(() => 'ok');
   }
 
   function mockVerifyFail(): void {
-    mockedExecSync.mockImplementation(() => {
+    mockedExecFileSync.mockImplementation(() => {
       throw new Error('verify failed');
     });
   }
@@ -526,7 +526,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('M src/file.ts');
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'echo ok');
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'npx tsc --noEmit');
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('t1', 'impl', checkpoint, makeLogger());
@@ -541,7 +541,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('M src/file.ts');
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'echo ok');
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'npx tsc --noEmit');
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger());
