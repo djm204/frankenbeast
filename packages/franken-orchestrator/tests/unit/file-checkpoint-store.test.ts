@@ -142,6 +142,24 @@ describe('FileCheckpointStore', () => {
       expect(store.readTaskOutput('task-1')).toEqual({ found: false });
     });
 
+    it('removes stale task output when falling back to marker-only recovery', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+
+      expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('clears persisted sidecar task outputs', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+      expect(existsSync(`${filePath}.outputs`)).toBe(true);
+
+      store.clear();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+      expect(existsSync(`${filePath}.outputs`)).toBe(false);
+    });
+
     it('stores task outputs under filesystem-safe hashed filenames', () => {
       const taskId = `../${'nested/'.repeat(40)}task`;
 

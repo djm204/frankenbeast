@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeSync,
@@ -122,15 +123,16 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   clear(): void {
-    if (!existsSync(this.checkpointPath)) {
-      return;
-    }
     this.withLock(() => {
-      this.atomicReplace([]);
+      if (existsSync(this.checkpointPath)) {
+        this.atomicReplace([]);
+      }
+      rmSync(this.taskOutputDir, { recursive: true, force: true });
     });
   }
 
   writeTaskOutput(taskId: string, output: unknown): void {
+    const outputPath = this.taskOutputPath(taskId);
     let payload: string;
     try {
       payload = serialize(output).toString('base64');
@@ -138,9 +140,9 @@ export class FileCheckpointStore implements ICheckpointStore {
       // Checkpoint markers must never fail a successful task just because its
       // output cannot be cloned. Persist what can be rehydrated and fall back
       // to marker-only recovery for non-serializable values.
+      this.deleteTaskOutput(outputPath);
       return;
     }
-    const outputPath = this.taskOutputPath(taskId);
     mkdirSync(dirname(outputPath), { recursive: true });
     this.withLock(() => {
       this.atomicWriteFile(outputPath, payload);
@@ -195,7 +197,21 @@ export class FileCheckpointStore implements ICheckpointStore {
 
   private taskOutputPath(taskId: string): string {
     const outputKey = createHash('sha256').update(taskId).digest('hex');
-    return join(`${this.checkpointPath}.outputs`, `${outputKey}.v8`);
+    return join(this.taskOutputDir, `${outputKey}.v8`);
+  }
+
+  private get taskOutputDir(): string {
+    return `${this.checkpointPath}.outputs`;
+  }
+
+  private deleteTaskOutput(outputPath: string): void {
+    try {
+      unlinkSync(outputPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
   }
 
   /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
