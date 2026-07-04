@@ -776,7 +776,9 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
-              void client.updateConfig(assignments).then(setNetworkConfig).catch(() => undefined);
+              return client.updateConfig(assignments).then((nextConfig) => {
+                setNetworkConfig(nextConfig);
+              });
             }}
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
