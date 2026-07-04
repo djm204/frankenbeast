@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.2](https://github.com/djm204/frankenbeast/compare/v0.40.1...v0.40.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **mcp-memory:** align frontload scope contract ([#523](https://github.com/djm204/frankenbeast/issues/523)) ([bf85b30](https://github.com/djm204/frankenbeast/commit/bf85b30a79d77aa742881eca5b8047fe50ca3bfd))
+
 ## [0.40.1](https://github.com/djm204/frankenbeast/compare/v0.40.0...v0.40.1) (2026-07-04)
 
 

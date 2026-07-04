@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.1...franken-orchestrator-v0.37.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **runtime:** scope beast run configs to project root ([#525](https://github.com/djm204/frankenbeast/issues/525)) ([626b8de](https://github.com/djm204/frankenbeast/commit/626b8de0f3f3754b3ecfaa863924216fa063498b))
+
 ## [0.37.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.0...franken-orchestrator-v0.37.1) (2026-07-04)
 
 
