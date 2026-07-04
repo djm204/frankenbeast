@@ -138,7 +138,7 @@ describe('Budget enforcement integration', () => {
       bridge.observerDeps,
     );
 
-    const result = await executor.execute(
+    await expect(executor.execute(
       'cli:budget-preflight',
       { objective: 'expensive task', context: emptyContext, sessionId: 'budget-preflight', projectId: 'test-project', dependencyOutputs: new Map() },
       {
@@ -151,9 +151,7 @@ describe('Budget enforcement integration', () => {
           timeoutMs: 5_000,
         },
       },
-    );
-
-    expect(result.output).toContain('Budget exceeded:');
+    )).rejects.toThrow(/Budget exceeded:/);
   });
 
   it('aborts an in-flight MartinLoop iteration when budget is exceeded mid-execution', async () => {
@@ -196,10 +194,45 @@ describe('Budget enforcement integration', () => {
     );
     bridge.observerDeps.endSpan(span);
 
-    const result = await resultPromise;
-
-    expect(result.output).toContain('Budget exceeded:');
+    await expect(resultPromise).rejects.toThrow(/Budget exceeded:/);
     expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it('refuses budget-managed execution with pre-existing tracked changes', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 1 });
+    bridge.startTrace('budget-refuse-tracked-dirty');
+
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'process.stdout.write("should not spawn")'));
+    const resetHeads: string[] = [];
+    const cleaned: string[][] = [];
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit({
+        getStatus: () => ' M user-work.ts\n?? user-notes.md',
+        resetHard: (commitHash) => resetHeads.push(commitHash),
+        cleanUntracked: (paths) => cleaned.push([...(paths ?? [])]),
+      }),
+      bridge.observerDeps,
+    );
+
+    await expect(executor.execute(
+      'cli:budget-refuse-tracked-dirty',
+      { objective: 'task', context: emptyContext, sessionId: 'budget-refuse-tracked-dirty', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 1,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    )).rejects.toThrow(/pre-existing tracked changes/);
+
+    expect(resetHeads).toEqual([]);
+    expect(cleaned).toEqual([]);
   });
 
   it('cleans only untracked files created after Martin starts on budget abort', async () => {
@@ -247,9 +280,7 @@ describe('Budget enforcement integration', () => {
     );
     bridge.observerDeps.endSpan(span);
 
-    const result = await resultPromise;
-
-    expect(result.output).toContain('Budget exceeded:');
+    await expect(resultPromise).rejects.toThrow(/Budget exceeded:/);
     expect(resetHeads).toEqual(['HEAD']);
     expect(cleaned).toEqual([['generated-output.md']]);
   });

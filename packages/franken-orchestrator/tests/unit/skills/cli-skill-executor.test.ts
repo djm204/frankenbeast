@@ -30,6 +30,7 @@ type MockGit = GitBranchIsolator & {
   getWorkingDir: ReturnType<typeof vi.fn<GitBranchIsolator['getWorkingDir']>>;
   getStatus: ReturnType<typeof vi.fn<GitBranchIsolator['getStatus']>>;
   resetHard: ReturnType<typeof vi.fn<GitBranchIsolator['resetHard']>>;
+  cleanUntracked: ReturnType<typeof vi.fn<GitBranchIsolator['cleanUntracked']>>;
   getConflictedFiles: ReturnType<typeof vi.fn<GitBranchIsolator['getConflictedFiles']>>;
   getConflictDiff: ReturnType<typeof vi.fn<GitBranchIsolator['getConflictDiff']>>;
   completeMerge: ReturnType<typeof vi.fn<GitBranchIsolator['completeMerge']>>;
@@ -164,6 +165,7 @@ function makeMockGit(): MockGit {
     getWorkingDir: vi.fn<GitBranchIsolator['getWorkingDir']>().mockReturnValue('/tmp/test-repo'),
     getStatus: vi.fn<GitBranchIsolator['getStatus']>().mockReturnValue(''),
     resetHard: vi.fn<GitBranchIsolator['resetHard']>(),
+    cleanUntracked: vi.fn<GitBranchIsolator['cleanUntracked']>(),
     getConflictedFiles: vi.fn<GitBranchIsolator['getConflictedFiles']>().mockReturnValue([]),
     getConflictDiff: vi.fn<GitBranchIsolator['getConflictDiff']>().mockReturnValue(''),
     completeMerge: vi.fn<GitBranchIsolator['completeMerge']>(),
@@ -374,6 +376,20 @@ describe('CliSkillExecutor', () => {
       expect(result.tokensUsed).toBe(300);
     });
 
+    it('forwards rendered prompts to provider-attempt callbacks', async () => {
+      const onProviderAttempt = vi.fn<NonNullable<MartinLoopConfig['onProviderAttempt']>>();
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
+        config.onProviderAttempt?.('claude', 2, 'rendered session prompt');
+        return { completed: true, iterations: 1, output: '<promise>IMPL_01_DONE</promise>', tokensUsed: 250 };
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput(), makeCliConfig({
+        martin: { onProviderAttempt },
+      }));
+
+      expect(onProviderAttempt).toHaveBeenCalledWith('claude', 2, 'rendered session prompt');
+    });
+
     it('uses executor-level provider defaults when execution passes no martin config', async () => {
       const executor = harness.executor({
         defaultMartinConfig: {
@@ -461,7 +477,7 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('budget exceeded mid-loop', () => {
-    it('stops loop early and returns partial result', async () => {
+    it('stops loop early and propagates a budget failure', async () => {
       observer.breaker.check
         .mockReturnValueOnce({ tripped: false, limitUsd: 10, spendUsd: 0 })
         .mockReturnValue({ tripped: true, limitUsd: 10, spendUsd: 11 });
@@ -472,14 +488,22 @@ describe('CliSkillExecutor', () => {
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 5000 };
       });
 
-      const result = await createAndExecute();
-
-      expect(result.output).toContain('Budget exceeded');
+      await expect(createAndExecute()).rejects.toThrow(/Budget exceeded/);
       expect(git.merge).not.toHaveBeenCalled();
       expect(observer.endSpan).toHaveBeenCalledWith(
         expect.any(Object),
         expect.objectContaining({ errorMessage: 'budget-exceeded' }),
       );
+    });
+
+    it('refuses to run when isolation leaves pre-existing tracked changes', async () => {
+      git.getStatus.mockReturnValue(' M src/user-work.ts\n?? notes.md');
+
+      await expect(createAndExecute()).rejects.toThrow(/pre-existing tracked changes.*src\/user-work\.ts/);
+
+      expect(martin.run).not.toHaveBeenCalled();
+      expect(git.resetHard).not.toHaveBeenCalled();
+      expect(git.cleanUntracked).not.toHaveBeenCalled();
     });
   });
 

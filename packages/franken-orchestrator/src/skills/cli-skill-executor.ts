@@ -300,7 +300,15 @@ export class CliSkillExecutor {
         `Git isolation failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    const preMartinUntrackedFiles = this.untrackedFilesFromStatus(this.git.getStatus());
+    const preMartinStatus = this.git.getStatus();
+    const preMartinTrackedChanges = this.trackedChangesFromStatus(preMartinStatus);
+    if (preMartinTrackedChanges.length > 0) {
+      cleanupUpstreamAbortHandler();
+      const errorMessage = 'git worktree has pre-existing tracked changes after isolation; refusing budget-managed execution';
+      this.observer.endSpan(chunkSpan, { status: 'error', errorMessage });
+      throw new Error(`${errorMessage}: ${preMartinTrackedChanges.join(', ')}`);
+    }
+    const preMartinUntrackedFiles = this.untrackedFilesFromStatus(preMartinStatus);
 
     // Build martin config with defaults from input when not explicitly provided
     const isImpl = taskId ? !taskId.startsWith('harden:') : true;
@@ -341,7 +349,7 @@ export class CliSkillExecutor {
           formatIterationProgress({ chunkId, iteration, maxIterations: wrappedConfig.maxIterations }),
           { final: false },
         );
-        config.martin?.onProviderAttempt?.(provider, iteration);
+        config.martin?.onProviderAttempt?.(provider, iteration, renderedPrompt);
       },
       onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
         this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
@@ -486,17 +494,13 @@ export class CliSkillExecutor {
 
       if (budgetError) {
         this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
-        const postTokens = this.observer.counter.grandTotal();
         this.observer.setMetadata(chunkSpan, {
           budgetExceeded: true,
           spent: budgetError.spent,
           limit: budgetError.limit,
         });
         this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
-        return {
-          output: `Budget exceeded: $${budgetError.spent.toFixed(2)} / $${budgetError.limit.toFixed(2)}`,
-          tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
-        };
+        throw budgetError;
       }
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(
@@ -509,17 +513,41 @@ export class CliSkillExecutor {
 
     if (budgetAbortResult) {
       this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
-      const postTokens = this.observer.counter.grandTotal();
       this.observer.setMetadata(chunkSpan, {
         budgetExceeded: true,
         spent: budgetAbortResult.spendUsd,
         limit: budgetAbortResult.limitUsd,
       });
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
-      return {
-        output: `Budget exceeded: $${budgetAbortResult.spendUsd.toFixed(2)} / $${budgetAbortResult.limitUsd.toFixed(2)}`,
-        tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
-      };
+      throw new BudgetExceededError(budgetAbortResult.spendUsd, budgetAbortResult.limitUsd);
+    }
+
+    const postMartinTokens = this.observer.counter.grandTotal();
+    const postMartinTokensUsed = postMartinTokens.totalTokens - preTokens.totalTokens;
+    if (!martinResult.completed) {
+      const finalBudgetResult = this.observer.breaker.check(this.computeCurrentCost());
+      if (finalBudgetResult.tripped) {
+        this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
+        this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
+        throw new BudgetExceededError(finalBudgetResult.spendUsd, finalBudgetResult.limitUsd);
+      }
+
+      const emittedTagsMsg = martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
+        ? `; emitted tags: ${martinResult.emittedPromiseTags.join(', ')}`
+        : '';
+      const errorMsg =
+        `MartinLoop did not complete for chunk "${chunkId}" after ${martinResult.iterations} iterations `
+        + `(no matching promise tag detected${emittedTagsMsg})`;
+      this.logger?.error('CliSkillExecutor: chunk failed — promise not detected', {
+        chunkId,
+        iterations: martinResult.iterations,
+        tokensUsed: postMartinTokensUsed,
+        ...(martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
+          ? { emittedPromiseTags: martinResult.emittedPromiseTags }
+          : {}),
+      });
+      this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: errorMsg });
+      throw new Error(errorMsg);
     }
 
     // Generate commit message for squash merge (if available)
@@ -571,35 +599,6 @@ export class CliSkillExecutor {
       merged: mergeResult.merged,
       commits: mergeResult.commits,
     });
-
-    if (!martinResult.completed) {
-      const finalBudgetResult = this.observer.breaker.check(this.computeCurrentCost());
-      if (finalBudgetResult.tripped) {
-        this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
-        this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
-        return {
-          output: `Budget exceeded: $${finalBudgetResult.spendUsd.toFixed(2)} / $${finalBudgetResult.limitUsd.toFixed(2)}`,
-          tokensUsed: chunkTokensUsed,
-        };
-      }
-
-      const emittedTagsMsg = martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
-        ? `; emitted tags: ${martinResult.emittedPromiseTags.join(', ')}`
-        : '';
-      const errorMsg =
-        `MartinLoop did not complete for chunk "${chunkId}" after ${martinResult.iterations} iterations `
-        + `(no matching promise tag detected${emittedTagsMsg})`;
-      this.logger?.error('CliSkillExecutor: chunk failed — promise not detected', {
-        chunkId,
-        iterations: martinResult.iterations,
-        tokensUsed: chunkTokensUsed,
-        ...(martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
-          ? { emittedPromiseTags: martinResult.emittedPromiseTags }
-          : {}),
-      });
-      this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: errorMsg });
-      throw new Error(errorMsg);
-    }
 
     this.observer.endSpan(chunkSpan, { status: 'completed' });
     this.observer.recordReplay?.({
@@ -727,6 +726,15 @@ export class CliSkillExecutor {
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.startsWith('?? '))
+      .map(line => line.slice(3).trim())
+      .filter(file => file.length > 0);
+  }
+
+  private trackedChangesFromStatus(status: string): string[] {
+    return status
+      .split('\n')
+      .map(line => line.trimEnd())
+      .filter(line => line.length > 0 && !line.startsWith('?? '))
       .map(line => line.slice(3).trim())
       .filter(file => file.length > 0);
   }
