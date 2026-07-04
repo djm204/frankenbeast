@@ -1,4 +1,15 @@
-import { z } from 'zod';
+import {
+  ChatBeastContextSchema,
+  ChatSessionResponseSchema,
+  TokenTotalsSchema,
+  TranscriptMessageSchema,
+} from '@franken/types';
+import type {
+  ChatBeastContext,
+  ChatSessionResponse,
+  TranscriptMessage,
+  TurnOutcome,
+} from '@franken/types';
 
 // --- Const enums ---
 
@@ -20,73 +31,15 @@ export type IntentClassValue = (typeof IntentClass)[keyof typeof IntentClass];
 
 // --- TurnOutcome discriminated union (kind discriminant) ---
 
-export interface ReplyOutcome {
-  kind: 'reply';
-  content: string;
-  modelTier: string;
-}
-
-export interface ClarifyOutcome {
-  kind: 'clarify';
-  question: string;
-  options: string[];
-}
-
-export interface PlanOutcome {
-  kind: 'plan';
-  planSummary: string;
-  chunkCount: number;
-}
-
-export interface ExecuteOutcome {
-  kind: 'execute';
-  taskDescription: string;
-  approvalRequired: boolean;
-}
-
-export type TurnOutcome = ReplyOutcome | ClarifyOutcome | PlanOutcome | ExecuteOutcome;
-
-export const ChatBeastContextSchema = z.object({
-  agentId: z.string().min(1).optional(),
-  definitionId: z.string().min(1),
-  interviewSessionId: z.string().min(1),
-  executionMode: z.enum(['process', 'container']).optional(),
-  status: z.enum(['interviewing']),
-});
-export type ChatBeastContext = z.infer<typeof ChatBeastContextSchema>;
+export type ReplyOutcome = Extract<TurnOutcome, { kind: 'reply' }>;
+export type ClarifyOutcome = Extract<TurnOutcome, { kind: 'clarify' }>;
+export type PlanOutcome = Extract<TurnOutcome, { kind: 'plan' }>;
+export type ExecuteOutcome = Extract<TurnOutcome, { kind: 'execute' }>;
+export type { ChatBeastContext, TranscriptMessage, TurnOutcome };
 
 // --- Zod schemas ---
 
-export const TranscriptMessageSchema = z.object({
-  id: z.string().optional(),
-  role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
-  timestamp: z.string(),
-  modelTier: z.string().optional(),
-  tokens: z.number().nonnegative().optional(),
-  costUsd: z.number().nonnegative().optional(),
-});
-export type TranscriptMessage = z.infer<typeof TranscriptMessageSchema>;
+export { ChatBeastContextSchema, TranscriptMessageSchema, TokenTotalsSchema };
 
-export const TokenTotalsSchema = z.object({
-  cheap: z.number().nonnegative(),
-  premiumReasoning: z.number().nonnegative(),
-  premiumExecution: z.number().nonnegative(),
-});
-
-export const ChatSessionSchema = z.object({
-  id: z.string(),
-  projectId: z.string(),
-  transcript: z.array(TranscriptMessageSchema),
-  state: z.string(),
-  pendingApproval: z.object({
-    description: z.string(),
-    requestedAt: z.string(),
-  }).nullable().optional(),
-  beastContext: ChatBeastContextSchema.nullable().optional(),
-  tokenTotals: TokenTotalsSchema,
-  costUsd: z.number().nonnegative(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type ChatSession = z.infer<typeof ChatSessionSchema>;
+export const ChatSessionSchema = ChatSessionResponseSchema.omit({ socketToken: true });
+export type ChatSession = Omit<ChatSessionResponse, 'socketToken'>;
