@@ -13,7 +13,7 @@ interface NetworkPageProps {
   onStart(serviceId: string): void;
   onStop(serviceId: string): void;
   onRestart(serviceId: string): void;
-  onSaveConfig(assignments: string[]): void;
+  onSaveConfig(assignments: string[]): Promise<void> | void;
 }
 
 export function NetworkPage({
