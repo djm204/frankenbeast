@@ -574,6 +574,16 @@ export class CliSkillExecutor {
     });
 
     if (!martinResult.completed) {
+      const finalBudgetResult = this.observer.breaker.check(this.computeCurrentCost());
+      if (finalBudgetResult.tripped) {
+        this.resetBudgetAbortedWorktree();
+        this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
+        return {
+          output: `Budget exceeded: $${finalBudgetResult.spendUsd.toFixed(2)} / $${finalBudgetResult.limitUsd.toFixed(2)}`,
+          tokensUsed: chunkTokensUsed,
+        };
+      }
+
       const emittedTagsMsg = martinResult.emittedPromiseTags && martinResult.emittedPromiseTags.length > 0
         ? `; emitted tags: ${martinResult.emittedPromiseTags.join(', ')}`
         : '';
