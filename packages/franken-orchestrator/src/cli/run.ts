@@ -200,6 +200,24 @@ async function resolveCommsPublicRef(ref: string | undefined, secretStore: ISecr
   return (await resolveCommsSecret(ref, secretStore)) ?? ref.trim();
 }
 
+function requireCommsChannelFields(
+  channel: string,
+  enabled: boolean,
+  fields: Record<string, string | undefined>,
+): void {
+  if (!enabled) {
+    return;
+  }
+  const missing = Object.entries(fields)
+    .filter(([, value]) => !value?.trim())
+    .map(([field]) => field);
+  if (missing.length > 0) {
+    throw new Error(
+      `Cannot start enabled ${channel} comms channel; missing resolved ${missing.join(', ')}`,
+    );
+  }
+}
+
 async function buildChatServerCommsConfig(
   config: OrchestratorConfig,
   secretStore: ISecretStore | undefined,
@@ -212,6 +230,34 @@ async function buildChatServerCommsConfig(
     return undefined;
   }
 
+  const slackToken = await resolveCommsSecret(config.comms.slack.botTokenRef, secretStore);
+  const slackSigningSecret = await resolveCommsSecret(config.comms.slack.signingSecretRef, secretStore);
+  const discordToken = await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore);
+  const discordPublicKey = await resolveCommsPublicRef(config.comms.discord.publicKeyRef, secretStore);
+  const telegramBotToken = await resolveCommsSecret(config.comms.telegram.botTokenRef, secretStore);
+  const whatsappAccessToken = await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore);
+  const whatsappPhoneNumberId = await resolveCommsPublicRef(config.comms.whatsapp.phoneNumberIdRef, secretStore);
+  const whatsappAppSecret = await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore);
+  const whatsappVerifyToken = await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore);
+
+  requireCommsChannelFields('slack', config.comms.slack.enabled, {
+    token: slackToken,
+    signingSecret: slackSigningSecret,
+  });
+  requireCommsChannelFields('discord', config.comms.discord.enabled, {
+    token: discordToken,
+    publicKey: discordPublicKey,
+  });
+  requireCommsChannelFields('telegram', config.comms.telegram.enabled, {
+    botToken: telegramBotToken,
+  });
+  requireCommsChannelFields('whatsapp', config.comms.whatsapp.enabled, {
+    accessToken: whatsappAccessToken,
+    phoneNumberId: whatsappPhoneNumberId,
+    appSecret: whatsappAppSecret,
+    verifyToken: whatsappVerifyToken,
+  });
+
   return CommsConfigSchema.parse({
     orchestrator: {
       wsUrl: config.comms.orchestratorWsUrl,
@@ -220,24 +266,24 @@ async function buildChatServerCommsConfig(
     channels: {
       slack: {
         enabled: config.comms.slack.enabled,
-        token: await resolveCommsSecret(config.comms.slack.botTokenRef, secretStore),
-        signingSecret: await resolveCommsSecret(config.comms.slack.signingSecretRef, secretStore),
+        token: slackToken,
+        signingSecret: slackSigningSecret,
       },
       discord: {
         enabled: config.comms.discord.enabled,
-        token: await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore),
-        publicKey: await resolveCommsPublicRef(config.comms.discord.publicKeyRef, secretStore),
+        token: discordToken,
+        publicKey: discordPublicKey,
       },
       telegram: {
         enabled: config.comms.telegram.enabled,
-        botToken: await resolveCommsSecret(config.comms.telegram.botTokenRef, secretStore),
+        botToken: telegramBotToken,
       },
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,
-        accessToken: await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore),
-        phoneNumberId: await resolveCommsPublicRef(config.comms.whatsapp.phoneNumberIdRef, secretStore),
-        appSecret: await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore),
-        verifyToken: await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore),
+        accessToken: whatsappAccessToken,
+        phoneNumberId: whatsappPhoneNumberId,
+        appSecret: whatsappAppSecret,
+        verifyToken: whatsappVerifyToken,
       },
     },
   });

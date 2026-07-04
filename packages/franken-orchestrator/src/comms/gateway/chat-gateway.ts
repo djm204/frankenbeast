@@ -56,6 +56,7 @@ export class ChatGateway extends EventEmitter {
     channelType: ChannelType,
     sessionId: string,
     actionId: string,
+    routeMetadata?: Record<string, unknown>,
   ): Promise<void> {
     // Map action IDs to the appropriate slash command.
     // /approve approves the pending action; rejection is a plain-text
@@ -72,10 +73,13 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const routeMetadata = this.routeMetadataBySession.get(sessionId);
+    const outboundRouteMetadata = routeMetadata ?? this.routeMetadataBySession.get(sessionId);
+    if (routeMetadata) {
+      this.routeMetadataBySession.set(sessionId, routeMetadata);
+    }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
-      ...(routeMetadata ? { metadata: routeMetadata } : {}),
+      ...(outboundRouteMetadata ? { metadata: outboundRouteMetadata } : {}),
     };
     if (result.status) outbound.status = result.status;
     this.relayToChannel(sessionId, channelType, outbound);

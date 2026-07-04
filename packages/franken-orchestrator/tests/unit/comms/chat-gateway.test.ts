@@ -140,6 +140,23 @@ describe('ChatGateway', () => {
     );
   });
 
+  it('handleAction relays explicit route metadata after a restart', async () => {
+    const telegramAdapter = mockAdapter('telegram');
+    gateway.registerAdapter(telegramAdapter);
+
+    await gateway.handleAction('telegram', 'sess-telegram', 'approve', {
+      chatId: 'chat-123',
+      externalChannelId: 'chat-123',
+    });
+
+    expect(telegramAdapter.send).toHaveBeenCalledWith(
+      'sess-telegram',
+      expect.objectContaining({
+        metadata: expect.objectContaining({ chatId: 'chat-123' }),
+      }),
+    );
+  });
+
   it('handleAction sends rejection text for reject action', async () => {
     const slackAdapter = mockAdapter('slack');
     gateway.registerAdapter(slackAdapter);
