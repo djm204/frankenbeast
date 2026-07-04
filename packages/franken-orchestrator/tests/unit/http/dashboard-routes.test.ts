@@ -126,5 +126,71 @@ describe('dashboard routes', () => {
       expect(data.security.profile).toBe('standard');
       expect(data.providers).toHaveLength(1);
     });
+
+    it('streams a fresh snapshot when dashboard state changes after connect', async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = createMockDeps();
+        const providers = deps.getProviders as ReturnType<typeof vi.fn>;
+        const app = createDashboardRoutes(deps);
+        const res = await app.request('/events');
+
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (let i = 0; i < 10; i++) {
+          const { value, done } = await reader.read();
+          if (value) text += decoder.decode(value, { stream: true });
+          if (done || text.includes('event: snapshot')) break;
+        }
+
+        providers.mockReturnValue([
+          { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+          { name: 'ollama', type: 'ollama', available: true, failoverOrder: 1 },
+        ]);
+
+        const nextRead = reader.read();
+        await vi.advanceTimersByTimeAsync(1_000);
+        const { value } = await nextRead;
+        if (value) text += decoder.decode(value, { stream: true });
+        reader.cancel();
+
+        expect(text).toContain('"name":"ollama"');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps polling after one snapshot refresh throws', async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = createMockDeps();
+        const providers = deps.getProviders as ReturnType<typeof vi.fn>;
+        const app = createDashboardRoutes(deps);
+        const res = await app.request('/events');
+        const reader = res.body!.getReader();
+
+        await reader.read();
+        providers.mockImplementation(() => {
+          throw new Error('config read failed');
+        });
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        providers.mockReturnValue([
+          { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+          { name: 'ollama', type: 'ollama', available: true, failoverOrder: 1 },
+        ]);
+
+        const nextRead = reader.read();
+        await vi.advanceTimersByTimeAsync(1_000);
+        const { value } = await nextRead;
+        const text = value ? new TextDecoder().decode(value) : '';
+        reader.cancel();
+
+        expect(text).toContain('"name":"ollama"');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

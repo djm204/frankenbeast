@@ -500,4 +500,56 @@ describe('parseArgs', () => {
     });
   });
 
+  describe('numeric option validation', () => {
+    it('parses valid decimal and integer values', () => {
+      const chatArgs = parseArgs(['chat-server', '--budget', '12.5', '--port', '4242']);
+      expect(chatArgs.budget).toBe(12.5);
+      expect(chatArgs.port).toBe(4242);
+
+      const ephemeralPortArgs = parseArgs(['chat-server', '--port', '0']);
+      expect(ephemeralPortArgs.port).toBe(0);
+
+      const issueArgs = parseArgs(['issues', '--limit', '50']);
+      expect(issueArgs.issueLimit).toBe(50);
+    });
+
+    it.each([
+      ['NaN'],
+      ['Infinity'],
+      ['12abc'],
+    ])('rejects invalid budget value %s', (value) => {
+      expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
+    });
+
+    it('rejects a negative budget value', () => {
+      expect(() => parseArgs(['--budget=-0.01'])).toThrow(/Invalid --budget/);
+    });
+
+    it.each([
+      ['NaN'],
+      ['8080abc'],
+      ['3.5'],
+      ['65536'],
+    ])('rejects invalid port value %s', (value) => {
+      expect(() => parseArgs(['chat-server', '--port', value])).toThrow(/Invalid --port/);
+    });
+
+    it('rejects a negative port value', () => {
+      expect(() => parseArgs(['chat-server', '--port=-1'])).toThrow(/Invalid --port/);
+    });
+
+    it.each([
+      ['NaN'],
+      ['10abc'],
+      ['2.5'],
+      ['0'],
+    ])('rejects invalid issue limit value %s', (value) => {
+      expect(() => parseArgs(['issues', '--limit', value])).toThrow(/Invalid --limit/);
+    });
+
+    it('rejects a negative issue limit value', () => {
+      expect(() => parseArgs(['issues', '--limit=-1'])).toThrow(/Invalid --limit/);
+    });
+  });
+
 });

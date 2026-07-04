@@ -106,6 +106,8 @@ const STRING_OPTIONS = new Set([
   'repo', 'mode', 'set',
 ]);
 const BOOLEAN_SHORT_OPTIONS = new Set(['d']);
+const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+const INTEGER_PATTERN = /^[+-]?\d+$/;
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -278,6 +280,45 @@ function splitSkillAddArgs(args: string[]): { parsedFlagArgs: string[]; rawSkill
     parsedFlagArgs: args.slice(0, commandIndex + 1),
     rawSkillAddCommandArgs,
   };
+}
+
+function parseFiniteDecimalOption(name: string, value: string, options: { min?: number } = {}): number {
+  const trimmed = value.trim();
+  if (!DECIMAL_PATTERN.test(trimmed)) {
+    throw new TypeError(`Invalid ${name}: expected a finite number, got '${value}'`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new TypeError(`Invalid ${name}: expected a finite number, got '${value}'`);
+  }
+
+  if (options.min !== undefined && parsed < options.min) {
+    throw new TypeError(`Invalid ${name}: expected a value >= ${options.min}, got ${value}`);
+  }
+
+  return parsed;
+}
+
+function parseIntegerOption(name: string, value: string, options: { min?: number; max?: number } = {}): number {
+  const trimmed = value.trim();
+  if (!INTEGER_PATTERN.test(trimmed)) {
+    throw new TypeError(`Invalid ${name}: expected an integer, got '${value}'`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new TypeError(`Invalid ${name}: expected a safe integer, got '${value}'`);
+  }
+
+  if (options.min !== undefined && parsed < options.min) {
+    throw new TypeError(`Invalid ${name}: expected a value >= ${options.min}, got ${value}`);
+  }
+  if (options.max !== undefined && parsed > options.max) {
+    throw new TypeError(`Invalid ${name}: expected a value <= ${options.max}, got ${value}`);
+  }
+
+  return parsed;
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
@@ -458,10 +499,17 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   const limitRaw = values.limit;
   let issueLimit: number | undefined;
   if (limitRaw !== undefined) {
-    issueLimit = parseInt(limitRaw, 10);
+    issueLimit = parseIntegerOption('--limit', limitRaw, { min: 1 });
   } else if (subcommand === 'issues') {
     issueLimit = 30;
   }
+
+  const budget = values.budget !== undefined
+    ? parseFiniteDecimalOption('--budget', values.budget, { min: 0 })
+    : 10;
+  const port = values.port !== undefined
+    ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
+    : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined);
 
   const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']
     || values['no-planner'] || values['no-critique'] || values['no-governor'] || values['no-heartbeat'];
@@ -494,7 +542,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     securityTarget,
     baseDir: values['base-dir'] ?? process.cwd(),
     baseBranch: values['base-branch'],
-    budget: values.budget ? parseFloat(values.budget) : 10,
+    budget,
     provider,
     providerSpecified: values.provider !== undefined,
     providers,
@@ -506,7 +554,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     interviewOutput: values.output,
     config: values.config,
     host: values.host ?? (subcommand === 'chat-server' || subcommand === 'beasts-daemon' ? '127.0.0.1' : undefined),
-    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined),
+    port,
     allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,
