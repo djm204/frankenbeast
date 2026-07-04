@@ -653,7 +653,9 @@ const recorder = new GovernorAuditRecorder(memoryPort);
 | `ApprovalTimeoutError` | No response within `config.timeoutMs` |
 | `ChannelUnavailableError` | Channel fails (e.g., Slack webhook down) |
 | `SignatureVerificationError` | HMAC signature verification fails |
-| `TriggerEvaluationError` | Trigger evaluation throws |
+| `ApprovalConfigurationError` | `config.requireSignedApprovals` is `true` but no signature verifier is configured (no `config.signingSecret` and no `ApprovalGatewayDeps.signatureVerifier`) |
+| `ApprovalMismatchError` | A channel response's `requestId` does not match the active request (stale, replayed, or misrouted response) |
+| `TriggerEvaluationError` | Reserved — exported but not currently thrown by any code path |
 
 ## Testing
 
