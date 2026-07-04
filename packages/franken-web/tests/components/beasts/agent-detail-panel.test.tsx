@@ -34,7 +34,7 @@ const handlers = {
 describe('AgentDetailPanel', () => {
   beforeEach(() => {
     useBeastStore.getState().resetEdit();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('renders readonly view by default', () => {

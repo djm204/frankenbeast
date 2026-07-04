@@ -960,7 +960,7 @@ describe('agent routes integration', () => {
     expectEventsToIncludeTypes(detail.data.events, ['agent.config.updated']);
   });
 
-  it('updates linked run module snapshots when patching module configuration', async () => {
+  it('preserves started run snapshots and applies module edits through a replacement restart', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: ['Bearer', operatorToken].join(' '),
@@ -1007,7 +1007,16 @@ describe('agent routes integration', () => {
     });
     expect(runResponse.status).toBe(200);
     const runDetail = await runResponse.json() as { data: { run: { configSnapshot: { modules?: unknown } } } };
-    expect(runDetail.data.run.configSnapshot.modules).toEqual({ firewall: false, memory: true });
+    expect(runDetail.data.run.configSnapshot.modules).toEqual({ firewall: true, memory: false });
+
+    const restartResponse = await app.request('/v1/beasts/agents/' + created.data.id + '/restart', {
+      method: 'POST',
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    expect(restartResponse.status).toBe(200);
+    const restarted = await restartResponse.json() as { data: { id: string; configSnapshot: { modules?: unknown } } };
+    expect(restarted.data.id).not.toBe(created.data.dispatchRunId);
+    expect(restarted.data.configSnapshot.modules).toEqual({ firewall: false, memory: true });
   });
 
   it('returns 404 for unknown tracked agents', async () => {

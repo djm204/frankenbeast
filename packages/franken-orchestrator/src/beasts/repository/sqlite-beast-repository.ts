@@ -802,10 +802,10 @@ function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
   };
 }
 
-function trackedAgentIdentityPatch(initConfig: Readonly<Record<string, unknown>>): Pick<TrackedAgent, 'name'> | Record<string, never> {
+function trackedAgentIdentityPatch(initConfig: Readonly<Record<string, unknown>>): Pick<TrackedAgent, 'name'> {
   const identity = isRecord(initConfig.identity) ? initConfig.identity : undefined;
   const name = typeof identity?.name === 'string' ? identity.name : undefined;
-  return name ? { name } : {};
+  return { name };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

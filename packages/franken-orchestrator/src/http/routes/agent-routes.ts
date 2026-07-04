@@ -182,7 +182,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       });
       if (body.moduleConfig !== undefined && current.dispatchRunId) {
         const run = deps.runs.getRun(current.dispatchRunId);
-        if (run) {
+        if (run && deps.runs.listAttempts(run.id).length === 0) {
           deps.runs.updateConfigSnapshot(run.id, {
             ...run.configSnapshot,
             modules: body.moduleConfig,
@@ -226,13 +226,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       }
 
       if (agent.dispatchRunId) {
-        const run = await deps.runs.start(agent.dispatchRunId, 'operator');
+        const existingRun = deps.runs.getRun(agent.dispatchRunId);
+        const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+          ? await dispatchDetachedAgent(deps, agentId)
+          : await deps.runs.start(agent.dispatchRunId, 'operator');
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.start.requested',
-          message: `Start requested for linked run ${agent.dispatchRunId}`,
+          message: `Start requested for linked run ${run.id}`,
           payload: {
-            runId: agent.dispatchRunId,
+            runId: run.id,
           },
         });
         return c.json({ data: run });
@@ -302,13 +305,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     try {
       const agent = deps.agents.getAgent(agentId);
       if (agent.dispatchRunId) {
-        const run = await deps.runs.restart(agent.dispatchRunId, 'operator');
+        const existingRun = deps.runs.getRun(agent.dispatchRunId);
+        const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+          ? await dispatchReplacementAgentRun(deps, agentId, existingRun)
+          : await deps.runs.restart(agent.dispatchRunId, 'operator');
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.restart.requested',
-          message: `Restart requested for linked run ${agent.dispatchRunId}`,
+          message: `Restart requested for linked run ${run.id}`,
           payload: {
-            runId: agent.dispatchRunId,
+            runId: run.id,
           },
         });
         return c.json({ data: run });
@@ -402,13 +408,16 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' is not stopped`,
         );
       }
-      const run = await deps.runs.start(agent.dispatchRunId, 'operator');
+      const existingRun = deps.runs.getRun(agent.dispatchRunId);
+      const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
+        ? await dispatchDetachedAgent(deps, agentId)
+        : await deps.runs.start(agent.dispatchRunId, 'operator');
       deps.agents.appendEvent(agentId, {
         level: 'info',
         type: 'agent.resume.requested',
-        message: `Resume requested for linked run ${agent.dispatchRunId}`,
+        message: `Resume requested for linked run ${run.id}`,
         payload: {
-          runId: agent.dispatchRunId,
+          runId: run.id,
         },
       });
       return c.json({ data: run });
@@ -479,6 +488,25 @@ function patchInitConfigIdentity(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function shouldDispatchFreshRunForModuleConfig(
+  agent: ReturnType<AgentService['getAgent']>,
+  run: ReturnType<BeastRunService['getRun']>,
+): boolean {
+  if (!run || agent.moduleConfig === undefined || run.attemptCount === 0) return false;
+  return JSON.stringify(run.configSnapshot.modules ?? {}) !== JSON.stringify(agent.moduleConfig);
+}
+
+async function dispatchReplacementAgentRun(
+  deps: AgentRoutesDeps,
+  agentId: string,
+  existingRun: ReturnType<BeastRunService['getRun']>,
+) {
+  if (existingRun?.status === 'running') {
+    await deps.runs.stop(existingRun.id, 'operator');
+  }
+  return dispatchDetachedAgent(deps, agentId);
 }
 
 async function dispatchDetachedAgent(

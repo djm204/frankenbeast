@@ -103,7 +103,7 @@ export function AgentDetailEdit({ onSave, onCancel, error, saving = false }: Age
                           >
                             <input
                               type="checkbox"
-                              checked={Boolean((values.moduleConfig as Record<string, boolean> | undefined)?.[key])}
+                              checked={(values.moduleConfig as Record<string, boolean> | undefined)?.[key] !== false}
                               onChange={(e) => {
                                 const current = (values.moduleConfig as Record<string, boolean>) ?? {};
                                 setEditField('moduleConfig', { ...current, [key]: e.target.checked });
