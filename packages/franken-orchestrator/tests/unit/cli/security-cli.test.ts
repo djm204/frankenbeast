@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, it, expect, vi } from 'vitest';
 import { handleSecurityCommand } from '../../../src/cli/security-cli.js';
 
@@ -41,17 +44,46 @@ describe('handleSecurityCommand()', () => {
     expect(print).toHaveBeenCalledWith('  Output Validation: on');
   });
 
-  it('prints config instructions for set', async () => {
+  it('persists the selected security profile', async () => {
+    const print = vi.fn();
+    const dir = await mkdtemp(join(tmpdir(), 'security-cli-'));
+    const configPath = join(dir, '.fbeast', 'config.json');
+
+    await handleSecurityCommand({ action: 'set', target: 'strict', configPath, print });
+
+    await expect(readFile(configPath, 'utf-8')).resolves.toContain('"profile": "strict"');
+    expect(print).toHaveBeenCalledWith(`Security profile set to 'strict' in ${configPath}.`);
+  });
+
+  it('preserves existing config and security settings when setting profile', async () => {
+    const print = vi.fn();
+    const dir = await mkdtemp(join(tmpdir(), 'security-cli-'));
+    const configPath = join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({
+      maxDurationMs: 120_000,
+      security: { piiMasking: false, outputValidation: true },
+    }), 'utf-8');
+
+    await handleSecurityCommand({ action: 'set', target: 'permissive', configPath, print });
+
+    const config = JSON.parse(await readFile(configPath, 'utf-8')) as {
+      maxDurationMs?: number;
+      security?: { profile?: string; piiMasking?: boolean; outputValidation?: boolean };
+    };
+    expect(config.maxDurationMs).toBe(120_000);
+    expect(config.security).toEqual({
+      piiMasking: false,
+      outputValidation: true,
+      profile: 'permissive',
+    });
+  });
+
+  it('requires a config path for set', async () => {
     const print = vi.fn();
 
-    await handleSecurityCommand({ action: 'set', target: 'strict', print });
-
-    expect(print).toHaveBeenCalledWith(
-      expect.stringContaining('security.profile'),
-    );
-    expect(print).toHaveBeenCalledWith(
-      expect.stringContaining('strict'),
-    );
+    await expect(
+      handleSecurityCommand({ action: 'set', target: 'strict', print }),
+    ).rejects.toThrow(/missing config path/);
   });
 
   it('throws on invalid profile name', async () => {
