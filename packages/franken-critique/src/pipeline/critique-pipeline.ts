@@ -2,6 +2,10 @@ import type { Evaluator, EvaluationInput, EvaluationResult, CritiqueResult } fro
 
 const SAFETY_EVALUATOR_NAME = 'safety';
 
+function hasWarningFinding(result: EvaluationResult): boolean {
+  return result.findings.some((finding) => finding.severity !== 'info');
+}
+
 export class CritiquePipeline {
   private readonly evaluators: readonly Evaluator[];
 
@@ -35,7 +39,7 @@ export class CritiquePipeline {
     const overallScore = results.reduce((sum, r) => sum + r.score, 0) / results.length;
     const hasFailure = results.some((r) => r.verdict === 'fail');
     const hasWarning = results.some(
-      (r) => r.verdict === 'warn' || (r.verdict === 'pass' && r.findings.length > 0),
+      (r) => r.verdict === 'warn' || (r.verdict === 'pass' && hasWarningFinding(r)),
     );
 
     return {

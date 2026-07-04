@@ -89,6 +89,19 @@ describe('CritiquePipeline', () => {
     expect(result.overallScore).toBe(0.8);
   });
 
+  it('keeps passing evaluator info findings informational', async () => {
+    const informational = createMockEvaluator('reflection', 'heuristic', {
+      verdict: 'pass',
+      score: 0.9,
+      findings: [{ message: 'on track', severity: 'info' }],
+    });
+    const pipeline = new CritiquePipeline([informational]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.overallScore).toBe(0.9);
+  });
+
   it('runs deterministic evaluators before heuristic', async () => {
     const callOrder: string[] = [];
     const heuristic: Evaluator = {
