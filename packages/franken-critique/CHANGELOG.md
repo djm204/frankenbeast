@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.7](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.6...franken-critique-v0.6.7) (2026-07-04)
+
+
+### Bug Fixes
+
+* **critique:** align warning evaluator verdicts ([#492](https://github.com/djm204/frankenbeast/issues/492)) ([2a0d7a0](https://github.com/djm204/frankenbeast/commit/2a0d7a001f285c6703c422edc3d959a94b95ba18))
+
 ## [0.6.6](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.5...franken-critique-v0.6.6) (2026-07-01)
 
 
