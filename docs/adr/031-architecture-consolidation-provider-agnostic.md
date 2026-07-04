@@ -5,6 +5,8 @@
 - **Deciders:** pfk
 - **Supersedes:** Portions of ADR-011 (monorepo structure)
 
+> **Implementation outcome note:** This ADR records the consolidation decision, but the repository's current post-facto state differs from the original package table: the workspace currently has 10 packages, and `packages/franken-mcp-suite` remains as the shipped `fbeast` CLI/MCP suite package. Treat the package-count/removal table below as historical intent unless a later amendment supersedes it.
+
 ## Context
 
 Frankenbeast was designed as a 13-package monorepo providing comprehensive guardrails for AI agents. After evaluating the competitive landscape — particularly OpenClaw (247k GitHub stars) and NVIDIA's NemoClaw wrapper — it became clear that 7 of 13 packages duplicate capabilities that well-funded open-source projects already provide with more contributors and production hours.
@@ -43,7 +45,7 @@ The strategic decision is to cut the redundant packages, absorb infrastructure c
 
 ## Decision
 
-### Packages Retained (8)
+### Packages Retained (8; historical target)
 
 | Package | Role | Changes |
 |---------|------|---------|
@@ -56,13 +58,13 @@ The strategic decision is to cut the redundant packages, absorb infrastructure c
 | `franken-orchestrator` | Beast Loop, process supervisor, provider registry | **Absorbs** firewall (as LLM middleware), checkpointing (from heartbeat), MCP client (from franken-mcp), skill loading (from franken-skills), comms (from franken-comms — Slack/Discord/Telegram/WhatsApp bidirectional). Adds provider registry with failover. |
 | `franken-web` | React dashboard + skill management | **Adds** skill management panel: browse provider catalogs, install/toggle skills, create custom MCPs, edit context.md. Standalone, talks to orchestrator via REST/SSE. |
 
-### Packages Removed (5)
+### Packages Removed (5; historical target)
 
 | Package | Disposition |
 |---------|-------------|
 | `frankenfirewall` | Absorbed into orchestrator as LLM middleware (input validation + output filtering). 2-3 functions, not a package. |
 | `franken-skills` | Replaced by marketplace-first MCP skill discovery + directory-based `mcp.json` configs. Provider adapters query native marketplaces; users can also add custom MCP servers. Optional `context.md` for team-specific conventions. |
-| `franken-mcp` | Gone. Orchestrator connects to MCP servers as a client via `@modelcontextprotocol/sdk`. No custom MCP server hosting. |
+| `franken-mcp` | Historical target: gone. Post-facto outcome: `franken-mcp-suite` remains in the workspace as the `fbeast` CLI/MCP suite package, while the orchestrator still connects to MCP servers as a client via `@modelcontextprotocol/sdk`. |
 | `franken-heartbeat` | Split. Reflection → critique evaluator. Checkpointing → orchestrator. Periodic self-assessment → orchestrator config flag. |
 | `franken-comms` | Absorbed into orchestrator. Slack/Discord/Telegram/WhatsApp adapters, ChatGateway, session mapping, signature verification all move to `orchestrator/src/comms/`. Bidirectional comms preserved. **ChatSocketBridge replaced with direct in-process ChatRuntime integration** — eliminates the localhost WebSocket hop between comms and chat (see Comms Absorption below). |
 

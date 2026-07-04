@@ -4,6 +4,8 @@
 - **Status:** Accepted
 - **Deciders:** pfk
 
+> **Implementation status:** Accepted target architecture, not live behavior. `ProcessBeastExecutor.start()` does not yet create per-agent git worktrees, and concurrent beasts still share the configured checkout. Implementation is tracked in [#494](https://github.com/djm204/frankenbeast/issues/494); until it lands, operators should not rely on this ADR as current runtime behavior.
+
 ## Context
 
 When multiple agents run concurrently, they share the same git working directory. This causes:

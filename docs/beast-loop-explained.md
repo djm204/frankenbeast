@@ -2,6 +2,8 @@
 
 This document explains the looping and iteration mechanisms that drive Frankenbeast's agent pipeline. The system uses 5 interlocking loops, each with distinct continuation and termination conditions.
 
+> **Implementation status:** This page distinguishes the current Beast Loop wiring from target architecture. The live orchestrator runs a sequential execution phase today; recovery-loop self-correction and parallel/recursive execution waves are documented target behavior until [#496](https://github.com/djm204/frankenbeast/issues/496) and [#497](https://github.com/djm204/frankenbeast/issues/497) land.
+
 ---
 
 ## Overview
@@ -15,8 +17,8 @@ User Input
   → Critique reviews plan ←──────┐
   → Plan rejected? ──── re-plan ─┘
   → Plan approved
-  → Execute tasks in topo order
-      → Task fails? ── Recovery classifies ── inject fix ── re-execute
+  → Execute tasks sequentially in topo order
+      → Task fails? ── fail current run (target: recovery classifies/injects fix; #496)
       → Governor blocks? ── HITL approval ── proceed or abort
       → Loop detected? ── Observer fires event ── halt
       → Budget exceeded? ── Circuit breaker trips ── HITL escalation
@@ -118,21 +120,21 @@ while tasks remain pending:
     if no ready tasks found → deadlock detected → stop
 ```
 
-### Three execution strategies
+### Execution strategies
 
-The planner supports three strategies that drive execution differently:
+The live orchestrator execution phase is sequential: it runs ready tasks one at a time in topological order. Planner strategy modules describe additional target execution modes, but parallel waves and recursive expansion are not wired into `BeastLoop`/`runExecution` yet; that implementation gap is tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
 
-**Linear** (`franken-planner/src/planners/linear.ts`)
+**Linear** (`franken-planner/src/planners/linear.ts`) — current live behavior
 - Tasks execute one at a time in topological order
 - First failure stops the entire sequence
 
-**Parallel** (`franken-planner/src/planners/parallel.ts`)
+**Parallel** (`franken-planner/src/planners/parallel.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks execute in concurrent "waves"
 - Each wave contains all tasks whose dependencies are satisfied
 - All tasks in a wave run simultaneously via `Promise.all`
 - A failure in any wave stops subsequent waves
 
-**Recursive** (`franken-planner/src/planners/recursive.ts`)
+**Recursive** (`franken-planner/src/planners/recursive.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks can expand into sub-graphs during execution
 - Depth-limited to prevent unbounded recursion
 - Sub-graphs are themselves executed in topological order
@@ -143,7 +145,9 @@ The planner supports three strategies that drive execution differently:
 
 **Source:** `franken-planner/src/planner.ts`, `franken-planner/src/recovery/recovery-controller.ts`
 
-When a task fails during execution, the recovery controller classifies the error and attempts to fix it:
+> **Implementation status:** This is target architecture. The recovery controller exists in planner code, but the live orchestrator execution phase does not yet call it after task failure. Wiring error classification plus fix-it task injection into execution is tracked in [#496](https://github.com/djm204/frankenbeast/issues/496).
+
+When wired, a task failure during execution will let the recovery controller classify the error and attempt to fix it:
 
 ```
 attempt = 1
@@ -191,9 +195,9 @@ Checks cumulative token spend against a USD budget limit. When the limit is exce
 
 ### Heartbeat Pulse
 
-**Source:** `franken-heartbeat/src/orchestrator/pulse-orchestrator.ts`
+**Source:** `franken-orchestrator/src/adapters/reflection-heartbeat-adapter.ts`, invoked through `deps.heartbeat.pulse()` from `franken-orchestrator/src/beast-loop.ts`
 
-Runs during the Closure phase. Follows a cost-conscious pattern:
+Runs during the Closure phase and, when `enableReflection` is configured, after planning/execution phase boundaries. The current default adapter is lightweight: if no reflection function is configured it returns an empty pulse with `No reflection configured.` Target reflection implementations should follow a cost-conscious pattern:
 
 1. **Deterministic check** (zero LLM cost) — checks watchlist items, git state, token budget
 2. If everything is healthy → **early exit**, no LLM call needed
@@ -211,9 +215,9 @@ Runs during the Closure phase. Follows a cost-conscious pattern:
 | From | To | Mechanism |
 |------|----|-----------|
 | Critique | Planning | Plan rejection triggers re-planning |
-| Execution | Recovery | Failed task triggers error classification and fix-it injection |
+| Execution | Recovery | Target only: failed task triggers error classification and fix-it injection once #496 is wired |
 | Governor | Execution | Rationale rejection skips or re-attempts task |
-| Recovery | Plan Graph | New graph version with fix-it task inserted |
+| Recovery | Plan Graph | Target only: new graph version with fix-it task inserted once #496 is wired |
 
 ### Inter-module feedback
 
@@ -235,9 +239,9 @@ Runs during the Closure phase. Follows a cost-conscious pattern:
 |------|---------------|------------|
 | Plan-Critique | Verdict is not 'pass' and iterations remain | Pass verdict, breaker tripped, or max iterations exhausted |
 | Execution | Tasks remain with satisfied dependencies | All tasks complete or deadlock (no ready tasks) |
-| Recovery | Task failed and attempt count below max | Completed, max recovery attempts, unknown error escalated, or rationale rejected |
-| Parallel Waves | `completedIds.size < totalTasks` and no failures | Failure in any wave or all tasks completed |
-| Recursive Expand | Sub-tasks generated and depth below limit | Max recursion depth exceeded or all sub-tasks complete |
+| Recovery (target, #496) | Task failed and attempt count below max | Completed, max recovery attempts, unknown error escalated, or rationale rejected |
+| Parallel Waves (target, #497) | `completedIds.size < totalTasks` and no failures | Failure in any wave or all tasks completed |
+| Recursive Expand (target, #497) | Sub-tasks generated and depth below limit | Max recursion depth exceeded or all sub-tasks complete |
 | Loop Detector | Pattern hasn't repeated threshold times | Pattern detected — fires event handlers |
 | Circuit Breaker | Spend below budget | Budget exceeded — fires event handlers |
 | Heartbeat | Flags detected in deterministic check | No flags (early exit) or LLM/audit failure |

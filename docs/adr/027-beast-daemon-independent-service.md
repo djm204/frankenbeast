@@ -4,6 +4,8 @@
 - **Status:** Accepted (deferred; follow-up implementation tracked in [#463](https://github.com/djm204/frankenbeast/issues/463))
 - **Deciders:** pfk
 
+> **Implementation status:** Accepted target architecture, not live behavior. The standalone `frankenbeast beasts-daemon` process, `:4050` API, and daemon PID lifecycle are not implemented yet; the gap is documented in [#495](https://github.com/djm204/frankenbeast/issues/495). Until the implementation lands, `chat-server` continues to instantiate beast services in-process.
+
 ## 2026-07-01 Deploy-Beasts Decision
 
 ADR-027 remains accepted as the target architecture for an independently
