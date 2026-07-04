@@ -178,7 +178,10 @@ describe('Budget enforcement integration', () => {
       },
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Record spend immediately after the provider has been launched. Waiting on
+    // an additional timer here made the test race the provider timeout on
+    // slower CI workers, even though the budget polling path is the behavior
+    // under test.
     const span = bridge.observerDeps.startSpan(bridge.observerDeps.trace, { name: 'mid-run-spend' });
     bridge.observerDeps.recordTokenUsage(
       span,
