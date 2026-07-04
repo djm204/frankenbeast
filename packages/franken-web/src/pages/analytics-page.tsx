@@ -82,7 +82,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       setEventPage(eventsResult);
     }).catch((error: unknown) => {
       if (cancelled) return;
-      setEventPage(null);
+      setEventPage((current) => current ? { ...current, events: [] } : null);
       setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
     }).finally(() => {
       if (!cancelled) {
@@ -97,7 +97,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
   const events = eventPage?.events ?? [];
   const totalEvents = eventPage?.total ?? 0;
-  const currentPage = eventPage?.page ?? 1;
+  const currentPage = page;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
   const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
   const canGoPrevious = currentPage > 1 && !isEventsLoading;

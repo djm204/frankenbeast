@@ -191,7 +191,8 @@ describe('AnalyticsPage', () => {
 
     expect(await screen.findByText('HTTP 500')).toBeTruthy();
     expect(screen.queryByText('First page event')).toBeNull();
-    expect(screen.getByText('Page 1 of 1 · 0 events')).toBeTruthy();
+    expect(screen.getByText('Page 2 of 2 · 75 events')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Previous' })).toHaveProperty('disabled', false);
   });
 
   it('resets to the first page when filters or page size change', async () => {
