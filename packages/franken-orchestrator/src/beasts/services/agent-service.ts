@@ -156,7 +156,9 @@ export class AgentService {
     return {
       agentId: worktreeAgentId,
       branchName,
+      created: true,
       executionCwd: typeof metadata.worktreeExecutionCwd === 'string' ? metadata.worktreeExecutionCwd : worktreePath,
+      gitTopLevel: projectRoot,
       projectRoot,
       worktreePath,
     };

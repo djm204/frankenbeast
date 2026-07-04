@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
@@ -22,28 +22,38 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   return env;
 }
 
-function materializeRuntimeDirectory(
-  configSnapshot: Readonly<Record<string, unknown>>,
-  key: string,
-  sourceRoot: string | undefined,
-  targetRoot: string | undefined,
-): void {
-  if (!sourceRoot || !targetRoot) return;
-  const value = configSnapshot[key];
-  if (typeof value !== 'string' || isAbsolute(value)) return;
-  const source = resolve(sourceRoot, value);
-  const target = resolve(targetRoot, value);
-  if (!existsSync(source) || existsSync(target)) return;
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(source, target, { recursive: true });
+function remapRuntimePath(value: string, sourceRoot: string | undefined, targetRoot: string | undefined): string {
+  if (!sourceRoot || !targetRoot) return value;
+  const source = isAbsolute(value) ? resolve(value) : resolve(sourceRoot, value);
+  const relativeSource = relative(resolve(sourceRoot), source);
+  if (relativeSource.startsWith('..') || isAbsolute(relativeSource)) return value;
+  const target = resolve(targetRoot, relativeSource);
+  if (existsSync(source) && !existsSync(target)) {
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target, { recursive: true });
+  }
+  return isAbsolute(value) ? target : value;
 }
 
-function materializeIgnoredRuntimeState(
+function remapRuntimeConfigSnapshot(
   configSnapshot: Readonly<Record<string, unknown>>,
   sourceRoot: string | undefined,
   targetRoot: string | undefined,
-): void {
-  materializeRuntimeDirectory(configSnapshot, 'chunkDirectory', sourceRoot, targetRoot);
+): Readonly<Record<string, unknown>> {
+  const chunkDirectory = configSnapshot.chunkDirectory;
+  if (typeof chunkDirectory !== 'string') return configSnapshot;
+  const remappedChunkDirectory = remapRuntimePath(chunkDirectory, sourceRoot, targetRoot);
+  return remappedChunkDirectory === chunkDirectory
+    ? configSnapshot
+    : { ...configSnapshot, chunkDirectory: remappedChunkDirectory };
+}
+
+function remapAbsoluteRuntimeArgs(
+  args: readonly string[],
+  sourceRoot: string | undefined,
+  targetRoot: string | undefined,
+): readonly string[] {
+  return args.map((arg) => isAbsolute(arg) ? remapRuntimePath(arg, sourceRoot, targetRoot) : arg);
 }
 
 export interface ProcessBeastExecutorOptions {
@@ -79,17 +89,21 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
-    const worktree = createBeastWorktree(
-      this.options.worktreeIsolation,
-      run.trackedAgentId ?? run.id,
-      processSpec.cwd,
-    );
-    if (worktree) {
-      materializeIgnoredRuntimeState(run.configSnapshot, processSpec.cwd, worktree.executionCwd);
-    }
+    this.supervisor.validateCwd?.(processSpec.cwd);
+    const worktree = run.trackedAgentId
+      ? createBeastWorktree(
+          this.options.worktreeIsolation,
+          run.trackedAgentId,
+          processSpec.cwd,
+        )
+      : undefined;
+    const isolatedConfigSnapshot = worktree
+      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
+      : run.configSnapshot;
     const isolatedSpec = worktree
       ? {
           ...processSpec,
+          args: remapAbsoluteRuntimeArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
           cwd: worktree.executionCwd,
           env: {
             ...processSpec.env,
@@ -98,7 +112,6 @@ export class ProcessBeastExecutor implements BeastExecutor {
           },
         }
       : processSpec;
-    this.supervisor.validateCwd?.(isolatedSpec.cwd);
 
     // Write configSnapshot to a JSON file for the spawned process to load
     const configDir = resolve(
@@ -107,7 +120,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     );
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);
-    writeFileSync(configFilePath, JSON.stringify(run.configSnapshot, null, 2));
+    writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
     this.configFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
@@ -197,8 +210,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         try { unlinkSync(configPath); } catch { /* already removed */ }
         this.configFilePaths.delete(run.id);
       }
-      if (worktree) {
-        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* cleanup best effort */ }
+      if (worktree?.created) {
+        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
       }
 
       this.options.eventBus?.publish({
@@ -224,6 +237,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
               worktreeIsolation: true,
               worktreePath: worktree.worktreePath,
               worktreeBranch: worktree.branchName,
+              worktreeCreated: worktree.created,
               worktreeAgentId: worktree.agentId,
               worktreeExecutionCwd: worktree.executionCwd,
               worktreeProjectRoot: worktree.projectRoot,

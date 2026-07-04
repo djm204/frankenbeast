@@ -15,7 +15,9 @@ export interface GitWorktreeIsolationConfig {
 export interface BeastWorktreeAllocation {
   readonly agentId: string;
   readonly branchName: string;
+  readonly created: boolean;
   readonly executionCwd: string;
+  readonly gitTopLevel: string;
   readonly projectRoot: string;
   readonly worktreePath: string;
 }
@@ -48,10 +50,14 @@ function isGitRepository(runGit: GitRunner, projectRoot: string): boolean {
   }
 }
 
-function isolatedExecutionCwd(projectRoot: string, worktreePath: string, baseCwd: string | undefined): string {
+function gitTopLevel(runGit: GitRunner, projectRoot: string): string {
+  return resolve(runGit(['rev-parse', '--show-toplevel'], projectRoot));
+}
+
+function isolatedExecutionCwd(gitRoot: string, worktreePath: string, baseCwd: string | undefined): string {
   if (!baseCwd) return worktreePath;
   const resolvedBaseCwd = resolve(baseCwd);
-  const relativeBaseCwd = relative(projectRoot, resolvedBaseCwd);
+  const relativeBaseCwd = relative(gitRoot, resolvedBaseCwd);
   if (!relativeBaseCwd || relativeBaseCwd.startsWith('..') || isAbsolute(relativeBaseCwd)) {
     return worktreePath;
   }
@@ -73,18 +79,22 @@ export function createBeastWorktree(
   const runGit = config.runGit ?? defaultRunGit;
 
   if (!isGitRepository(runGit, projectRoot)) return undefined;
+  const root = gitTopLevel(runGit, projectRoot);
 
   mkdirSync(worktreesRoot, { recursive: true });
+  const alreadyExists = existsSync(worktreePath);
 
   const allocation: BeastWorktreeAllocation = {
     agentId: safeAgentId,
     branchName,
-    executionCwd: isolatedExecutionCwd(projectRoot, worktreePath, baseCwd),
+    created: !alreadyExists,
+    executionCwd: isolatedExecutionCwd(root, worktreePath, baseCwd),
+    gitTopLevel: root,
     projectRoot,
     worktreePath,
   };
 
-  if (existsSync(worktreePath)) {
+  if (alreadyExists) {
     return allocation;
   }
 

@@ -123,11 +123,15 @@ describe('ProcessBeastExecutor', () => {
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = createSupervisorMock();
-    const runGit = vi.fn((args: readonly string[]) => args[0] === 'rev-parse' ? 'true' : '');
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      return '';
+    });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
       worktreeIsolation: {
         enabled: true,
-        projectRoot: workDir,
+        projectRoot: workDir!,
         runGit,
       },
     });
@@ -173,6 +177,7 @@ describe('ProcessBeastExecutor', () => {
       worktreeIsolation: true,
       worktreePath: expectedWorktree,
       worktreeBranch: expectedBranch,
+      worktreeCreated: true,
       worktreeAgentId: agent.id,
       worktreeExecutionCwd: expectedWorktree,
       worktreeProjectRoot: workDir,
@@ -184,9 +189,46 @@ describe('ProcessBeastExecutor', () => {
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = createSupervisorMock();
-    const runGit = vi.fn(() => { throw new Error('not a git repository'); });
+    const runGit = vi.fn((_args: readonly string[]): string => { throw new Error('not a git repository'); });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
-      worktreeIsolation: { enabled: true, projectRoot: workDir, runGit },
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    await executor.start(run, createDefinitionWithCwd(workDir));
+
+    const [spawnedSpec] = supervisor.spawn.mock.calls[0];
+    expect(spawnedSpec).toMatchObject({ cwd: workDir });
+    expect(runGit).toHaveBeenCalledWith(['rev-parse', '--is-inside-work-tree'], workDir);
+  });
+
+  it('skips worktree isolation for ad-hoc runs without a tracked agent', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const runGit = vi.fn((_args: readonly string[]) => 'true');
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
     });
     const run = createTestRun(repo);
 
@@ -194,7 +236,7 @@ describe('ProcessBeastExecutor', () => {
 
     const [spawnedSpec] = supervisor.spawn.mock.calls[0];
     expect(spawnedSpec).toMatchObject({ cwd: workDir });
-    expect(runGit).toHaveBeenCalledWith(['rev-parse', '--is-inside-work-tree'], workDir);
+    expect(runGit).not.toHaveBeenCalled();
   });
 
   it('preserves subdirectory cwd and materializes ignored runtime plan state in the worktree', async () => {
@@ -206,9 +248,13 @@ describe('ProcessBeastExecutor', () => {
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = createSupervisorMock();
-    const runGit = vi.fn((args: readonly string[]) => args[0] === 'rev-parse' ? 'true' : '');
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      return '';
+    });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
-      worktreeIsolation: { enabled: true, projectRoot: workDir, runGit },
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
     });
     const agent = repo.createTrackedAgent({
       definitionId: 'martin-loop',
@@ -249,13 +295,14 @@ describe('ProcessBeastExecutor', () => {
       stop: vi.fn(async () => {}),
       kill: vi.fn(async () => {}),
     };
-    const runGit = vi.fn((args: readonly string[]) => {
-      if (args[0] === 'rev-parse') return 'true';
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
       if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
       return '';
     });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
-      worktreeIsolation: { enabled: true, projectRoot: workDir, runGit },
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
     });
     const agent = repo.createTrackedAgent({
       definitionId: 'test-beast',
