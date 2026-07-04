@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -343,12 +343,51 @@ describe('discoverResumeTarget', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('preserves a custom plan directory directly under .fbeast', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-fbeast-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const customPlanDir = join(root, '.fbeast', 'plans');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(customPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'plans.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plans',
+      checkpointFile: checkpoint,
+      planDir: customPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('preserves a unique nested custom plan directory', () => {
     const root = join(tmpdir(), `frankenbeast-resume-nested-custom-${Date.now()}`);
     const buildDir = join(root, '.fbeast', '.build');
     const nestedPlanDir = join(root, 'docs', 'chunks');
     mkdirSync(buildDir, { recursive: true });
     mkdirSync(nestedPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: nestedPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('skips symlinked directories while scanning for nested custom plan dirs', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-symlink-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const nestedPlanDir = join(root, 'docs', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(nestedPlanDir, { recursive: true });
+    symlinkSync(root, join(root, 'docs', 'loop'), 'dir');
 
     const checkpoint = join(buildDir, 'chunks.checkpoint');
     writeFileSync(checkpoint, 'impl:01:done');
@@ -438,6 +477,22 @@ describe('discoverResumeTarget', () => {
     execFileSync('git', ['checkout', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
 
     expect(inferResumeBaseBranch(root)).toBe('develop');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('ignores inferred base branches that no longer exist', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-deleted-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'develop'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['branch', '-D', 'develop'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBeUndefined();
 
     rmSync(root, { recursive: true, force: true });
   });
@@ -757,6 +812,54 @@ describe('main() execution', () => {
       resume: true,
       paths: expect.objectContaining({
         plansDir: `${root}/.fbeast/plans`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves explicit issue plan names', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-issues-plan-name-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'issues',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: 'batch-13',
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, 'batch-13');
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      entryPhase: 'execute',
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans/batch-13`,
       }),
     }));
 

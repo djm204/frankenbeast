@@ -2,7 +2,7 @@
 
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -128,7 +128,7 @@ function findUniquePlanDirByBasename(root: string, planName: string): string | u
       const path = join(dir, entry);
       let stats;
       try {
-        stats = statSync(path);
+        stats = lstatSync(path);
       } catch {
         continue;
       }
@@ -171,9 +171,12 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
   if (!planName) return undefined;
 
   const scopedPlanDir = join(root, '.fbeast', 'plans', planName);
+  const fbeastPlanDir = join(root, '.fbeast', planName);
   const customPlanDir = join(root, planName);
   const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
     ? customPlanDir
+    : !existsSync(scopedPlanDir) && existsSync(fbeastPlanDir)
+      ? fbeastPlanDir
     : !existsSync(scopedPlanDir)
       ? findUniquePlanDirByBasename(root, planName)
     : undefined;
@@ -183,6 +186,26 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
 
 function isConventionalBaseBranch(branch: string): boolean {
   return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
+}
+
+function branchExists(root: string, branch: string): boolean {
+  try {
+    execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    try {
+      execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/remotes/origin/${branch}`], {
+        cwd: root,
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function inferResumeBaseBranch(root: string): string | undefined {
@@ -202,10 +225,10 @@ export function inferResumeBaseBranch(root: string): string | undefined {
       const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
       if (!match) continue;
       const [, fromBranch, toBranch] = match;
-      if (toBranch === currentBranch && isConventionalBaseBranch(toBranch)) {
+      if (toBranch === currentBranch && isConventionalBaseBranch(toBranch) && branchExists(root, toBranch)) {
         return toBranch;
       }
-      if (toBranch === currentBranch && fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch)) {
+      if (toBranch === currentBranch && fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch) && branchExists(root, fromBranch)) {
         candidateBaseBranches.push(fromBranch);
       }
     }
@@ -368,9 +391,9 @@ export async function main(): Promise<void> {
   // Resolve project root — scope plans by name unless --plan-dir overrides
   const planName = planDirOverride
     ? undefined
-    : args.subcommand === 'issues'
+    : (args.planName ?? (args.subcommand === 'issues'
       ? undefined
-    : (args.planName ?? resumeTarget?.planName ?? generatePlanName(args.designDoc));
+      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
 
