@@ -525,6 +525,10 @@ describe('SqliteBrain', () => {
         const hydrated = SqliteBrain.hydrate(snapshot, dbPath, { maxEntries: 1 });
         expect(hydrated.working.snapshot()).toEqual({ fresh: 'snapshot' });
         hydrated.close();
+
+        const reopened = new SqliteBrain(dbPath, { maxEntries: 1 });
+        expect(reopened.working.snapshot()).toEqual({ fresh: 'snapshot' });
+        reopened.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
