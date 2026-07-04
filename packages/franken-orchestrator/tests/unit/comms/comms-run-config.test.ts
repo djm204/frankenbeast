@@ -78,6 +78,15 @@ describe('resolveCommsSecrets', () => {
     expect(secrets.discord).toEqual({ token: 'discord-token', publicKey });
   });
 
+  it('rejects unresolved Discord public key ref names', () => {
+    const config = CommsRunConfigSchema.parse({
+      channels: { discord: { enabled: true, publicKeyRef: 'DISCORD_PUBLIC_KEY' } },
+    });
+
+    expect(() => resolveCommsSecrets(config, { DISCORD_BOT_TOKEN: 'discord-token' }))
+      .toThrow('DISCORD_PUBLIC_KEY not found in environment');
+  });
+
   it('skips disabled channels', () => {
     const config = CommsRunConfigSchema.parse({});
     const secrets = resolveCommsSecrets(config, {});

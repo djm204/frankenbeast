@@ -47,8 +47,13 @@ export interface ResolvedCommsSecrets {
   };
 }
 
+const isDiscordPublicKeyLiteral = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value);
+
 function resolvePublicRef(ref: string, env: Record<string, string | undefined>): string | undefined {
-  return env[ref]?.trim() || ref.trim();
+  const resolved = env[ref]?.trim();
+  if (resolved) return resolved;
+  const trimmed = ref.trim();
+  return isDiscordPublicKeyLiteral(trimmed) ? trimmed : undefined;
 }
 
 /**
