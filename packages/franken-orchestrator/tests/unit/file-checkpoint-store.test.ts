@@ -110,6 +110,14 @@ describe('FileCheckpointStore', () => {
     it('handles clear on non-existent file', () => {
       expect(() => store.clear()).not.toThrow();
     });
+
+    it('handles clear on a fresh nested checkpoint path', () => {
+      const nestedPath = join(tmpDir, 'fresh', 'nested', 'checkpoint.log');
+      const nestedStore = new FileCheckpointStore(nestedPath);
+
+      expect(() => nestedStore.clear()).not.toThrow();
+      expect(existsSync(nestedPath)).toBe(false);
+    });
   });
 
   describe('task output persistence', () => {
@@ -146,6 +154,20 @@ describe('FileCheckpointStore', () => {
       store.writeTaskOutput('task-1', 'old-output');
 
       expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('treats corrupted task output sidecars as missing', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+      const [outputFile] = readdirSync(`${filePath}.outputs`);
+      writeFileSync(join(`${filePath}.outputs`, outputFile!), 'not-valid-base64-v8-payload');
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('does not persist outputs that cannot be rehydrated faithfully', () => {
+      store.writeTaskOutput('task-1', new URL('https://example.com/path'));
 
       expect(store.readTaskOutput('task-1')).toEqual({ found: false });
     });

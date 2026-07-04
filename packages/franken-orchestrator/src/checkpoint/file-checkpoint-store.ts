@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
 import type { ICheckpointStore } from '../deps.js';
 
@@ -123,6 +124,10 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   clear(): void {
+    if (!existsSync(this.checkpointPath) && !existsSync(this.taskOutputDir)) {
+      return;
+    }
+    mkdirSync(dirname(this.checkpointPath), { recursive: true });
     this.withLock(() => {
       if (existsSync(this.checkpointPath)) {
         this.atomicReplace([]);
@@ -135,11 +140,17 @@ export class FileCheckpointStore implements ICheckpointStore {
     const outputPath = this.taskOutputPath(taskId);
     let payload: string;
     try {
-      payload = serialize(output).toString('base64');
+      const serialized = serialize(output);
+      const rehydrated = deserialize(serialized);
+      if (!isDeepStrictEqual(rehydrated, output)) {
+        this.deleteTaskOutput(outputPath);
+        return;
+      }
+      payload = serialized.toString('base64');
     } catch {
       // Checkpoint markers must never fail a successful task just because its
-      // output cannot be cloned. Persist what can be rehydrated and fall back
-      // to marker-only recovery for non-serializable values.
+      // output cannot be cloned or faithfully rehydrated. Persist what can be
+      // safely rehydrated and fall back to marker-only recovery otherwise.
       this.deleteTaskOutput(outputPath);
       return;
     }
@@ -159,7 +170,11 @@ export class FileCheckpointStore implements ICheckpointStore {
       }
       throw error;
     }
-    return { found: true, output: deserialize(Buffer.from(payload, 'base64')) };
+    try {
+      return { found: true, output: deserialize(Buffer.from(payload, 'base64')) };
+    } catch {
+      return { found: false };
+    }
   }
 
   recordCommit(taskId: string, stage: string, iteration: number, commitHash: string): void {
