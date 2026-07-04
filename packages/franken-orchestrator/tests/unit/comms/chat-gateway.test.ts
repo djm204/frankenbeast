@@ -159,6 +159,25 @@ describe('ChatGateway', () => {
     );
   });
 
+  it('handleAction relays routing metadata returned by the runtime after a restart', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'approved',
+      status: 'reply',
+      metadata: { channelId: 'C-stored', threadTs: '456.789' },
+    } satisfies CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleAction('slack', 'sess-slack', 'approve');
+
+    expect(slackAdapter.send).toHaveBeenCalledWith(
+      'sess-slack',
+      expect.objectContaining({
+        metadata: expect.objectContaining({ channelId: 'C-stored', threadTs: '456.789' }),
+      }),
+    );
+  });
+
   it('handleAction sends rejection text for reject action', async () => {
     const slackAdapter = mockAdapter('slack');
     gateway.registerAdapter(slackAdapter);

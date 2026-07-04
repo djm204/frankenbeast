@@ -133,6 +133,11 @@ export class NetworkSupervisor {
     if (!hostService) {
       return false;
     }
+    if (hostState.pid <= 0) {
+      throw new Error(
+        `Cannot enable ${serviceState.id}: host service ${hostServiceId} is already running outside this network state; stop that process and retry.`,
+      );
+    }
 
     await this.deps.stopService(hostState);
     const restartedHost = await this.startManagedService(hostService, detached, startedAt);

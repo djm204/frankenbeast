@@ -1,5 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
@@ -72,6 +74,19 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
 type ChatSessionWithRouting = ChatSession & { routingMetadata?: Record<string, unknown> | undefined };
 
+async function loadLegacyCommsSession(
+  sessionStoreDir: string,
+  id: string,
+): Promise<(ChatSessionWithRouting & { sessionId?: string }) | null> {
+  try {
+    return JSON.parse(
+      await readFile(join(sessionStoreDir, 'comms', `${encodeURIComponent(id)}.json`), 'utf-8'),
+    ) as ChatSessionWithRouting & { sessionId?: string };
+  } catch {
+    return null;
+  }
+}
+
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
 }
@@ -79,6 +94,7 @@ export function resolveChatServerSessionStore(options: Pick<StartChatServerOptio
 function createCommsRuntimeAdapter(
   runtime: ChatRuntimeBundle['runtime'],
   sessionStore: ISessionStore,
+  sessionStoreDir: string,
   projectName: string,
 ): CommsRuntimePort {
   const toStoredSessionId = (id: string): string => encodeURIComponent(id);
@@ -86,7 +102,19 @@ function createCommsRuntimeAdapter(
     load: async (id) => {
       const session = sessionStore.get(toStoredSessionId(id)) as ChatSessionWithRouting | undefined;
       if (!session) {
-        return null;
+        const legacy = await loadLegacyCommsSession(sessionStoreDir, id);
+        if (!legacy) {
+          return null;
+        }
+        return {
+          sessionId: legacy.sessionId ?? id,
+          projectId: legacy.projectId,
+          transcript: legacy.transcript,
+          state: legacy.state,
+          pendingApproval: legacy.pendingApproval ?? null,
+          ...(legacy.beastContext !== undefined ? { beastContext: legacy.beastContext } : {}),
+          ...(legacy.routingMetadata !== undefined ? { routingMetadata: legacy.routingMetadata } : {}),
+        };
       }
       return {
         sessionId: id,
@@ -221,7 +249,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   });
   const commsRuntime = options.commsRuntime
     ?? (options.commsConfig
-      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.projectName)
+      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
       : undefined);
   const app = createChatApp({
     sessionStore,

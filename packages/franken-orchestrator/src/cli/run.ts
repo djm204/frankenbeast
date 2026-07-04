@@ -212,16 +212,25 @@ async function resolveCommsSecret(root: string, ref: string | undefined, secretS
   return webEnvValue?.trim() ? webEnvValue.trim() : undefined;
 }
 
-async function resolveCommsPublicRef(root: string, ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+async function resolveCommsPublicRef(
+  root: string,
+  ref: string | undefined,
+  secretStore: ISecretStore | undefined,
+  isLiteral: (value: string) => boolean,
+): Promise<string | undefined> {
   if (!ref?.trim()) {
     return undefined;
   }
+  const trimmed = ref.trim();
   const resolved = await resolveCommsSecret(root, ref, secretStore);
   if (resolved) {
     return resolved;
   }
-  return ref.trim();
+  return isLiteral(trimmed) ? trimmed : undefined;
 }
+
+const isDiscordPublicKeyLiteral = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value);
+const isWhatsappPhoneNumberIdLiteral = (value: string): boolean => /^\d{5,}$/.test(value);
 
 function requireCommsChannelFields(
   channel: string,
@@ -257,10 +266,20 @@ async function buildChatServerCommsConfig(
   const slackToken = await resolveCommsSecret(root, config.comms.slack.botTokenRef, secretStore);
   const slackSigningSecret = await resolveCommsSecret(root, config.comms.slack.signingSecretRef, secretStore);
   const discordToken = await resolveCommsSecret(root, config.comms.discord.botTokenRef, secretStore);
-  const discordPublicKey = await resolveCommsPublicRef(root, config.comms.discord.publicKeyRef, secretStore);
+  const discordPublicKey = await resolveCommsPublicRef(
+    root,
+    config.comms.discord.publicKeyRef,
+    secretStore,
+    isDiscordPublicKeyLiteral,
+  );
   const telegramBotToken = await resolveCommsSecret(root, config.comms.telegram.botTokenRef, secretStore);
   const whatsappAccessToken = await resolveCommsSecret(root, config.comms.whatsapp.accessTokenRef, secretStore);
-  const whatsappPhoneNumberId = await resolveCommsPublicRef(root, config.comms.whatsapp.phoneNumberIdRef, secretStore);
+  const whatsappPhoneNumberId = await resolveCommsPublicRef(
+    root,
+    config.comms.whatsapp.phoneNumberIdRef,
+    secretStore,
+    isWhatsappPhoneNumberIdLiteral,
+  );
   const whatsappAppSecret = await resolveCommsSecret(root, config.comms.whatsapp.appSecretRef, secretStore);
   const whatsappVerifyToken = await resolveCommsSecret(root, config.comms.whatsapp.verifyTokenRef, secretStore);
 

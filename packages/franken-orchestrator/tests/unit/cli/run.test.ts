@@ -231,6 +231,7 @@ vi.mock('node:readline', () => ({
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
 import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
+import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
@@ -444,6 +445,8 @@ describe('main() execution', () => {
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+    delete process.env.DISCORD_BOT_TOKEN;
+    delete process.env.DISCORD_PUBLIC_KEY;
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -606,6 +609,76 @@ describe('main() execution', () => {
     logSpy.mockRestore();
   });
 
+  it('passes literal uppercase Discord public keys into managed comms config', async () => {
+    const publicKey = 'A'.repeat(64);
+    process.env.DISCORD_BOT_TOKEN = 'discord-token';
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      network: { mode: 'insecure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 3200,
+        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        slack: { enabled: false },
+        discord: { enabled: true, botTokenRef: 'DISCORD_BOT_TOKEN', publicKeyRef: publicKey },
+        telegram: { enabled: false },
+        whatsapp: { enabled: false },
+      },
+    } as any);
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      commsConfig: expect.objectContaining({
+        channels: expect.objectContaining({
+          discord: expect.objectContaining({ token: 'discord-token', publicKey }),
+        }),
+      }),
+    }));
+    delete process.env.DISCORD_BOT_TOKEN;
+  });
+
   it('prefers the root .env beast operator token for chat-server', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}`);
     tempDirs.push(root);
@@ -720,6 +793,72 @@ describe('main() execution', () => {
         operatorToken: 'dashboard-file-token',
       }),
     }));
+  });
+
+  it('does not treat unresolved Discord public-key refs as literal keys', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-discord-public-key`);
+    tempDirs.push(root);
+    mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
+    process.env.DISCORD_BOT_TOKEN = 'discord-bot-token';
+    delete process.env.DISCORD_PUBLIC_KEY;
+
+    vi.mocked(loadConfig).mockImplementationOnce(async () => ({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 3200,
+        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        slack: { enabled: false },
+        discord: { enabled: true, botTokenRef: 'DISCORD_BOT_TOKEN', publicKeyRef: 'DISCORD_PUBLIC_KEY' },
+        telegram: { enabled: false },
+        whatsapp: { enabled: false },
+      },
+    }) as never);
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    } as never);
+
+    await expect(main()).rejects.toThrow('Cannot start enabled discord comms channel; missing resolved publicKey');
+    expect(mockStartChatServer).not.toHaveBeenCalled();
   });
 
   it('proxies chat-server beast routes only when a daemon URL is explicit', async () => {

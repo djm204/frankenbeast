@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -119,6 +119,43 @@ describe('startChatServer comms pass-through', () => {
       threadTs: '171234.000100',
     }));
     expect(handle.sessionStore.get('slack/team/thread')).toBeUndefined();
+  });
+
+  it('loads legacy encoded comms sessions before creating a shared chat session', async () => {
+    const sessionStoreDir = await mkdtemp(join(tmpdir(), 'chat-server-comms-legacy-'));
+    tempDirs.push(sessionStoreDir);
+    await mkdir(join(sessionStoreDir, 'comms'));
+    await writeFile(join(sessionStoreDir, 'comms', `${encodeURIComponent('slack/team/thread')}.json`), JSON.stringify({
+      sessionId: 'slack/team/thread',
+      projectId: 'legacy-project',
+      transcript: [{ role: 'assistant', content: 'approval pending', timestamp: '2026-07-04T00:00:00.000Z' }],
+      state: 'pending_approval',
+      pendingApproval: { description: 'legacy approval', requestedAt: '2026-07-04T00:00:00.000Z' },
+      routingMetadata: { channelId: 'C-legacy', threadTs: '123.456' },
+    }), 'utf-8');
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig: { orchestrator: {}, channels: {} },
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    await opts.commsRuntime!.processInbound({
+      sessionId: 'slack/team/thread',
+      channelType: 'slack',
+      text: '/approve',
+      externalUserId: 'U123',
+    });
+
+    const stored = handle.sessionStore.get('slack%2Fteam%2Fthread') as { routingMetadata?: Record<string, unknown>; transcript?: unknown[] } | undefined;
+    expect(stored?.routingMetadata).toEqual(expect.objectContaining({ channelId: 'C-legacy', threadTs: '123.456' }));
+    expect(stored?.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: 'approval pending' }),
+    ]));
   });
 
   it('does not pass commsConfig or commsRuntime when not provided', async () => {
