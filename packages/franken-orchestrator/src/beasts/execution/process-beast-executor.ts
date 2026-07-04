@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
+import { createBeastWorktree, removeBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -19,6 +20,54 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
     }
   }
   return env;
+}
+
+function remapRuntimePath(value: string, sourceRoot: string | undefined, targetRoot: string | undefined): string {
+  if (!sourceRoot || !targetRoot) return value;
+  const source = isAbsolute(value) ? resolve(value) : resolve(sourceRoot, value);
+  const relativeSource = relative(resolve(sourceRoot), source);
+  if (relativeSource.startsWith('..') || isAbsolute(relativeSource)) return value;
+  const target = resolve(targetRoot, relativeSource);
+  if (existsSync(source) && !existsSync(target)) {
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target, { recursive: true });
+  }
+  return isAbsolute(value) ? target : value;
+}
+
+const RUNTIME_CONFIG_PATH_FIELDS = ['chunkDirectory', 'designDocPath', 'outputDir'] as const;
+const RUNTIME_PATH_ARG_FLAGS = new Set(['--plan-dir', '--design-doc', '--output-dir']);
+
+function remapRuntimeConfigSnapshot(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  sourceRoot: string | undefined,
+  targetRoot: string | undefined,
+): Readonly<Record<string, unknown>> {
+  let changed = false;
+  const remapped: Record<string, unknown> = { ...configSnapshot };
+  for (const key of RUNTIME_CONFIG_PATH_FIELDS) {
+    const value = configSnapshot[key];
+    if (typeof value !== 'string') continue;
+    const remappedValue = remapRuntimePath(value, sourceRoot, targetRoot);
+    if (remappedValue !== value) {
+      remapped[key] = remappedValue;
+      changed = true;
+    }
+  }
+  return changed ? remapped : configSnapshot;
+}
+
+function remapRuntimePathArgs(
+  args: readonly string[],
+  sourceRoot: string | undefined,
+  targetRoot: string | undefined,
+): readonly string[] {
+  return args.map((arg, index) => {
+    const previous = index > 0 ? args[index - 1] : undefined;
+    return previous && RUNTIME_PATH_ARG_FLAGS.has(previous)
+      ? remapRuntimePath(arg, sourceRoot, targetRoot)
+      : arg;
+  });
 }
 
 export interface ProcessBeastExecutorOptions {
@@ -37,6 +86,7 @@ export interface ProcessBeastExecutorOptions {
     spawnedSpec: BeastProcessSpec,
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
+  worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -54,21 +104,43 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
     this.supervisor.validateCwd?.(processSpec.cwd);
+    const worktree = run.trackedAgentId
+      ? createBeastWorktree(
+          this.options.worktreeIsolation,
+          run.trackedAgentId,
+          processSpec.cwd,
+        )
+      : undefined;
+    const isolatedConfigSnapshot = worktree
+      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
+      : run.configSnapshot;
+    const isolatedSpec = worktree
+      ? {
+          ...processSpec,
+          args: remapRuntimePathArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
+          cwd: worktree.executionCwd,
+          env: {
+            ...processSpec.env,
+            FRANKENBEAST_WORKTREE_PATH: worktree.worktreePath,
+            FRANKENBEAST_WORKTREE_BRANCH: worktree.branchName,
+          },
+        }
+      : processSpec;
 
     // Write configSnapshot to a JSON file for the spawned process to load
     const configDir = resolve(
       this.options.runConfigDir ??
-      join(processSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
+      join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
     );
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);
-    writeFileSync(configFilePath, JSON.stringify(run.configSnapshot, null, 2));
+    writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
     this.configFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
-      ...processSpec,
+      ...isolatedSpec,
       env: {
-        ...processSpec.env,
+        ...isolatedSpec.env,
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
       },
@@ -146,11 +218,14 @@ export class ProcessBeastExecutor implements BeastExecutor {
         data: { runId: run.id, event: spawnFailedEvent },
       });
 
-      // Clean up config file written before spawn
+      // Clean up config file and worktree allocation written before spawn
       const configPath = this.configFilePaths.get(run.id);
       if (configPath) {
         try { unlinkSync(configPath); } catch { /* already removed */ }
         this.configFilePaths.delete(run.id);
+      }
+      if (worktree?.created) {
+        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
       }
 
       this.options.eventBus?.publish({
@@ -171,6 +246,17 @@ export class ProcessBeastExecutor implements BeastExecutor {
         backend: 'process',
         command: processSpec.command,
         args: [...processSpec.args],
+        ...(worktree
+          ? {
+              worktreeIsolation: true,
+              worktreePath: worktree.worktreePath,
+              worktreeBranch: worktree.branchName,
+              worktreeCreated: worktree.created,
+              worktreeAgentId: worktree.agentId,
+              worktreeExecutionCwd: worktree.executionCwd,
+              worktreeProjectRoot: worktree.projectRoot,
+            }
+          : {}),
       },
     });
 

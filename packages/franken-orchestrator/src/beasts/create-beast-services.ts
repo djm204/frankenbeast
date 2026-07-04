@@ -50,6 +50,10 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
       eventBus,
       runConfigDir,
+      worktreeIsolation: {
+        enabled: true,
+        projectRoot,
+      },
     }),
     container: new ContainerBeastExecutor({
       repository,
