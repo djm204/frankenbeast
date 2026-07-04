@@ -22,9 +22,10 @@ export const commsGatewayService: NetworkServiceDefinition = {
   describe: (config: OrchestratorConfig) =>
     `Enabled when comms.enabled=true or a channel is enabled; current channel flags slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled}.`,
   buildRuntimeConfig: (config: OrchestratorConfig) => ({
-    host: config.comms.host,
-    port: config.comms.port,
-    url: `http://${config.comms.host}:${config.comms.port}`,
+    host: config.chat.host,
+    port: config.chat.port,
+    url: `http://${config.chat.host}:${config.chat.port}/comms/health`,
+    healthUrl: `http://${config.chat.host}:${config.chat.port}/comms/health`,
     orchestratorWsUrl: config.comms.orchestratorWsUrl,
     channels: {
       slack: config.comms.slack.enabled,
@@ -33,5 +34,6 @@ export const commsGatewayService: NetworkServiceDefinition = {
     // Comms webhook routes are now served in-process on the orchestrator's Hono server
     // via commsRoutes() registered in chat-app.ts — no separate process needed.
     inProcess: true,
+    hostServiceId: 'chat-server',
   }),
 };

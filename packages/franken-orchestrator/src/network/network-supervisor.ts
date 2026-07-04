@@ -85,6 +85,7 @@ export class NetworkSupervisor {
       ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
       ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
       ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
+      ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : {}),
     };
   }
 
@@ -200,9 +201,15 @@ export class NetworkSupervisor {
       return;
     }
 
+    const targetService = target === 'all'
+      ? undefined
+      : state.services.find((service) => service.id === target);
+    const effectiveTarget = targetService?.inProcess && targetService.hostServiceId
+      ? targetService.hostServiceId
+      : target;
     const selected = target === 'all'
       ? state.services
-      : collectDependents(state.services, target);
+      : collectDependents(state.services, effectiveTarget);
 
     for (const service of [...selected].reverse()) {
       await this.deps.stopService(service);
@@ -240,7 +247,7 @@ export class NetworkSupervisor {
     }
 
     const services = await Promise.all(
-      state.services.map((service) => resolveServiceHealth(service, this.deps.healthcheck)),
+      state.services.map((service) => resolveServiceHealth(service, this.deps.healthcheck, state.services)),
     );
 
     return {

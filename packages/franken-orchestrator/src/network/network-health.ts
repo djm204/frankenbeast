@@ -10,11 +10,16 @@ export interface NetworkServiceHealthStatus {
 export async function resolveServiceHealth(
   service: ManagedNetworkServiceState,
   healthcheck: (service: ManagedNetworkServiceState) => Promise<boolean>,
+  services: ManagedNetworkServiceState[] = [service],
 ): Promise<NetworkServiceHealthStatus> {
   if (service.inProcess) {
+    const healthSource = service.hostServiceId
+      ? services.find((candidate) => candidate.id === service.hostServiceId)
+      : undefined;
+    const healthy = healthSource ? await healthcheck(healthSource) : false;
     return {
       id: service.id,
-      status: 'running',
+      status: healthy ? 'running' : 'stale',
       inProcess: true,
       ...(service.channels ? { channels: service.channels } : {}),
     };
