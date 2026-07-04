@@ -65,7 +65,17 @@ export type { ToolCallSchema, ToolCallAccuracyInput } from './evals/deterministi
 export type { ADRRule, ArchitecturalAdherenceInput } from './evals/deterministic/ArchitecturalAdherence.js'
 export type { GoldenTrace, GoldenSpan, GoldenTraceInput } from './evals/regression/GoldenTraceEval.js'
 export type { JudgeFunction, JudgeResponse, LLMJudgeEvalOptions } from './evals/llm-judge/LLMJudgeEval.js'
-export type { Trace, Span, SpanStatus, TraceStatus, StartSpanOptions, EndSpanOptions } from './core/types.js'
+export type {
+  Trace,
+  Span,
+  SpanStatus,
+  TraceStatus,
+  StartSpanOptions,
+  EndSpanOptions,
+  TraceValidationIssue,
+  TraceValidationOptions,
+  TraceValidationResult,
+} from './core/types.js'
 export type { TokenUsage } from './core/SpanLifecycle.js'
 export type { TokenRecord, TokenTotals } from './cost/TokenCounter.js'
 export type { CostCalculatorOptions } from './cost/CostCalculator.js'

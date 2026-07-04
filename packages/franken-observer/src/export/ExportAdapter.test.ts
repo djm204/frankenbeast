@@ -1,13 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { TraceContext } from '../core/TraceContext.js'
 import { SpanLifecycle } from '../core/SpanLifecycle.js'
 import { InMemoryAdapter } from './InMemoryAdapter.js'
 
 describe('InMemoryAdapter', () => {
   let adapter: InMemoryAdapter
+  let warningSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     adapter = new InMemoryAdapter()
+    warningSpy = vi.spyOn(process, 'emitWarning').mockImplementation(() => true)
+  })
+
+  afterEach(() => {
+    warningSpy.mockRestore()
   })
 
   describe('flush()', () => {
@@ -52,6 +58,16 @@ describe('InMemoryAdapter', () => {
 
       const retrieved = await adapter.queryByTraceId(trace.id)
       expect(retrieved!.goal).toBe('updated goal')
+    })
+
+    it('warns when exporting a trace that still has active spans', async () => {
+      const trace = TraceContext.createTrace('goal')
+      TraceContext.startSpan(trace, { name: 'orphaned' })
+
+      await adapter.flush(trace)
+
+      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining('active span(s)'))
+      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining('orphaned'))
     })
   })
 

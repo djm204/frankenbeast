@@ -1,5 +1,6 @@
 import type { Trace } from '../core/types.js'
 import type { ExportAdapter } from '../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../export/ExportAdapter.js'
 
 // ── Strategy interface ────────────────────────────────────────────────────────
 
@@ -128,6 +129,7 @@ export class SamplingAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'SamplingAdapter')
     if (this.strategy.shouldSample(trace.id)) {
       await this.inner.flush(trace)
     }

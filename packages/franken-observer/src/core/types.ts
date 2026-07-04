@@ -33,3 +33,29 @@ export interface EndSpanOptions {
   status?: 'completed' | 'error'
   errorMessage?: string
 }
+
+export interface TraceValidationIssue {
+  type: 'active-span'
+  spanId: string
+  spanName: string
+  ageMs: number
+  message: string
+  autoClosed?: true
+}
+
+export interface TraceValidationOptions {
+  /** Clock override for deterministic tests. Defaults to Date.now(). */
+  now?: number
+  /**
+   * When set, active spans older than this threshold are considered timed out.
+   * Detection still reports all active spans; auto-close only applies to timed-out spans.
+   */
+  activeSpanTimeoutMs?: number
+  /** Mark timed-out active spans as error instead of only reporting them. */
+  autoCloseTimedOutSpans?: boolean
+}
+
+export interface TraceValidationResult {
+  ok: boolean
+  issues: TraceValidationIssue[]
+}

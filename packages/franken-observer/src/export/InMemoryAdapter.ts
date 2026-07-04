@@ -1,5 +1,6 @@
 import type { Trace } from '../core/types.js'
 import type { ExportAdapter } from './ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from './ExportAdapter.js'
 
 /**
  * Zero-dependency in-process adapter. Useful in tests and as a
@@ -9,6 +10,7 @@ export class InMemoryAdapter implements ExportAdapter {
   private readonly store = new Map<string, Trace>()
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'InMemoryAdapter')
     this.store.set(trace.id, trace)
   }
 

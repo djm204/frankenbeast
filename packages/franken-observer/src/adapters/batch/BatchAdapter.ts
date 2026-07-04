@@ -1,5 +1,6 @@
 import type { Trace } from '../../core/types.js'
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 
 export interface BatchAdapterOptions {
   /** Underlying adapter that receives traces when the batch is drained. */
@@ -65,6 +66,7 @@ export class BatchAdapter implements ExportAdapter {
 
   /** Add a trace to the buffer. Drains immediately if `maxBatchSize` is reached. */
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'BatchAdapter')
     this.buffer.push(trace)
     if (this.buffer.length >= this.maxBatchSize) {
       await this.drain()

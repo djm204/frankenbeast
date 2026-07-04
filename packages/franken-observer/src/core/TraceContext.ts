@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { Trace, Span, StartSpanOptions, EndSpanOptions } from './types.js'
+import type {
+  Trace,
+  Span,
+  StartSpanOptions,
+  EndSpanOptions,
+  TraceValidationOptions,
+  TraceValidationResult,
+} from './types.js'
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
 export const TraceContext = {
@@ -50,5 +57,41 @@ export const TraceContext = {
     }
     trace.endedAt = Date.now()
     trace.status = 'completed'
+  },
+
+  validateTrace(trace: Trace, options: TraceValidationOptions = {}): TraceValidationResult {
+    const now = options.now ?? Date.now()
+    const issues = trace.spans
+      .filter(span => span.status === 'active')
+      .map(span => {
+        const ageMs = Math.max(0, now - span.startedAt)
+        const timedOut =
+          options.activeSpanTimeoutMs !== undefined &&
+          ageMs >= options.activeSpanTimeoutMs
+        const autoClosed = Boolean(options.autoCloseTimedOutSpans && timedOut)
+
+        if (autoClosed) {
+          span.endedAt = now
+          span.durationMs = ageMs
+          span.status = 'error'
+          span.errorMessage = `Span was auto-closed after ${ageMs}ms without explicit end`
+        }
+
+        return {
+          type: 'active-span' as const,
+          spanId: span.id,
+          spanName: span.name,
+          ageMs,
+          message: autoClosed
+            ? `Span "${span.name}" (${span.id}) was auto-closed after ${ageMs}ms without explicit end`
+            : `Span "${span.name}" (${span.id}) is still active after ${ageMs}ms`,
+          ...(autoClosed ? { autoClosed: true as const } : {}),
+        }
+      })
+
+    return {
+      ok: issues.length === 0,
+      issues,
+    }
   },
 }
