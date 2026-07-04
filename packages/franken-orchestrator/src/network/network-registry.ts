@@ -29,6 +29,7 @@ export interface NetworkServiceRuntimeConfig {
   services?: string[];
   suppressManagedBanner?: boolean;
   inProcess?: boolean;
+  hostServiceId?: NetworkServiceId;
   process?: {
     command: string;
     args: string[];

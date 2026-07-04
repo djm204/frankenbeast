@@ -162,4 +162,47 @@ describe('NetworkPage', () => {
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('HTTP 400'));
   });
+
+  it('disables unsupported stop and restart controls for in-process services', () => {
+    const onStart = vi.fn();
+    const onStop = vi.fn();
+    const onRestart = vi.fn();
+
+    render(
+      <NetworkPage
+        config={{
+          network: { mode: 'secure', secureBackend: 'local-encrypted' },
+          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+        }}
+        logs={[]}
+        onRefresh={vi.fn()}
+        onRestart={onRestart}
+        onSaveConfig={vi.fn()}
+        onStart={onStart}
+        onStop={onStop}
+        services={[
+          {
+            id: 'comms-gateway',
+            status: 'running',
+            inProcess: true,
+            channels: { slack: true, discord: false },
+          },
+        ]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop comms-gateway' });
+    const restartButton = screen.getByRole('button', { name: 'Restart comms-gateway' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start comms-gateway' }));
+    fireEvent.click(stopButton);
+    fireEvent.click(restartButton);
+
+    expect(stopButton).toHaveProperty('disabled', true);
+    expect(restartButton).toHaveProperty('disabled', true);
+    expect(onStart).toHaveBeenCalledWith('comms-gateway');
+    expect(onStop).not.toHaveBeenCalled();
+    expect(onRestart).not.toHaveBeenCalled();
+  });
 });

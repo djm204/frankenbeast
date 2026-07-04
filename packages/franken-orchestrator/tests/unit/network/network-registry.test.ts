@@ -24,6 +24,13 @@ describe('network-registry', () => {
       'dashboard-web',
       'comms-gateway',
     ]);
+    expect(services.find((service) => service.id === 'comms-gateway')?.runtimeConfig).toMatchObject({
+      inProcess: true,
+      channels: {
+        slack: true,
+        discord: false,
+      },
+    });
   });
 
   it('starts comms gateway when Telegram or WhatsApp channels are enabled', () => {

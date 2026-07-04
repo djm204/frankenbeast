@@ -43,5 +43,6 @@ export const commsGatewayService: NetworkServiceDefinition = {
     // Comms webhook routes are now served in-process on the orchestrator's Hono server
     // via commsRoutes() registered in chat-app.ts — no separate process needed.
     inProcess: true,
+    hostServiceId: 'chat-server',
   }),
 };

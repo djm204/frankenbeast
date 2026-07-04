@@ -48,6 +48,7 @@ export const ChatSessionResponseSchema = z.object({
   state: z.string(),
   pendingApproval: PendingApprovalSchema.nullable().optional(),
   beastContext: ChatBeastContextSchema.nullable().optional(),
+  routingMetadata: z.record(z.unknown()).optional(),
   socketToken: z.string(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
@@ -316,6 +317,9 @@ export interface NetworkServiceStatus {
   status: string;
   explanation?: string;
   url?: string;
+  inProcess?: boolean;
+  hostServiceId?: string;
+  channels?: Record<string, boolean>;
 }
 
 export interface NetworkStatusResponse {

@@ -13,6 +13,8 @@ export interface ManagedNetworkServiceState {
   url?: string | undefined;
   healthUrl?: string | undefined;
   serviceIdentity?: string | undefined;
+  hostServiceId?: string | undefined;
+  channels?: Record<string, boolean> | undefined;
 }
 
 export interface NetworkOperatorState {

@@ -68,6 +68,89 @@ export class NetworkSupervisor {
     this.startupDelayMs = deps.startupDelayMs ?? 250;
   }
 
+  private createInProcessState(
+    service: ResolvedNetworkService,
+    startedAt: string,
+    detached: boolean,
+  ): ManagedNetworkServiceState {
+    return {
+      id: service.id,
+      pid: 0,
+      detached,
+      dependsOn: [...service.dependsOn],
+      startedAt,
+      status: 'already-running',
+      inProcess: true,
+      ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+      ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+      ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+      ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
+      ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : {}),
+    };
+  }
+
+  private async startManagedService(
+    service: ResolvedNetworkService,
+    detached: boolean,
+    startedAt: string,
+  ): Promise<ManagedNetworkServiceState> {
+    const logFile = detached ? await this.deps.logStore.register(service.id) : undefined;
+    const { pid } = await this.deps.startService(service, {
+      detached,
+      ...(logFile ? { logFile } : {}),
+    });
+    return {
+      id: service.id,
+      pid,
+      detached,
+      dependsOn: [...service.dependsOn],
+      startedAt,
+      status: 'started',
+      ...(logFile ? { logFile } : {}),
+      ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+      ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+      ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+    };
+  }
+
+  private async restartReusedHostForInProcessService(
+    serviceState: ManagedNetworkServiceState,
+    services: ManagedNetworkServiceState[],
+    resolvedServices: ResolvedNetworkService[],
+    detached: boolean,
+    startedAt: string,
+  ): Promise<boolean> {
+    const hostServiceId = serviceState.hostServiceId;
+    if (!hostServiceId) {
+      return false;
+    }
+    const hostIndex = services.findIndex((candidate) => candidate.id === hostServiceId);
+    const hostState = hostIndex >= 0 ? services[hostIndex] : undefined;
+    if (!hostState || hostState.status !== 'already-running') {
+      return false;
+    }
+    const hostService = resolvedServices.find((candidate) => candidate.id === hostServiceId);
+    if (!hostService) {
+      return false;
+    }
+    if (hostState.pid <= 0) {
+      throw new Error(
+        `Cannot enable ${serviceState.id}: host service ${hostServiceId} is already running outside this network state; stop that process and retry.`,
+      );
+    }
+
+    await this.deps.stopService(hostState);
+    const stopped = await this.waitForStopped(hostState);
+    if (!stopped) {
+      throw new Error(
+        `Cannot enable ${serviceState.id}: host service ${hostServiceId} did not stop before restart; stop that process and retry.`,
+      );
+    }
+    const restartedHost = await this.startManagedService(hostService, detached, startedAt);
+    services[hostIndex] = restartedHost;
+    return this.waitForHealthy(restartedHost);
+  }
+
   async up(options: {
     services: ResolvedNetworkService[];
     detached: boolean;
@@ -81,20 +164,19 @@ export class NetworkSupervisor {
     try {
       for (const service of options.services) {
         if (service.runtimeConfig.inProcess === true) {
-          const serviceState: ManagedNetworkServiceState = {
-            id: service.id,
-            pid: 0,
-            detached: options.detached,
-            dependsOn: [...service.dependsOn],
-            startedAt,
-            status: 'already-running',
-            inProcess: true,
-            ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
-            ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
-            ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
-          };
+          const serviceState = this.createInProcessState(service, startedAt, options.detached);
           services.push(serviceState);
-          const healthy = await this.waitForHealthy(serviceState);
+          let healthy = await this.waitForHealthy(serviceState);
+          if (!healthy) {
+            const hostRestarted = await this.restartReusedHostForInProcessService(
+              serviceState,
+              services,
+              options.services,
+              options.detached,
+              startedAt,
+            );
+            healthy = hostRestarted ? await this.waitForHealthy(serviceState) : false;
+          }
           if (!healthy) {
             throw new Error(`Service ${service.id} failed healthcheck during startup`);
           }
@@ -119,28 +201,14 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : existingService?.url ? { url: existingService.url } : {}),
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
+            ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : existingService?.channels ? { channels: existingService.channels } : {}),
+            ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : existingService?.hostServiceId ? { hostServiceId: existingService.hostServiceId } : {}),
             ...(existingService?.inProcess ? { inProcess: existingService.inProcess } : {}),
           });
           continue;
         }
 
-        const logFile = options.detached ? await this.deps.logStore.register(service.id) : undefined;
-        const { pid } = await this.deps.startService(service, {
-          detached: options.detached,
-          ...(logFile ? { logFile } : {}),
-        });
-        const serviceState: ManagedNetworkServiceState = {
-          id: service.id,
-          pid,
-          detached: options.detached,
-          dependsOn: [...service.dependsOn],
-          startedAt,
-          status: 'started',
-          ...(logFile ? { logFile } : {}),
-          ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
-          ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
-          ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
-        };
+        const serviceState = await this.startManagedService(service, options.detached, startedAt);
         services.push(serviceState);
         const healthy = await this.waitForHealthy(serviceState);
         if (!healthy) {
@@ -242,7 +310,7 @@ export class NetworkSupervisor {
     }
 
     const services = await Promise.all(
-      state.services.map((service) => resolveServiceHealth(service, this.deps.healthcheck)),
+      state.services.map((service) => resolveServiceHealth(service, this.deps.healthcheck, state.services)),
     );
 
     return {
@@ -262,6 +330,18 @@ export class NetworkSupervisor {
   private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
     for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
       if (await this.deps.healthcheck(service)) {
+        return true;
+      }
+      if (attempt < this.startupAttempts - 1) {
+        await sleep(this.startupDelayMs);
+      }
+    }
+    return false;
+  }
+
+  private async waitForStopped(service: ManagedNetworkServiceState): Promise<boolean> {
+    for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
+      if (!await this.deps.healthcheck(service)) {
         return true;
       }
       if (attempt < this.startupAttempts - 1) {

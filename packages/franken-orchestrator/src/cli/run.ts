@@ -323,7 +323,17 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
-async function resolveCommsSecret(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+async function readEnvValueFromFile(filePath: string, key: string): Promise<string | undefined> {
+  try {
+    const contents = await readFile(filePath, 'utf8');
+    const parsed = parseDotenv(contents);
+    return parsed[key];
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveCommsSecret(root: string, ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
   if (!ref?.trim()) {
     return undefined;
   }
@@ -337,15 +347,37 @@ async function resolveCommsSecret(ref: string | undefined, secretStore: ISecretS
       // Fall through to environment lookup for deploys that keep refs as env var names.
     }
   }
-  return process.env[ref]?.trim() || undefined;
+  const envValue = process.env[ref]?.trim();
+  if (envValue) {
+    return envValue;
+  }
+  const rootEnvValue = await readEnvValueFromFile(join(root, '.env'), ref);
+  if (rootEnvValue?.trim()) {
+    return rootEnvValue.trim();
+  }
+  const webEnvValue = await readEnvValueFromFile(join(root, 'packages', 'franken-web', '.env.local'), ref);
+  return webEnvValue?.trim() ? webEnvValue.trim() : undefined;
 }
 
-async function resolveCommsPublicRef(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+async function resolveCommsPublicRef(
+  root: string,
+  ref: string | undefined,
+  secretStore: ISecretStore | undefined,
+  isLiteral: (value: string) => boolean,
+): Promise<string | undefined> {
   if (!ref?.trim()) {
     return undefined;
   }
-  return (await resolveCommsSecret(ref, secretStore)) ?? ref.trim();
+  const trimmed = ref.trim();
+  const resolved = await resolveCommsSecret(root, ref, secretStore);
+  if (resolved) {
+    return resolved;
+  }
+  return isLiteral(trimmed) ? trimmed : undefined;
 }
+
+const isDiscordPublicKeyLiteral = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value);
+const isWhatsappPhoneNumberIdLiteral = (value: string): boolean => /^\d{5,}$/.test(value);
 
 function requireCommsChannelFields(
   channel: string,
@@ -368,6 +400,7 @@ function requireCommsChannelFields(
 async function buildChatServerCommsConfig(
   config: OrchestratorConfig,
   secretStore: ISecretStore | undefined,
+  root: string,
 ): Promise<CommsConfig | undefined> {
   if (!config.comms.enabled
     && !config.comms.slack.enabled
@@ -377,15 +410,25 @@ async function buildChatServerCommsConfig(
     return undefined;
   }
 
-  const slackToken = await resolveCommsSecret(config.comms.slack.botTokenRef, secretStore);
-  const slackSigningSecret = await resolveCommsSecret(config.comms.slack.signingSecretRef, secretStore);
-  const discordToken = await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore);
-  const discordPublicKey = await resolveCommsPublicRef(config.comms.discord.publicKeyRef, secretStore);
-  const telegramBotToken = await resolveCommsSecret(config.comms.telegram.botTokenRef, secretStore);
-  const whatsappAccessToken = await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore);
-  const whatsappPhoneNumberId = await resolveCommsPublicRef(config.comms.whatsapp.phoneNumberIdRef, secretStore);
-  const whatsappAppSecret = await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore);
-  const whatsappVerifyToken = await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore);
+  const slackToken = await resolveCommsSecret(root, config.comms.slack.botTokenRef, secretStore);
+  const slackSigningSecret = await resolveCommsSecret(root, config.comms.slack.signingSecretRef, secretStore);
+  const discordToken = await resolveCommsSecret(root, config.comms.discord.botTokenRef, secretStore);
+  const discordPublicKey = await resolveCommsPublicRef(
+    root,
+    config.comms.discord.publicKeyRef,
+    secretStore,
+    isDiscordPublicKeyLiteral,
+  );
+  const telegramBotToken = await resolveCommsSecret(root, config.comms.telegram.botTokenRef, secretStore);
+  const whatsappAccessToken = await resolveCommsSecret(root, config.comms.whatsapp.accessTokenRef, secretStore);
+  const whatsappPhoneNumberId = await resolveCommsPublicRef(
+    root,
+    config.comms.whatsapp.phoneNumberIdRef,
+    secretStore,
+    isWhatsappPhoneNumberIdLiteral,
+  );
+  const whatsappAppSecret = await resolveCommsSecret(root, config.comms.whatsapp.appSecretRef, secretStore);
+  const whatsappVerifyToken = await resolveCommsSecret(root, config.comms.whatsapp.verifyTokenRef, secretStore);
 
   requireCommsChannelFields('slack', config.comms.slack.enabled, {
     token: slackToken,
@@ -408,7 +451,7 @@ async function buildChatServerCommsConfig(
   return CommsConfigSchema.parse({
     orchestrator: {
       wsUrl: config.comms.orchestratorWsUrl,
-      token: await resolveCommsSecret(config.comms.orchestratorTokenRef, secretStore),
+      token: await resolveCommsSecret(root, config.comms.orchestratorTokenRef, secretStore),
     },
     channels: {
       slack: {
@@ -676,7 +719,7 @@ export async function main(): Promise<void> {
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
-      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore);
+      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
       const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({

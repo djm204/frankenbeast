@@ -244,6 +244,123 @@ describe('NetworkSupervisor', () => {
     expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
   });
 
+  it('restarts a reused chat-server when in-process comms routes are missing', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.telegram.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: false,
+      startedAt: '2026-03-10T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 500,
+          detached: false,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'started',
+        },
+      ],
+    });
+    const startService = vi.fn(async () => ({ pid: 601 }));
+    let hostStopped = false;
+    const stopService = vi.fn(async () => {
+      hostStopped = true;
+    });
+    const healthcheck = vi.fn(async (service) => {
+      if (service.id === 'comms-gateway') {
+        return startService.mock.calls.some(([startedService]) => startedService.id === 'chat-server');
+      }
+      if (service.id === 'chat-server' && service.pid === 500 && hostStopped) {
+        return false;
+      }
+      return true;
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService,
+      healthcheck,
+      preflightService: vi.fn(async (service) => service.id === 'chat-server'
+        ? { action: 'reuse' as const }
+        : { action: 'start' as const }),
+      now: () => '2026-03-10T00:00:00.000Z',
+      startupAttempts: 1,
+    });
+
+    const state = await supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    });
+
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+    expect(startService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }), expect.any(Object));
+    expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'chat-server', pid: 601, status: 'started' }),
+      expect.objectContaining({ id: 'comms-gateway', inProcess: true }),
+    ]));
+  });
+
+  it('reports reused pid-zero chat-server hosts instead of spawning a duplicate for in-process comms', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.telegram.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: false,
+      startedAt: '2026-03-09T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 0,
+          detached: false,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-09T00:00:00.000Z',
+          status: 'already-running',
+        },
+      ],
+    });
+    const startService = vi.fn(async () => ({ pid: 601 }));
+    const stopService = vi.fn(async () => undefined);
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService,
+      healthcheck: vi.fn(async (service) => service.id !== 'comms-gateway'),
+      preflightService: vi.fn(async (service) => service.id === 'chat-server'
+        ? { action: 'reuse' as const }
+        : { action: 'start' as const }),
+      now: () => '2026-03-10T00:00:00.000Z',
+      startupAttempts: 1,
+    });
+
+    await expect(supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    })).rejects.toThrow(/host service chat-server is already running outside this network state/);
+
+    expect(stopService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+    expect(startService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }), expect.any(Object));
+  });
+
+
   it('allows reused pid-zero services to stop because they are not in-process markers', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));

@@ -73,15 +73,20 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const outboundRouteMetadata = routeMetadata ?? this.routeMetadataBySession.get(sessionId);
-    if (routeMetadata) {
-      this.routeMetadataBySession.set(sessionId, routeMetadata);
+    const outboundRouteMetadata = routeMetadata
+      ?? this.routeMetadataBySession.get(sessionId)
+      ?? result.metadata;
+    if (outboundRouteMetadata) {
+      this.routeMetadataBySession.set(sessionId, outboundRouteMetadata);
     }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
       ...(outboundRouteMetadata ? { metadata: outboundRouteMetadata } : {}),
     };
     if (result.status) outbound.status = result.status;
+    if (result.actions) outbound.actions = result.actions;
+    if (result.provider) outbound.provider = result.provider;
+    if (result.phase) outbound.phase = result.phase;
     this.relayToChannel(sessionId, channelType, outbound);
   }
 
