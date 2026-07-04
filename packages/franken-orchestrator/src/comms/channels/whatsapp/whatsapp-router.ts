@@ -65,7 +65,10 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
           // Handle interactive button reply
           if (message.type === 'interactive' && message.interactive?.button_reply) {
             const actionId = message.interactive.button_reply.id;
-            await gateway.handleAction('whatsapp', sessionId, actionId);
+            await gateway.handleAction('whatsapp', sessionId, actionId, {
+              externalChannelId: from,
+              phoneNumber: from,
+            });
           }
         }
       }

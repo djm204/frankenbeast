@@ -11,6 +11,7 @@ import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
 import { NetworkSupervisor } from '../../network/network-supervisor.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
+import type { ApiDataEnvelope, NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 import {
   healthcheckNetworkService,
   preflightNetworkService,
@@ -58,19 +59,18 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const supervisor = createSupervisor(deps.frankenbeastDir);
     const status = await supervisor.status();
     const services = resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root });
-    return c.json({
-      data: {
-        ...status,
-        services: status.services.map((service) => {
-          const resolved = services.find((candidate) => candidate.id === service.id);
-          return {
-            ...service,
-            explanation: resolved?.explanation,
-            url: resolved?.runtimeConfig.url,
-          };
-        }),
-      },
-    });
+    const response: NetworkStatusResponse = {
+      ...status,
+      services: status.services.map((service) => {
+        const resolved = services.find((candidate) => candidate.id === service.id);
+        return {
+          ...service,
+          ...(resolved?.explanation !== undefined ? { explanation: resolved.explanation } : {}),
+          ...(resolved?.runtimeConfig.url !== undefined ? { url: resolved.runtimeConfig.url } : {}),
+        };
+      }),
+    };
+    return c.json({ data: response } satisfies ApiDataEnvelope<NetworkStatusResponse>);
   });
 
   app.post('/v1/network/up', async (c) => {
@@ -139,7 +139,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   });
 
   app.get('/v1/network/config', (c) => {
-    return c.json({ data: redactSensitiveConfig(deps.getConfig()) });
+    return c.json({ data: redactSensitiveConfig(deps.getConfig()) } satisfies ApiDataEnvelope<NetworkConfigResponse>);
   });
 
   app.post('/v1/network/config', async (c) => {
@@ -150,7 +150,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     deps.setConfig(nextConfig);
     await mkdir(dirname(deps.configFile), { recursive: true });
     await writeFile(deps.configFile, JSON.stringify(nextConfig, null, 2), 'utf-8');
-    return c.json({ data: redactSensitiveConfig(nextConfig) });
+    return c.json({ data: redactSensitiveConfig(nextConfig) } satisfies ApiDataEnvelope<NetworkConfigResponse>);
   });
 
   return app;

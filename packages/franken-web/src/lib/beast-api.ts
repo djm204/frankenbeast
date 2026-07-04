@@ -1,195 +1,49 @@
-export interface BeastInterviewPrompt {
-  key: string;
-  prompt: string;
-  kind: 'string' | 'boolean' | 'file' | 'directory';
-  required?: boolean;
-  options?: readonly string[];
-}
+import { MODULE_CONFIG_KEYS } from '@franken/types';
+import type {
+  ApiDataEnvelope,
+  BeastCatalogEntry,
+  BeastContainerRuntimeStatus,
+  BeastInterviewPrompt,
+  BeastEventHandlers,
+  BeastExecutionMode,
+  BeastRunDetail,
+  BeastRunSummary,
+  BeastSseAgentEvent,
+  BeastSseAgentStatusEvent,
+  BeastSseRunEvent,
+  BeastSseRunLogEvent,
+  BeastSseRunStatusEvent,
+  BeastSseSnapshot,
+  ExtendedAgentCreateInput,
+  ModuleConfig,
+  TrackedAgentDetail,
+  TrackedAgentEvent,
+  TrackedAgentInitAction,
+  TrackedAgentSummary,
+} from '@franken/types';
 
-export type BeastExecutionMode = 'process' | 'container';
-
-export interface BeastContainerRuntimeStatus {
-  available: boolean;
-  reason?: string;
-}
-
-export interface BeastCatalogEntry {
-  id: string;
-  version?: number;
-  label: string;
-  description: string;
-  executionModeDefault: BeastExecutionMode;
-  containerRuntime?: BeastContainerRuntimeStatus;
-  interviewPrompts: BeastInterviewPrompt[];
-}
-
-export interface BeastRunSummary {
-  id: string;
-  trackedAgentId?: string;
-  definitionId: string;
-  status: string;
-  executionMode: 'process' | 'container';
-  dispatchedBy: string;
-  dispatchedByUser: string;
-  attemptCount: number;
-  currentAttemptId?: string;
-  stopReason?: string;
-  containerId?: string;
-  containerName?: string;
-  containerRuntime?: string;
-  image?: string;
-  containerImage?: string;
-  containerNetwork?: string;
-  resourceSnapshot?: Record<string, unknown>;
-  resources?: Record<string, unknown>;
-  workspaceHostPath?: string;
-  workspaceContainerPath?: string;
-  createdAt: string;
-}
-
-export interface BeastRunDetail {
-  run: BeastRunSummary;
-  attempts: Array<Record<string, unknown>>;
-  events: Array<{ id: string; runId: string; sequence: number; type: string; payload: Record<string, unknown>; createdAt: string }>;
-  logs: string[];
-}
-
-export interface BeastSseSnapshot {
-  agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
-}
-
-export interface BeastSseAgentStatusEvent {
-  agentId: string;
-  status: string;
-  updatedAt?: string;
-}
-
-export interface BeastSseAgentEvent {
-  agentId: string;
-  event: Omit<TrackedAgentEvent, 'id' | 'agentId' | 'sequence'> & Partial<TrackedAgentEvent>;
-}
-
-export interface BeastSseRunStatusEvent {
-  runId: string;
-  status: string;
-  updatedAt?: string;
-}
-
-export interface BeastSseRunLogEvent {
-  eventId?: string;
-  runId: string;
-  attemptId?: string;
-  stream?: 'stdout' | 'stderr';
-  line: string;
-  createdAt?: string;
-}
-
-export interface BeastSseRunEvent {
-  runId: string;
-  event: Record<string, unknown>;
-}
-
-export interface BeastEventHandlers {
-  snapshot?: (snapshot: BeastSseSnapshot) => void;
-  agentStatus?: (event: BeastSseAgentStatusEvent) => void;
-  agentEvent?: (event: BeastSseAgentEvent) => void;
-  runStatus?: (event: BeastSseRunStatusEvent) => void;
-  runLog?: (event: BeastSseRunLogEvent) => void;
-  runEvent?: (event: BeastSseRunEvent) => void;
-  error?: (error: Error) => void;
-}
-
-export interface TrackedAgentInitAction {
-  kind: 'design-interview' | 'chunk-plan' | 'martin-loop';
-  command: string;
-  config: Record<string, unknown>;
-  chatSessionId?: string;
-}
-
-export interface ModuleConfig {
-  firewall?: boolean;
-  skills?: boolean;
-  memory?: boolean;
-  planner?: boolean;
-  critique?: boolean;
-  governor?: boolean;
-  heartbeat?: boolean;
-}
-
-export const MODULE_CONFIG_KEYS: readonly (keyof ModuleConfig)[] = [
-  'firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat',
-] as const;
-
-export interface TrackedAgentSummary {
-  id: string;
-  name?: string;
-  definitionId: string;
-  status: string;
-  source: string;
-  createdByUser: string;
-  initAction: TrackedAgentInitAction;
-  initConfig: Record<string, unknown>;
-  moduleConfig?: ModuleConfig;
-  executionMode?: BeastExecutionMode;
-  chatSessionId?: string;
-  dispatchRunId?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TrackedAgentEvent {
-  id: string;
-  agentId: string;
-  sequence: number;
-  level: 'info' | 'warning' | 'error';
-  type: string;
-  message: string;
-  payload: Record<string, unknown>;
-  createdAt: string;
-}
-
-export interface TrackedAgentDetail {
-  agent: TrackedAgentSummary;
-  events: TrackedAgentEvent[];
-}
-
-export interface AgentLlmConfig {
-  default?: { provider: string; model: string };
-  overrides?: Record<string, { provider: string; model: string }>;
-}
-
-export interface AgentGitConfig {
-  preset: 'one-shot' | 'feature-branch' | 'feature-branch-worktree' | 'yolo-main' | 'custom';
-  baseBranch: string;
-  branchPattern: string;
-  prCreation: boolean;
-  prTemplate?: string;
-  commitConvention: 'conventional' | 'freeform';
-  mergeStrategy: 'merge' | 'squash' | 'rebase';
-}
-
-export interface AgentDeepModuleConfig {
-  firewall?: { ruleSet?: string; customRules?: string };
-  memory?: { backend?: string; retentionPolicy?: string };
-  planner?: { maxDagDepth?: number; parallelTaskLimit?: number };
-  critique?: { maxIterations?: number; severityThreshold?: string };
-  governor?: { approvalMode?: string; escalationRules?: string };
-  heartbeat?: { reflectionInterval?: number; llmOverride?: { provider: string; model: string } };
-}
-
-export interface ExtendedAgentCreateInput {
-  name: string;
-  description?: string;
-  definitionId: string;
-  initAction: TrackedAgentInitAction;
-  moduleConfig?: ModuleConfig;
-  deepModuleConfig?: AgentDeepModuleConfig;
-  llmConfig?: AgentLlmConfig;
-  gitConfig?: AgentGitConfig;
-  skills?: string[];
-  promptText?: string;
-  promptFiles?: Array<{ name: string; content: string; tokens: number }>;
-}
+export { MODULE_CONFIG_KEYS } from '@franken/types';
+export type {
+  BeastCatalogEntry,
+  BeastContainerRuntimeStatus,
+  BeastInterviewPrompt,
+  BeastEventHandlers,
+  BeastExecutionMode,
+  BeastRunDetail,
+  BeastRunSummary,
+  BeastSseAgentEvent,
+  BeastSseAgentStatusEvent,
+  BeastSseRunEvent,
+  BeastSseRunLogEvent,
+  BeastSseRunStatusEvent,
+  BeastSseSnapshot,
+  ExtendedAgentCreateInput,
+  ModuleConfig,
+  TrackedAgentDetail,
+  TrackedAgentEvent,
+  TrackedAgentInitAction,
+  TrackedAgentSummary,
+} from '@franken/types';
 
 export class BeastApiClient {
   constructor(
@@ -409,7 +263,7 @@ export class BeastApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const body = await this.requestRaw<{ data: T }>(path, init);
+    const body = await this.requestRaw<ApiDataEnvelope<T>>(path, init);
     return body.data;
   }
 

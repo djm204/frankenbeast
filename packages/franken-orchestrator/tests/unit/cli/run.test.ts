@@ -209,6 +209,20 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
     providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+    network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+    beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+    chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+    dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+    comms: {
+      enabled: false,
+      host: '127.0.0.1',
+      port: 3200,
+      orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+      slack: { enabled: false },
+      discord: { enabled: false },
+      telegram: { enabled: false },
+      whatsapp: { enabled: false },
+    },
   })),
 }));
 

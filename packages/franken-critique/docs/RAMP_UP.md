@@ -10,7 +10,7 @@
 - **Evaluators**:
     - `SafetyEvaluator`: Checks for guardrail violations.
     - `GhostDependencyEvaluator`: Detects undeclared imports.
-    - `ADRCompliance`: Checks against stored Architecture Decision Records.
+    - `ADRComplianceEvaluator`: Checks against stored Architecture Decision Records.
 - **Circuit Breakers**: Prevents infinite critique spirals.
 
 ## Integration Gap
@@ -19,7 +19,7 @@ The `franken-orchestrator` currently skips the reflection phase by using a stub 
 ## Key API
 - `CritiquePipeline`: Executes a sequence of evaluators.
 - `CritiqueLoop`: Orchestrates the retry-until-pass logic.
-- `Reviewer`: The high-level factory for creating a pre-wired critique service.
+- `Reviewer`: The interface of the pre-wired critique service; create one with the `createReviewer` factory.
 
 ## Build & Test
 ```bash

@@ -56,6 +56,19 @@ export const DiscordChannelConfigSchema = z.object({
   publicKeyRef: z.string().min(1).optional(),
 });
 
+export const TelegramChannelConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  botTokenRef: z.string().min(1).optional(),
+});
+
+export const WhatsAppChannelConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  accessTokenRef: z.string().min(1).optional(),
+  phoneNumberIdRef: z.string().min(1).optional(),
+  appSecretRef: z.string().min(1).optional(),
+  verifyTokenRef: z.string().min(1).optional(),
+});
+
 export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
   host: HostSchema,
@@ -64,6 +77,8 @@ export const CommsServiceConfigSchema = z.object({
   orchestratorTokenRef: z.string().min(1).optional(),
   slack: SlackChannelConfigSchema.default({}),
   discord: DiscordChannelConfigSchema.default({}),
+  telegram: TelegramChannelConfigSchema.default({}),
+  whatsapp: WhatsAppChannelConfigSchema.default({}),
 });
 
 export const NetworkConfigSchema = z.object({

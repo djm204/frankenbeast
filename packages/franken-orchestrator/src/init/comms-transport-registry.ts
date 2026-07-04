@@ -21,12 +21,12 @@ const KNOWN_TRANSPORTS: readonly CommsTransportDefinition[] = [
   {
     id: 'telegram',
     label: 'Telegram',
-    description: 'Known future transport; not yet wired through orchestrator runtime.',
+    description: 'Telegram Bot API webhooks via the managed comms gateway.',
   },
   {
     id: 'whatsapp',
     label: 'WhatsApp',
-    description: 'Known future transport; not yet wired through orchestrator runtime.',
+    description: 'WhatsApp Cloud API webhooks via the managed comms gateway.',
   },
 ];
 
@@ -35,7 +35,9 @@ function runtimeSupportedTransportIds(): Set<SupportedCommsTransportId> {
   const reserved = new Set(['enabled', 'host', 'port', 'orchestratorWsUrl', 'orchestratorTokenRef']);
   const supported = Object.keys(comms)
     .filter((key) => !reserved.has(key))
-    .filter((key): key is SupportedCommsTransportId => key === 'slack' || key === 'discord');
+    .filter((key): key is SupportedCommsTransportId =>
+      key === 'slack' || key === 'discord' || key === 'telegram' || key === 'whatsapp',
+    );
   return new Set(supported);
 }
 

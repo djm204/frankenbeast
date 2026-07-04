@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.1...franken-types-v0.7.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **api:** share web DTO contracts ([#544](https://github.com/djm204/frankenbeast/issues/544)) ([ec1e29a](https://github.com/djm204/frankenbeast/commit/ec1e29ae21bed03d156f0a58c0f27964566e5e80))
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.0...franken-types-v0.7.1) (2026-07-04)
 
 

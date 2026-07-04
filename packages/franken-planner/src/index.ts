@@ -60,7 +60,6 @@ export { RationaleEnforcer } from './cot/rationale-enforcer.js';
 // ── HITL (Human-in-the-Loop) ───────────────────────────────────────
 export { PlanExporter } from './hitl/plan-exporter.js';
 export { applyModifications } from './hitl/plan-modifier.js';
-export { StubHITLGate } from './hitl/stub-hitl-gate.js';
 export type {
   TaskModification,
   ApprovalResult,

@@ -8,6 +8,7 @@ export interface ManagedNetworkServiceState {
   dependsOn: string[];
   startedAt: string;
   status?: 'started' | 'already-running';
+  inProcess?: boolean | undefined;
   logFile?: string | undefined;
   url?: string | undefined;
   healthUrl?: string | undefined;

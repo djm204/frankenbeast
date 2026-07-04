@@ -185,6 +185,53 @@ describe('runExecution', () => {
     expect(secondInput.dependencyOutputs.get('t1')).toBe('alpha-output');
   });
 
+  it('rehydrates dependency outputs for checkpointed tasks on resume', async () => {
+    const execute = vi.fn(async (skillId: string, input: SkillInput) => {
+      if (skillId === 'alpha') {
+        return { output: { message: 'alpha-output' }, tokensUsed: 1 };
+      }
+      if (skillId === 'beta') {
+        return { output: input.dependencyOutputs.get('t1'), tokensUsed: 1 };
+      }
+      throw new Error(`Unexpected skill: ${skillId}`);
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const checkpointOutputs = new Map<string, unknown>();
+    const checkpointEntries = new Set<string>(['t1:done']);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => checkpointEntries.has(key)),
+      write: vi.fn((key: string) => checkpointEntries.add(key)),
+      readAll: vi.fn(() => new Set(checkpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      readTaskOutput: vi.fn((taskId: string) => ({
+        found: checkpointOutputs.has(taskId),
+        output: checkpointOutputs.get(taskId),
+      })),
+      writeTaskOutput: vi.fn((taskId: string, output: unknown) => {
+        checkpointOutputs.set(taskId, output);
+      }),
+    };
+    checkpointOutputs.set('t1', { message: 'persisted-alpha-output' });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['beta'], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]![0]).toBe('beta');
+    expect(checkpoint.readTaskOutput).toHaveBeenCalledWith('t1');
+    expect(outcomes[0]).toEqual({ taskId: 't1', status: 'success', output: { message: 'persisted-alpha-output' } });
+    expect(outcomes[1]!.output).toEqual({ message: 'persisted-alpha-output' });
+  });
+
   it('passes through dependency output when no skills are required', async () => {
     const execute = vi.fn(async (skillId: string) => ({
       output: `${skillId}-output`,

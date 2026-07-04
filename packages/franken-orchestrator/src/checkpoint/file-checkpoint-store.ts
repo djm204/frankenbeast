@@ -6,12 +6,15 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { randomBytes } from 'node:crypto';
-import { dirname } from 'node:path';
+import { createHash, randomBytes } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { deserialize, serialize } from 'node:v8';
 import type { ICheckpointStore } from '../deps.js';
 
 const LOCK_RETRY_MS = 5;
@@ -121,12 +124,57 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   clear(): void {
-    if (!existsSync(this.checkpointPath)) {
+    if (!existsSync(this.checkpointPath) && !existsSync(this.taskOutputDir)) {
       return;
     }
+    mkdirSync(dirname(this.checkpointPath), { recursive: true });
     this.withLock(() => {
-      this.atomicReplace([]);
+      if (existsSync(this.checkpointPath)) {
+        this.atomicReplace([]);
+      }
+      rmSync(this.taskOutputDir, { recursive: true, force: true });
     });
+  }
+
+  writeTaskOutput(taskId: string, output: unknown): void {
+    const outputPath = this.taskOutputPath(taskId);
+    let payload: string;
+    try {
+      const serialized = serialize(output);
+      const rehydrated = deserialize(serialized);
+      if (!isDeepStrictEqual(rehydrated, output)) {
+        this.deleteTaskOutput(outputPath);
+        return;
+      }
+      payload = serialized.toString('base64');
+    } catch {
+      // Checkpoint markers must never fail a successful task just because its
+      // output cannot be cloned or faithfully rehydrated. Persist what can be
+      // safely rehydrated and fall back to marker-only recovery otherwise.
+      this.deleteTaskOutput(outputPath);
+      return;
+    }
+    mkdirSync(dirname(outputPath), { recursive: true });
+    this.withLock(() => {
+      this.atomicWriteFile(outputPath, payload);
+    });
+  }
+
+  readTaskOutput(taskId: string): { found: boolean; output?: unknown } {
+    let payload: string;
+    try {
+      payload = readFileSync(this.taskOutputPath(taskId), 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { found: false };
+      }
+      throw error;
+    }
+    try {
+      return { found: true, output: deserialize(Buffer.from(payload, 'base64')) };
+    } catch {
+      return { found: false };
+    }
   }
 
   recordCommit(taskId: string, stage: string, iteration: number, commitHash: string): void {
@@ -162,19 +210,43 @@ export class FileCheckpointStore implements ICheckpointStore {
     return content.split('\n').filter(isValidEntry);
   }
 
+  private taskOutputPath(taskId: string): string {
+    const outputKey = createHash('sha256').update(taskId).digest('hex');
+    return join(this.taskOutputDir, `${outputKey}.v8`);
+  }
+
+  private get taskOutputDir(): string {
+    return `${this.checkpointPath}.outputs`;
+  }
+
+  private deleteTaskOutput(outputPath: string): void {
+    try {
+      unlinkSync(outputPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
   /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
   private atomicReplace(entries: string[]): void {
-    const tmpPath = `${this.checkpointPath}.tmp.${process.pid}.${this.writeCounter++}`;
+    const payload = entries.length > 0 ? entries.join('\n') + '\n' : '';
+    this.atomicWriteFile(this.checkpointPath, payload);
+  }
+
+  /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
+  private atomicWriteFile(targetPath: string, payload: string): void {
+    const tmpPath = `${targetPath}.tmp.${process.pid}.${this.writeCounter++}`;
     try {
       const fd = openSync(tmpPath, 'w');
       try {
-        const payload = entries.length > 0 ? entries.join('\n') + '\n' : '';
         writeAll(fd, payload);
         fsyncSync(fd);
       } finally {
         closeSync(fd);
       }
-      renameSync(tmpPath, this.checkpointPath);
+      renameSync(tmpPath, targetPath);
     } catch (error) {
       try {
         unlinkSync(tmpPath);
@@ -183,7 +255,7 @@ export class FileCheckpointStore implements ICheckpointStore {
       }
       throw error;
     }
-    fsyncDir(dirname(this.checkpointPath));
+    fsyncDir(dirname(targetPath));
   }
 
   private get lockOwnerRecord(): string {

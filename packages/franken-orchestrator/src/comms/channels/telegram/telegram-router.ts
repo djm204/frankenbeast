@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { TelegramUpdateSchema } from './telegram-schemas.js';
+import { decodeTelegramCallbackData } from './telegram-adapter.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
 
@@ -17,8 +18,14 @@ export function telegramRouter(options: TelegramRouterOptions) {
   const { gateway, sessionMapper, botToken } = options;
   const app = new Hono();
 
-  // Telegram recommends using the bot token in the webhook URL for security
-  app.post(`/${botToken}`, async (c) => {
+  // Telegram recommends using the bot token in the webhook URL for security.
+  // Compare the token as route data instead of interpolating it into the route
+  // template because Telegram tokens contain ':' and Hono treats ':' as a
+  // parameter marker in literal route strings.
+  app.post('/:token', async (c) => {
+    if (c.req.param('token') !== botToken) {
+      return c.json({ error: 'Not found' }, 404);
+    }
     const body = await c.req.json();
     const update = TelegramUpdateSchema.parse(body);
 
@@ -57,13 +64,17 @@ export function telegramRouter(options: TelegramRouterOptions) {
       const userId = query.from.id.toString();
 
       if (chatId) {
-        const sessionId = sessionMapper.mapToSessionId({
+        const callback = decodeTelegramCallbackData(update.callback_query.data);
+        const sessionId = callback.sessionId ?? sessionMapper.mapToSessionId({
           channelType: 'telegram',
           externalUserId: userId,
           externalChannelId: chatId,
         });
 
-        await gateway.handleAction('telegram', sessionId, update.callback_query.data);
+        await gateway.handleAction('telegram', sessionId, callback.actionId, {
+          externalChannelId: chatId,
+          chatId,
+        });
       }
 
       // Acknowledge callback query

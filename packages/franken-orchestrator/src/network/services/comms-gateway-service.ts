@@ -2,7 +2,10 @@ import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 function hasEnabledChannels(config: OrchestratorConfig): boolean {
-  return config.comms.slack.enabled || config.comms.discord.enabled;
+  return config.comms.slack.enabled
+    || config.comms.discord.enabled
+    || config.comms.telegram.enabled
+    || config.comms.whatsapp.enabled;
 }
 
 export const commsGatewayService: NetworkServiceDefinition = {
@@ -17,18 +20,25 @@ export const commsGatewayService: NetworkServiceDefinition = {
     'comms.orchestratorWsUrl',
     'comms.slack.enabled',
     'comms.discord.enabled',
+    'comms.telegram.enabled',
+    'comms.whatsapp.enabled',
   ],
   enabled: (config: OrchestratorConfig) => config.comms.enabled || hasEnabledChannels(config),
   describe: (config: OrchestratorConfig) =>
-    `Enabled when comms.enabled=true or a channel is enabled; current channel flags slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled}.`,
+    'Enabled when comms.enabled=true or a channel is enabled; current channel flags '
+      + `slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled} `
+      + `telegram=${config.comms.telegram.enabled} whatsapp=${config.comms.whatsapp.enabled}.`,
   buildRuntimeConfig: (config: OrchestratorConfig) => ({
-    host: config.comms.host,
-    port: config.comms.port,
-    url: `http://${config.comms.host}:${config.comms.port}`,
+    host: config.chat.host,
+    port: config.chat.port,
+    url: `http://${config.chat.host}:${config.chat.port}`,
+    healthUrl: `http://${config.chat.host}:${config.chat.port}/comms/health`,
     orchestratorWsUrl: config.comms.orchestratorWsUrl,
     channels: {
       slack: config.comms.slack.enabled,
       discord: config.comms.discord.enabled,
+      telegram: config.comms.telegram.enabled,
+      whatsapp: config.comms.whatsapp.enabled,
     },
     // Comms webhook routes are now served in-process on the orchestrator's Hono server
     // via commsRoutes() registered in chat-app.ts — no separate process needed.

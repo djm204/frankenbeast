@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -51,6 +51,7 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -314,6 +315,119 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
+async function resolveCommsSecret(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  if (secretStore) {
+    try {
+      const resolved = await secretStore.resolve(ref);
+      if (resolved?.trim()) {
+        return resolved.trim();
+      }
+    } catch {
+      // Fall through to environment lookup for deploys that keep refs as env var names.
+    }
+  }
+  return process.env[ref]?.trim() || undefined;
+}
+
+async function resolveCommsPublicRef(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  return (await resolveCommsSecret(ref, secretStore)) ?? ref.trim();
+}
+
+function requireCommsChannelFields(
+  channel: string,
+  enabled: boolean,
+  fields: Record<string, string | undefined>,
+): void {
+  if (!enabled) {
+    return;
+  }
+  const missing = Object.entries(fields)
+    .filter(([, value]) => !value?.trim())
+    .map(([field]) => field);
+  if (missing.length > 0) {
+    throw new Error(
+      `Cannot start enabled ${channel} comms channel; missing resolved ${missing.join(', ')}`,
+    );
+  }
+}
+
+async function buildChatServerCommsConfig(
+  config: OrchestratorConfig,
+  secretStore: ISecretStore | undefined,
+): Promise<CommsConfig | undefined> {
+  if (!config.comms.enabled
+    && !config.comms.slack.enabled
+    && !config.comms.discord.enabled
+    && !config.comms.telegram.enabled
+    && !config.comms.whatsapp.enabled) {
+    return undefined;
+  }
+
+  const slackToken = await resolveCommsSecret(config.comms.slack.botTokenRef, secretStore);
+  const slackSigningSecret = await resolveCommsSecret(config.comms.slack.signingSecretRef, secretStore);
+  const discordToken = await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore);
+  const discordPublicKey = await resolveCommsPublicRef(config.comms.discord.publicKeyRef, secretStore);
+  const telegramBotToken = await resolveCommsSecret(config.comms.telegram.botTokenRef, secretStore);
+  const whatsappAccessToken = await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore);
+  const whatsappPhoneNumberId = await resolveCommsPublicRef(config.comms.whatsapp.phoneNumberIdRef, secretStore);
+  const whatsappAppSecret = await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore);
+  const whatsappVerifyToken = await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore);
+
+  requireCommsChannelFields('slack', config.comms.slack.enabled, {
+    token: slackToken,
+    signingSecret: slackSigningSecret,
+  });
+  requireCommsChannelFields('discord', config.comms.discord.enabled, {
+    token: discordToken,
+    publicKey: discordPublicKey,
+  });
+  requireCommsChannelFields('telegram', config.comms.telegram.enabled, {
+    botToken: telegramBotToken,
+  });
+  requireCommsChannelFields('whatsapp', config.comms.whatsapp.enabled, {
+    accessToken: whatsappAccessToken,
+    phoneNumberId: whatsappPhoneNumberId,
+    appSecret: whatsappAppSecret,
+    verifyToken: whatsappVerifyToken,
+  });
+
+  return CommsConfigSchema.parse({
+    orchestrator: {
+      wsUrl: config.comms.orchestratorWsUrl,
+      token: await resolveCommsSecret(config.comms.orchestratorTokenRef, secretStore),
+    },
+    channels: {
+      slack: {
+        enabled: config.comms.slack.enabled,
+        token: slackToken,
+        signingSecret: slackSigningSecret,
+      },
+      discord: {
+        enabled: config.comms.discord.enabled,
+        token: discordToken,
+        publicKey: discordPublicKey,
+      },
+      telegram: {
+        enabled: config.comms.telegram.enabled,
+        botToken: telegramBotToken,
+      },
+      whatsapp: {
+        enabled: config.comms.whatsapp.enabled,
+        accessToken: whatsappAccessToken,
+        phoneNumberId: whatsappPhoneNumberId,
+        appSecret: whatsappAppSecret,
+        verifyToken: whatsappVerifyToken,
+      },
+    },
+  });
+}
+
 async function createChatSurfaceDeps(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -464,6 +578,8 @@ export async function main(): Promise<void> {
         skillManager,
         action: args.skillAction,
         target: args.skillTarget,
+        command: args.skillCommand,
+        commandArgs: args.skillCommandArgs,
         print: console.log,
       });
     } catch (err) {
@@ -478,6 +594,9 @@ export async function main(): Promise<void> {
       await handleSecurityCommand({
         action: args.securityAction,
         target: args.securityTarget,
+        configPath: args.config ?? paths.configFile,
+        ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
+        ...(config.security ? { currentSecurity: config.security } : {}),
         print: console.log,
       });
     } catch (err) {
@@ -548,6 +667,7 @@ export async function main(): Promise<void> {
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
+      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore);
       const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({
@@ -590,6 +710,7 @@ export async function main(): Promise<void> {
             mutableConfig = nextConfig;
           },
         },
+        ...(commsConfig ? { commsConfig } : {}),
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
@@ -761,6 +882,7 @@ export interface NetworkCommandSupervisorLike {
     mode: 'secure' | 'insecure';
     secureBackend: string;
   }): Promise<{ services: { id: string; url?: string | undefined; status?: 'started' | 'already-running' | undefined }[] }>;
+  stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
   down(): Promise<void>;
   status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
   stop(target: string | 'all'): Promise<void>;
@@ -908,8 +1030,13 @@ export async function runNetworkCommand(
     return;
   }
 
+  const configFile = args.config ? resolvePath(args.config) : undefined;
   const services = filterNetworkServices(
-    deps.resolveServices(config, { repoRoot: root }),
+    deps.resolveServices(config, {
+      repoRoot: root,
+      ...(configFile ? { configFile } : {}),
+      ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+    }),
     action === 'up' ? undefined : args.networkTarget,
   );
 
@@ -939,7 +1066,10 @@ export async function runNetworkCommand(
     }
     if (!args.networkDetached) {
       await deps.waitForShutdown();
-      await supervisor.stop(args.networkTarget ?? 'all');
+      await supervisor.stopAll({
+        ...state,
+        services: state.services.filter((service) => service.status === 'started'),
+      });
     }
     return;
   }
