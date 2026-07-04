@@ -121,4 +121,53 @@ describe('TraceContext', () => {
       expect(() => TraceContext.endTrace(trace)).toThrow()
     })
   })
+
+  describe('validateTrace()', () => {
+    it('reports active spans without mutating them by default', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      span.startedAt = 1_000
+
+      const result = TraceContext.validateTrace(trace, { now: 1_250 })
+
+      expect(result.ok).toBe(false)
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          type: 'active-span',
+          spanId: span.id,
+          spanName: 'step',
+          ageMs: 250,
+        }),
+      ])
+      expect(span.status).toBe('active')
+      expect(span.endedAt).toBeUndefined()
+    })
+
+    it('returns ok=true when all spans are closed', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      TraceContext.endSpan(span)
+
+      expect(TraceContext.validateTrace(trace).ok).toBe(true)
+    })
+
+    it('auto-closes timed-out active spans when configured', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'slow-step' })
+      span.startedAt = 1_000
+
+      const result = TraceContext.validateTrace(trace, {
+        now: 2_500,
+        activeSpanTimeoutMs: 1_000,
+        autoCloseTimedOutSpans: true,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.issues[0]).toEqual(expect.objectContaining({ autoClosed: true, ageMs: 1_500 }))
+      expect(span.status).toBe('error')
+      expect(span.endedAt).toBe(2_500)
+      expect(span.durationMs).toBe(1_500)
+      expect(span.errorMessage).toMatch(/auto-closed/)
+    })
+  })
 })

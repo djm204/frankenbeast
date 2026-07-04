@@ -1,4 +1,5 @@
 import type { Trace, Span } from '../core/types.js'
+import { warnIfTraceHasActiveSpans } from './ExportAdapter.js'
 
 // ── OTEL-shaped output types ──────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ function serializeSpan(span: Span): OTELSpan {
 
 export const OTELSerializer = {
   serializeTrace(trace: Trace): OTELPayload {
+    warnIfTraceHasActiveSpans(trace, 'OTELSerializer')
     return {
       resourceSpans: [
         {

@@ -1,5 +1,6 @@
 import type { Trace } from '../../core/types.js'
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 
 export interface MultiAdapterOptions {
   /** Adapters to fan-out to. Order matters for queryByTraceId (first-wins). */
@@ -39,6 +40,7 @@ export class MultiAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'MultiAdapter')
     const results = await Promise.allSettled(this.adapters.map(a => a.flush(trace)))
 
     if (this.throwOnError) {

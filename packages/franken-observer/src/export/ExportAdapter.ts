@@ -1,4 +1,16 @@
 import type { Trace } from '../core/types.js'
+import { TraceContext } from '../core/TraceContext.js'
+
+export function warnIfTraceHasActiveSpans(trace: Trace, destination = 'export'): void {
+  const validation = TraceContext.validateTrace(trace)
+  if (validation.ok) return
+
+  const activeSpans = validation.issues.map(issue => `${issue.spanName} (${issue.spanId})`).join(', ')
+  process.emitWarning(
+    `[franken-observer] Exporting trace ${trace.id} to ${destination} with ` +
+      `${validation.issues.length} active span(s): ${activeSpans}`,
+  )
+}
 
 /**
  * Pluggable export backend. All adapters implement this interface.

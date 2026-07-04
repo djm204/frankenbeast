@@ -1,5 +1,6 @@
 import type { Trace, Span } from '../core/types.js'
 import type { ExportAdapter } from '../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../export/ExportAdapter.js'
 
 // ── Rule types ────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ export class SpanRedactor implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'SpanRedactor')
     const redacted: Trace = {
       ...trace,
       spans: trace.spans.map(span => this.redactSpan(span)),

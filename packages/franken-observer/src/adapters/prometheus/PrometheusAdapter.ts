@@ -1,4 +1,5 @@
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import type { Trace } from '../../core/types.js'
 import type { PricingTable } from '../../cost/defaultPricing.js'
 
@@ -36,6 +37,7 @@ export class PrometheusAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
     for (const span of trace.spans) {
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)

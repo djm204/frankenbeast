@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
+import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import {
   CREATE_TABLES,
   UPSERT_TRACE,
@@ -78,6 +79,7 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
+    warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
     const upsertTrace = this.db.prepare(UPSERT_TRACE)
     const upsertSpan = this.db.prepare(UPSERT_SPAN)
 
