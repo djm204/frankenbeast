@@ -537,7 +537,7 @@ Frankenbeast stores secrets outside the config file. The config references secre
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 | Local encrypted file | `local-encrypted` | CI/CD or offline environments |
 
-Set `network.secureBackend` in `frankenbeast.example.json` (or your project's `frankenbeast.config.json`) to choose a backend.
+Set `network.secureBackend` in `frankenbeast.example.json` or in the config file the CLI will load (`.fbeast/config.json` by default, or another file passed with `--config`) to choose a backend.
 
 ### Setup per backend
 
@@ -551,13 +551,13 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in your project config, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
+Set this in `.fbeast/config.json`, or pass the config explicitly with `frankenbeast init --config frankenbeast.config.json` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
 ```json
 { "network": { "secureBackend": "1password" } }
 ```
-Set the backend in config (there is no `--backend` CLI flag), then run `frankenbeast init`. Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+Set the backend in `.fbeast/config.json`, or pass the config explicitly with `frankenbeast init --config frankenbeast.config.json` (there is no `--backend` CLI flag). Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
