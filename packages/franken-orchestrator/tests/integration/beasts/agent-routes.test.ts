@@ -907,6 +907,58 @@ describe('agent routes integration', () => {
     expect(detailResponse.status).toBe(404);
   });
 
+  it('patches tracked agent identity and module configuration', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: ['Bearer', operatorToken].join(' '),
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: {},
+        },
+        initConfig: {
+          identity: { name: 'Old name', description: 'Old description' },
+          workflow: { workflowType: 'design-interview' },
+        },
+        autoDispatch: false,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const patchResponse = await app.request(`/v1/beasts/agents/${created.data.id}/config`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        name: 'Updated name',
+        description: 'Updated description',
+        moduleConfig: { firewall: false, memory: true },
+      }),
+    });
+
+    expect(patchResponse.status).toBe(200);
+    const patched = await patchResponse.json() as {
+      data: { initConfig: { identity: { name: string; description: string }; workflow: unknown }; moduleConfig: unknown };
+    };
+    expect(patched.data.initConfig.identity).toEqual({ name: 'Updated name', description: 'Updated description' });
+    expect(patched.data.initConfig.workflow).toEqual({ workflowType: 'design-interview' });
+    expect(patched.data.moduleConfig).toEqual({ firewall: false, memory: true });
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    const detail = await detailResponse.json() as { data: { events: AgentEvent[] } };
+    expectEventsToIncludeTypes(detail.data.events, ['agent.config.updated']);
+  });
+
   it('returns 404 for unknown tracked agents', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
 

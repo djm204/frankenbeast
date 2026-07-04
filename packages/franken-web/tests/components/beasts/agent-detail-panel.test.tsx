@@ -83,6 +83,58 @@ describe('AgentDetailPanel', () => {
     await waitFor(() => expect(screen.getByText('Overview')).toBeTruthy());
   });
 
+  it('initializes identity edits from initConfig.identity without adding absent moduleConfig', async () => {
+    handlers.onSaveConfig.mockResolvedValueOnce(undefined);
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          initConfig: { identity: { name: 'Wizard agent', description: 'Wizard description' } },
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByText('Edit'));
+
+    expect(screen.getByDisplayValue('Wizard agent')).toBeTruthy();
+    expect(screen.getByDisplayValue('Wizard description')).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue('Wizard description'), { target: { value: 'Updated description' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(handlers.onSaveConfig).toHaveBeenCalled());
+    const savedValues = handlers.onSaveConfig.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(savedValues).toMatchObject({ name: 'Wizard agent', description: 'Updated description' });
+    expect(savedValues).not.toHaveProperty('moduleConfig');
+  });
+
+  it('resets stale edit values when the selected agent changes', () => {
+    const { rerender } = render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Unsaved old agent' } });
+
+    rerender(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-2',
+          initConfig: { identity: { name: 'Second agent', description: 'Second description' } },
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    expect(screen.getByDisplayValue('Second agent')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Unsaved old agent')).toBeNull();
+  });
+
   it('keeps edit mode open and surfaces save errors', async () => {
     handlers.onSaveConfig.mockRejectedValueOnce(new Error('HTTP 500'));
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);

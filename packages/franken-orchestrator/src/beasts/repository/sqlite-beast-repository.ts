@@ -81,6 +81,7 @@ interface CreateTrackedAgentInput {
 
 interface UpdateTrackedAgentPatch {
   status?: TrackedAgentStatus | undefined;
+  initConfig?: Readonly<Record<string, unknown>> | undefined;
   chatSessionId?: string | undefined;
   dispatchRunId?: string | undefined;
   executionMode?: BeastExecutionMode | undefined;
@@ -468,6 +469,7 @@ export class SQLiteBeastRepository {
     const next: TrackedAgent = {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.initConfig !== undefined ? { initConfig: patch.initConfig } : {}),
       ...(patch.chatSessionId !== undefined ? { chatSessionId: patch.chatSessionId } : {}),
       ...(patch.dispatchRunId !== undefined ? { dispatchRunId: patch.dispatchRunId } : {}),
       ...(patch.executionMode !== undefined ? { executionMode: patch.executionMode } : {}),
@@ -478,6 +480,7 @@ export class SQLiteBeastRepository {
     this.db.prepare(
       `UPDATE tracked_agents
          SET status = ?,
+             init_config = ?,
              chat_session_id = ?,
              dispatch_run_id = ?,
              execution_mode = ?,
@@ -486,6 +489,7 @@ export class SQLiteBeastRepository {
        WHERE id = ?`,
     ).run(
       next.status,
+      JSON.stringify(next.initConfig),
       next.chatSessionId ?? null,
       next.dispatchRunId ?? null,
       next.executionMode ?? null,

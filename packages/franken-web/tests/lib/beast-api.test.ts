@@ -179,6 +179,28 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('sends agent config patches to the config endpoint', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          id: 'agent-1',
+          moduleConfig: { firewall: false },
+        },
+      }),
+    });
+
+    await client.patchAgentConfig('agent-1', { name: 'Updated', moduleConfig: { firewall: false } });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/beasts/agents/agent-1/config',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated', moduleConfig: { firewall: false } }),
+      }),
+    );
+  });
+
   it('kills a tracked agent through the agent-specific kill endpoint', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

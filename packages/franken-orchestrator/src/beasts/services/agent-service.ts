@@ -28,6 +28,7 @@ export interface AppendTrackedAgentEventRequest {
 
 export interface UpdateTrackedAgentRequest {
   readonly status?: TrackedAgent['status'] | undefined;
+  readonly initConfig?: Readonly<Record<string, unknown>> | undefined;
   readonly chatSessionId?: string | undefined;
   readonly dispatchRunId?: string | undefined;
   readonly executionMode?: BeastExecutionMode | undefined;
@@ -109,6 +110,7 @@ export class AgentService {
   updateAgent(agentId: string, request: UpdateTrackedAgentRequest): TrackedAgent {
     return this.repository.updateTrackedAgent(agentId, {
       ...(request.status !== undefined ? { status: request.status } : {}),
+      ...(request.initConfig !== undefined ? { initConfig: request.initConfig } : {}),
       ...(request.chatSessionId !== undefined ? { chatSessionId: request.chatSessionId } : {}),
       ...(request.dispatchRunId !== undefined ? { dispatchRunId: request.dispatchRunId } : {}),
       ...(request.executionMode !== undefined ? { executionMode: request.executionMode } : {}),

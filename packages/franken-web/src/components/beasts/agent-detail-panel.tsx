@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
-import type { TrackedAgentDetail } from '../../lib/beast-api';
+import type { TrackedAgentDetail, TrackedAgentSummary } from '../../lib/beast-api';
 import { useBeastStore } from '../../stores/beast-store';
 import { SlideInPanel } from './slide-in-panel';
 import { StatusLight } from './status-light';
@@ -39,12 +39,9 @@ export function AgentDetailPanel({
 
   useEffect(() => {
     if (mode !== 'edit') return;
-    setEditSnapshot({
-      name: agent.name ?? '',
-      description: agent.initConfig.description ?? '',
-      moduleConfig: agent.moduleConfig ?? {},
-    });
-  }, [agent.id, agent.name, agent.initConfig.description, agent.moduleConfig, mode, setEditSnapshot]);
+    resetEdit();
+    setEditSnapshot(buildAgentEditSnapshot(agent));
+  }, [agent.id, mode, resetEdit, setEditSnapshot]);
 
   const enterMode = (nextMode: Mode) => {
     setSaveError(null);
@@ -142,4 +139,21 @@ export function AgentDetailPanel({
       />
     </>
   );
+}
+
+function buildAgentEditSnapshot(agent: TrackedAgentSummary): Record<string, unknown> {
+  const identity = isRecord(agent.initConfig.identity) ? agent.initConfig.identity : undefined;
+  return {
+    name: stringValue(agent.name) ?? stringValue(identity?.name) ?? stringValue(agent.initConfig.name) ?? '',
+    description: stringValue(identity?.description) ?? stringValue(agent.initConfig.description) ?? '',
+    ...(agent.moduleConfig !== undefined ? { moduleConfig: agent.moduleConfig } : {}),
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

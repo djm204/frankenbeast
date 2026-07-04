@@ -34,6 +34,12 @@ const CreateAgentBody = z.object({
   autoDispatch: z.boolean().optional(),
 }).strict();
 
+const PatchAgentConfigBody = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  moduleConfig: ModuleConfigSchema.optional(),
+}).strict();
+
 export interface AgentRoutesDeps {
   agents: AgentService;
   dispatch?: BeastDispatchService;
@@ -152,6 +158,40 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       return c.json({
         data: deps.agents.getAgentDetail(agentId),
       });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
+  app.patch('/v1/beasts/agents/:agentId/config', async (c) => {
+    const agentId = c.req.param('agentId');
+    const body = validateBody(PatchAgentConfigBody, await parseJsonBody(c));
+    try {
+      const current = deps.agents.getAgent(agentId);
+      const hasIdentityPatch = body.name !== undefined || body.description !== undefined;
+      const updated = deps.agents.updateAgent(agentId, {
+        ...(hasIdentityPatch ? { initConfig: patchInitConfigIdentity(current.initConfig, body) } : {}),
+        ...(body.moduleConfig !== undefined ? { moduleConfig: body.moduleConfig } : {}),
+      });
+      deps.agents.appendEvent(agentId, {
+        level: 'info',
+        type: 'agent.config.updated',
+        message: 'Updated tracked agent configuration from the dashboard',
+        payload: {
+          fields: [
+            ...(hasIdentityPatch ? ['identity'] : []),
+            ...(body.moduleConfig !== undefined ? ['moduleConfig'] : []),
+          ],
+        },
+      });
+      return c.json({ data: updated });
     } catch (error) {
       if (error instanceof UnknownTrackedAgentError) {
         throw new HttpError(
@@ -411,6 +451,25 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
   return kind === 'chunk-plan' || kind === 'martin-loop' || kind === 'design-interview';
+}
+
+function patchInitConfigIdentity(
+  initConfig: Readonly<Record<string, unknown>>,
+  patchBody: z.infer<typeof PatchAgentConfigBody>,
+): Readonly<Record<string, unknown>> {
+  const currentIdentity = isRecord(initConfig.identity) ? initConfig.identity : {};
+  return {
+    ...initConfig,
+    identity: {
+      ...currentIdentity,
+      ...(patchBody.name !== undefined ? { name: patchBody.name } : {}),
+      ...(patchBody.description !== undefined ? { description: patchBody.description } : {}),
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function dispatchDetachedAgent(

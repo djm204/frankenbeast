@@ -166,6 +166,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
+  const selectedBeastAgentIdRef = useRef<string | null>(null);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
     mode: 'secure',
     secureBackend: 'local-encrypted',
@@ -256,6 +257,10 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   useEffect(() => {
     beastAgentDetailRef.current = beastAgentDetail;
   }, [beastAgentDetail]);
+
+  useEffect(() => {
+    selectedBeastAgentIdRef.current = selectedBeastAgentId;
+  }, [selectedBeastAgentId]);
 
   useEffect(() => {
     if (route !== 'beasts') {
@@ -697,6 +702,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             logs={beastAgentDetail?.run?.logs ?? []}
             selectedAgentId={selectedBeastAgentId}
             onClose={() => {
+              selectedBeastAgentIdRef.current = null;
               setSelectedBeastAgentId(null);
               setBeastAgentDetail(null);
             }}
@@ -747,10 +753,13 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               setBeastError(null);
               await beastClient.patchAgentConfig(agentId, values);
               const detail = await beastClient.getAgent(agentId);
-              setBeastAgentDetail(detail);
+              if (selectedBeastAgentIdRef.current === agentId) {
+                setBeastAgentDetail(detail);
+              }
               setBeastRefreshNonce((current) => current + 1);
             }}
             onSelectAgent={(agentId) => {
+              selectedBeastAgentIdRef.current = agentId;
               setSelectedBeastAgentId(agentId);
             }}
             onStart={(agentId) => {
