@@ -46,6 +46,20 @@ function transportDefault(state: InitState, config: OrchestratorConfig, id: Supp
   return config.comms[id].enabled;
 }
 
+function hasTransportOnlyScope(scope: readonly InitWizardScope[] | undefined): boolean {
+  return scope !== undefined
+    && scope.some((item) => item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
+    && !scope.includes('modules')
+    && !scope.includes('provider')
+    && !scope.includes('security');
+}
+
+function hasEnabledScopedTransport(config: OrchestratorConfig, scope: readonly InitWizardScope[] | undefined): boolean {
+  return hasTransportOnlyScope(scope)
+    && scope!.some((item) => (item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
+      && config.comms[item].enabled);
+}
+
 async function askBoolean(io: InterviewIO, prompt: string, defaultValue: boolean): Promise<boolean> {
   const raw = (await io.ask(prompt)).trim().toLowerCase();
   if (raw.length === 0) {
@@ -131,7 +145,9 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
 
   let enableChat = moduleDefault(options.initialState, config, 'chat');
   let enableDashboard = moduleDefault(options.initialState, config, 'dashboard');
-  let enableComms = moduleDefault(options.initialState, config, 'comms');
+  let enableComms = hasEnabledScopedTransport(config, options.scope)
+    ? true
+    : moduleDefault(options.initialState, config, 'comms');
   if (!secretBackendOnly && scope.has('modules')) {
     enableChat = await askBoolean(options.io, 'Enable Chat? [Y/n]', enableChat);
     enableDashboard = await askBoolean(options.io, 'Enable Dashboard? [Y/n]', enableDashboard);

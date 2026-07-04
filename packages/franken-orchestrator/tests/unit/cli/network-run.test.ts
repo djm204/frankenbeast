@@ -181,6 +181,42 @@ describe('runNetworkCommand', () => {
     });
   });
 
+  it('forwards network --set overrides to managed services', async () => {
+    const config = defaultConfig();
+    const resolveServices = vi.fn(() => [makeService('chat-server')]);
+
+    await runNetworkCommand(
+      makeArgs({
+        networkAction: 'up',
+        networkDetached: true,
+        networkSet: ['comms.telegram.enabled=true'],
+      }),
+      config,
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices,
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(async () => ({ services: [] })),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print: vi.fn(),
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    expect(resolveServices).toHaveBeenCalledWith(config, {
+      repoRoot: '/repo/frankenbeast',
+      configOverrides: ['comms.telegram.enabled=true'],
+    });
+  });
+
   it('foreground shutdown stops only services started by this invocation', async () => {
     const stopAll = vi.fn(async () => undefined);
     const waitForShutdown = vi.fn(async () => undefined);

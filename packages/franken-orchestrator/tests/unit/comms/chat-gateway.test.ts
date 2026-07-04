@@ -103,6 +103,8 @@ describe('ChatGateway', () => {
 
   it('passes channel routing metadata through to outbound replies', async () => {
     for (const [type, expectedMetadata] of [
+      ['slack', { externalChannelId: 'C-slack', channelId: 'C-slack' }],
+      ['discord', { externalChannelId: 'C-discord', channelId: 'C-discord' }],
       ['telegram', { externalChannelId: 'C-telegram', chatId: 'C-telegram' }],
       ['whatsapp', { externalChannelId: 'C-whatsapp', phoneNumber: 'C-whatsapp' }],
     ] as const) {

@@ -181,4 +181,35 @@ describe('verifyInit', () => {
     expect(result.state.selectedCommsTransports).toEqual(['slack', 'telegram']);
     expect(prompts).toEqual(['Telegram bot token ref']);
   });
+
+  it('repair treats directly enabled channel flags as comms-enabled', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = false;
+    config.comms.telegram.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: [],
+      selectedCommsTransports: [],
+      completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
+      answers: {},
+    });
+    const { io, prompts } = scriptedIo('op://telegram/bot-token');
+
+    const result = await runRepairInit({
+      configFile,
+      stateStore,
+      io,
+    });
+
+    expect(result.config.comms.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(true);
+    expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.state.selectedCommsTransports).toEqual(['telegram']);
+    expect(prompts).toEqual(['Telegram bot token ref']);
+  });
 });

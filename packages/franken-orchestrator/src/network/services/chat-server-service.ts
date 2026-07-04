@@ -33,6 +33,7 @@ export const chatServerService: NetworkServiceDefinition = {
         '--port',
         String(config.chat.port),
         ...(context.configFile ? ['--config', context.configFile] : []),
+        ...(context.configOverrides?.flatMap((override) => ['--set', override]) ?? []),
       ],
       cwd: context.repoRoot,
       env: {

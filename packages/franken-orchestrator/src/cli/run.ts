@@ -869,7 +869,11 @@ export async function runNetworkCommand(
 
   const configFile = args.config ? resolvePath(args.config) : undefined;
   const services = filterNetworkServices(
-    deps.resolveServices(config, { repoRoot: root, ...(configFile ? { configFile } : {}) }),
+    deps.resolveServices(config, {
+      repoRoot: root,
+      ...(configFile ? { configFile } : {}),
+      ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+    }),
     action === 'up' ? undefined : args.networkTarget,
   );
 

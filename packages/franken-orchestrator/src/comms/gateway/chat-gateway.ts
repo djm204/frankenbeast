@@ -89,6 +89,14 @@ export class ChatGateway extends EventEmitter {
     return {
       externalChannelId: message.externalChannelId,
       externalThreadId: message.externalThreadId,
+      ...(message.channelType === 'slack' ? {
+        channelId: message.externalChannelId,
+        threadTs: message.externalThreadId,
+      } : {}),
+      ...(message.channelType === 'discord' ? {
+        channelId: message.externalChannelId,
+        threadId: message.externalThreadId,
+      } : {}),
       ...(message.channelType === 'telegram' ? { chatId: message.externalChannelId } : {}),
       ...(message.channelType === 'whatsapp' ? { phoneNumber: message.externalChannelId } : {}),
     };
