@@ -4,7 +4,7 @@
 
 ## Port Interfaces
 
-Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package consolidation there are no standalone firewall (MOD-01), skills (MOD-02), or heartbeat (MOD-08) packages — those capabilities live inside `franken-orchestrator`. The orchestrator's Beast Loop ports (`IFirewallModule`, `ISkillsModule`, `IMemoryModule`, `IPlannerModule`, `IObserverModule`, `ICritiqueModule`, `IGovernorModule`, `IHeartbeatModule`, `IMcpModule`) are all defined in `packages/franken-orchestrator/src/deps.ts`. (`IObservabilityModule` and `IHitlGateway` do not exist; the observer and governor ports are `IObserverModule` and `IGovernorModule`.)
+Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package consolidation there are no standalone firewall (MOD-01), skills (MOD-02), or heartbeat (MOD-08) packages — those capabilities live inside `franken-orchestrator`. The orchestrator's Beast Loop ports (`IFirewallModule`, `ISkillsModule`, `IMemoryModule`, `IPlannerModule`, `IObserverModule`, `ICritiqueModule`, `IGovernorModule`, `IHeartbeatModule`, `IMcpModule`) are all defined in `packages/franken-orchestrator/src/deps.ts`. (`IObservabilityModule` and `IHitlGateway` do not exist; the observer and governor ports are `IObserverModule` and `IGovernorModule`.) The current source imports Zod from `zod`; no separate Zod import-path split is tracked here.
 
 | Port Interface | Defining Module | Consuming Module(s) | Structural Match? |
 |---|---|---|---|
@@ -14,7 +14,7 @@ Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package
 | `GuardrailsModule` | MOD-04 planner (`src/modules/mod01.ts`) | Firewall-capability impl (orchestrator security middleware) | Needs adapter |
 | `SkillsModule` | MOD-04 planner (`src/modules/mod02.ts`) | Skills-capability impl (orchestrator skill manager) | Needs adapter |
 | `MemoryModule` | MOD-04 planner (`src/modules/mod03.ts`) | MOD-03 brain impl | Needs adapter |
-| `SelfCritiqueModule` | MOD-04 planner (`src/modules/mod07.ts`) | Critique-capability impl (verifies `RationaleBlock`) | Resolved for shared `TaskId` via `@franken/types`; still adapter-shaped |
+| `SelfCritiqueModule` | MOD-04 planner (`src/modules/mod07.ts`) | `@franken/governor` via `GovernorCritiqueAdapter.verifyRationale(...)` | Resolved for shared `TaskId`, `RationaleBlock`, and `VerificationResult` via `@franken/types`; still adapter-shaped |
 | `GuardrailsPort` | MOD-06 critique (`src/types/contracts.ts`) | Wired with an inline all-pass stub in `dep-factory.ts` | Needs real impl |
 | `MemoryPort` | MOD-06 critique (`src/types/contracts.ts`) | Wired with an inline no-op stub in `dep-factory.ts` | Needs real impl |
 | `ObservabilityPort` | MOD-06 critique (`src/types/contracts.ts`) | `CliObserverBridge.getTokenSpend` (real) | Yes |
@@ -65,7 +65,6 @@ These items were previously listed under “Type Mismatches Requiring Resolution
 - **Heartbeat** (`franken-heartbeat/src/modules/memory.ts:5-11`): `summary`/`timestamp` fields
 - **Resolution**: Each module keeps its own projection (different shapes serve different purposes). Document that these are intentional views, not duplicates.
 
-### 2. Zod Version Split
-- **Heartbeat**: `zod/v4` (Zod 4.x import path)
-- **Critique**: `zod` 3.24.x
-- **Resolution**: `@franken/types` uses Zod 4. Critique continues with Zod 3 internally. Shared types avoid Zod runtime validation at the boundary (use TypeScript types only for cross-module contracts).
+### 2. Zod Runtime Boundary
+- **Current source**: packages import from `zod`; no separate Zod import-path split is present.
+- **Resolution**: Cross-module contracts use shared TypeScript types from `@franken/types` instead of passing Zod schema instances across package boundaries.

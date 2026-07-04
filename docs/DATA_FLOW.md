@@ -89,7 +89,7 @@ The current local Beast Loop wires real adapters for every module except the pla
 That means the current path is:
 
 - real ingestion sanitization through `MiddlewareChainFirewallAdapter` (the security middleware chain)
-- real local skill discovery and skill execution wiring through `SkillManagerAdapter`
+- real local skill discovery through `SkillManagerAdapter`; CLI/function/LLM execution is dispatched by `CliSkillExecutor` and MCP execution requires an `IMcpModule`
 - real episodic memory persistence through `SqliteBrainMemoryAdapter` (`franken-brain`)
 - graph-builder-driven planning for chunk files or design-doc decomposition; the planner port itself is `stubPlanner`, which throws if invoked
 - real plan critique through `CritiquePortAdapter` over `@franken/critique`, and real HITL approval through `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (non-TTY runs default to reject). If either safety module is enabled but not installed, the dep factory fails closed unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`
@@ -145,7 +145,7 @@ flowchart TD
     PlanReady["ctx.plan ready"]
 
     Start --> GraphBuilder
-    GraphBuilder -->|yes| GB --> PlanReady
+    GraphBuilder -->|yes| GB --> Critique --> Approved
     GraphBuilder -->|no| Planner --> Critique --> Approved
     Approved -->|yes| PlanReady
     Approved -->|no, max iterations hit| Spiral
@@ -528,7 +528,7 @@ flowchart TD
 Target differences from current:
 
 - planner owns task generation instead of relying mostly on external graph builders
-- critique reviews every plan in-loop; graph-builder plans are reviewed too (the former graph-builder bypass was closed in #462)
+- critique reviews every plan in-loop; graph-builder plans now route through `critique.reviewPlan(...)` and must reach the approved path before execution (the former graph-builder bypass was closed in #462)
 - plan approval can escalate through governor instead of failing only as a local critique spiral
 
 ### Target Execution, Tooling, and Approval Flow
