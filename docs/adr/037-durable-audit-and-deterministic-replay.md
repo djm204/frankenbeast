@@ -36,7 +36,7 @@ Implement record/state replay primitives with explicit claim boundaries.
 
 4. **Durable phase state snapshots**
    - Add `StateSnapshotStore` for appending `.fbeast/state/<runId>.jsonl` phase snapshots.
-   - `BeastLoop` records snapshots after ingestion, hydration, planning, execution, and closure.
+   - `BeastLoop` records snapshots after ingestion, hydration, planning, execution, and closure when `config.stateDir` is configured.
    - Snapshots include run id, phase, previous phase, timestamp, and available execution metadata.
 
 ## Consequences
