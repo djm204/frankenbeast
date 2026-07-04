@@ -42,21 +42,20 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [eventPage, setEventPage] = useState<AnalyticsEventPage | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [isEventsLoading, setIsEventsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    setLoadError(null);
+    setOverviewError(null);
 
     void Promise.allSettled([
       client.fetchSummary(filters),
       client.fetchSessions(filters),
-      client.fetchEvents({ ...filters, page, pageSize }),
-    ]).then(([summaryResult, sessionsResult, eventsResult]) => {
+    ]).then(([summaryResult, sessionsResult]) => {
       if (cancelled) return;
-      const errors = [summaryResult, sessionsResult, eventsResult]
+      const errors = [summaryResult, sessionsResult]
         .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
         .map((result) => result.reason instanceof Error ? result.reason.message : 'Unable to load analytics.');
       if (summaryResult.status === 'fulfilled') {
@@ -65,13 +64,28 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
       }
-      if (eventsResult.status === 'fulfilled') {
-        setEventPage(eventsResult.value);
-      }
-      setLoadError(errors.length > 0 ? errors.join('; ') : null);
+      setOverviewError(errors.length > 0 ? errors.join('; ') : null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, filters]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsEventsLoading(true);
+    setEventsError(null);
+
+    void client.fetchEvents({ ...filters, page, pageSize }).then((eventsResult) => {
+      if (cancelled) return;
+      setEventPage(eventsResult);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
     }).finally(() => {
       if (!cancelled) {
-        setIsLoading(false);
+        setIsEventsLoading(false);
       }
     });
 
@@ -82,11 +96,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
   const events = eventPage?.events ?? [];
   const totalEvents = eventPage?.total ?? 0;
-  const currentPage = eventPage?.page ?? page;
+  const currentPage = page;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
   const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
-  const canGoPrevious = currentPage > 1;
-  const canGoNext = currentPage < totalPages;
+  const canGoPrevious = currentPage > 1 && !isEventsLoading;
+  const canGoNext = currentPage < totalPages && !isEventsLoading;
+  const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
   const activityEvents = useMemo(
     () => events.filter((event) => event.outcome === 'approved' && event.source !== 'governor'),
     [events],
@@ -236,14 +251,14 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
             className="button button--secondary button--small"
             disabled={!canGoNext}
             type="button"
-            onClick={() => setPage((current) => current + 1)}
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
           >
             Next
           </button>
         </div>
       </section>
 
-      {isLoading ? (
+      {isEventsLoading && !eventPage ? (
         <section className="empty-state">Loading analytics...</section>
       ) : (
         <section className="analytics-table-grid">
