@@ -43,6 +43,6 @@ describe('TelegramAdapter', () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1]!.body as string);
     expect(body.reply_markup.inline_keyboard[0][0].text).toBe('Approve');
-    expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe('approve');
+    expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe('fb:session-123:approve');
   });
 });

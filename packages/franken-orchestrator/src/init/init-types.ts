@@ -2,7 +2,7 @@ import type { NetworkMode } from '../network/network-config.js';
 
 export type InitModuleId = 'chat' | 'dashboard' | 'comms';
 export type KnownCommsTransportId = 'slack' | 'discord' | 'telegram' | 'whatsapp';
-export type SupportedCommsTransportId = 'slack' | 'discord';
+export type SupportedCommsTransportId = KnownCommsTransportId;
 export type InitStepId =
   | 'module-selection'
   | 'provider-config'

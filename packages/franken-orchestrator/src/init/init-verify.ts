@@ -8,6 +8,8 @@ export type InitIssueCode =
   | 'missing-init-state'
   | 'slack-incomplete'
   | 'discord-incomplete'
+  | 'telegram-incomplete'
+  | 'whatsapp-incomplete'
   | 'secret-backend-unavailable';
 
 export interface InitVerificationIssue {
@@ -89,6 +91,31 @@ export async function verifyInit(options: {
       issues.push({
         code: 'discord-incomplete',
         message: `Discord config is incomplete: missing ${missing.join(', ')}.`,
+      });
+    }
+  }
+
+  if (config.comms.telegram.enabled) {
+    const missing: string[] = [];
+    if (!config.comms.telegram.botTokenRef) missing.push('botTokenRef');
+    if (missing.length > 0) {
+      issues.push({
+        code: 'telegram-incomplete',
+        message: `Telegram config is incomplete: missing ${missing.join(', ')}.`,
+      });
+    }
+  }
+
+  if (config.comms.whatsapp.enabled) {
+    const missing: string[] = [];
+    if (!config.comms.whatsapp.accessTokenRef) missing.push('accessTokenRef');
+    if (!config.comms.whatsapp.phoneNumberIdRef) missing.push('phoneNumberIdRef');
+    if (!config.comms.whatsapp.appSecretRef) missing.push('appSecretRef');
+    if (!config.comms.whatsapp.verifyTokenRef) missing.push('verifyTokenRef');
+    if (missing.length > 0) {
+      issues.push({
+        code: 'whatsapp-incomplete',
+        message: `WhatsApp config is incomplete: missing ${missing.join(', ')}.`,
       });
     }
   }

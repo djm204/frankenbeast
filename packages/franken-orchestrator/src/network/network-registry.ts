@@ -10,6 +10,8 @@ export type NetworkServiceKind = 'app' | 'infra';
 
 export interface NetworkRegistryContext {
   repoRoot: string;
+  configFile?: string | undefined;
+  configOverrides?: string[] | undefined;
 }
 
 export interface NetworkServiceRuntimeConfig {
@@ -26,6 +28,7 @@ export interface NetworkServiceRuntimeConfig {
   composeFile?: string;
   services?: string[];
   suppressManagedBanner?: boolean;
+  inProcess?: boolean;
   process?: {
     command: string;
     args: string[];

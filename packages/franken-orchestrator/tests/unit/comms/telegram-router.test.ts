@@ -67,10 +67,39 @@ describe('telegramRouter', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'session-123', 'approve');
+    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'session-123', 'approve', {
+      chatId: '456',
+      externalChannelId: '456',
+    });
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('answerCallbackQuery'),
       expect.any(Object)
     );
+  });
+
+  it('uses embedded session ids from callback data when another group operator clicks', async () => {
+    const body = JSON.stringify({
+      update_id: 3,
+      callback_query: {
+        id: 'q2',
+        from: { id: 999 },
+        message: {
+          message_id: 101,
+          chat: { id: 456 },
+        },
+        data: 'fb:original-session:approve',
+      },
+    });
+
+    const res = await app.request(`/${botToken}`, {
+      method: 'POST',
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'original-session', 'approve', {
+      chatId: '456',
+      externalChannelId: '456',
+    });
   });
 });
