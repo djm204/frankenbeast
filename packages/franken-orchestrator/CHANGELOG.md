@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.0...franken-orchestrator-v0.37.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **orchestrator:** finalize issue-mode sessions ([#481](https://github.com/djm204/frankenbeast/issues/481)) ([6a53d9d](https://github.com/djm204/frankenbeast/commit/6a53d9d17697c0f78da6622f95ea3e506330edb3))
+
 ## [0.37.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.36.0...franken-orchestrator-v0.37.0) (2026-07-03)
 
 

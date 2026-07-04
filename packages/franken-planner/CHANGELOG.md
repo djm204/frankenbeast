@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.4...franken-planner-v0.4.5) (2026-07-04)
+
+
+### Bug Fixes
+
+* **planner:** preserve governance rejection in parallel strategy ([#480](https://github.com/djm204/frankenbeast/issues/480)) ([f98a453](https://github.com/djm204/frankenbeast/commit/f98a4535f8fcaa3ad5ed06bc7a4c2a4eb086329b))
+
 ## [0.4.4](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.3...franken-planner-v0.4.4) (2026-07-01)
 
 

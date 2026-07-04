@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/djm204/frankenbeast/compare/v0.40.0...v0.40.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **mcp:** label planner scaffold provenance ([#485](https://github.com/djm204/frankenbeast/issues/485)) ([aa4cf8e](https://github.com/djm204/frankenbeast/commit/aa4cf8ed7eb9d14d746f296fc52dbe1a454a5f75))
+
 ## [0.40.0](https://github.com/djm204/frankenbeast/compare/v0.39.0...v0.40.0) (2026-07-03)
 
 
