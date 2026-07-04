@@ -160,5 +160,26 @@ describe('dashboard routes', () => {
         vi.useRealTimers();
       }
     });
+
+    it('does not reject the polling timer when refreshing the snapshot throws', async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = createMockDeps();
+        const providers = deps.getProviders as ReturnType<typeof vi.fn>;
+        const app = createDashboardRoutes(deps);
+        const res = await app.request('/events');
+        const reader = res.body!.getReader();
+
+        await reader.read();
+        providers.mockImplementation(() => {
+          throw new Error('config read failed');
+        });
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        reader.cancel();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
