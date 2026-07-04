@@ -72,6 +72,7 @@ export async function runExecution(
   // atomically add newly discovered tasks without duplicating overlapping work.
   const pending = new Map(ctx.plan.tasks.map((task) => [task.id, task]));
   const recoveryAttempts = new Map<string, number>();
+  const terminalSkipped = new Set<string>();
   let iterations = 0;
   let maxIterations = Math.max(pending.size * 2, 10); // safety guard
 
@@ -112,6 +113,7 @@ export async function runExecution(
           status: 'skipped',
           error: 'Unmet dependencies',
         });
+        terminalSkipped.add(task.id);
       }
       break;
     }
@@ -157,6 +159,7 @@ export async function runExecution(
       completedOutputs.set(task.id, outcome.output);
     } else if (outcome.status === 'skipped') {
       outcomes.push(outcome);
+      terminalSkipped.add(task.id);
     } else if (outcome.status === 'failure') {
       const recovered = await recoverFailedTask({
         ctx,
@@ -165,6 +168,7 @@ export async function runExecution(
         error: new Error(outcome.error ?? 'Task failed'),
         pending,
         completed,
+        terminalSkipped,
         recoveryAttempts,
         logger,
       });
@@ -200,12 +204,13 @@ interface RecoveryAttemptInput {
   readonly error: Error;
   readonly pending: Map<string, PlanTask>;
   readonly completed: ReadonlySet<string>;
+  readonly terminalSkipped: ReadonlySet<string>;
   readonly recoveryAttempts: Map<string, number>;
   readonly logger: ILogger;
 }
 
 async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> {
-  const { ctx, memory, task, error, pending, completed, recoveryAttempts, logger } = input;
+  const { ctx, memory, task, error, pending, completed, terminalSkipped, recoveryAttempts, logger } = input;
   if (!ctx.plan) return false;
 
   const attempt = (recoveryAttempts.get(task.id) ?? 0) + 1;
@@ -219,13 +224,13 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
       toRecoveryGraph(ctx.plan.tasks),
       attempt,
     );
-    const recoveredTasks = fromRecoveryGraph(recoveredGraph);
+    const recoveredTasks = fromRecoveryGraph(recoveredGraph, task);
     validateAcyclicPlan(recoveredTasks);
 
     ctx.plan = { tasks: recoveredTasks };
 
     for (const recoveredTask of recoveredTasks) {
-      if (!completed.has(recoveredTask.id) && !pending.has(recoveredTask.id)) {
+      if (!completed.has(recoveredTask.id) && !terminalSkipped.has(recoveredTask.id) && !pending.has(recoveredTask.id)) {
         pending.set(recoveredTask.id, recoveredTask);
       }
     }
@@ -328,31 +333,38 @@ function tryParseKnownErrorJson(entry: string): KnownError | undefined {
 function toRecoveryGraph(tasks: readonly PlanTask[]): RecoveryPlanGraph {
   const nodes = new Map<ReturnType<typeof createTaskId>, RecoveryTask>();
   const edges = new Map<ReturnType<typeof createTaskId>, Set<ReturnType<typeof createTaskId>>>();
+  const taskIds = new Set(tasks.map(task => task.id));
 
   for (const task of tasks) {
-    const recoveryTask = toRecoveryTask(task);
+    const recoveryTask = toRecoveryTask(task, taskIds);
     nodes.set(recoveryTask.id, recoveryTask);
-    edges.set(recoveryTask.id, new Set(task.dependsOn.map(dep => createTaskId(dep))));
+    edges.set(recoveryTask.id, new Set(recoveryTask.dependsOn));
   }
 
   return RecoveryPlanGraph.createWithRawEdges(nodes, edges);
 }
 
-function toRecoveryTask(task: PlanTask): RecoveryTask {
+function toRecoveryTask(task: PlanTask, taskIds: ReadonlySet<string>): RecoveryTask {
+  const existingDependencies = task.dependsOn.filter(dep => taskIds.has(dep));
+
   return {
     id: createTaskId(task.id),
     objective: task.objective,
     requiredSkills: [...task.requiredSkills],
-    dependsOn: task.dependsOn.map(dep => createTaskId(dep)),
+    dependsOn: existingDependencies.map(dep => createTaskId(dep)),
     status: 'pending',
   };
 }
 
-function fromRecoveryGraph(graph: RecoveryPlanGraph): PlanTask[] {
+function fromRecoveryGraph(graph: RecoveryPlanGraph, failedTask: PlanTask): PlanTask[] {
+  const fixTaskPrefix = `fix-${failedTask.id}-attempt-`;
+
   return graph.topoSort().map((task: RecoveryTask) => ({
     id: task.id,
     objective: task.objective,
-    requiredSkills: [...task.requiredSkills],
+    requiredSkills: task.id.startsWith(fixTaskPrefix) && task.requiredSkills.length === 0
+      ? [...failedTask.requiredSkills]
+      : [...task.requiredSkills],
     dependsOn: graph.getDependencies(task.id),
   }));
 }
@@ -591,7 +603,7 @@ async function executeTask(
     logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
     await memory.recordTrace({
       taskId: task.id,
-      summary: task.objective,
+      summary: errorMsg,
       outcome: 'failure',
       timestamp: new Date().toISOString(),
     });

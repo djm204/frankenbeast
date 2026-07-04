@@ -407,7 +407,7 @@ describe('runExecution', () => {
     expect(outcomes[0]!.status).toBe('failure');
     expect(outcomes[0]!.error).toContain('boom');
     expect(memory.recordTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
+      expect.objectContaining({ taskId: 't1', outcome: 'failure', summary: 'boom' }),
     );
     expect(c.errorContext).toHaveLength(1);
     expect(c.errorContext![0]).toBeInstanceOf(Error);
@@ -420,6 +420,7 @@ describe('runExecution', () => {
     const execute = vi
       .fn()
       .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
       .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
     const skills = makeSkills({
       hasSkill: vi.fn(() => true),
@@ -440,15 +441,78 @@ describe('runExecution', () => {
 
     expect(outcomes.map(outcome => outcome.status)).toEqual(['success', 'success']);
     expect(outcomes[0]!.taskId).toBe('fix-t1-attempt-1');
-    expect(outcomes[0]!.output).toBeInstanceOf(Map);
+    expect(outcomes[0]!.output).toBe('fix-output');
     expect(outcomes[1]).toEqual({ taskId: 't1', status: 'success', output: 'retry-output' });
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['alpha', 'alpha', 'alpha']);
     expect(c.plan?.tasks).toEqual([
-      { id: 'fix-t1-attempt-1', objective: 'free temporary files before retrying', requiredSkills: [], dependsOn: [] },
+      { id: 'fix-t1-attempt-1', objective: 'free temporary files before retrying', requiredSkills: ['alpha'], dependsOn: [] },
       { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: ['fix-t1-attempt-1'] },
     ]);
     expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
     expect(c.circuitBreakerTripped).toBe(false);
+  });
+
+  it('does not requeue terminal skipped tasks when recovery rebuilds the graph', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn((id: string) => id === 'alpha'),
+      execute,
+      getAvailableSkills: vi.fn(() => [{ id: 'hitl', name: 'HITL', requiresHitl: true }]),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => ({ decision: 'rejected', reason: 'nope' })),
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 'needs-human', objective: 'ask human', requiredSkills: ['hitl'], dependsOn: [] },
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['needs-human', 'fix-t1-attempt-1', 't1']);
+    expect(governor.requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('recovers a known-error task even when unrelated tasks have missing dependencies', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn((id: string) => id === 'alpha'),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 'orphan', objective: 'blocked forever', requiredSkills: ['alpha'], dependsOn: ['missing'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1', 'orphan']);
+    expect(outcomes.at(-1)).toEqual({ taskId: 'orphan', status: 'skipped', error: 'Unmet dependencies' });
+    expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
   });
 
   // ── CLI skill routing tests ──
