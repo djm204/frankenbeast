@@ -429,7 +429,7 @@ describe('runExecution', () => {
     const memory = makeMemory({
       getContext: vi.fn(async () => ({
         adrs: [],
-        knownErrors: ['disk full => free temporary files before retrying'],
+        knownErrors: ['[previous-task] disk full => free temporary files before retrying'],
         rules: [],
       })),
     });
@@ -513,6 +513,119 @@ describe('runExecution', () => {
     expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1', 'orphan']);
     expect(outcomes.at(-1)).toEqual({ taskId: 'orphan', status: 'skipped', error: 'Unmet dependencies' });
     expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
+  });
+
+  it('preserves original dependency outputs when retrying a recovered task', async () => {
+    const retryInputs: SkillInput[] = [];
+    let secondAttempts = 0;
+    const execute = vi.fn(async (_skillId: string, input: SkillInput): Promise<SkillResult> => {
+      if (input.objective === 'first') {
+        return { output: 'dep-output', tokensUsed: 1 };
+      }
+      if (input.objective === 'second') {
+        secondAttempts += 1;
+        retryInputs.push(input);
+        if (secondAttempts === 1) {
+          throw new Error('disk full while writing artifact');
+        }
+        return { output: 'retry-output', tokensUsed: 1 };
+      }
+      return { output: 'fix-output', tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['alpha'], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 'fix-t2-attempt-1', 't2']);
+    expect(retryInputs[1]!.dependencyOutputs?.get('t1')).toBe('dep-output');
+    expect(retryInputs[1]!.dependencyOutputs?.get('fix-t2-attempt-1')).toBe('fix-output');
+  });
+
+  it('does not duplicate recovered tasks when refresh returns the current recovered plan', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(
+      c,
+      skills,
+      makeGovernor(),
+      memory,
+      makeObserver(),
+      undefined,
+      makeLogger(),
+      undefined,
+      undefined,
+      async () => c.plan?.tasks ?? [],
+    );
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1']);
+  });
+
+  it('does not requeue terminal failures when another task recovers later', async () => {
+    const execute = vi.fn(async (_skillId: string, input: SkillInput): Promise<SkillResult> => {
+      if (input.objective === 'unknown failure') {
+        throw new Error('unknown boom');
+      }
+      if (input.objective === 'recoverable') {
+        if (!execute.mock.calls.slice(0, -1).some(call => call[1]?.objective === 'recoverable')) {
+          throw new Error('disk full while writing artifact');
+        }
+        return { output: 'retry-output', tokensUsed: 1 };
+      }
+      return { output: 'fix-output', tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'unknown failure', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'recoverable', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 'fix-t2-attempt-1', 't2']);
+    expect(outcomes[0]).toEqual({ taskId: 't1', status: 'failure', error: 'unknown boom' });
+    expect(execute.mock.calls.filter(call => call[1]?.objective === 'unknown failure')).toHaveLength(1);
   });
 
   // ── CLI skill routing tests ──

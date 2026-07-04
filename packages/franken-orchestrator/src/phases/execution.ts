@@ -73,6 +73,7 @@ export async function runExecution(
   const pending = new Map(ctx.plan.tasks.map((task) => [task.id, task]));
   const recoveryAttempts = new Map<string, number>();
   const terminalSkipped = new Set<string>();
+  const terminalFailures = new Set<string>();
   let iterations = 0;
   let maxIterations = Math.max(pending.size * 2, 10); // safety guard
 
@@ -168,7 +169,9 @@ export async function runExecution(
         error: new Error(outcome.error ?? 'Task failed'),
         pending,
         completed,
+        knownTaskIds,
         terminalSkipped,
+        terminalFailures,
         recoveryAttempts,
         logger,
       });
@@ -177,6 +180,7 @@ export async function runExecution(
         maxIterations += 2;
       } else {
         outcomes.push(outcome);
+        terminalFailures.add(task.id);
       }
     }
   }
@@ -204,13 +208,15 @@ interface RecoveryAttemptInput {
   readonly error: Error;
   readonly pending: Map<string, PlanTask>;
   readonly completed: ReadonlySet<string>;
+  readonly knownTaskIds: Set<string>;
   readonly terminalSkipped: ReadonlySet<string>;
+  readonly terminalFailures: ReadonlySet<string>;
   readonly recoveryAttempts: Map<string, number>;
   readonly logger: ILogger;
 }
 
 async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> {
-  const { ctx, memory, task, error, pending, completed, terminalSkipped, recoveryAttempts, logger } = input;
+  const { ctx, memory, task, error, pending, completed, knownTaskIds, terminalSkipped, terminalFailures, recoveryAttempts, logger } = input;
   if (!ctx.plan) return false;
 
   const attempt = (recoveryAttempts.get(task.id) ?? 0) + 1;
@@ -230,7 +236,13 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
     ctx.plan = { tasks: recoveredTasks };
 
     for (const recoveredTask of recoveredTasks) {
-      if (!completed.has(recoveredTask.id) && !terminalSkipped.has(recoveredTask.id) && !pending.has(recoveredTask.id)) {
+      knownTaskIds.add(recoveredTask.id);
+      if (
+        !completed.has(recoveredTask.id) &&
+        !terminalSkipped.has(recoveredTask.id) &&
+        !terminalFailures.has(recoveredTask.id) &&
+        !pending.has(recoveredTask.id)
+      ) {
         pending.set(recoveredTask.id, recoveredTask);
       }
     }
@@ -300,18 +312,25 @@ function parseKnownError(entry: string): KnownError {
 
   const arrowMatch = trimmed.match(/^(.*?)\s*(?:=>|->)\s*(.*?)$/u);
   if (arrowMatch) {
+    const pattern = stripTracePrefix(arrowMatch[1]!.trim());
     return {
-      pattern: arrowMatch[1]!.trim(),
-      description: arrowMatch[1]!.trim(),
+      pattern,
+      description: pattern,
       fixSuggestion: arrowMatch[2]!.trim(),
     };
   }
 
+  const pattern = stripTracePrefix(trimmed);
+
   return {
-    pattern: trimmed,
-    description: trimmed,
-    fixSuggestion: `Fix known error before retrying the failed task: ${trimmed}`,
+    pattern,
+    description: pattern,
+    fixSuggestion: `Fix known error before retrying the failed task: ${pattern}`,
   };
+}
+
+function stripTracePrefix(entry: string): string {
+  return entry.replace(/^\[[^\]]+\]\s*/u, '').trim();
 }
 
 function tryParseKnownErrorJson(entry: string): KnownError | undefined {
@@ -359,14 +378,23 @@ function toRecoveryTask(task: PlanTask, taskIds: ReadonlySet<string>): RecoveryT
 function fromRecoveryGraph(graph: RecoveryPlanGraph, failedTask: PlanTask): PlanTask[] {
   const fixTaskPrefix = `fix-${failedTask.id}-attempt-`;
 
-  return graph.topoSort().map((task: RecoveryTask) => ({
-    id: task.id,
-    objective: task.objective,
-    requiredSkills: task.id.startsWith(fixTaskPrefix) && task.requiredSkills.length === 0
-      ? [...failedTask.requiredSkills]
-      : [...task.requiredSkills],
-    dependsOn: graph.getDependencies(task.id),
-  }));
+  return graph.topoSort().map((task: RecoveryTask) => {
+    const dependencies = graph.getDependencies(task.id);
+    return {
+      id: task.id,
+      objective: task.objective,
+      requiredSkills: task.id.startsWith(fixTaskPrefix) && task.requiredSkills.length === 0
+        ? [...failedTask.requiredSkills]
+        : [...task.requiredSkills],
+      dependsOn: task.id === failedTask.id
+        ? mergeDependencies(dependencies, failedTask.dependsOn)
+        : dependencies,
+    };
+  });
+}
+
+function mergeDependencies(primary: readonly string[], secondary: readonly string[]): string[] {
+  return [...new Set([...primary, ...secondary])];
 }
 
 function collectNewRefreshTasks(
