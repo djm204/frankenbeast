@@ -1,5 +1,49 @@
 import { describe, it, expect } from 'vitest';
 import { CliObserverBridge } from '../../src/adapters/cli-observer-bridge.js';
+import { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
+import { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
+import { MartinLoop } from '../../src/skills/martin-loop.js';
+import { ProviderRegistry, type ICliProvider } from '../../src/skills/providers/cli-provider.js';
+
+const emptyContext = { adrs: [], knownErrors: [], rules: [] };
+
+function fakeGit(options: {
+  getStatus?: () => string;
+  resetHard?: (commitHash: string) => void;
+  cleanUntracked?: (paths?: readonly string[]) => void;
+} = {}): GitBranchIsolator {
+  return {
+    isolate: () => undefined,
+    getWorkingDir: () => process.cwd(),
+    getStatus: options.getStatus ?? (() => ''),
+    resetHard: options.resetHard ?? (() => undefined),
+    cleanUntracked: options.cleanUntracked ?? (() => undefined),
+    autoCommit: () => false,
+    getCurrentHead: () => 'HEAD',
+    getDiffStat: () => '',
+    merge: () => ({ merged: true, commits: 0 }),
+    abortMerge: () => undefined,
+    getConflictDiff: () => '',
+    getConflictedFiles: () => [],
+  } as unknown as GitBranchIsolator;
+}
+
+function provider(name: string, script: string): ICliProvider {
+  return {
+    name,
+    command: 'node',
+    chatModel: name,
+    buildArgs: () => ['-e', script],
+    normalizeOutput: (raw) => raw,
+    estimateTokens: (text) => Math.ceil(text.length / 4),
+    isRateLimited: () => false,
+    parseRetryAfter: () => undefined,
+    filterEnv: (env) => env,
+    supportsStreamJson: () => false,
+    supportsNativeSessionResume: () => false,
+    defaultContextWindowTokens: () => 200_000,
+  };
+}
 
 describe('Budget enforcement integration', () => {
   it('trips the circuit breaker when recorded cost exceeds budget', async () => {
@@ -80,5 +124,164 @@ describe('Budget enforcement integration', () => {
     expect(typeof deps.endSpan).toBe('function');
     expect(typeof deps.recordTokenUsage).toBe('function');
     expect(typeof deps.setMetadata).toBe('function');
+  });
+
+  it('checks estimated iteration cost before spawning a provider process', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 0.000001 });
+    bridge.startTrace('budget-preflight-abort');
+
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'process.stdout.write("should not spawn")'));
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit(),
+      bridge.observerDeps,
+    );
+
+    await expect(executor.execute(
+      'cli:budget-preflight',
+      { objective: 'expensive task', context: emptyContext, sessionId: 'budget-preflight', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'expensive task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 25,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    )).rejects.toThrow(/Budget exceeded:/);
+  });
+
+  it('aborts an in-flight MartinLoop iteration when budget is exceeded mid-execution', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 0.02 });
+    bridge.startTrace('budget-mid-execution-abort');
+
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'setInterval(() => process.stdout.write("working\\n"), 50)'));
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit(),
+      bridge.observerDeps,
+    );
+
+    const startedAt = Date.now();
+    const resultPromise = executor.execute(
+      'cli:budget-mid-execution',
+      { objective: 'long running task', context: emptyContext, sessionId: 'budget-mid-execution', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'long running task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 1,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    );
+
+    // Record spend immediately after the provider has been launched. Waiting on
+    // an additional timer here made the test race the provider timeout on
+    // slower CI workers, even though the budget polling path is the behavior
+    // under test.
+    const span = bridge.observerDeps.startSpan(bridge.observerDeps.trace, { name: 'mid-run-spend' });
+    bridge.observerDeps.recordTokenUsage(
+      span,
+      { promptTokens: 2_000, completionTokens: 2_000, model: 'gpt-4o' },
+      bridge.observerDeps.counter,
+    );
+    bridge.observerDeps.endSpan(span);
+
+    await expect(resultPromise).rejects.toThrow(/Budget exceeded:/);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it('refuses budget-managed execution with pre-existing tracked changes', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 1 });
+    bridge.startTrace('budget-refuse-tracked-dirty');
+
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'process.stdout.write("should not spawn")'));
+    const resetHeads: string[] = [];
+    const cleaned: string[][] = [];
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit({
+        getStatus: () => ' M user-work.ts\n?? user-notes.md',
+        resetHard: (commitHash) => resetHeads.push(commitHash),
+        cleanUntracked: (paths) => cleaned.push([...(paths ?? [])]),
+      }),
+      bridge.observerDeps,
+    );
+
+    await expect(executor.execute(
+      'cli:budget-refuse-tracked-dirty',
+      { objective: 'task', context: emptyContext, sessionId: 'budget-refuse-tracked-dirty', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 1,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    )).rejects.toThrow(/pre-existing tracked changes/);
+
+    expect(resetHeads).toEqual([]);
+    expect(cleaned).toEqual([]);
+  });
+
+  it('cleans only untracked files created after Martin starts on budget abort', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 0.02 });
+    bridge.startTrace('budget-clean-new-untracked-only');
+
+    const statuses = [
+      '?? user-notes.md',
+      ' M tracked.ts\n?? user-notes.md\n?? generated-output.md',
+    ];
+    const cleaned: string[][] = [];
+    const resetHeads: string[] = [];
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'setInterval(() => process.stdout.write("working\\n"), 50)'));
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit({
+        getStatus: () => statuses.shift() ?? ' M tracked.ts\n?? user-notes.md\n?? generated-output.md',
+        resetHard: (commitHash) => resetHeads.push(commitHash),
+        cleanUntracked: (paths) => cleaned.push([...(paths ?? [])]),
+      }),
+      bridge.observerDeps,
+    );
+
+    const resultPromise = executor.execute(
+      'cli:budget-clean-new-untracked-only',
+      { objective: 'long running task', context: emptyContext, sessionId: 'budget-clean-new-untracked-only', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'long running task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 1,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    );
+
+    const span = bridge.observerDeps.startSpan(bridge.observerDeps.trace, { name: 'mid-run-spend' });
+    bridge.observerDeps.recordTokenUsage(
+      span,
+      { promptTokens: 2_000, completionTokens: 2_000, model: 'gpt-4o' },
+      bridge.observerDeps.counter,
+    );
+    bridge.observerDeps.endSpan(span);
+
+    await expect(resultPromise).rejects.toThrow(/Budget exceeded:/);
+    expect(resetHeads).toEqual(['HEAD']);
+    expect(cleaned).toEqual([['generated-output.md']]);
   });
 });

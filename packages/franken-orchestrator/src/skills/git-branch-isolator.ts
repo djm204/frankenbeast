@@ -344,6 +344,14 @@ export class GitBranchIsolator {
     this.git(['reset', '--hard', commitHash]);
   }
 
+  cleanUntracked(paths?: readonly string[]): void {
+    if (paths && paths.length > 0) {
+      this.git(['clean', '-fd', '--', ...paths]);
+      return;
+    }
+    this.git(['clean', '-fd']);
+  }
+
   getWorkingDir(): string {
     return this.config.workingDir;
   }
