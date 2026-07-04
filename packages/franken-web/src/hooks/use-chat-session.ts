@@ -173,6 +173,39 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
   return normalizeTranscript(session.transcript);
 }
 
+function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
+  const snapshot = applySessionSnapshot(session);
+  const snapshotById = new Map(snapshot.map((message) => [message.id, message]));
+  const snapshotEquivalentMessages = new Map<string, ChatMessage[]>();
+  for (const message of snapshot) {
+    const key = `${message.role}\u0000${message.content}`;
+    snapshotEquivalentMessages.set(key, [...(snapshotEquivalentMessages.get(key) ?? []), message]);
+  }
+  const seen = new Set<string>();
+  const merged = current.flatMap((message) => {
+    const snapshotMessage = snapshotById.get(message.id);
+    if (snapshotMessage) {
+      seen.add(message.id);
+      return [snapshotMessage];
+    }
+
+    const key = `${message.role}\u0000${message.content}`;
+    const equivalentMessages = snapshotEquivalentMessages.get(key) ?? [];
+    const equivalentMessage = equivalentMessages.shift();
+    if (equivalentMessage) {
+      seen.add(equivalentMessage.id);
+      return [equivalentMessage];
+    }
+
+    return [message];
+  });
+
+  return [
+    ...merged,
+    ...snapshot.filter((message) => !seen.has(message.id)),
+  ];
+}
+
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
@@ -424,11 +457,35 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
   async function approve(approved: boolean): Promise<void> {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== 1) {
+    if (!sessionId) {
       return;
     }
 
     setStatus('sending');
+    if (!socket || socket.readyState !== 1) {
+      try {
+        await clientRef.current.approve(sessionId, approved);
+        const refreshed = await clientRef.current.getSession(sessionId);
+        readyRef.current = true;
+        setMessages((current) => mergeSessionSnapshot(current, refreshed));
+        setPendingApproval(refreshed.pendingApproval ?? null);
+        setActivity((current) => [
+          ...current,
+          {
+            type: 'turn.approval.resolved',
+            data: { approved },
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setTokenTotals(refreshed.tokenTotals);
+        setCostUsd(refreshed.costUsd);
+        setStatus('idle');
+      } catch {
+        setStatus('error');
+      }
+      return;
+    }
+
     socket.send(JSON.stringify({
       type: 'approval.respond',
       approved,

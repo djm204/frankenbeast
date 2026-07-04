@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { verifySessionToken } from '../../../src/http/ws-chat-auth.js';
+import type { ChatSession } from '../../../src/chat/types.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-service.js';
@@ -458,6 +459,181 @@ describe('Chat HTTP Routes', () => {
     const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.state).toBe('approved');
+    expect(sessionBody.data.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve is idempotent when no approval is pending', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const submitRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'run deployment' }),
+    });
+    expect(submitRes.status).toBe(200);
+
+    const approveRes = await app.request(`/v1/chat/sessions/${created.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(approveRes.status).toBe(200);
+    expect((await approveRes.json()).data.state).toBe('approved');
+
+    const retryRes = await app.request(`/v1/chat/sessions/${created.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(retryRes.status).toBe(200);
+    expect((await retryRes.json()).data.state).toBe('approved');
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.state).toBe('approved');
+    expect(sessionBody.data.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve handles state-only pending approvals', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-state-only-pending',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'approval' as const, content: 'Approved.' }],
+        events: [],
+        pendingApproval: false,
+        state: 'approved',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: 'test-secret-for-http-routes',
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.state).toBe('approved');
+    expect(runtime.run).toHaveBeenCalledWith('/approve', expect.objectContaining({
+      pendingApproval: true,
+    }));
+    expect(session.state).toBe('approved');
+    expect(session.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve does not downgrade approved sessions when runtime reports active', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-active-result',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: { description: 'Deploy?', requestedAt: now },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'status' as const, content: 'Nothing pending.' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: 'test-secret-for-http-routes',
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.state).toBe('approved');
+    expect(session.state).toBe('approved');
+    expect(session.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve clears pending approval when rejected', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const submitRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'run deployment' }),
+    });
+    expect(submitRes.status).toBe(200);
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.state).toBe('rejected');
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.state).toBe('rejected');
+    expect(sessionBody.data.pendingApproval).toBeNull();
   });
 
   it('POST /v1/chat/sessions/:id/approve returns 404 for unknown session', async () => {

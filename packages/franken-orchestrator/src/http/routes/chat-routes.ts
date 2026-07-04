@@ -146,7 +146,26 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    session.state = approved ? 'approved' : 'rejected';
+    if (!session.pendingApproval && session.state !== 'pending_approval') {
+      return c.json({ data: { id: session.id, approved, state: session.state } });
+    }
+
+    if (approved) {
+      const result = await runtime.run('/approve', {
+        sessionId: session.id,
+        pendingApproval: Boolean(session.pendingApproval) || session.state === 'pending_approval',
+        projectId: session.projectId,
+        transcript: session.transcript,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      });
+
+      session.state = result.state === 'active' ? 'approved' : result.state;
+      session.pendingApproval = null;
+      session.beastContext = result.beastContext ?? null;
+    } else {
+      session.state = 'rejected';
+      session.pendingApproval = null;
+    }
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
