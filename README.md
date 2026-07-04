@@ -541,23 +541,23 @@ Set `network.secureBackend` in `frankenbeast.example.json` (or your project's `f
 
 ### Setup per backend
 
-**OS keychain (default for local dev):**
+**Local encrypted file (the default):**
 ```bash
-frankenbeast init   # interactive — generates and stores token automatically
+frankenbeast init   # interactive — prompts for a passphrase, generates and stores the token
 ```
+When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment and run `frankenbeast init --non-interactive`.
 
-**Local encrypted file (CI/CD):**
-```bash
-export FRANKENBEAST_PASSPHRASE=<strong-random-passphrase>
-frankenbeast init --non-interactive
+**OS keychain:**
+```json
+{ "network": { "secureBackend": "os-keychain" } }
 ```
-The passphrase encrypts the local vault at `.fbeast/secrets.enc`. Set `FRANKENBEAST_PASSPHRASE` in your CI environment.
+Set this in your project config, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
-```bash
-frankenbeast init --backend 1password   # opens browser sign-in flow
+```json
+{ "network": { "secureBackend": "1password" } }
 ```
-Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+Set the backend in config (there is no `--backend` CLI flag), then run `frankenbeast init`. Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
@@ -633,7 +633,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is still stubbed in `franken-orchestrator/src/cli/dep-factory.ts`, so heartbeat-driven self-improvement should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `franken-orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
 
 ### Circuit Breakers
 
@@ -768,7 +768,7 @@ frankenbeast/
 │   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # 16 Architecture Decision Records
+│   ├── adr/                     # Architecture Decision Records
 │   ├── guides/                  # Quickstart, add-provider, wrap-agent, run-dashboard-chat
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
