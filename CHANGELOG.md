@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.40.4](https://github.com/djm204/frankenbeast/compare/v0.40.3...v0.40.4) (2026-07-04)
+
+
+### Bug Fixes
+
+* **network:** track in-process comms gateway ([#487](https://github.com/djm204/frankenbeast/issues/487)) ([b3d7a3b](https://github.com/djm204/frankenbeast/commit/b3d7a3be68dabbfcf3ff6e967ab73b4c0d29677f))
+
+
+### Documentation
+
+* align CLAUDE.md monorepo layout and README secret-backend docs with reality ([#528](https://github.com/djm204/frankenbeast/issues/528)) ([9729137](https://github.com/djm204/frankenbeast/commit/97291374833d7312c43155861a1c4b960b3fb737))
+
 ## [0.40.3](https://github.com/djm204/frankenbeast/compare/v0.40.2...v0.40.3) (2026-07-04)
 
 

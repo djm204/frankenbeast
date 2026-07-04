@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.38.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.3...franken-orchestrator-v0.38.0) (2026-07-04)
+
+
+### Features
+
+* **comms:** enable Telegram and WhatsApp runtime transports ([#526](https://github.com/djm204/frankenbeast/issues/526)) ([bb4368b](https://github.com/djm204/frankenbeast/commit/bb4368b728c2a730004c6cfff27c7e4f8d878de9))
+
+
+### Bug Fixes
+
+* **cli:** auto-detect smart resume state ([#543](https://github.com/djm204/frankenbeast/issues/543)) ([461b5c0](https://github.com/djm204/frankenbeast/commit/461b5c0db7686ccdff71c2124e65306b55912d26))
+* **network:** track in-process comms gateway ([#487](https://github.com/djm204/frankenbeast/issues/487)) ([b3d7a3b](https://github.com/djm204/frankenbeast/commit/b3d7a3be68dabbfcf3ff6e967ab73b4c0d29677f))
+
 ## [0.37.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.2...franken-orchestrator-v0.37.3) (2026-07-04)
 
 
