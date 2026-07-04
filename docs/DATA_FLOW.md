@@ -89,7 +89,7 @@ The current local Beast Loop wires real adapters for every module except the pla
 That means the current path is:
 
 - real ingestion sanitization through `MiddlewareChainFirewallAdapter` (the security middleware chain)
-- real local skill discovery through `SkillManagerAdapter`; CLI/function/LLM execution is dispatched by `CliSkillExecutor` and MCP execution requires an `IMcpModule`
+- real local skill discovery through `SkillManagerAdapter`; `cli:*` execution is dispatched by `CliSkillExecutor`, MCP execution requires an `IMcpModule`, and non-CLI `function`/`llm` execution still requires an `ISkillsModule.execute(...)` implementation outside `SkillManagerAdapter`
 - real episodic memory persistence through `SqliteBrainMemoryAdapter` (`franken-brain`)
 - graph-builder-driven planning for chunk files or design-doc decomposition; the planner port itself is `stubPlanner`, which throws if invoked
 - real plan critique through `CritiquePortAdapter` over `@franken/critique`, and real HITL approval through `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (non-TTY runs default to reject). If either safety module is enabled but not installed, the dep factory fails closed unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`
@@ -140,16 +140,19 @@ flowchart TD
     GB["graphBuilder.build(intent)"]
     Planner["planner.createPlan(intent)"]
     Critique["critique.reviewPlan(plan)"]
-    Approved{"pass + min score?"}
+    GBApproved{"graph-builder plan approved?"}
+    PlannerApproved{"planner plan approved?"}
     Spiral["CritiqueSpiralError"]
     PlanReady["ctx.plan ready"]
 
     Start --> GraphBuilder
-    GraphBuilder -->|yes| GB --> Critique --> Approved
-    GraphBuilder -->|no| Planner --> Critique --> Approved
-    Approved -->|yes| PlanReady
-    Approved -->|no, max iterations hit| Spiral
-    Approved -->|no, retry allowed| Planner
+    GraphBuilder -->|yes| GB --> Critique --> GBApproved
+    GraphBuilder -->|no| Planner --> Critique --> PlannerApproved
+    GBApproved -->|yes| PlanReady
+    GBApproved -->|no| Spiral
+    PlannerApproved -->|yes| PlanReady
+    PlannerApproved -->|no, max iterations hit| Spiral
+    PlannerApproved -->|no, retry allowed| Planner
 ```
 
 Today, most useful local execution paths avoid the planner stub by supplying a `GraphBuilder`:

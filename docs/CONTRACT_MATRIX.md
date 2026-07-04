@@ -58,11 +58,10 @@ These items were previously listed under “Type Mismatches Requiring Resolution
 
 ## Remaining Type Mismatches Requiring Resolution or Adapter Boundaries
 
-### 1. EpisodicTrace Quadruple-Definition
+### 1. EpisodicTrace Module Projections
 - **Brain** (`franken-brain/src/types/memory.ts:46-54`): Zod-backed, `input`/`output` fields
 - **Critique** (`franken-critique/src/types/contracts.ts:28-33`): `summary`/`outcome` fields
 - **Governor** (`franken-governor/src/audit/governor-memory-port.ts:1-12`): `toolName`/`tags` fields
-- **Heartbeat** (`franken-heartbeat/src/modules/memory.ts:5-11`): `summary`/`timestamp` fields
 - **Resolution**: Each module keeps its own projection (different shapes serve different purposes). Document that these are intentional views, not duplicates.
 
 ### 2. Zod Runtime Boundary
