@@ -146,4 +146,21 @@ describe('AgentDetailPanel', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
     expect(screen.getByText('Identity')).toBeTruthy();
   });
+
+  it('keeps edit mode visible while save is pending', async () => {
+    let rejectSave: ((error: Error) => void) | undefined;
+    handlers.onSaveConfig.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectSave = reject;
+    }));
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getAllByDisplayValue('')[0]!, { target: { value: 'Slow save' } });
+    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getByText('Readonly'));
+
+    expect(screen.getByText('Identity')).toBeTruthy();
+    rejectSave?.(new Error('HTTP 500'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
+  });
 });

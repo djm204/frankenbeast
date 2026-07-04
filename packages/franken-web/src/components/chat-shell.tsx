@@ -755,8 +755,8 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               const detail = await beastClient.getAgent(agentId);
               if (selectedBeastAgentIdRef.current === agentId) {
                 setBeastAgentDetail(detail);
+                setBeastRefreshNonce((current) => current + 1);
               }
-              setBeastRefreshNonce((current) => current + 1);
             }}
             onSelectAgent={(agentId) => {
               selectedBeastAgentIdRef.current = agentId;

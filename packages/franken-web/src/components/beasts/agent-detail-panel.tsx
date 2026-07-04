@@ -44,6 +44,7 @@ export function AgentDetailPanel({
   }, [agent.id, mode, resetEdit, setEditSnapshot]);
 
   const enterMode = (nextMode: Mode) => {
+    if (saving) return;
     setSaveError(null);
     setMode(nextMode);
     if (nextMode === 'readonly') resetEdit();
@@ -75,16 +76,19 @@ export function AgentDetailPanel({
             value={mode}
             onValueChange={(val) => { if (val) enterMode(val as Mode); }}
             aria-label="View mode"
+            disabled={saving}
             className="flex gap-0.5 bg-beast-control rounded-lg border border-beast-border p-0.5"
           >
             <ToggleGroup.Item
               value="readonly"
+              disabled={saving}
               className="px-2 py-1 text-xs rounded-md text-beast-muted data-[state=on]:bg-beast-accent-soft data-[state=on]:text-beast-accent transition-colors"
             >
               Readonly
             </ToggleGroup.Item>
             <ToggleGroup.Item
               value="edit"
+              disabled={saving}
               className="px-2 py-1 text-xs rounded-md text-beast-muted data-[state=on]:bg-beast-accent-soft data-[state=on]:text-beast-accent transition-colors"
             >
               Edit

@@ -28,6 +28,10 @@ export class BeastRunService {
     return this.repository.getRun(runId);
   }
 
+  updateConfigSnapshot(runId: string, configSnapshot: Readonly<Record<string, unknown>>): BeastRun {
+    return this.repository.updateRun(runId, { configSnapshot });
+  }
+
   listAttempts(runId: string) {
     this.requireRun(runId);
     return this.repository.listAttempts(runId);

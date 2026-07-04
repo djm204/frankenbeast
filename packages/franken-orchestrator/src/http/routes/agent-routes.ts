@@ -180,6 +180,15 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(hasIdentityPatch ? { initConfig: patchInitConfigIdentity(current.initConfig, body) } : {}),
         ...(body.moduleConfig !== undefined ? { moduleConfig: body.moduleConfig } : {}),
       });
+      if (body.moduleConfig !== undefined && current.dispatchRunId) {
+        const run = deps.runs.getRun(current.dispatchRunId);
+        if (run) {
+          deps.runs.updateConfigSnapshot(run.id, {
+            ...run.configSnapshot,
+            modules: body.moduleConfig,
+          });
+        }
+      }
       deps.agents.appendEvent(agentId, {
         level: 'info',
         type: 'agent.config.updated',

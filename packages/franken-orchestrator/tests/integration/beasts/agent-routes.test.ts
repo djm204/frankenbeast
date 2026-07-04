@@ -946,8 +946,9 @@ describe('agent routes integration', () => {
 
     expect(patchResponse.status).toBe(200);
     const patched = await patchResponse.json() as {
-      data: { initConfig: { identity: { name: string; description: string }; workflow: unknown }; moduleConfig: unknown };
+      data: { name?: string; initConfig: { identity: { name: string; description: string }; workflow: unknown }; moduleConfig: unknown };
     };
+    expect(patched.data.name).toBe('Updated name');
     expect(patched.data.initConfig.identity).toEqual({ name: 'Updated name', description: 'Updated description' });
     expect(patched.data.initConfig.workflow).toEqual({ workflowType: 'design-interview' });
     expect(patched.data.moduleConfig).toEqual({ firewall: false, memory: true });
@@ -957,6 +958,56 @@ describe('agent routes integration', () => {
     });
     const detail = await detailResponse.json() as { data: { events: AgentEvent[] } };
     expectEventsToIncludeTypes(detail.data.events, ['agent.config.updated']);
+  });
+
+  it('updates linked run module snapshots when patching module configuration', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: ['Bearer', operatorToken].join(' '),
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'chunk-plan',
+        initAction: {
+          kind: 'chunk-plan',
+          command: '/plan --design-doc docs/plans/design.md',
+          config: {
+            designDocPath: 'docs/plans/design.md',
+            outputDir: 'docs/chunks',
+          },
+        },
+        initConfig: {
+          identity: { name: 'Linked run agent' },
+          designDocPath: 'docs/plans/design.md',
+          outputDir: 'docs/chunks',
+          modules: { firewall: true, memory: false },
+        },
+        moduleConfig: { firewall: true, memory: false },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string; dispatchRunId?: string } };
+    expect(created.data.dispatchRunId).toBeTruthy();
+
+    const patchResponse = await app.request('/v1/beasts/agents/' + created.data.id + '/config', {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        moduleConfig: { firewall: false, memory: true },
+      }),
+    });
+    expect(patchResponse.status).toBe(200);
+
+    const runResponse = await app.request('/v1/beasts/runs/' + created.data.dispatchRunId, {
+      headers: { authorization: ['Bearer', operatorToken].join(' ') },
+    });
+    expect(runResponse.status).toBe(200);
+    const runDetail = await runResponse.json() as { data: { run: { configSnapshot: { modules?: unknown } } } };
+    expect(runDetail.data.run.configSnapshot.modules).toEqual({ firewall: false, memory: true });
   });
 
   it('returns 404 for unknown tracked agents', async () => {

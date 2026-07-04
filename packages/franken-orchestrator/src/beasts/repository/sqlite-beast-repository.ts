@@ -39,6 +39,7 @@ interface CreateAttemptInput {
 
 interface UpdateRunPatch {
   status?: BeastRunStatus | undefined;
+  configSnapshot?: Readonly<Record<string, unknown>> | undefined;
   startedAt?: string | undefined;
   finishedAt?: string | undefined;
   currentAttemptId?: string | undefined;
@@ -281,6 +282,7 @@ export class SQLiteBeastRepository {
     const next: BeastRun = {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.configSnapshot !== undefined ? { configSnapshot: patch.configSnapshot } : {}),
       ...(patch.startedAt !== undefined ? { startedAt: patch.startedAt } : {}),
       ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
       ...(patch.currentAttemptId !== undefined ? { currentAttemptId: patch.currentAttemptId } : {}),
@@ -293,6 +295,7 @@ export class SQLiteBeastRepository {
     this.db.prepare(
       `UPDATE beast_runs
          SET status = ?,
+             config_snapshot = ?,
              started_at = ?,
              finished_at = ?,
              current_attempt_id = ?,
@@ -303,6 +306,7 @@ export class SQLiteBeastRepository {
        WHERE id = ?`,
     ).run(
       next.status,
+      JSON.stringify(next.configSnapshot),
       next.startedAt ?? null,
       next.finishedAt ?? null,
       next.currentAttemptId ?? null,
@@ -398,6 +402,7 @@ export class SQLiteBeastRepository {
   createTrackedAgent(input: CreateTrackedAgentInput): TrackedAgent {
     const agent: TrackedAgent = {
       id: prefixedId('agent'),
+      ...trackedAgentIdentityPatch(input.initConfig),
       definitionId: input.definitionId,
       source: input.source,
       status: input.status,
@@ -476,6 +481,10 @@ export class SQLiteBeastRepository {
       ...(patch.moduleConfig !== undefined ? { moduleConfig: patch.moduleConfig } : {}),
       ...(patch.updatedAt !== undefined ? { updatedAt: patch.updatedAt } : {}),
     };
+    const nextWithIdentity: TrackedAgent = {
+      ...next,
+      ...trackedAgentIdentityPatch(next.initConfig),
+    };
 
     this.db.prepare(
       `UPDATE tracked_agents
@@ -488,17 +497,17 @@ export class SQLiteBeastRepository {
              updated_at = ?
        WHERE id = ?`,
     ).run(
-      next.status,
-      JSON.stringify(next.initConfig),
-      next.chatSessionId ?? null,
-      next.dispatchRunId ?? null,
-      next.executionMode ?? null,
-      next.moduleConfig ? JSON.stringify(next.moduleConfig) : null,
-      next.updatedAt,
+      nextWithIdentity.status,
+      JSON.stringify(nextWithIdentity.initConfig),
+      nextWithIdentity.chatSessionId ?? null,
+      nextWithIdentity.dispatchRunId ?? null,
+      nextWithIdentity.executionMode ?? null,
+      nextWithIdentity.moduleConfig ? JSON.stringify(nextWithIdentity.moduleConfig) : null,
+      nextWithIdentity.updatedAt,
       agentId,
     );
 
-    return next;
+    return nextWithIdentity;
   }
 
   appendTrackedAgentEvent(agentId: string, input: AppendTrackedAgentEventInput): TrackedAgentEvent {
@@ -774,14 +783,16 @@ function mapInterviewSession(row: BeastInterviewSessionRow): BeastInterviewSessi
 }
 
 function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
+  const initConfig = JSON.parse(row.init_config) as Readonly<Record<string, unknown>>;
   return {
     id: row.id,
+    ...trackedAgentIdentityPatch(initConfig),
     definitionId: row.definition_id,
     source: row.source,
     status: row.status,
     createdByUser: row.created_by_user,
     initAction: JSON.parse(row.init_action) as TrackedAgentInitAction,
-    initConfig: JSON.parse(row.init_config) as Readonly<Record<string, unknown>>,
+    initConfig,
     ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
     ...(row.dispatch_run_id ? { dispatchRunId: row.dispatch_run_id } : {}),
     ...(row.execution_mode ? { executionMode: row.execution_mode } : {}),
@@ -789,6 +800,16 @@ function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function trackedAgentIdentityPatch(initConfig: Readonly<Record<string, unknown>>): Pick<TrackedAgent, 'name'> | Record<string, never> {
+  const identity = isRecord(initConfig.identity) ? initConfig.identity : undefined;
+  const name = typeof identity?.name === 'string' ? identity.name : undefined;
+  return name ? { name } : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function mapTrackedAgentEvent(row: TrackedAgentEventRow): TrackedAgentEvent {

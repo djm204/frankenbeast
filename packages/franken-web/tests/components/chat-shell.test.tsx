@@ -209,6 +209,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     resumeAgent: typeof mockResumeAgent;
     startAgent: typeof mockStartAgent;
     stopAgent: typeof mockStopAgent;
+    patchAgentConfig: ReturnType<typeof vi.fn>;
     startRun: ReturnType<typeof vi.fn>;
     stopRun: ReturnType<typeof vi.fn>;
     killRun: ReturnType<typeof vi.fn>;
@@ -229,6 +230,7 @@ vi.mock('../../src/lib/beast-api.js', () => ({
     this.resumeAgent = mockResumeAgent;
     this.startAgent = mockStartAgent;
     this.stopAgent = mockStopAgent;
+    this.patchAgentConfig = vi.fn().mockResolvedValue(undefined);
     this.startRun = vi.fn().mockResolvedValue(undefined);
     this.stopRun = vi.fn().mockResolvedValue(undefined);
     this.killRun = vi.fn().mockResolvedValue(undefined);
