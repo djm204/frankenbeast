@@ -199,7 +199,10 @@ function runVerifyCommand(verifyCommand: string, cwd: string): void {
     encoding: 'utf-8',
     cwd,
     stdio: 'pipe',
-    shell: false,
+    // Windows requires cmd.exe to launch npm/npx .cmd shims. This remains safe
+    // because verifyCommand is matched against exact hard-coded commands above;
+    // caller-provided command text is never passed through the shell.
+    shell: process.platform === 'win32',
   });
 }
 
