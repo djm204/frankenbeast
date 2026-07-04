@@ -57,7 +57,7 @@ That points the frontend at the same-origin API paths; production deployments sh
 If your backend is on a different port, set `VITE_API_URL` explicitly:
 
 ```bash
-VITE_API_URL=https://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
 Open the URL Vite prints, usually:

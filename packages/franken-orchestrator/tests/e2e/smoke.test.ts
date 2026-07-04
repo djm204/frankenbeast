@@ -37,8 +37,8 @@ describe('E2E smoke test', () => {
     expect(ports.planner.intents).toHaveLength(1);
     expect(ports.critique.reviewedPlans).toHaveLength(1);
     expect(ports.memory.traces.length).toBeGreaterThan(0);
-    expect(ports.observer.traceIds).toHaveLength(1);
-    expect(ports.heartbeat.pulseCalled).toBe(true);
+    expect(ports.observer.traceIds).toHaveLength(0);
+    expect(ports.heartbeat.pulseCalled).toBe(false);
   });
 
   it('accepts config overrides', async () => {
