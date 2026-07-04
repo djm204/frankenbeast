@@ -1,18 +1,11 @@
 import type { CircuitBreaker, CircuitBreakerResult, LoopState, LoopConfig } from './circuit-breaker.js';
-import { ConfigurationError } from '../errors/index.js';
+import { hasReachedMaxIterations } from '../loop/iteration-limit.js';
 
 export class MaxIterationBreaker implements CircuitBreaker {
   readonly name = 'max-iteration';
 
   async check(state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
-    if (config.maxIterations < 1 || config.maxIterations > 5) {
-      throw new ConfigurationError(
-        `maxIterations must be between 1 and 5, got ${config.maxIterations}`,
-        { context: { maxIterations: config.maxIterations } },
-      );
-    }
-
-    if (state.iterationCount >= config.maxIterations) {
+    if (hasReachedMaxIterations(state.iterationCount, config.maxIterations)) {
       return {
         tripped: true,
         reason: `Maximum iterations reached (${config.maxIterations})`,
