@@ -4,22 +4,23 @@ This project uses AI-assisted development. Rules in `.cursor/rules/` provide gui
 
 ## Monorepo Layout
 
-This is an npm workspaces monorepo with Turborepo for build orchestration. All 11 packages live under `packages/`:
+This is an npm workspaces monorepo with Turborepo for build orchestration. All 10 packages live under `packages/`:
 
 ```
 packages/
-├── franken-types/           # Shared type definitions
-├── frankenfirewall/         # MOD-01: LLM proxy
-├── franken-skills/          # MOD-02: Skill registry
-├── franken-brain/           # MOD-03: Memory systems
-├── franken-planner/         # MOD-04: DAG planning
-├── franken-observer/        # MOD-05: Tracing & cost
-├── franken-critique/        # MOD-06: Self-critique
-├── franken-governor/        # MOD-07: HITL governance
-├── franken-heartbeat/       # MOD-08: Reflection
-├── franken-mcp/             # MCP server registry
-└── franken-orchestrator/    # The Beast Loop & CLI
+├── franken-types/           # Shared types + runtime Zod schemas (@franken/types)
+├── franken-brain/           # MOD-03: SQLite-backed memory (working + episodic)
+├── franken-planner/         # MOD-04: DAG planning, strategies, recovery primitives
+├── franken-observer/        # MOD-05: Tracing, token/cost tracking, circuit breaker (@frankenbeast/observer)
+├── franken-critique/        # MOD-06: Self-critique evaluators + reviewer loop (@franken/critique)
+├── franken-governor/        # MOD-07: HITL governance, triggers, approval gateway (@franken/governor)
+├── franken-orchestrator/    # The Beast Loop, CLI (frankenbeast/franken/frkn), chat/network servers
+├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy (@fbeast/mcp-suite)
+├── franken-web/             # React dashboard (@frankenbeast/web)
+└── live-bench/              # Live CLI benchmark tooling (@fbeast/live-bench)
 ```
+
+Former packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` were consolidated into `franken-orchestrator` and `franken-mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); their capabilities live on as internal adapters.
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)
@@ -27,7 +28,7 @@ packages/
 - `npm run typecheck` — runs `turbo run typecheck`
 - Per-package: `npx turbo run test --filter=franken-brain`
 
-Cross-package dependencies are managed by npm workspaces (e.g., `@frankenbeast/types`). See [ADR-011](docs/adr/011-monorepo-migration.md) for the migration from individual repos.
+Cross-package dependencies are managed by npm workspaces (e.g., `@franken/types`). See [ADR-011](docs/adr/011-real-monorepo-migration.md) for the migration from individual repos.
 
 ## Installed Templates
 
