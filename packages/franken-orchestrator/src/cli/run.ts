@@ -110,9 +110,10 @@ export interface ResumeTarget {
   planName: string;
   checkpointFile: string;
   planDir?: string;
+  ambiguousPlanDir?: boolean;
 }
 
-function findUniquePlanDirByBasename(root: string, planName: string): string | undefined {
+function findUniquePlanDirByBasename(root: string, planName: string): string | undefined | null {
   const skip = new Set(['.git', '.fbeast', 'node_modules']);
   const matches: string[] = [];
 
@@ -143,7 +144,8 @@ function findUniquePlanDirByBasename(root: string, planName: string): string | u
   }
 
   visit(root);
-  return matches.length === 1 ? matches[0] : undefined;
+  if (matches.length === 0) return undefined;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function discoverResumeTarget(root: string): ResumeTarget | undefined {
@@ -174,19 +176,28 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
   const scopedPlanDir = join(root, '.fbeast', 'plans', planName);
   const fbeastPlanDir = join(root, '.fbeast', planName);
   const customPlanDir = join(root, planName);
+  const nestedPlanDir = !existsSync(scopedPlanDir) && !existsSync(customPlanDir) && !existsSync(fbeastPlanDir)
+    ? findUniquePlanDirByBasename(root, planName)
+    : undefined;
   const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
     ? customPlanDir
     : !existsSync(scopedPlanDir) && existsSync(fbeastPlanDir)
       ? fbeastPlanDir
-    : !existsSync(scopedPlanDir)
-      ? findUniquePlanDirByBasename(root, planName)
-    : undefined;
+    : nestedPlanDir ?? undefined;
+
+  if (nestedPlanDir === null) {
+    return { planName, checkpointFile: newest.checkpointFile, ambiguousPlanDir: true };
+  }
 
   return { planName, checkpointFile: newest.checkpointFile, ...(planDir ? { planDir } : {}) };
 }
 
-function isConventionalBaseBranch(branch: string): boolean {
-  return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
+function ensureResumeTargetIsUsable(resumeTarget: ResumeTarget | undefined): void {
+  if (resumeTarget?.ambiguousPlanDir) {
+    throw new Error(
+      `Multiple custom plan directories named "${resumeTarget.planName}" match ${resumeTarget.checkpointFile}; pass --plan-dir explicitly to resume this checkpoint.`,
+    );
+  }
 }
 
 function branchExists(root: string, branch: string): boolean {
@@ -197,16 +208,12 @@ function branchExists(root: string, branch: string): boolean {
     });
     return true;
   } catch {
-    try {
-      execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/remotes/origin/${branch}`], {
-        cwd: root,
-        stdio: 'ignore',
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
+}
+
+function isConventionalBaseBranch(branch: string): boolean {
+  return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
 }
 
 export function inferResumeBaseBranch(root: string): string | undefined {
@@ -236,11 +243,12 @@ export function inferResumeBaseBranch(root: string): string | undefined {
     const originalBaseBranch = candidateBaseBranches.at(-1);
     if (originalBaseBranch) return originalBaseBranch;
   } catch {
-    // Fall through to the conventional default when reflog is unavailable.
+    // Fall through to the normal base-branch resolver when reflog is unavailable.
   }
 
   return undefined;
 }
+
 
 /**
  * Validates config path and loads config from all sources.
@@ -500,6 +508,7 @@ export async function main(): Promise<void> {
   const resumeTarget = args.resume && !args.planDir && !args.planName && (!args.subcommand || args.subcommand === 'run')
     ? discoverResumeTarget(root)
     : undefined;
+  ensureResumeTargetIsUsable(resumeTarget);
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides

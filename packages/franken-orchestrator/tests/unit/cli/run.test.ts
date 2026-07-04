@@ -415,6 +415,27 @@ describe('discoverResumeTarget', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('marks nested custom plan directories as ambiguous when more than one matches', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-ambiguous-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const firstPlanDir = join(root, 'docs', 'chunks');
+    const secondPlanDir = join(root, 'notes', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(firstPlanDir, { recursive: true });
+    mkdirSync(secondPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      ambiguousPlanDir: true,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('returns undefined when no plan-scoped checkpoints exist', () => {
     const root = join(tmpdir(), `frankenbeast-resume-empty-${Date.now()}`);
     mkdirSync(join(root, '.fbeast', '.build'), { recursive: true });
@@ -504,6 +525,7 @@ describe('discoverResumeTarget', () => {
     execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
     execFileSync('git', ['checkout', '-b', 'develop'], { cwd: root, stdio: 'ignore' });
     execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/develop', 'develop'], { cwd: root, stdio: 'ignore' });
     execFileSync('git', ['branch', '-D', 'develop'], { cwd: root, stdio: 'ignore' });
 
     expect(inferResumeBaseBranch(root)).toBeUndefined();
