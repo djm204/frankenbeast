@@ -217,7 +217,7 @@ Examples:
   frankenbeast issues --label critical,high # fetch filtered issues
   frankenbeast issues --dry-run             # preview issue fetch
   frankenbeast skill list                   # list installed skills
-  frankenbeast skill add my-tool node -- ./server.js  # install a runnable skill
+  frankenbeast skill add my-tool node ./server.js     # install a runnable skill
   frankenbeast skill scaffold my-tool       # scaffold a skill for manual config
   frankenbeast skill enable my-tool         # enable a skill
   frankenbeast skill info my-tool           # show skill details
@@ -239,8 +239,18 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     flagArgs = argv.slice(1);
   }
 
+  let rawSkillAddCommandArgs: string[] | undefined;
+  let parsedFlagArgs = flagArgs;
+  if (subcommand === 'skill' && flagArgs[0] === 'add') {
+    rawSkillAddCommandArgs = flagArgs.slice(3);
+    if (rawSkillAddCommandArgs[0] === '--') {
+      rawSkillAddCommandArgs = rawSkillAddCommandArgs.slice(1);
+    }
+    parsedFlagArgs = flagArgs.slice(0, 3);
+  }
+
   const { values, positionals } = nodeParseArgs({
-    args: flagArgs,
+    args: parsedFlagArgs,
     options: {
       detached: { type: 'boolean', short: 'd', default: false },
       'base-dir': { type: 'string' },
@@ -327,7 +337,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     }
     skillTarget = positionals[1];
     skillCommand = positionals[2];
-    skillCommandArgs = positionals.length > 3 ? positionals.slice(3) : undefined;
+    skillCommandArgs = rawSkillAddCommandArgs !== undefined
+      ? rawSkillAddCommandArgs
+      : positionals.length > 3 ? positionals.slice(3) : undefined;
   } else if (subcommand === 'security') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {

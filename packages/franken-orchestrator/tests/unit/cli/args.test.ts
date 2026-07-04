@@ -392,7 +392,16 @@ describe('parseArgs', () => {
       expect(args.skillCommandArgs).toEqual(['server.js']);
     });
 
-    it('parses skill add command args after a delimiter', () => {
+    it('preserves option-like skill add command args without a delimiter', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+      expect(args.verbose).toBe(false);
+    });
+
+    it('parses skill add command args after an optional delimiter', () => {
       const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '--', '-y', '@acme/mcp-server']);
       expect(args.skillAction).toBe('add');
       expect(args.skillTarget).toBe('my-skill');
