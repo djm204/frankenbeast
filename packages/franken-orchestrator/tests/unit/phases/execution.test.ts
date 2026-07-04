@@ -916,4 +916,77 @@ describe('runExecution', () => {
     expect(outcomes.map(o => o.taskId)).toEqual(['t1', 't2']);
     expect(outcomes.every(o => o.status === 'success')).toBe(true);
   });
+
+  it('rejects refreshed tasks that introduce dependency cycles before mutating the plan', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+    ]);
+    const refreshPlanTasks = vi
+      .fn<() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>>()
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t3'] },
+        { id: 't3', objective: 'third', requiredSkills: [], dependsOn: ['t2'] },
+      ]);
+
+    await expect(
+      runExecution(
+        c,
+        makeSkills(),
+        makeGovernor(),
+        makeMemory(),
+        makeObserver(),
+        undefined,
+        makeLogger(),
+        undefined,
+        undefined,
+        refreshPlanTasks,
+      ),
+    ).rejects.toThrow('cycle detected');
+
+    expect(c.plan!.tasks.map(t => t.id)).toEqual(['t1']);
+  });
+
+  it('rejects duplicate initial task ids before queueing pending work', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+      { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+    ]);
+
+    await expect(runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver()))
+      .rejects.toThrow("duplicate task id 't1'");
+  });
+
+  it('keeps refreshed duplicate tasks out of the pending execution queue', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+    ]);
+    const refreshPlanTasks = vi
+      .fn<() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>>()
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+        { id: 't2', objective: 'duplicate second', requiredSkills: [], dependsOn: ['t1'] },
+      ])
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+      ]);
+
+    const outcomes = await runExecution(
+      c,
+      makeSkills(),
+      makeGovernor(),
+      makeMemory(),
+      makeObserver(),
+      undefined,
+      makeLogger(),
+      undefined,
+      undefined,
+      refreshPlanTasks,
+    );
+
+    expect(outcomes.map(o => o.taskId)).toEqual(['t1', 't2']);
+    expect(c.plan!.tasks.map(t => t.id)).toEqual(['t1', 't2']);
+  });
 });
