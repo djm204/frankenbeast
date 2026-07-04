@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.6](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.5...franken-governor-v0.5.6) (2026-07-04)
+
+
+### Documentation
+
+* fix package README drift (governor, observer, brain, critique) ([#527](https://github.com/djm204/frankenbeast/issues/527)) ([4afdd51](https://github.com/djm204/frankenbeast/commit/4afdd51f0852cfb934c6db1307e61afc98ee51c4))
+
 ## [0.5.5](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.4...franken-governor-v0.5.5) (2026-07-03)
 
 
