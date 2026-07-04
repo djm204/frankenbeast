@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.38.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.0...franken-orchestrator-v0.38.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **orchestrator:** allow dashboard CORS origins ([59cf742](https://github.com/djm204/frankenbeast/commit/59cf7422d6e543c6b5e56589336303152611d071))
+* **web:** fall back to REST for approvals ([#479](https://github.com/djm204/frankenbeast/issues/479)) ([3ac7f74](https://github.com/djm204/frankenbeast/commit/3ac7f74384328418a483fc9a2e4fb8837d87a380))
+* **web:** persist agent detail edits ([#533](https://github.com/djm204/frankenbeast/issues/533)) ([de88101](https://github.com/djm204/frankenbeast/commit/de88101a2fcf9514c9785dee931177d098dd95ef))
+* **web:** wire Network page log fetching ([#532](https://github.com/djm204/frankenbeast/issues/532)) ([49051bd](https://github.com/djm204/frankenbeast/commit/49051bde6a4531c2d5d6439f596f1736e4d98b90))
+
 ## [0.38.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.3...franken-orchestrator-v0.38.0) (2026-07-04)
 
 
