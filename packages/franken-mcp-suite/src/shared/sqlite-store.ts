@@ -62,13 +62,6 @@ const SCHEMA = `
     matched_patterns TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-
-  CREATE TABLE IF NOT EXISTS skill_state (
-    name TEXT PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    config TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
 `;
 
 export function createSqliteStore(dbPath: string): SqliteStore {

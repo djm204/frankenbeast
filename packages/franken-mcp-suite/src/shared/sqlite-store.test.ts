@@ -44,7 +44,7 @@ describe('SqliteStore', () => {
     expect(tables).toContain('cost_ledger');
     expect(tables).toContain('governor_log');
     expect(tables).toContain('firewall_log');
-    expect(tables).toContain('skill_state');
+    expect(tables).not.toContain('skill_state');
 
     const walMode = store.db.pragma('journal_mode', { simple: true });
     expect(walMode).toBe('wal');
