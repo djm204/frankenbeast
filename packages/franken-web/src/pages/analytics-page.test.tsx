@@ -123,6 +123,7 @@ describe('AnalyticsPage', () => {
       expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 50 }));
     });
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('Loading analytics...')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(client.fetchEvents).toHaveBeenCalledTimes(2);
 

@@ -258,7 +258,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
         </div>
       </section>
 
-      {isEventsLoading && !eventPage ? (
+      {isEventsLoading ? (
         <section className="empty-state">Loading analytics...</section>
       ) : (
         <section className="analytics-table-grid">
