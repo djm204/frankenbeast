@@ -66,7 +66,9 @@ export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpSer
       description: 'Load all memory entries from this database. Returns everything stored.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: {
+          projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
+        },
       },
       async handler(_args) {
         const sections = await brain.frontload();

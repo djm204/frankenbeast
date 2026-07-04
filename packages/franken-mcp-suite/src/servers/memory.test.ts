@@ -47,8 +47,9 @@ describe('Memory Server', () => {
     expect(queryResult.content[0]!.text).toContain('use adapters');
 
     expect(frontloadTool.inputSchema.required).toBeUndefined();
+    expect(frontloadTool.inputSchema.properties).toHaveProperty('projectId');
 
-    const frontloadResult = await frontloadTool.handler({});
+    const frontloadResult = await frontloadTool.handler({ projectId: 'test-project' });
     expect(brain.frontload).toHaveBeenCalledWith();
     expect(frontloadResult.content[0]!.text).toContain('adr: use adapters');
 

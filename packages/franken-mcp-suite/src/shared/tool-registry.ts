@@ -105,7 +105,9 @@ const TOOLS: ToolFull[] = [
     description: 'Load all memory entries from this database',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
+      },
     },
     makeHandler: ({ brain }) => async () => {
       const sections = await brain.frontload();
