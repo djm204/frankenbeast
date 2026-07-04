@@ -24,7 +24,7 @@ Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package
 | `IFirewallModule` | Orchestrator (`src/deps.ts`) | `MiddlewareChainFirewallAdapter` | Yes — adapter shipped |
 | `ISkillsModule` | Orchestrator (`src/deps.ts`) | `SkillManagerAdapter` | Yes — adapter shipped |
 | `IMemoryModule` | Orchestrator (`src/deps.ts`) | `SqliteBrainMemoryAdapter` (over `franken-brain`) | Yes — adapter shipped |
-| `IPlannerModule` | Orchestrator (`src/deps.ts`) | `stubPlanner` in the CLI path; graph builders own planning | Stub only |
+| `IPlannerModule` | Orchestrator (`src/deps.ts`) | `stubPlanner` in the default local CLI graph-builder path; shipped implementations include `LlmPlanner` and `PlannerPortAdapter` | Stubbed in default CLI graph-builder wiring; adapters shipped |
 | `IObserverModule` | Orchestrator (`src/deps.ts`) | `AuditTrailObserverAdapter` / observer bridge | Yes — adapter shipped |
 | `ICritiqueModule` | Orchestrator (`src/deps.ts`) | `CritiquePortAdapter` (over `@franken/critique`) | Yes — adapter shipped |
 | `IGovernorModule` | Orchestrator (`src/deps.ts`) | `GovernorPortAdapter` (over `ApprovalGateway`) | Yes — adapter shipped |
@@ -59,7 +59,7 @@ These items were previously listed under “Type Mismatches Requiring Resolution
 ## Remaining Type Mismatches Requiring Resolution or Adapter Boundaries
 
 ### 1. EpisodicTrace Module Projections
-- **Brain** (`franken-brain/src/types/memory.ts:46-54`): Zod-backed, `input`/`output` fields
+- **Brain** (`packages/franken-types/src/brain.ts:42-49`, persisted by `packages/franken-brain/src/sqlite-brain.ts`): `summary`/`details` episodic event fields
 - **Critique** (`franken-critique/src/types/contracts.ts:28-33`): `summary`/`outcome` fields
 - **Governor** (`franken-governor/src/audit/governor-memory-port.ts:1-12`): `toolName`/`tags` fields
 - **Resolution**: Each module keeps its own projection (different shapes serve different purposes). Document that these are intentional views, not duplicates.

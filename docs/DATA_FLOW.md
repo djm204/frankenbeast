@@ -402,7 +402,7 @@ flowchart TD
             BeastDb["beasts.db"]
             BeastLogs["beasts/logs/<run>/<attempt>.log"]
             Traces["build-traces.db"]
-            Memory["memory.db"]
+            Memory["../beast.db"]
             Checkpoints["<plan>.checkpoint and issues/*/*.checkpoint"]
             Session["chunk-sessions/<plan>/<chunk>.json"]
             Snapshots["chunk-session-snapshots/<plan>/<chunk>/*.json"]
@@ -420,7 +420,7 @@ flowchart TD
 | `.fbeast/.build/beasts.db` | agent, dispatch, run, interview services | dashboard Beast pages, process executor | tracked agents, runs, attempts, events, interview sessions |
 | `.fbeast/.build/beasts/logs/*` | process executor, run service | dashboard logs panel | per-attempt structured log lines |
 | `.fbeast/.build/build-traces.db` | observer bridge / trace viewer | trace viewer | spans, token usage, cost telemetry |
-| `.fbeast/.build/memory.db` | episodic memory adapter | hydration and trace recording | episodic execution memory |
+| `.fbeast/beast.db` | episodic memory adapter (`SqliteBrainMemoryAdapter` over `SqliteBrain`) | hydration and trace recording | episodic execution memory |
 | `.fbeast/.build/*.checkpoint` | execution phase, issue runner | resume logic | task completion markers and recovery checkpoints |
 | `.fbeast/.build/chunk-sessions/*` | MartinLoop | MartinLoop, renderer, compactor | canonical chunk conversation state |
 | `.fbeast/.build/chunk-session-snapshots/*` | MartinLoop | recovery and rollback | pre-compaction rollback points |

@@ -49,12 +49,12 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 ### Current Local CLI Path
 
-The current local CLI path is almost fully wired with real adapters — only the planner port is a stub:
+The current local CLI path defaults to real adapters for every enabled module except the planner port. Disabled safety modules still use explicit stubs:
 
 - Real execution stack: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`, chunk-session store/renderer/compactor/GC
 - Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured)
 - Real safety adapters wired in `src/cli/dep-factory.ts`: `CritiquePortAdapter` over `@franken/critique` (critique) and `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (governor; non-TTY runs default to reject). If either safety module is enabled but its package cannot be imported, the dep factory fails closed (throws) unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` explicitly opts into all-pass stubs
-- Stubbed: only the planner port (`stubPlanner` in `src/cli/dep-factory.ts` throws if invoked; planning is graph-builder driven)
+- Stubbed: the planner port (`stubPlanner` in `src/cli/dep-factory.ts` throws if invoked; planning is graph-builder driven). Critique/governor use all-pass/all-approve stubs only when disabled by run config or `FRANKENBEAST_MODULE_CRITIQUE=false` / `FRANKENBEAST_MODULE_GOVERNOR=false`, or when `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe missing-package fallbacks
 - `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
 - PR creation is wired; the dep factory resolves target branch from CLI args/config via `baseBranch`
 - The CLI path imports concrete observer classes from `@frankenbeast/observer`, so it is not purely ports-only today
