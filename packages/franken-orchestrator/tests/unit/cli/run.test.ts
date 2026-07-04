@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
@@ -70,8 +71,10 @@ const {
     initNonInteractive: false,
   }));
   const mockSessionStart = vi.fn(async () => ({ status: 'completed' as const }));
-  const MockSession = vi.fn(function (this: { start: typeof mockSessionStart }) {
+  const mockSessionRunIssues = vi.fn(async () => ({ status: 'completed' as const }));
+  const MockSession = vi.fn(function (this: { start: typeof mockSessionStart; runIssues: typeof mockSessionRunIssues }) {
     this.start = mockSessionStart;
+    this.runIssues = mockSessionRunIssues;
   });
   const mockStartChatServer = vi.fn(async () => ({
     url: 'http://127.0.0.1:3737',
@@ -119,11 +122,13 @@ vi.mock('../../../src/cli/args.js', () => ({
 vi.mock('../../../src/cli/project-root.js', () => ({
   resolveProjectRoot: vi.fn((dir: string) => dir),
   generatePlanName: vi.fn(() => 'plan-2026-03-08'),
-  getProjectPaths: vi.fn((root: string) => ({
+  getProjectPaths: vi.fn((root: string, planName?: string) => {
+    const plansDir = planName ? `${root}/.fbeast/plans/${planName}` : `${root}/.fbeast/plans`;
+    return {
     root,
     frankenbeastDir: `${root}/.fbeast`,
     llmCacheDir: `${root}/.fbeast/.cache/llm`,
-    plansDir: `${root}/.fbeast/plans`,
+    plansDir,
     buildDir: `${root}/.fbeast/.build`,
     beastsDir: `${root}/.fbeast/.build/beasts`,
     beastLogsDir: `${root}/.fbeast/.build/beasts/logs`,
@@ -131,10 +136,11 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     checkpointFile: `${root}/.fbeast/.build/.checkpoint`,
     tracesDb: `${root}/.fbeast/.build/build-traces.db`,
     logFile: `${root}/.fbeast/.build/build.log`,
-    designDocFile: `${root}/.fbeast/plans/design.md`,
+    designDocFile: `${plansDir}/design.md`,
     configFile: `${root}/.fbeast/config.json`,
-    llmResponseFile: `${root}/.fbeast/plans/llm-response.json`,
-  })),
+    llmResponseFile: `${plansDir}/llm-response.json`,
+  };
+  }),
   scaffoldFrankenbeast: vi.fn(),
 }));
 
@@ -230,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
@@ -250,6 +256,11 @@ describe('resolvePhases', () => {
 
   it('returns execute entry (no exit) for run subcommand', () => {
     const result = resolvePhases({ subcommand: 'run' });
+    expect(result).toEqual({ entryPhase: 'execute' });
+  });
+
+  it('returns execute entry for bare resume', () => {
+    const result = resolvePhases({ resume: true });
     expect(result).toEqual({ entryPhase: 'execute' });
   });
 
@@ -283,6 +294,243 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('discoverResumeTarget', () => {
+  it('selects the newest plan-scoped checkpoint and extracts the plan name', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+
+    const older = join(buildDir, 'plan-older.checkpoint');
+    const newer = join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint');
+    writeFileSync(older, 'impl:01:done');
+    writeFileSync(newer, 'impl:04:done');
+    utimesSync(older, new Date('2026-03-07T00:00:00Z'), new Date('2026-03-07T00:00:00Z'));
+    utimesSync(newer, new Date('2026-03-08T00:00:00Z'), new Date('2026-03-08T00:00:00Z'));
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plan-2026-03-07-pluggable-providers',
+      checkpointFile: newer,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('ignores newer legacy checkpoints when selecting a plan-scoped checkpoint', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-legacy-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+
+    const legacy = join(buildDir, '.checkpoint');
+    const scoped = join(buildDir, 'plan-existing.checkpoint');
+    writeFileSync(scoped, 'impl:01:done');
+    writeFileSync(legacy, 'impl:02:done');
+    utimesSync(scoped, new Date('2026-03-07T00:00:00Z'), new Date('2026-03-07T00:00:00Z'));
+    utimesSync(legacy, new Date('2026-03-09T00:00:00Z'), new Date('2026-03-09T00:00:00Z'));
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plan-existing',
+      checkpointFile: scoped,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves a custom plan directory when a matching root directory exists', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const customPlanDir = join(root, 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(customPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: customPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves a custom plan directory directly under .fbeast', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-fbeast-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const customPlanDir = join(root, '.fbeast', 'plans');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(customPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'plans.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plans',
+      checkpointFile: checkpoint,
+      planDir: customPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves a unique nested custom plan directory', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-nested-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const nestedPlanDir = join(root, 'docs', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(nestedPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: nestedPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('skips symlinked directories while scanning for nested custom plan dirs', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-symlink-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const nestedPlanDir = join(root, 'docs', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(nestedPlanDir, { recursive: true });
+    symlinkSync(root, join(root, 'docs', 'loop'), 'dir');
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: nestedPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('marks nested custom plan directories as ambiguous when more than one matches', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-ambiguous-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const firstPlanDir = join(root, 'docs', 'chunks');
+    const secondPlanDir = join(root, 'notes', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(firstPlanDir, { recursive: true });
+    mkdirSync(secondPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      ambiguousPlanDir: true,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('returns undefined when no plan-scoped checkpoints exist', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-empty-${Date.now()}`);
+    mkdirSync(join(root, '.fbeast', '.build'), { recursive: true });
+
+    expect(discoverResumeTarget(root)).toBeUndefined();
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('defers to the normal base resolver when resume base-branch reflog inference is unavailable', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-no-git-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+
+    expect(inferResumeBaseBranch(root)).toBeUndefined();
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('infers the pre-feature base branch while currently on a feature branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-feature-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('uses the current base branch after checkout returns from a feature branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('ignores prior feature branches while inferring the resume base branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-feature-to-feature-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-05'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('uses the original conventional base branch after later checkout detours', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-original-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'develop'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('develop');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('ignores inferred base branches that no longer exist', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-deleted-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'develop'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/develop', 'develop'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['branch', '-D', 'develop'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBeUndefined();
+
+    rmSync(root, { recursive: true, force: true });
   });
 });
 
@@ -499,6 +747,159 @@ describe('main() execution', () => {
       entryPhase: 'execute',
       resume: true,
     }));
+  });
+
+  it('auto-detects plan dir and skips base-branch prompt for bare --resume', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+    writeFileSync(join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint'), 'impl:04:done');
+    vi.mocked(resolveBaseBranch).mockClear();
+
+    mockParseArgs.mockReturnValue({
+      subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: true,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, 'plan-2026-03-07-pluggable-providers');
+    expect(resolveBaseBranch).toHaveBeenCalledWith(root, undefined, expect.any(Object));
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      baseBranch: 'main',
+      entryPhase: 'execute',
+      resume: true,
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans/plan-2026-03-07-pluggable-providers`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('does not scope issue resumes to an unrelated execution checkpoint', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-issues-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+    writeFileSync(join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint'), 'impl:04:done');
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'issues',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: true,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, undefined);
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      entryPhase: 'execute',
+      resume: true,
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('preserves explicit issue plan names', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-issues-plan-name-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+
+    mockParseArgs.mockReturnValue({
+      subcommand: 'issues',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: 'batch-13',
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, 'batch-13');
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      entryPhase: 'execute',
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans/batch-13`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('uses config.providers.default when --provider is omitted', async () => {

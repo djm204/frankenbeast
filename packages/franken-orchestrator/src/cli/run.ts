@@ -2,8 +2,8 @@
 
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -73,7 +73,7 @@ export function createStdinIO(): InterviewIO & { close(): void } {
  * Determines entry phase and exit behavior from CLI args.
  * Subcommand takes precedence, then flags, then default.
  */
-export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir'>): {
+export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir' | 'resume'>>): {
   entryPhase: SessionPhase;
   exitAfter?: SessionPhase;
 } {
@@ -92,6 +92,9 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   }
 
   // Default mode — detect entry from provided files
+  if (args.resume) {
+    return { entryPhase: 'execute' };
+  }
   if (args.planDir) {
     return { entryPhase: 'execute' };
   }
@@ -102,6 +105,150 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   // No files, no subcommand — full interactive flow
   return { entryPhase: 'interview' };
 }
+
+export interface ResumeTarget {
+  planName: string;
+  checkpointFile: string;
+  planDir?: string;
+  ambiguousPlanDir?: boolean;
+}
+
+function findUniquePlanDirByBasename(root: string, planName: string): string | undefined | null {
+  const skip = new Set(['.git', '.fbeast', 'node_modules']);
+  const matches: string[] = [];
+
+  function visit(dir: string): void {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (skip.has(entry)) continue;
+      const path = join(dir, entry);
+      let stats;
+      try {
+        stats = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (!stats.isDirectory()) continue;
+      if (entry === planName) {
+        matches.push(path);
+        continue;
+      }
+      visit(path);
+    }
+  }
+
+  visit(root);
+  if (matches.length === 0) return undefined;
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export function discoverResumeTarget(root: string): ResumeTarget | undefined {
+  const buildDir = join(root, '.fbeast', '.build');
+  let newest: { checkpointFile: string; mtimeMs: number } | undefined;
+
+  try {
+    for (const entry of readdirSync(buildDir)) {
+      if (entry === '.checkpoint') continue;
+      if (!entry.endsWith('.checkpoint')) continue;
+      const checkpointFile = join(buildDir, entry);
+      const stats = statSync(checkpointFile);
+      if (!stats.isFile()) continue;
+      if (!newest || stats.mtimeMs > newest.mtimeMs) {
+        newest = { checkpointFile, mtimeMs: stats.mtimeMs };
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (!newest) return undefined;
+
+  const fileName = basename(newest.checkpointFile);
+  const planName = fileName.replace(/\.checkpoint$/i, '');
+  if (!planName) return undefined;
+
+  const scopedPlanDir = join(root, '.fbeast', 'plans', planName);
+  const fbeastPlanDir = join(root, '.fbeast', planName);
+  const customPlanDir = join(root, planName);
+  const nestedPlanDir = !existsSync(scopedPlanDir) && !existsSync(customPlanDir) && !existsSync(fbeastPlanDir)
+    ? findUniquePlanDirByBasename(root, planName)
+    : undefined;
+  const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
+    ? customPlanDir
+    : !existsSync(scopedPlanDir) && existsSync(fbeastPlanDir)
+      ? fbeastPlanDir
+    : nestedPlanDir ?? undefined;
+
+  if (nestedPlanDir === null) {
+    return { planName, checkpointFile: newest.checkpointFile, ambiguousPlanDir: true };
+  }
+
+  return { planName, checkpointFile: newest.checkpointFile, ...(planDir ? { planDir } : {}) };
+}
+
+function ensureResumeTargetIsUsable(resumeTarget: ResumeTarget | undefined): void {
+  if (resumeTarget?.ambiguousPlanDir) {
+    throw new Error(
+      `Multiple custom plan directories named "${resumeTarget.planName}" match ${resumeTarget.checkpointFile}; pass --plan-dir explicitly to resume this checkpoint.`,
+    );
+  }
+}
+
+function branchExists(root: string, branch: string): boolean {
+  try {
+    execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isConventionalBaseBranch(branch: string): boolean {
+  return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
+}
+
+export function inferResumeBaseBranch(root: string): string | undefined {
+  try {
+    const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const reflog = execFileSync('git', ['reflog', '--format=%gs'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const candidateBaseBranches: string[] = [];
+    for (const line of reflog.split('\n')) {
+      const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
+      if (!match) continue;
+      const [, fromBranch, toBranch] = match;
+      if (toBranch === currentBranch && isConventionalBaseBranch(toBranch) && branchExists(root, toBranch)) {
+        return toBranch;
+      }
+      if (toBranch === currentBranch && fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch) && branchExists(root, fromBranch)) {
+        candidateBaseBranches.push(fromBranch);
+      }
+    }
+    const originalBaseBranch = candidateBaseBranches.at(-1);
+    if (originalBaseBranch) return originalBaseBranch;
+  } catch {
+    // Fall through to the normal base-branch resolver when reflog is unavailable.
+  }
+
+  return undefined;
+}
+
 
 /**
  * Validates config path and loads config from all sources.
@@ -358,8 +505,18 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
+  const resumeTarget = args.resume && !args.planDir && !args.planName && (!args.subcommand || args.subcommand === 'run')
+    ? discoverResumeTarget(root)
+    : undefined;
+  ensureResumeTargetIsUsable(resumeTarget);
+  const planDirOverride = args.planDir ?? resumeTarget?.planDir;
+
   // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const planName = planDirOverride
+    ? undefined
+    : (args.planName ?? (args.subcommand === 'issues'
+      ? undefined
+      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
 
@@ -372,6 +529,10 @@ export async function main(): Promise<void> {
 
   if (args.verbose) {
     console.log('Config:', JSON.stringify(config, null, 2));
+  }
+
+  if (resumeTarget) {
+    logger.info(`Resuming ${resumeTarget.planName} from ${resumeTarget.checkpointFile}`, 'session');
   }
 
   scaffoldFrankenbeast(paths);
@@ -604,8 +765,12 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
-  // Resolve base branch
-  const baseBranch = await resolveBaseBranch(root, args.baseBranch, io);
+  // Resolve base branch. Resume usually starts from the interrupted run's
+  // feature branch, so infer the original base from git reflog unless the
+  // user supplied an explicit --base-branch override.
+  const baseBranch = args.resume && !args.baseBranch
+    ? (inferResumeBaseBranch(root) ?? await resolveBaseBranch(root, args.baseBranch, io))
+    : await resolveBaseBranch(root, args.baseBranch, io);
 
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
@@ -628,7 +793,9 @@ export async function main(): Promise<void> {
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
-    ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+    ...(planDirOverride !== undefined
+      ? { planDirOverride }
+      : {}),
     // Issue-specific config
     issueLabel: args.issueLabel,
     issueMilestone: args.issueMilestone,
