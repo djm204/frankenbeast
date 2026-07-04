@@ -161,7 +161,7 @@ describe('dashboard routes', () => {
       }
     });
 
-    it('does not reject the polling timer when refreshing the snapshot throws', async () => {
+    it('keeps polling after one snapshot refresh throws', async () => {
       vi.useFakeTimers();
       try {
         const deps = createMockDeps();
@@ -176,7 +176,18 @@ describe('dashboard routes', () => {
         });
 
         await vi.advanceTimersByTimeAsync(1_000);
+        providers.mockReturnValue([
+          { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+          { name: 'ollama', type: 'ollama', available: true, failoverOrder: 1 },
+        ]);
+
+        const nextRead = reader.read();
+        await vi.advanceTimersByTimeAsync(1_000);
+        const { value } = await nextRead;
+        const text = value ? new TextDecoder().decode(value) : '';
         reader.cancel();
+
+        expect(text).toContain('"name":"ollama"');
       } finally {
         vi.useRealTimers();
       }

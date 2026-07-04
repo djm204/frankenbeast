@@ -55,12 +55,18 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
       };
 
       const snapshotInterval = setInterval(async () => {
+        let nextSnapshot: string;
         try {
-          const nextSnapshot = JSON.stringify(buildSnapshot(deps));
-          if (nextSnapshot === lastSnapshot) {
-            return;
-          }
-          lastSnapshot = nextSnapshot;
+          nextSnapshot = JSON.stringify(buildSnapshot(deps));
+        } catch {
+          return;
+        }
+
+        if (nextSnapshot === lastSnapshot) {
+          return;
+        }
+        lastSnapshot = nextSnapshot;
+        try {
           await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
         } catch {
           clearAll();
