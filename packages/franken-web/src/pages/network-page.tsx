@@ -8,24 +8,32 @@ interface NetworkPageProps {
   status: Pick<NetworkStatusResponse, 'mode' | 'secureBackend'>;
   services: Array<{ id: string; status: string; explanation?: string; url?: string }>;
   logs: string[];
+  selectedLogServiceId?: string;
+  logsLoading?: boolean;
+  logsError?: string | null;
   config: NetworkConfigResponse;
   onRefresh(): void;
   onStart(serviceId: string): void;
   onStop(serviceId: string): void;
   onRestart(serviceId: string): void;
   onSaveConfig(assignments: string[]): void;
+  onSelectLogService(serviceId: string): void;
 }
 
 export function NetworkPage({
   status,
   services,
   logs,
+  selectedLogServiceId,
+  logsLoading,
+  logsError,
   config,
   onRefresh,
   onStart,
   onStop,
   onRestart,
   onSaveConfig,
+  onSelectLogService,
 }: NetworkPageProps) {
   return (
     <main className="network-page">
@@ -50,7 +58,14 @@ export function NetworkPage({
 
         <div className="network-page__rail">
           <NetworkConfigEditor config={config} onSave={onSaveConfig} />
-          <NetworkLogsPanel logs={logs} />
+          <NetworkLogsPanel
+            error={logsError}
+            isLoading={logsLoading}
+            logs={logs}
+            onSelectService={onSelectLogService}
+            selectedServiceId={selectedLogServiceId}
+            services={services}
+          />
         </div>
       </div>
     </main>

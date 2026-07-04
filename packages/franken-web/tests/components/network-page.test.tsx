@@ -13,6 +13,7 @@ describe('NetworkPage', () => {
           chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
         }}
         logs={['/tmp/chat-server.log']}
+        onSelectLogService={vi.fn()}
         onRefresh={vi.fn()}
         onRestart={vi.fn()}
         onSaveConfig={vi.fn()}
@@ -51,6 +52,7 @@ describe('NetworkPage', () => {
           chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
         }}
         logs={[]}
+        onSelectLogService={vi.fn()}
         onRefresh={vi.fn()}
         onRestart={onRestart}
         onSaveConfig={onSaveConfig}
@@ -78,5 +80,34 @@ describe('NetworkPage', () => {
     expect(onStop).toHaveBeenCalledWith('chat-server');
     expect(onRestart).toHaveBeenCalledWith('chat-server');
     expect(onSaveConfig).toHaveBeenCalledWith(['chat.model=gpt-5']);
+  });
+
+  it('lets operators select a service whose logs should be fetched', () => {
+    const onSelectLogService = vi.fn();
+
+    render(
+      <NetworkPage
+        config={{
+          network: { mode: 'secure', secureBackend: 'local-encrypted' },
+          chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+        }}
+        logs={[]}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onSelectLogService={onSelectLogService}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[
+          { id: 'chat-server', status: 'running' },
+          { id: 'dashboard', status: 'stopped' },
+        ]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });
+
+    expect(onSelectLogService).toHaveBeenCalledWith('chat-server');
   });
 });
