@@ -67,7 +67,10 @@ describe('telegramRouter', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'session-123', 'approve');
+    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'session-123', 'approve', {
+      chatId: '456',
+      externalChannelId: '456',
+    });
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('answerCallbackQuery'),
       expect.any(Object)
