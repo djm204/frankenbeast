@@ -49,7 +49,7 @@ PlanResult
 | `src/hitl/types.ts` | `HITLGate` interface and approval result types |
 | `src/hitl/plan-exporter.ts` | `PlanExporter` — renders `PlanGraph` as Markdown checklist |
 | `src/hitl/plan-modifier.ts` | `applyModifications` — applies `TaskModification[]` to a graph |
-| `src/hitl/stub-hitl-gate.ts` | `StubHITLGate` — configurable test double |
+| `src/hitl/stub-hitl-gate.ts` | Internal `StubHITLGate` test double (not a public package export) |
 | `src/recovery/error-ingester.ts` | `ErrorIngester` — classifies errors against known patterns |
 | `src/recovery/recovery-plan-generator.ts` | `RecoveryPlanGenerator` — injects a fix-it task into the graph |
 | `src/recovery/recovery-controller.ts` | `RecoveryController` — orchestrates recovery with circuit breaker |
@@ -62,15 +62,24 @@ PlanResult
 import {
   Planner,
   LinearPlanner,
-  StubHITLGate,
   RecoveryController,
+  type ApprovalResult,
+  type HITLGate,
 } from 'franken-planner';
+
+class BrowserConfirmHITLGate implements HITLGate {
+  async requestApproval(markdown: string): Promise<ApprovalResult> {
+    return window.confirm(markdown)
+      ? { decision: 'approved' }
+      : { decision: 'aborted', reason: 'User rejected plan' };
+  }
+}
 
 const planner = new Planner(
   guardrailsModule,   // GuardrailsModule — sanitizes raw input
   graphBuilder,       // GraphBuilder — converts Intent to PlanGraph
   taskExecutor,       // TaskExecutor — executes a single Task
-  new StubHITLGate(), // HITLGate — approve / modify / abort the plan
+  new BrowserConfirmHITLGate(), // HITLGate — approve / modify / abort the plan
   new LinearPlanner(),
   new RecoveryController(memoryModule),
   selfCritiqueModule  // optional SelfCritiqueModule — enables CoT enforcement
@@ -101,7 +110,10 @@ interface HITLGate {
 //               | { decision: 'aborted'; reason: string }
 ```
 
-Use `StubHITLGate` in tests (auto-approves by default).
+Implement this interface at the application boundary (CLI prompt, browser UI,
+chat approval flow, etc.). The package's `StubHITLGate` is an internal test
+double for this repository's tests and is intentionally not exported from the
+public package entrypoint.
 
 ### CoT enforcement
 
@@ -137,7 +149,7 @@ tests/
 │   ├── core/           # DAG, types, errors
 │   ├── planners/       # LinearPlanner, ParallelPlanner, RecursivePlanner
 │   ├── cot/            # RationaleEnforcer, CoT gate
-│   ├── hitl/           # PlanExporter, plan-modifier, StubHITLGate
+│   ├── hitl/           # PlanExporter, plan-modifier, internal StubHITLGate
 │   ├── recovery/       # ErrorIngester, RecoveryPlanGenerator, RecoveryController
 │   └── planner.test.ts # Planner orchestrator unit tests
 └── integration/
