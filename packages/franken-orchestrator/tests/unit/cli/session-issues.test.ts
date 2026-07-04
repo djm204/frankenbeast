@@ -324,6 +324,28 @@ describe('Session.runIssues()', () => {
     expect(mockFinalize).toHaveBeenCalled();
   });
 
+  it('finalizes issue-mode dependencies when fetching issues throws', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    mockFetcher.fetch.mockRejectedValueOnce(new Error('fetch failed'));
+    const config = makeConfig();
+    const session = new Session(config);
+
+    await expect(session.runIssues()).rejects.toThrow('fetch failed');
+
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalizes issue-mode dependencies when execution throws', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    mockRunnerInstance.run.mockRejectedValueOnce(new Error('runner failed'));
+    const config = makeConfig();
+    const session = new Session(config);
+
+    await expect(session.runIssues()).rejects.toThrow('runner failed');
+
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
   it('constructs fetch options from CLI args', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig({

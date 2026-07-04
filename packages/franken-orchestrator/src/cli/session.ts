@@ -122,75 +122,77 @@ export class Session {
       dryRun,
     });
 
-    if (!issueDeps) {
-      throw new Error('Issue dependencies not created');
-    }
-
-    const { fetcher, triage, review, graphBuilder, runner, executor, git, prCreator, checkpoint, issueRuntime } = issueDeps;
-
-    // Resolve canonical repo for the entire issues pipeline.
-    let repo: string;
-    if (this.config.targetUpstream) {
-      repo = await resolveUpstreamRepo();
-    } else if (this.config.issueRepo) {
-      repo = this.config.issueRepo;
-    } else {
-      try {
-        repo = await fetcher.inferRepo();
-      } catch {
-        throw new Error('Could not infer repository. Use --repo <owner/repo> to specify.');
+    try {
+      if (!issueDeps) {
+        throw new Error('Issue dependencies not created');
       }
-    }
 
-    // Build fetch options from CLI args
-    const fetchOptions: IssueFetchOptions = {
-      repo,
-      label: this.config.issueLabel,
-      milestone: this.config.issueMilestone,
-      search: this.config.issueSearch,
-      assignee: this.config.issueAssignee,
-      limit: this.config.issueLimit,
-    };
+      const { fetcher, triage, review, graphBuilder, runner, git, checkpoint, issueRuntime } = issueDeps;
 
-    // Fetch
-    logger.info('Fetching issues...', 'issues');
-    const issues = await fetcher.fetch(fetchOptions);
-    logger.info(`Found ${issues.length} issue(s)`, 'issues');
+      // Resolve canonical repo for the entire issues pipeline.
+      let repo: string;
+      if (this.config.targetUpstream) {
+        repo = await resolveUpstreamRepo();
+      } else if (this.config.issueRepo) {
+        repo = this.config.issueRepo;
+      } else {
+        try {
+          repo = await fetcher.inferRepo();
+        } catch {
+          throw new Error('Could not infer repository. Use --repo <owner/repo> to specify.');
+        }
+      }
 
-    // Triage
-    logger.info('Triaging issues...', 'issues');
-    const triageResults = await triage.triage(issues);
+      // Build fetch options from CLI args
+      const fetchOptions: IssueFetchOptions = {
+        repo,
+        label: this.config.issueLabel,
+        milestone: this.config.issueMilestone,
+        search: this.config.issueSearch,
+        assignee: this.config.issueAssignee,
+        limit: this.config.issueLimit,
+      };
 
-    // Review (HITL)
-    const decision = await review.review(issues, triageResults);
+      // Fetch
+      logger.info('Fetching issues...', 'issues');
+      const issues = await fetcher.fetch(fetchOptions);
+      logger.info(`Found ${issues.length} issue(s)`, 'issues');
 
-    if (decision.action === 'abort') {
-      logger.info('Issue processing aborted by user', 'issues');
+      // Triage
+      logger.info('Triaging issues...', 'issues');
+      const triageResults = await triage.triage(issues);
+
+      // Review (HITL)
+      const decision = await review.review(issues, triageResults);
+
+      if (decision.action === 'abort') {
+        logger.info('Issue processing aborted by user', 'issues');
+        return;
+      }
+
+      // Execute approved issues
+      logger.info('Executing approved issues...', 'issues');
+
+      const approvedNumbers = new Set(decision.approved.map(t => t.issueNumber));
+      const approvedIssues = issues.filter(i => approvedNumbers.has(i.number));
+
+      const outcomes = await runner.run({
+        issues: approvedIssues,
+        triageResults: decision.approved,
+        graphBuilder,
+        fullDeps: deps,
+        git,
+        logger,
+        budget,
+        repo,
+        issueRuntime,
+        checkpoint,
+      });
+
+      this.displayIssueSummary(outcomes);
+    } finally {
       await finalize();
-      return;
     }
-
-    // Execute approved issues
-    logger.info('Executing approved issues...', 'issues');
-
-    const approvedNumbers = new Set(decision.approved.map(t => t.issueNumber));
-    const approvedIssues = issues.filter(i => approvedNumbers.has(i.number));
-
-    const outcomes = await runner.run({
-      issues: approvedIssues,
-      triageResults: decision.approved,
-      graphBuilder,
-      fullDeps: deps,
-      git,
-      logger,
-      budget,
-      repo,
-      issueRuntime,
-      checkpoint,
-    });
-
-    this.displayIssueSummary(outcomes);
-    await finalize();
   }
 
   private async runInterview(): Promise<'continue' | 'exit'> {
