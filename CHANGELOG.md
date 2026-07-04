@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.40.5](https://github.com/djm204/frankenbeast/compare/v0.40.4...v0.40.5) (2026-07-04)
+
+
+### Bug Fixes
+
+* **mcp-suite:** drop never-used skill_state table from shared schema ([#546](https://github.com/djm204/frankenbeast/issues/546)) ([959ee17](https://github.com/djm204/frankenbeast/commit/959ee170356252336bf94a23243097df4f01f353)), closes [#493](https://github.com/djm204/frankenbeast/issues/493)
+* **orchestrator:** allow dashboard CORS origins ([59cf742](https://github.com/djm204/frankenbeast/commit/59cf7422d6e543c6b5e56589336303152611d071))
+* **web:** add analytics event pagination controls ([#534](https://github.com/djm204/frankenbeast/issues/534)) ([0ae15e8](https://github.com/djm204/frankenbeast/commit/0ae15e8d569e99a8357dfc9f53434dbfa18cc4c2))
+* **web:** fall back to REST for approvals ([#479](https://github.com/djm204/frankenbeast/issues/479)) ([3ac7f74](https://github.com/djm204/frankenbeast/commit/3ac7f74384328418a483fc9a2e4fb8837d87a380))
+* **web:** persist agent detail edits ([#533](https://github.com/djm204/frankenbeast/issues/533)) ([de88101](https://github.com/djm204/frankenbeast/commit/de88101a2fcf9514c9785dee931177d098dd95ef))
+* **web:** wire Network page log fetching ([#532](https://github.com/djm204/frankenbeast/issues/532)) ([49051bd](https://github.com/djm204/frankenbeast/commit/49051bde6a4531c2d5d6439f596f1736e4d98b90))
+
+
+### Documentation
+
+* correct architecture docs to match real local-CLI wiring and contracts ([4a8cded](https://github.com/djm204/frankenbeast/commit/4a8cdede52dfb54ce5e0beadd76b36f63031e16e))
+
 ## [0.40.4](https://github.com/djm204/frankenbeast/compare/v0.40.3...v0.40.4) (2026-07-04)
 
 
