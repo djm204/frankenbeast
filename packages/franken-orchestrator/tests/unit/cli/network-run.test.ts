@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CliArgs } from '../../../src/cli/args.js';
 import { runNetworkCommand } from '../../../src/cli/run.js';
@@ -91,6 +91,7 @@ describe('runNetworkCommand', () => {
         resolveServices: vi.fn(() => services),
         createSupervisor: vi.fn(() => ({
           up,
+          stopAll: vi.fn(),
           down: vi.fn(),
           status: vi.fn(),
           stop: vi.fn(),
@@ -132,6 +133,7 @@ describe('runNetworkCommand', () => {
               { id: 'chat-server', pid: 0, dependsOn: [], startedAt: '2026-03-10T00:00:00.000Z', url: 'http://127.0.0.1:3737', status: 'already-running' },
             ],
           })),
+          stopAll: vi.fn(),
           down: vi.fn(),
           status: vi.fn(),
           stop: vi.fn(),
@@ -145,6 +147,75 @@ describe('runNetworkCommand', () => {
     );
 
     expect(print).toHaveBeenCalledWith('Already running 1 service.');
+  });
+
+  it('resolves relative config paths before forwarding them to managed services', async () => {
+    const config = defaultConfig();
+    const resolveServices = vi.fn(() => [makeService('chat-server')]);
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'up', networkDetached: true, config: 'configs/runtime.json' }),
+      config,
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices,
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(async () => ({ services: [] })),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print: vi.fn(),
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    expect(resolveServices).toHaveBeenCalledWith(config, {
+      repoRoot: '/repo/frankenbeast',
+      configFile: resolvePath('configs/runtime.json'),
+    });
+  });
+
+  it('foreground shutdown stops only services started by this invocation', async () => {
+    const stopAll = vi.fn(async () => undefined);
+    const waitForShutdown = vi.fn(async () => undefined);
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'up', networkDetached: false }),
+      defaultConfig(),
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => [makeService('chat-server'), makeService('dashboard-web')]),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(async () => ({
+            services: [
+              { id: 'chat-server', pid: 0, dependsOn: [], startedAt: '2026-03-10T00:00:00.000Z', status: 'already-running' as const },
+              { id: 'dashboard-web', pid: 102, dependsOn: ['chat-server'], startedAt: '2026-03-10T00:00:00.000Z', status: 'started' as const },
+            ],
+          })),
+          stopAll,
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print: vi.fn(),
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown,
+      },
+    );
+
+    expect(waitForShutdown).toHaveBeenCalled();
+    expect(stopAll).toHaveBeenCalledWith(expect.objectContaining({
+      services: [expect.objectContaining({ id: 'dashboard-web', status: 'started' })],
+    }));
   });
 
   it('up does not print started when the supervisor rejects startup', async () => {
@@ -161,6 +232,7 @@ describe('runNetworkCommand', () => {
           up: vi.fn(async () => {
             throw new Error('Port conflict for chat-server on 127.0.0.1:3737');
           }),
+          stopAll: vi.fn(),
           down: vi.fn(),
           status: vi.fn(),
           stop: vi.fn(),
@@ -188,6 +260,7 @@ describe('runNetworkCommand', () => {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
           up: vi.fn(),
+          stopAll: vi.fn(),
           down,
           status: vi.fn(),
           stop: vi.fn(),
@@ -220,6 +293,7 @@ describe('runNetworkCommand', () => {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
           up: vi.fn(),
+          stopAll: vi.fn(),
           down: vi.fn(),
           status: vi.fn(async () => status),
           stop: vi.fn(),
@@ -251,6 +325,7 @@ describe('runNetworkCommand', () => {
       resolveServices: vi.fn(() => services),
       createSupervisor: vi.fn(() => ({
         up,
+        stopAll: vi.fn(),
         down: vi.fn(),
         status: vi.fn(),
         stop,
@@ -302,6 +377,7 @@ describe('runNetworkCommand', () => {
         resolveServices: vi.fn(() => []),
         createSupervisor: vi.fn(() => ({
           up: vi.fn(),
+          stopAll: vi.fn(),
           down: vi.fn(),
           status: vi.fn(),
           stop: vi.fn(),
@@ -345,7 +421,8 @@ describe('runNetworkCommand', () => {
           resolveServices: vi.fn(() => []),
           createSupervisor: vi.fn(() => ({
             up: vi.fn(),
-            down: vi.fn(),
+            stopAll: vi.fn(),
+          down: vi.fn(),
             status: vi.fn(),
             stop: vi.fn(),
             logs: vi.fn(),
@@ -389,7 +466,8 @@ describe('runNetworkCommand', () => {
           resolveServices: vi.fn(() => []),
           createSupervisor: vi.fn(() => ({
             up: vi.fn(),
-            down: vi.fn(),
+            stopAll: vi.fn(),
+          down: vi.fn(),
             status: vi.fn(),
             stop: vi.fn(),
             logs: vi.fn(),

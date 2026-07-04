@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { TelegramUpdateSchema } from './telegram-schemas.js';
+import { decodeTelegramCallbackData } from './telegram-adapter.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
 
@@ -63,13 +64,14 @@ export function telegramRouter(options: TelegramRouterOptions) {
       const userId = query.from.id.toString();
 
       if (chatId) {
-        const sessionId = sessionMapper.mapToSessionId({
+        const callback = decodeTelegramCallbackData(update.callback_query.data);
+        const sessionId = callback.sessionId ?? sessionMapper.mapToSessionId({
           channelType: 'telegram',
           externalUserId: userId,
           externalChannelId: chatId,
         });
 
-        await gateway.handleAction('telegram', sessionId, update.callback_query.data, {
+        await gateway.handleAction('telegram', sessionId, callback.actionId, {
           externalChannelId: chatId,
           chatId,
         });

@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -867,8 +867,9 @@ export async function runNetworkCommand(
     return;
   }
 
+  const configFile = args.config ? resolvePath(args.config) : undefined;
   const services = filterNetworkServices(
-    deps.resolveServices(config, { repoRoot: root, ...(args.config ? { configFile: args.config } : {}) }),
+    deps.resolveServices(config, { repoRoot: root, ...(configFile ? { configFile } : {}) }),
     action === 'up' ? undefined : args.networkTarget,
   );
 
@@ -898,7 +899,10 @@ export async function runNetworkCommand(
     }
     if (!args.networkDetached) {
       await deps.waitForShutdown();
-      await supervisor.stopAll(state);
+      await supervisor.stopAll({
+        ...state,
+        services: state.services.filter((service) => service.status === 'started'),
+      });
     }
     return;
   }
