@@ -173,6 +173,21 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
   return normalizeTranscript(session.transcript);
 }
 
+function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
+  const snapshot = applySessionSnapshot(session);
+  const snapshotById = new Map(snapshot.map((message) => [message.id, message]));
+  const seen = new Set<string>();
+  const merged = current.map((message) => {
+    seen.add(message.id);
+    return snapshotById.get(message.id) ?? message;
+  });
+
+  return [
+    ...merged,
+    ...snapshot.filter((message) => !seen.has(message.id)),
+  ];
+}
+
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
@@ -433,7 +448,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       try {
         await clientRef.current.approve(sessionId, approved);
         const refreshed = await clientRef.current.getSession(sessionId);
-        setMessages(applySessionSnapshot(refreshed));
+        readyRef.current = true;
+        setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);

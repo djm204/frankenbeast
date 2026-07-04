@@ -297,6 +297,104 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('preserves streamed messages after HTTP approval fallback', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => {
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'assistant-streamed',
+        chunk: 'Ready to deploy',
+        modelTier: 'cheap',
+      });
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 1, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.01,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: 'assistant-streamed',
+      content: 'Ready to deploy',
+    }));
+    expect(result.current.pendingApproval).toBeNull();
+  });
+
+  it('ignores stale session.ready after HTTP approval fallback', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => {
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 1, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.01,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    act(() => {
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: {
+          description: 'Deploy the generated fix',
+          requestedAt: '2026-03-09T00:00:06Z',
+        },
+      });
+    });
+
+    expect(result.current.pendingApproval).toBeNull();
+  });
+
   it('resumes an existing session and reconnects when the socket closes', async () => {
     mockGetSession.mockResolvedValue({
       id: 'existing-sess',
