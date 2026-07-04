@@ -471,6 +471,9 @@ describe('parseArgs', () => {
       expect(chatArgs.budget).toBe(12.5);
       expect(chatArgs.port).toBe(4242);
 
+      const ephemeralPortArgs = parseArgs(['chat-server', '--port', '0']);
+      expect(ephemeralPortArgs.port).toBe(0);
+
       const issueArgs = parseArgs(['issues', '--limit', '50']);
       expect(issueArgs.issueLimit).toBe(50);
     });
@@ -491,7 +494,6 @@ describe('parseArgs', () => {
       ['NaN'],
       ['8080abc'],
       ['3.5'],
-      ['0'],
       ['65536'],
     ])('rejects invalid port value %s', (value) => {
       expect(() => parseArgs(['chat-server', '--port', value])).toThrow(/Invalid --port/);
