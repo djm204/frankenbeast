@@ -163,6 +163,8 @@ function safeReplayJson(value: unknown): string {
 // ── CliSkillExecutor ──
 
 type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
+const BUDGET_POLL_INTERVAL_MS = 100;
+
 type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<
   MartinLoopConfig,
   'command' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
@@ -239,6 +241,23 @@ export class CliSkillExecutor {
     }
 
     const chunkId = this.extractChunkId(skillId);
+    const budgetAbortController = new AbortController();
+    let budgetAbortResult: CircuitBreakerResult | undefined;
+    const abortForBudget = (result: CircuitBreakerResult): void => {
+      budgetAbortResult = result;
+      if (!budgetAbortController.signal.aborted) {
+        budgetAbortController.abort(new BudgetExceededError(result.spendUsd, result.limitUsd));
+      }
+    };
+    const upstreamAbortSignal = config.martin?.abortSignal;
+    if (upstreamAbortSignal?.aborted) {
+      budgetAbortController.abort(upstreamAbortSignal.reason);
+    } else if (upstreamAbortSignal) {
+      upstreamAbortSignal.addEventListener('abort', () => {
+        budgetAbortController.abort(upstreamAbortSignal.reason);
+      }, { once: true });
+    }
+
     this.observer.recordReplay?.({
       kind: 'tool.call',
       runId: input.sessionId,
@@ -291,11 +310,19 @@ export class CliSkillExecutor {
     const wrappedConfig: MartinLoopConfig = {
       ...martinDefaults,
       ...config.martin,
+      abortSignal: budgetAbortController.signal,
       onRateLimit: (provider: string) => {
         this.logger?.warn('MartinLoop: provider rate limited', { chunkId, provider }, 'martin');
         return config.martin?.onRateLimit?.(provider);
       },
       onProviderAttempt: (provider: string, iteration: number) => {
+        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig);
+        const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
+        if (estimatedBudgetResult.tripped) {
+          abortForBudget(estimatedBudgetResult);
+          throw new BudgetExceededError(estimatedBudgetResult.spendUsd, estimatedBudgetResult.limitUsd);
+        }
+
         this.logger?.info('MartinLoop: provider attempt', { chunkId, provider, iteration }, 'martin');
         // Show in-place progress line (overwritten by next update or final summary)
         writeProgress(
@@ -427,19 +454,34 @@ export class CliSkillExecutor {
     let martinResult: MartinLoopResult;
     let lastStaleMateSignature = '';
     let stalledIterations = 0;
+    const budgetPoll = setInterval(() => {
+      const currentCost = this.computeCurrentCost();
+      const budgetResult = this.observer.breaker.check(currentCost);
+      if (budgetResult.tripped) {
+        abortForBudget(budgetResult);
+      }
+    }, BUDGET_POLL_INTERVAL_MS);
+    budgetPoll.unref?.();
+
     try {
       martinResult = await this.martin.run(wrappedConfig);
     } catch (err) {
-      if (err instanceof BudgetExceededError) {
+      const budgetError = err instanceof BudgetExceededError
+        ? err
+        : budgetAbortResult
+          ? new BudgetExceededError(budgetAbortResult.spendUsd, budgetAbortResult.limitUsd)
+          : undefined;
+
+      if (budgetError) {
         const postTokens = this.observer.counter.grandTotal();
         this.observer.setMetadata(chunkSpan, {
           budgetExceeded: true,
-          spent: err.spent,
-          limit: err.limit,
+          spent: budgetError.spent,
+          limit: budgetError.limit,
         });
         this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
         return {
-          output: `Budget exceeded: $${err.spent.toFixed(2)} / $${err.limit.toFixed(2)}`,
+          output: `Budget exceeded: $${budgetError.spent.toFixed(2)} / $${budgetError.limit.toFixed(2)}`,
           tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
         };
       }
@@ -447,6 +489,8 @@ export class CliSkillExecutor {
       throw new Error(
         `MartinLoop failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      clearInterval(budgetPoll);
     }
 
     // Generate commit message for squash merge (if available)
@@ -618,6 +662,14 @@ export class CliSkillExecutor {
       return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
     });
     return this.observer.costCalc.totalCost(entries);
+  }
+
+  private estimateUpcomingIterationCost(config: MartinLoopConfig): number {
+    return this.observer.costCalc.totalCost([{
+      model: config.provider,
+      promptTokens: Math.ceil(config.prompt.length / 4),
+      completionTokens: Math.max(config.maxTurns, 1) * 1_000,
+    }]);
   }
 
   private recordSessionCommit(taskId: string, commitHash: string): void {
