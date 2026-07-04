@@ -168,7 +168,7 @@ export function inferResumeBaseBranch(root: string): string {
       if (toBranch === currentBranch && isConventionalBaseBranch(toBranch)) {
         return toBranch;
       }
-      if (fromBranch && fromBranch !== 'HEAD') {
+      if (fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch)) {
         return fromBranch;
       }
     }

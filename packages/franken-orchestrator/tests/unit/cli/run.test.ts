@@ -387,6 +387,22 @@ describe('discoverResumeTarget', () => {
 
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('ignores prior feature branches while inferring the resume base branch', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-feature-to-feature-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-05'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe('createStdinIO', () => {
