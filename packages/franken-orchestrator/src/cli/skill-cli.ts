@@ -5,11 +5,23 @@ export interface SkillCommandDeps {
   skillManager: SkillManager;
   action?: SkillAction;
   target?: string | undefined;
+  command?: string | undefined;
+  commandArgs?: string[] | undefined;
   print(message: string): void;
 }
 
+function scaffoldCommand(name: string): { command: string; args: string[] } {
+  return {
+    command: 'node',
+    args: [
+      '-e',
+      `console.error(${JSON.stringify(`Skill '${name}' was scaffolded but is not configured. Edit skills/${name}/mcp.json with the MCP server command before enabling it.`)}); process.exit(1);`,
+    ],
+  };
+}
+
 export async function handleSkillCommand(deps: SkillCommandDeps): Promise<void> {
-  const { skillManager, action, target, print } = deps;
+  const { skillManager, action, target, command, commandArgs = [], print } = deps;
 
   switch (action) {
     case 'list': {
@@ -27,11 +39,21 @@ export async function handleSkillCommand(deps: SkillCommandDeps): Promise<void> 
     }
     case 'add': {
       if (!target) throw new Error('skill add requires a name');
-      // Create the skill directory with a placeholder mcp.json.
-      // The user must edit mcp.json to set the correct command and args.
-      await skillManager.installCustom(target, { command: 'EDIT_ME', args: [] });
-      print(`Created skill '${target}' in skills directory.`);
-      print(`Edit skills/${target}/mcp.json to configure the MCP server command.`);
+      if (!command) {
+        throw new Error('skill add requires a runnable MCP server command. Use `skill scaffold <name>` to create an incomplete template.');
+      }
+      await skillManager.installCustom(target, { command, args: commandArgs });
+      print(`Installed skill '${target}' with MCP command '${command}'.`);
+      if (commandArgs.length > 0) {
+        print(`Arguments: ${commandArgs.join(' ')}`);
+      }
+      return;
+    }
+    case 'scaffold': {
+      if (!target) throw new Error('skill scaffold requires a name');
+      await skillManager.installCustom(target, scaffoldCommand(target));
+      print(`Scaffolded incomplete skill '${target}' in skills directory.`);
+      print(`Edit skills/${target}/mcp.json with the real MCP server command before enabling it.`);
       return;
     }
     case 'remove': {
@@ -61,6 +83,6 @@ export async function handleSkillCommand(deps: SkillCommandDeps): Promise<void> 
       return;
     }
     default:
-      throw new Error('Usage: frankenbeast skill <list|add|remove|enable|disable|info> [name]');
+      throw new Error('Usage: frankenbeast skill <list|add|scaffold|remove|enable|disable|info> [name]');
   }
 }

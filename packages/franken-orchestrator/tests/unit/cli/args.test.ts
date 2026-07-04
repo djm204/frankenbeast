@@ -383,10 +383,55 @@ describe('parseArgs', () => {
       expect(args.skillAction).toBe('list');
     });
 
-    it('parses skill add with target', () => {
-      const args = parseArgs(['skill', 'add', 'my-skill']);
+    it('parses skill add with target and runnable command', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'node', 'server.js']);
       expect(args.subcommand).toBe('skill');
       expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('node');
+      expect(args.skillCommandArgs).toEqual(['server.js']);
+    });
+
+    it('preserves option-like skill add command args without a delimiter', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+      expect(args.verbose).toBe(false);
+    });
+
+    it('parses global options between skill add and the skill name', () => {
+      const args = parseArgs(['skill', 'add', '--base-dir', '/tmp/beast', 'my-skill', 'npx', '-y', '@acme/mcp-server']);
+      expect(args.skillAction).toBe('add');
+      expect(args.baseDir).toBe('/tmp/beast');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server']);
+    });
+
+    it('preserves skill add command args when global options precede add', () => {
+      const args = parseArgs(['skill', '--base-dir', '/tmp/beast', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+      expect(args.skillAction).toBe('add');
+      expect(args.baseDir).toBe('/tmp/beast');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+      expect(args.verbose).toBe(false);
+    });
+
+    it('parses skill add command args after an optional delimiter', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '--', '-y', '@acme/mcp-server']);
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server']);
+    });
+
+    it('parses skill scaffold with target', () => {
+      const args = parseArgs(['skill', 'scaffold', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('scaffold');
       expect(args.skillTarget).toBe('my-skill');
     });
 
