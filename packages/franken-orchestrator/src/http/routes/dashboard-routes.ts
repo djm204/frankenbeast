@@ -3,6 +3,9 @@ import { streamSSE } from 'hono/streaming';
 import type { SkillManager } from '../../skills/skill-manager.js';
 import type { SecurityConfig } from '../../middleware/security-profiles.js';
 
+const DASHBOARD_SNAPSHOT_POLL_MS = 1_000;
+const DASHBOARD_HEARTBEAT_MS = 30_000;
+
 export interface DashboardRouteDeps {
   skillManager: SkillManager;
   getSecurityConfig: () => SecurityConfig;
@@ -36,26 +39,54 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   // GET /api/dashboard/events — SSE stream for real-time dashboard updates
   app.get('/events', (c) => {
     return streamSSE(c, async (stream) => {
+      let lastSnapshot = JSON.stringify(buildSnapshot(deps));
+
       // Send initial snapshot
       await stream.writeSSE({
         event: 'snapshot',
-        data: JSON.stringify(buildSnapshot(deps)),
+        data: lastSnapshot,
       });
 
-      // Keep connection alive with periodic heartbeats
-      // Real event push would be wired to SkillManager/SecurityConfig change events
-      const interval = setInterval(async () => {
+      const cleanup: Array<() => void> = [];
+      const clearAll = () => {
+        while (cleanup.length > 0) {
+          cleanup.pop()?.();
+        }
+      };
+
+      const snapshotInterval = setInterval(async () => {
+        let nextSnapshot: string;
+        try {
+          nextSnapshot = JSON.stringify(buildSnapshot(deps));
+        } catch {
+          return;
+        }
+
+        if (nextSnapshot === lastSnapshot) {
+          return;
+        }
+        lastSnapshot = nextSnapshot;
+        try {
+          await stream.writeSSE({ event: 'snapshot', data: nextSnapshot });
+        } catch {
+          clearAll();
+        }
+      }, DASHBOARD_SNAPSHOT_POLL_MS);
+      cleanup.push(() => clearInterval(snapshotInterval));
+
+      const heartbeatInterval = setInterval(async () => {
         try {
           await stream.writeSSE({ event: 'heartbeat', data: '' });
         } catch {
-          clearInterval(interval);
+          clearAll();
         }
-      }, 30_000);
+      }, DASHBOARD_HEARTBEAT_MS);
+      cleanup.push(() => clearInterval(heartbeatInterval));
 
       // Block until client disconnects (single onAbort — Hono stores one callback, not a list)
       await new Promise<void>((resolve) => {
         stream.onAbort(() => {
-          clearInterval(interval);
+          clearAll();
           resolve();
         });
       });
