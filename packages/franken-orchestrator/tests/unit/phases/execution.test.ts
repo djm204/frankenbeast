@@ -947,6 +947,16 @@ describe('runExecution', () => {
     expect(c.plan!.tasks.map(t => t.id)).toEqual(['t1']);
   });
 
+  it('rejects duplicate initial task ids before queueing pending work', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+      { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+    ]);
+
+    await expect(runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver()))
+      .rejects.toThrow("duplicate task id 't1'");
+  });
+
   it('keeps refreshed duplicate tasks out of the pending execution queue', async () => {
     const c = ctx([
       { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },

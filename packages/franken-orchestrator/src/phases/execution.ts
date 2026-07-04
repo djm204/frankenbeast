@@ -55,6 +55,7 @@ export async function runExecution(
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
   const completedOutputs = new Map<string, unknown>();
+  validateAcyclicPlan(ctx.plan.tasks);
   const knownTaskIds = new Set(ctx.plan.tasks.map((t) => t.id));
 
   // Simple topological execution: keep a keyed FIFO queue so plan refreshes can
