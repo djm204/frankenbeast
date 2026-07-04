@@ -312,6 +312,8 @@ export async function main(): Promise<void> {
         skillManager,
         action: args.skillAction,
         target: args.skillTarget,
+        command: args.skillCommand,
+        commandArgs: args.skillCommandArgs,
         print: console.log,
       });
     } catch (err) {

@@ -41,7 +41,7 @@ export type BeastAction =
   | 'delete'
   | undefined;
 
-export type SkillAction = 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
+export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 
 export interface CliArgs {
@@ -54,6 +54,8 @@ export interface CliArgs {
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
   skillTarget?: string | undefined;
+  skillCommand?: string | undefined;
+  skillCommandArgs?: string[] | undefined;
   securityAction?: SecurityAction;
   securityTarget?: string | undefined;
   baseDir: string;
@@ -96,7 +98,7 @@ export interface CliArgs {
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
-const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
+const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
 
 const USAGE = `
@@ -175,7 +177,8 @@ Beast Commands:
 
 Skill Commands:
   skill list                          List installed skills
-  skill add <name>                    Install a custom skill
+  skill add <name> <command> [args]   Install a custom skill with runnable MCP command
+  skill scaffold <name>               Scaffold an incomplete custom skill for manual config
   skill remove <name>                 Remove an installed skill
   skill enable <name>                 Enable a skill
   skill disable <name>                Disable a skill
@@ -214,7 +217,8 @@ Examples:
   frankenbeast issues --label critical,high # fetch filtered issues
   frankenbeast issues --dry-run             # preview issue fetch
   frankenbeast skill list                   # list installed skills
-  frankenbeast skill add my-tool            # scaffold a new skill
+  frankenbeast skill add my-tool node -- ./server.js  # install a runnable skill
+  frankenbeast skill scaffold my-tool       # scaffold a skill for manual config
   frankenbeast skill enable my-tool         # enable a skill
   frankenbeast skill info my-tool           # show skill details
   frankenbeast security status              # show security profile
@@ -290,6 +294,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let beastTarget: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
+  let skillCommand: string | undefined;
+  let skillCommandArgs: string[] | undefined;
   let securityAction: SecurityAction;
   let securityTarget: string | undefined;
 
@@ -320,6 +326,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       skillAction = actionCandidate as SkillAction;
     }
     skillTarget = positionals[1];
+    skillCommand = positionals[2];
+    skillCommandArgs = positionals.length > 3 ? positionals.slice(3) : undefined;
   } else if (subcommand === 'security') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
@@ -419,6 +427,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     networkSet: values.set,
     skillAction,
     skillTarget,
+    skillCommand,
+    skillCommandArgs,
     securityAction,
     securityTarget,
     baseDir: values['base-dir'] ?? process.cwd(),
