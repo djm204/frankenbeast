@@ -244,6 +244,50 @@ describe('NetworkSupervisor', () => {
     expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
   });
 
+  it('restarts a reused chat-server when in-process comms routes are missing', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.telegram.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    const startService = vi.fn(async () => ({ pid: 601 }));
+    const stopService = vi.fn(async () => undefined);
+    const healthcheck = vi.fn(async (service) => {
+      if (service.id === 'comms-gateway') {
+        return startService.mock.calls.some(([startedService]) => startedService.id === 'chat-server');
+      }
+      return true;
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService,
+      healthcheck,
+      preflightService: vi.fn(async (service) => service.id === 'chat-server'
+        ? { action: 'reuse' as const }
+        : { action: 'start' as const }),
+      now: () => '2026-03-10T00:00:00.000Z',
+      startupAttempts: 1,
+    });
+
+    const state = await supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    });
+
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+    expect(startService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }), expect.any(Object));
+    expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'chat-server', pid: 601, status: 'started' }),
+      expect.objectContaining({ id: 'comms-gateway', inProcess: true }),
+    ]));
+  });
+
   it('allows reused pid-zero services to stop because they are not in-process markers', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));

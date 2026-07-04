@@ -110,6 +110,25 @@ describe('ChatSessionSchema', () => {
     expect(() => ChatSessionSchema.parse(session)).not.toThrow();
   });
 
+  it('preserves comms routing metadata for shared chat sessions', () => {
+    const session = {
+      id: 'sess-1',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'active',
+      routingMetadata: {
+        channelId: 'C123',
+        threadTs: '171234.000100',
+      },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    expect(ChatSessionSchema.parse(session).routingMetadata).toEqual(session.routingMetadata);
+  });
+
   it('rejects negative cost', () => {
     const session = {
       id: 'sess-1', projectId: 'proj-1', transcript: [], state: 'active',

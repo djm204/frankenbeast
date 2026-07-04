@@ -81,14 +81,15 @@ function createCommsRuntimeAdapter(
   sessionStore: ISessionStore,
   projectName: string,
 ): CommsRuntimePort {
+  const toStoredSessionId = (id: string): string => encodeURIComponent(id);
   return new ChatRuntimeCommsAdapter(runtime, {
     load: async (id) => {
-      const session = sessionStore.get(id) as ChatSessionWithRouting | undefined;
+      const session = sessionStore.get(toStoredSessionId(id)) as ChatSessionWithRouting | undefined;
       if (!session) {
         return null;
       }
       return {
-        sessionId: session.id,
+        sessionId: id,
         projectId: session.projectId,
         transcript: session.transcript,
         state: session.state,
@@ -99,8 +100,9 @@ function createCommsRuntimeAdapter(
     },
     create: async (id, data) => {
       const now = new Date().toISOString();
+      const storedId = toStoredSessionId(id);
       const session: ChatSessionWithRouting = {
-        id,
+        id: storedId,
         projectId: typeof data.projectId === 'string' ? data.projectId : projectName,
         transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : [],
         state: typeof data.state === 'string' ? data.state : 'active',
@@ -114,7 +116,7 @@ function createCommsRuntimeAdapter(
       };
       sessionStore.save(session);
       return {
-        sessionId: session.id,
+        sessionId: id,
         projectId: session.projectId,
         transcript: session.transcript,
         state: session.state,
@@ -124,10 +126,11 @@ function createCommsRuntimeAdapter(
       };
     },
     save: async (id, data) => {
-      const existing = sessionStore.get(id) as ChatSessionWithRouting | undefined;
+      const storedId = toStoredSessionId(id);
+      const existing = sessionStore.get(storedId) as ChatSessionWithRouting | undefined;
       const now = new Date().toISOString();
       const session: ChatSessionWithRouting = {
-        id,
+        id: storedId,
         projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),
         transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : (existing?.transcript ?? []),
         state: typeof data.state === 'string' ? data.state : (existing?.state ?? 'active'),

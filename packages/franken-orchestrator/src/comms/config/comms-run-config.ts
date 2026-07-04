@@ -47,6 +47,10 @@ export interface ResolvedCommsSecrets {
   };
 }
 
+function resolvePublicRef(ref: string, env: Record<string, string | undefined>): string | undefined {
+  return env[ref]?.trim() || ref.trim();
+}
+
 /**
  * Resolve *Ref fields to actual values from an env map.
  * Throws if a required secret is missing for an enabled channel.
@@ -67,7 +71,7 @@ export function resolveCommsSecrets(
 
   if (config.channels.discord.enabled) {
     const token = env[config.channels.discord.tokenRef];
-    const publicKey = env[config.channels.discord.publicKeyRef];
+    const publicKey = resolvePublicRef(config.channels.discord.publicKeyRef, env);
     if (!token) throw new Error(`${config.channels.discord.tokenRef} not found in environment`);
     if (!publicKey) throw new Error(`${config.channels.discord.publicKeyRef} not found in environment`);
     secrets.discord = { token, publicKey };

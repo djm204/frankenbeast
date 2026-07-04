@@ -220,7 +220,7 @@ async function resolveCommsPublicRef(root: string, ref: string | undefined, secr
   if (resolved) {
     return resolved;
   }
-  return /^[A-Z_][A-Z0-9_]*$/.test(ref) ? undefined : ref.trim();
+  return ref.trim();
 }
 
 function requireCommsChannelFields(

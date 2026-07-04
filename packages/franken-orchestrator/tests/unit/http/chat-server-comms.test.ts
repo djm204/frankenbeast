@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 vi.mock('../../../src/http/chat-app.js', () => {
   const { Hono } = require('hono') as typeof import('hono');
@@ -20,6 +23,7 @@ const mockedCreateChatApp = vi.mocked(createChatApp);
 
 describe('startChatServer comms pass-through', () => {
   let handle: ChatServerHandle | undefined;
+  let tempDirs: string[] = [];
 
   beforeEach(() => {
     mockedCreateChatApp.mockClear();
@@ -30,6 +34,8 @@ describe('startChatServer comms pass-through', () => {
       await handle.close();
       handle = undefined;
     }
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs = [];
   });
 
   it('passes commsConfig and commsRuntime to createChatApp when provided', async () => {
@@ -78,6 +84,41 @@ describe('startChatServer comms pass-through', () => {
     expect(opts.commsRuntime).toEqual(expect.objectContaining({
       processInbound: expect.any(Function),
     }));
+  });
+
+  it('stores auto-wired comms sessions under encoded ids and preserves routing metadata', async () => {
+    const sessionStoreDir = await mkdtemp(join(tmpdir(), 'chat-server-comms-store-'));
+    tempDirs.push(sessionStoreDir);
+    const commsConfig: CommsConfig = {
+      orchestrator: {},
+      channels: {},
+    };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig,
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    await opts.commsRuntime!.processInbound({
+      sessionId: 'slack/team/thread',
+      channelType: 'slack',
+      text: '/status',
+      externalUserId: 'U123',
+      metadata: { externalChannelId: 'C123', externalThreadId: '171234.000100' },
+    });
+
+    expect(await readdir(sessionStoreDir)).toEqual(['slack%2Fteam%2Fthread.json']);
+    const stored = handle.sessionStore.get('slack%2Fteam%2Fthread') as { routingMetadata?: Record<string, unknown> } | undefined;
+    expect(stored?.routingMetadata).toEqual(expect.objectContaining({
+      channelId: 'C123',
+      threadTs: '171234.000100',
+    }));
+    expect(handle.sessionStore.get('slack/team/thread')).toBeUndefined();
   });
 
   it('does not pass commsConfig or commsRuntime when not provided', async () => {
