@@ -145,7 +145,7 @@ const TOOLS: ToolFull[] = [
   {
     name: 'fbeast_plan_decompose',
     server: 'planner',
-    description: 'Break task into DAG of dependent steps',
+    description: 'Create generic scaffold DAG; not objective-specific decomposition',
     inputSchema: {
       type: 'object',
       properties: {
@@ -159,7 +159,7 @@ const TOOLS: ToolFull[] = [
       const constraints = args['constraints'] ? String(args['constraints']) : undefined;
       const result = await planner.decompose(constraints ? { objective, constraints } : { objective });
       const taskList = result.tasks.map((t) => `  ${t.id}: ${t.title}${t.deps.length > 0 ? ` (after: ${t.deps.join(', ')})` : ''}`).join('\n');
-      const text = [`## Plan created: ${result.planId}`, ``, `**Objective:** ${result.objective}`, constraints ? `**Constraints:** ${constraints}` : '', ``, `**Tasks:**`, taskList, ``, `Use fbeast_plan_validate with planId "${result.planId}" to check for issues.`].filter(Boolean).join('\n');
+      const text = [`## Plan created: ${result.planId}`, ``, `**Objective:** ${result.objective}`, constraints ? `**Constraints:** ${constraints}` : '', `**Provenance:** ${result.provenance}`, `**Provenance note:** ${result.provenanceNote}`, ``, `**Tasks:**`, taskList, ``, `Use fbeast_plan_validate with planId "${result.planId}" to check for issues.`].filter(Boolean).join('\n');
       return { content: [{ type: 'text', text }] };
     },
   },

@@ -15,7 +15,7 @@ export function createPlannerServer(deps: PlannerServerDeps, options: CreateMcpS
   const tools: ToolDef[] = [
     {
       name: 'fbeast_plan_decompose',
-      description: 'Decompose an objective into a DAG of tasks. Stores the plan for later reference. Returns the plan ID and task list. Note: this creates a structural template — use your own judgment to fill in task details.',
+      description: 'Create a generic scaffold DAG for an objective. Stores the plan for later reference. Returns provenance so callers know it is not an objective-specific decomposition.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -38,6 +38,8 @@ export function createPlannerServer(deps: PlannerServerDeps, options: CreateMcpS
           ``,
           `**Objective:** ${result.objective}`,
           constraints ? `**Constraints:** ${constraints}` : '',
+          `**Provenance:** ${result.provenance}`,
+          `**Provenance note:** ${result.provenanceNote}`,
           ``,
           `**Tasks:**`,
           taskList,
