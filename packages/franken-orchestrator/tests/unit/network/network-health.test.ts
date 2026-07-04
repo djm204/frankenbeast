@@ -31,6 +31,7 @@ describe('resolveServiceHealth', () => {
       id: 'comms-gateway',
       status: 'running',
       inProcess: true,
+      hostServiceId: 'chat-server',
       channels: { slack: true, discord: false },
     });
     expect(healthcheck).toHaveBeenCalledWith(commsGateway);
@@ -50,6 +51,7 @@ describe('resolveServiceHealth', () => {
       id: 'comms-gateway',
       status: 'running',
       inProcess: true,
+      hostServiceId: 'chat-server',
     });
     expect(healthcheck).toHaveBeenCalledWith(chatServer);
   });
