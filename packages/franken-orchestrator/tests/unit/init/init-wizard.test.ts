@@ -3,6 +3,7 @@ import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 import type { ISecretStore, SecretStoreDetection } from '../../../src/network/secret-store.js';
 import { runInitWizard, type InitWizardScope } from '../../../src/init/init-wizard.js';
 import { createEmptyInitState } from '../../../src/init/init-types.js';
+import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 
 // ------------------------------------------------------------------
 // Helpers
@@ -221,6 +222,40 @@ describe('runInitWizard – with Telegram and WhatsApp enabled', () => {
     expect(secretStore.stored.get('comms.whatsapp.accessTokenRef')).toBe('wa-access-token');
     expect(secretStore.stored.get('comms.whatsapp.appSecretRef')).toBe('wa-app-secret');
     expect(secretStore.stored.get('comms.whatsapp.verifyTokenRef')).toBe('wa-verify-token');
+  });
+
+  it('preserves existing Telegram and WhatsApp refs when rerunning scoped prompts without a secret store', async () => {
+    const io = makeIO([]);
+    const state = createEmptyInitState('/tmp/test-config.json');
+    state.selectedModules = ['comms'];
+    state.selectedCommsTransports = ['telegram', 'whatsapp'];
+    const baseConfig = defaultConfig();
+    baseConfig.comms.enabled = true;
+    baseConfig.comms.telegram = {
+      enabled: true,
+      botTokenRef: 'secret://existing/telegram-token',
+    };
+    baseConfig.comms.whatsapp = {
+      enabled: true,
+      accessTokenRef: 'secret://existing/whatsapp-access',
+      phoneNumberIdRef: 'existing-phone-number-id',
+      appSecretRef: 'secret://existing/whatsapp-app-secret',
+      verifyTokenRef: 'secret://existing/whatsapp-verify',
+    };
+
+    const result = await runInitWizard({
+      io,
+      initialState: state,
+      baseConfig,
+      scope: ['telegram', 'whatsapp'],
+    });
+
+    expect(io.ask).not.toHaveBeenCalled();
+    expect(result.config.comms.telegram.botTokenRef).toBe('secret://existing/telegram-token');
+    expect(result.config.comms.whatsapp.accessTokenRef).toBe('secret://existing/whatsapp-access');
+    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe('existing-phone-number-id');
+    expect(result.config.comms.whatsapp.appSecretRef).toBe('secret://existing/whatsapp-app-secret');
+    expect(result.config.comms.whatsapp.verifyTokenRef).toBe('secret://existing/whatsapp-verify');
   });
 });
 

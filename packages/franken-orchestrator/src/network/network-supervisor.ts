@@ -102,6 +102,21 @@ export class NetworkSupervisor {
           continue;
         }
 
+        if (service.runtimeConfig.inProcess === true) {
+          services.push({
+            id: service.id,
+            pid: 0,
+            detached: options.detached,
+            dependsOn: [...service.dependsOn],
+            startedAt,
+            status: 'already-running',
+            ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+            ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+            ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+          });
+          continue;
+        }
+
         const logFile = options.detached ? await this.deps.logStore.register(service.id) : undefined;
         const { pid } = await this.deps.startService(service, {
           detached: options.detached,

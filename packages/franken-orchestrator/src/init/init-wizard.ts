@@ -315,6 +315,8 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           );
           if (!scope.has('telegram') || currentBotTokenRef.length === 0) {
             answers['comms.telegram.botTokenRef'] = await askText(options.io, 'Telegram bot token ref', currentBotTokenRef);
+          } else {
+            answers['comms.telegram.botTokenRef'] = currentBotTokenRef;
           }
         }
       }
@@ -348,6 +350,8 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           );
           if (!scope.has('whatsapp') || currentAccessTokenRef.length === 0) {
             answers['comms.whatsapp.accessTokenRef'] = await askText(options.io, 'WhatsApp access token ref', currentAccessTokenRef);
+          } else {
+            answers['comms.whatsapp.accessTokenRef'] = currentAccessTokenRef;
           }
           const currentPhoneNumberIdRef = String(
             stateValue(options.initialState, 'comms.whatsapp.phoneNumberIdRef')
@@ -356,6 +360,8 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           );
           if (!scope.has('whatsapp') || currentPhoneNumberIdRef.length === 0) {
             answers['comms.whatsapp.phoneNumberIdRef'] = await askText(options.io, 'WhatsApp phone number ID ref', currentPhoneNumberIdRef);
+          } else {
+            answers['comms.whatsapp.phoneNumberIdRef'] = currentPhoneNumberIdRef;
           }
           const currentAppSecretRef = String(
             stateValue(options.initialState, 'comms.whatsapp.appSecretRef')
@@ -364,6 +370,8 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           );
           if (!scope.has('whatsapp') || currentAppSecretRef.length === 0) {
             answers['comms.whatsapp.appSecretRef'] = await askText(options.io, 'WhatsApp app secret ref', currentAppSecretRef);
+          } else {
+            answers['comms.whatsapp.appSecretRef'] = currentAppSecretRef;
           }
           const currentVerifyTokenRef = String(
             stateValue(options.initialState, 'comms.whatsapp.verifyTokenRef')
@@ -372,6 +380,8 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           );
           if (!scope.has('whatsapp') || currentVerifyTokenRef.length === 0) {
             answers['comms.whatsapp.verifyTokenRef'] = await askText(options.io, 'WhatsApp verify token ref', currentVerifyTokenRef);
+          } else {
+            answers['comms.whatsapp.verifyTokenRef'] = currentVerifyTokenRef;
           }
         }
       }

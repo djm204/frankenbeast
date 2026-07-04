@@ -174,6 +174,41 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
+  it('records in-process services without spawning a child process', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.telegram.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    const startService = vi.fn(async (service) => ({ pid: service.id === 'dashboard-web' ? 202 : 201 }));
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService: vi.fn(async () => undefined),
+      healthcheck: vi.fn(async () => true),
+      now: () => '2026-03-10T00:00:00.000Z',
+    });
+
+    const state = await supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    });
+
+    expect(startService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }), expect.any(Object));
+    expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'comms-gateway',
+        pid: 0,
+        status: 'already-running',
+      }),
+    ]));
+  });
+
   it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
