@@ -326,8 +326,9 @@ export async function main(): Promise<void> {
       await handleSecurityCommand({
         action: args.securityAction,
         target: args.securityTarget,
-        configPath: paths.configFile,
+        configPath: args.config ?? paths.configFile,
         ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
+        ...(config.security ? { currentSecurity: config.security } : {}),
         print: console.log,
       });
     } catch (err) {

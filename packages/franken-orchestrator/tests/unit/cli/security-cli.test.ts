@@ -49,10 +49,54 @@ describe('handleSecurityCommand()', () => {
     const dir = await mkdtemp(join(tmpdir(), 'security-cli-'));
     const configPath = join(dir, '.fbeast', 'config.json');
 
+    await handleSecurityCommand({ action: 'set', target: 'permissive', configPath, print });
+
+    await expect(readFile(configPath, 'utf-8')).resolves.toContain('"profile": "permissive"');
+    expect(print).toHaveBeenCalledWith(`Security profile set to 'permissive' in ${configPath}.`);
+  });
+
+  it('rejects strict profile without configured allowedDomains', async () => {
+    const print = vi.fn();
+    const dir = await mkdtemp(join(tmpdir(), 'security-cli-'));
+    const configPath = join(dir, '.fbeast', 'config.json');
+
+    await expect(
+      handleSecurityCommand({ action: 'set', target: 'strict', configPath, print }),
+    ).rejects.toThrow(/requires allowedDomains/);
+  });
+
+  it('persists strict profile when allowedDomains are already configured', async () => {
+    const print = vi.fn();
+    const dir = await mkdtemp(join(tmpdir(), 'security-cli-'));
+    const configPath = join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({
+      security: { allowedDomains: ['example.com'] },
+    }), 'utf-8');
+
     await handleSecurityCommand({ action: 'set', target: 'strict', configPath, print });
 
-    await expect(readFile(configPath, 'utf-8')).resolves.toContain('"profile": "strict"');
-    expect(print).toHaveBeenCalledWith(`Security profile set to 'strict' in ${configPath}.`);
+    const config = JSON.parse(await readFile(configPath, 'utf-8')) as {
+      security?: { profile?: string; allowedDomains?: string[] };
+    };
+    expect(config.security).toEqual({
+      allowedDomains: ['example.com'],
+      profile: 'strict',
+    });
+  });
+
+  it('shows status with security overrides from config', async () => {
+    const print = vi.fn();
+
+    await handleSecurityCommand({
+      action: 'status',
+      currentSecurity: { profile: 'permissive', piiMasking: true },
+      print,
+    });
+
+    expect(print).toHaveBeenCalledWith('Security Profile: permissive');
+    expect(print).toHaveBeenCalledWith('  Injection Detection: off');
+    expect(print).toHaveBeenCalledWith('  PII Masking: on');
+    expect(print).toHaveBeenCalledWith('  Output Validation: on');
   });
 
   it('preserves existing config and security settings when setting profile', async () => {
