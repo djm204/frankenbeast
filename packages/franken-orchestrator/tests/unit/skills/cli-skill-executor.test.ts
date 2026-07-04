@@ -586,6 +586,28 @@ describe('CliSkillExecutor', () => {
     });
   });
 
+  describe('verify command safety', () => {
+    it('rejects shell metacharacters instead of executing injected verify commands', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'verify-command-injection-'));
+      const marker = join(root, 'pwned');
+      git.getWorkingDir.mockReturnValue(root);
+      git.getStatus.mockReturnValue(' M src/file.ts');
+
+      const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'safe123') });
+      const executor = harness.executor({
+        verifyCommand: `${process.execPath} -e "process.exit(0)" ; ${process.execPath} -e "require('node:fs').writeFileSync('${marker}', 'pwned')"`,
+      });
+
+      await expect(executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger()))
+        .resolves.toBe('reset');
+
+      expect(git.resetHard).toHaveBeenCalledWith('safe123');
+      expect(git.autoCommit).not.toHaveBeenCalled();
+      expect(() => rmSync(marker)).toThrow();
+      rmSync(root, { recursive: true, force: true });
+    });
+  });
+
   describe('chunk session recovery metadata', () => {
     it('records the last known good commit on the chunk session during recovery', async () => {
       const root = mkdtempSync(join(tmpdir(), 'chunk-recovery-'));
