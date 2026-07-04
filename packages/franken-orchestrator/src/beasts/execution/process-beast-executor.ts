@@ -35,25 +35,39 @@ function remapRuntimePath(value: string, sourceRoot: string | undefined, targetR
   return isAbsolute(value) ? target : value;
 }
 
+const RUNTIME_CONFIG_PATH_FIELDS = ['chunkDirectory', 'designDocPath', 'outputDir'] as const;
+const RUNTIME_PATH_ARG_FLAGS = new Set(['--plan-dir', '--design-doc', '--output-dir']);
+
 function remapRuntimeConfigSnapshot(
   configSnapshot: Readonly<Record<string, unknown>>,
   sourceRoot: string | undefined,
   targetRoot: string | undefined,
 ): Readonly<Record<string, unknown>> {
-  const chunkDirectory = configSnapshot.chunkDirectory;
-  if (typeof chunkDirectory !== 'string') return configSnapshot;
-  const remappedChunkDirectory = remapRuntimePath(chunkDirectory, sourceRoot, targetRoot);
-  return remappedChunkDirectory === chunkDirectory
-    ? configSnapshot
-    : { ...configSnapshot, chunkDirectory: remappedChunkDirectory };
+  let changed = false;
+  const remapped: Record<string, unknown> = { ...configSnapshot };
+  for (const key of RUNTIME_CONFIG_PATH_FIELDS) {
+    const value = configSnapshot[key];
+    if (typeof value !== 'string') continue;
+    const remappedValue = remapRuntimePath(value, sourceRoot, targetRoot);
+    if (remappedValue !== value) {
+      remapped[key] = remappedValue;
+      changed = true;
+    }
+  }
+  return changed ? remapped : configSnapshot;
 }
 
-function remapAbsoluteRuntimeArgs(
+function remapRuntimePathArgs(
   args: readonly string[],
   sourceRoot: string | undefined,
   targetRoot: string | undefined,
 ): readonly string[] {
-  return args.map((arg) => isAbsolute(arg) ? remapRuntimePath(arg, sourceRoot, targetRoot) : arg);
+  return args.map((arg, index) => {
+    const previous = index > 0 ? args[index - 1] : undefined;
+    return previous && RUNTIME_PATH_ARG_FLAGS.has(previous)
+      ? remapRuntimePath(arg, sourceRoot, targetRoot)
+      : arg;
+  });
 }
 
 export interface ProcessBeastExecutorOptions {
@@ -103,7 +117,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const isolatedSpec = worktree
       ? {
           ...processSpec,
-          args: remapAbsoluteRuntimeArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
+          args: remapRuntimePathArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
           cwd: worktree.executionCwd,
           env: {
             ...processSpec.env,

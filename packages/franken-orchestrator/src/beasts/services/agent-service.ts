@@ -6,11 +6,6 @@ import type {
   TrackedAgentInitAction,
 } from '../types.js';
 import { UnknownTrackedAgentError } from '../errors.js';
-import {
-  removeBeastWorktree,
-  type BeastWorktreeAllocation,
-  type GitRunner,
-} from '../execution/git-worktree-isolation.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 
 export interface CreateTrackedAgentRequest {
@@ -40,10 +35,6 @@ export interface UpdateTrackedAgentRequest {
   readonly moduleConfig?: ModuleConfig | undefined;
 }
 
-export interface AgentServiceOptions {
-  readonly runGit?: GitRunner | undefined;
-}
-
 export interface TrackedAgentDetail {
   readonly agent: TrackedAgent;
   readonly events: TrackedAgentEvent[];
@@ -53,7 +44,6 @@ export class AgentService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
     private readonly now: () => string = () => new Date().toISOString(),
-    private readonly options: AgentServiceOptions = {},
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
@@ -111,10 +101,6 @@ export class AgentService {
     if (agent.status !== 'stopped') {
       throw new Error(`Tracked agent '${agentId}' is not stopped`);
     }
-    const allocation = this.worktreeAllocationFor(agent);
-    if (allocation) {
-      removeBeastWorktree(allocation, this.options.runGit);
-    }
     return this.repository.updateTrackedAgent(agentId, {
       status: 'deleted',
       updatedAt: this.now(),
@@ -131,37 +117,6 @@ export class AgentService {
       ...(request.moduleConfig !== undefined ? { moduleConfig: request.moduleConfig } : {}),
       updatedAt: this.now(),
     });
-  }
-
-  private worktreeAllocationFor(agent: TrackedAgent): BeastWorktreeAllocation | undefined {
-    if (!agent.dispatchRunId) return undefined;
-    const attempt = [...this.repository.listAttempts(agent.dispatchRunId)].reverse()
-      .find((entry) => entry.executorMetadata?.worktreeIsolation === true);
-    const metadata = attempt?.executorMetadata;
-    if (!metadata) return undefined;
-
-    const worktreePath = metadata.worktreePath;
-    const branchName = metadata.worktreeBranch;
-    const projectRoot = metadata.worktreeProjectRoot;
-    const worktreeAgentId = metadata.worktreeAgentId;
-    if (
-      typeof worktreePath !== 'string' ||
-      typeof branchName !== 'string' ||
-      typeof projectRoot !== 'string' ||
-      typeof worktreeAgentId !== 'string'
-    ) {
-      return undefined;
-    }
-
-    return {
-      agentId: worktreeAgentId,
-      branchName,
-      created: true,
-      executionCwd: typeof metadata.worktreeExecutionCwd === 'string' ? metadata.worktreeExecutionCwd : worktreePath,
-      gitTopLevel: projectRoot,
-      projectRoot,
-      worktreePath,
-    };
   }
 }
 

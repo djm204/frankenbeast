@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -99,11 +99,10 @@ describe('AgentService', () => {
     expect(detail.events).toEqual([event]);
   });
 
-  it('removes tracked worktree allocation when soft-deleting a stopped agent', async () => {
+  it('preserves tracked worktree state when soft-deleting a stopped agent', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
-    const runGit = vi.fn((_args: readonly string[]) => 'beast/agent-cleanup');
-    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', { runGit });
+    const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
     const worktreePath = join(workDir, '.frankenbeast', '.worktrees', 'agent-cleanup');
     mkdirSync(worktreePath, { recursive: true });
 
@@ -144,8 +143,6 @@ describe('AgentService', () => {
     service.softDeleteAgent(agent.id);
 
     expect(existsSync(worktreePath)).toBe(true);
-    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', worktreePath], workDir);
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', 'beast/agent-cleanup'], workDir);
   });
 
   it('hides soft-deleted tracked agents from list and detail lookups', async () => {

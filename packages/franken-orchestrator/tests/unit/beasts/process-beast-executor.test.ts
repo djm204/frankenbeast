@@ -239,12 +239,19 @@ describe('ProcessBeastExecutor', () => {
     expect(runGit).not.toHaveBeenCalled();
   });
 
-  it('preserves subdirectory cwd and materializes ignored runtime plan state in the worktree', async () => {
+  it('preserves subdirectory cwd and materializes ignored runtime paths in the worktree', async () => {
     workDir = await createTempWorkDir();
     const projectCwd = join(workDir, 'packages', 'demo');
     const sourcePlanDir = join(projectCwd, '.fbeast', 'plans', 'plan-1');
+    const sourceDesignDoc = join(projectCwd, '.fbeast', 'designs', 'design.md');
+    const sourceOutputDir = join(projectCwd, '.fbeast', 'outputs', 'plan-1');
+    const originalCliEntrypoint = join(workDir, 'packages', 'franken-orchestrator', 'dist', 'cli', 'run.js');
     mkdirSync(sourcePlanDir, { recursive: true });
+    mkdirSync(join(projectCwd, '.fbeast', 'designs'), { recursive: true });
+    mkdirSync(sourceOutputDir, { recursive: true });
     writeFileSync(join(sourcePlanDir, 'chunk.md'), 'plan chunk');
+    writeFileSync(sourceDesignDoc, 'design doc');
+    writeFileSync(join(sourceOutputDir, 'result.md'), 'existing result');
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = createSupervisorMock();
@@ -271,19 +278,61 @@ describe('ProcessBeastExecutor', () => {
       definitionId: 'martin-loop',
       definitionVersion: 1,
       executionMode: 'process',
-      configSnapshot: { chunkDirectory: '.fbeast/plans/plan-1' },
+      configSnapshot: {
+        chunkDirectory: '.fbeast/plans/plan-1',
+        designDocPath: sourceDesignDoc,
+        outputDir: sourceOutputDir,
+      },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
       createdAt: '2026-03-10T00:00:00.000Z',
     });
+    const definition: BeastDefinition = {
+      ...createDefinitionWithCwd(projectCwd),
+      buildProcessSpec: () => ({
+        command: 'node',
+        args: [
+          originalCliEntrypoint,
+          '--design-doc',
+          sourceDesignDoc,
+          '--plan-dir',
+          '.fbeast/plans/plan-1',
+          '--output-dir',
+          sourceOutputDir,
+        ],
+        cwd: projectCwd,
+        env: { EXISTING_ENV: '1' },
+      }),
+    };
 
-    await executor.start(run, createDefinitionWithCwd(projectCwd));
+    await executor.start(run, definition);
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     const expectedExecutionCwd = join(expectedWorktree, 'packages', 'demo');
+    const expectedDesignDoc = join(expectedExecutionCwd, '.fbeast', 'designs', 'design.md');
+    const expectedOutputDir = join(expectedExecutionCwd, '.fbeast', 'outputs', 'plan-1');
     const [spawnedSpec] = supervisor.spawn.mock.calls[0];
-    expect(spawnedSpec).toMatchObject({ cwd: expectedExecutionCwd });
+    expect(spawnedSpec).toMatchObject({
+      cwd: expectedExecutionCwd,
+      args: [
+        originalCliEntrypoint,
+        '--design-doc',
+        expectedDesignDoc,
+        '--plan-dir',
+        '.fbeast/plans/plan-1',
+        '--output-dir',
+        expectedOutputDir,
+      ],
+    });
     expect(readFileSync(join(expectedExecutionCwd, '.fbeast', 'plans', 'plan-1', 'chunk.md'), 'utf-8')).toBe('plan chunk');
+    expect(readFileSync(expectedDesignDoc, 'utf-8')).toBe('design doc');
+    expect(readFileSync(join(expectedOutputDir, 'result.md'), 'utf-8')).toBe('existing result');
+    const configPath = (spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG;
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toMatchObject({
+      chunkDirectory: '.fbeast/plans/plan-1',
+      designDocPath: expectedDesignDoc,
+      outputDir: expectedOutputDir,
+    });
   });
 
   it('removes a worktree allocation when process spawning fails before attempt creation', async () => {
