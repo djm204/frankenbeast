@@ -12,6 +12,13 @@ function resolveClient(): McpClient {
   return clientArg ?? detectMcpClient({ cwd: process.cwd(), homeDir: homedir(), exists: existsSync });
 }
 
+function reportMcpInitError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`fbeast mcp init: ${message}`);
+  console.error('  Known flags: --hooks  --pick[=<servers>]  --mode=standard|proxy  --client=claude|gemini|codex');
+  process.exit(1);
+}
+
 function passthrough(): never {
   const result = spawnSync('frankenbeast', process.argv.slice(2), {
     stdio: 'inherit',
@@ -52,12 +59,16 @@ switch (subcommand) {
       console.error('  Known flags: --hooks  --pick[=<servers>]  --mode=standard|proxy  --client=claude|gemini|codex');
       process.exit(1);
     }
-    const { runInit } = await import('./init.js');
-    const root = process.cwd();
-    const client = resolveClient();
-    const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-    const initOptions = await resolveInitOptions(process.argv);
-    runInit({ root, claudeDir, client, ...initOptions });
+    try {
+      const { runInit } = await import('./init.js');
+      const root = process.cwd();
+      const client = resolveClient();
+      const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+      const initOptions = await resolveInitOptions(process.argv);
+      runInit({ root, claudeDir, client, ...initOptions });
+    } catch (error) {
+      reportMcpInitError(error);
+    }
     break;
   }
   case 'uninstall': {
