@@ -9,6 +9,8 @@ function fakeGit(): GitBranchIsolator {
   return {
     isolate: () => undefined,
     getWorkingDir: () => process.cwd(),
+    getStatus: () => '',
+    resetHard: () => undefined,
     autoCommit: () => false,
     getCurrentHead: () => 'HEAD',
     getDiffStat: () => '',
@@ -131,7 +133,7 @@ describe('Budget enforcement integration', () => {
 
     const result = await executor.execute(
       'cli:budget-preflight',
-      { objective: 'expensive task', sessionId: 'budget-preflight', dependencyOutputs: new Map() },
+      { objective: 'expensive task', context: '', sessionId: 'budget-preflight', dependencyOutputs: new Map() },
       {
         martin: {
           prompt: 'expensive task',
@@ -162,7 +164,7 @@ describe('Budget enforcement integration', () => {
     const startedAt = Date.now();
     const resultPromise = executor.execute(
       'cli:budget-mid-execution',
-      { objective: 'long running task', sessionId: 'budget-mid-execution', dependencyOutputs: new Map() },
+      { objective: 'long running task', context: '', sessionId: 'budget-mid-execution', dependencyOutputs: new Map() },
       {
         martin: {
           prompt: 'long running task',

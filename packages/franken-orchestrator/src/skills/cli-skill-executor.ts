@@ -243,6 +243,8 @@ export class CliSkillExecutor {
     const chunkId = this.extractChunkId(skillId);
     const budgetAbortController = new AbortController();
     let budgetAbortResult: CircuitBreakerResult | undefined;
+    let activeProvider = config.martin?.provider ?? this.defaultMartinConfig.provider;
+
     const abortForBudget = (result: CircuitBreakerResult): void => {
       budgetAbortResult = result;
       if (!budgetAbortController.signal.aborted) {
@@ -250,12 +252,14 @@ export class CliSkillExecutor {
       }
     };
     const upstreamAbortSignal = config.martin?.abortSignal;
+    let upstreamAbortHandler: (() => void) | undefined;
     if (upstreamAbortSignal?.aborted) {
       budgetAbortController.abort(upstreamAbortSignal.reason);
     } else if (upstreamAbortSignal) {
-      upstreamAbortSignal.addEventListener('abort', () => {
+      upstreamAbortHandler = () => {
         budgetAbortController.abort(upstreamAbortSignal.reason);
-      }, { once: true });
+      };
+      upstreamAbortSignal.addEventListener('abort', upstreamAbortHandler, { once: true });
     }
 
     this.observer.recordReplay?.({
@@ -316,7 +320,8 @@ export class CliSkillExecutor {
         return config.martin?.onRateLimit?.(provider);
       },
       onProviderAttempt: (provider: string, iteration: number) => {
-        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig);
+        activeProvider = provider;
+        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider);
         const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
         if (estimatedBudgetResult.tripped) {
           abortForBudget(estimatedBudgetResult);
@@ -455,7 +460,7 @@ export class CliSkillExecutor {
     let lastStaleMateSignature = '';
     let stalledIterations = 0;
     const budgetPoll = setInterval(() => {
-      const currentCost = this.computeCurrentCost();
+      const currentCost = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, activeProvider);
       const budgetResult = this.observer.breaker.check(currentCost);
       if (budgetResult.tripped) {
         abortForBudget(budgetResult);
@@ -473,6 +478,7 @@ export class CliSkillExecutor {
           : undefined;
 
       if (budgetError) {
+        this.resetBudgetAbortedWorktree();
         const postTokens = this.observer.counter.grandTotal();
         this.observer.setMetadata(chunkSpan, {
           budgetExceeded: true,
@@ -491,6 +497,9 @@ export class CliSkillExecutor {
       );
     } finally {
       clearInterval(budgetPoll);
+      if (upstreamAbortSignal && upstreamAbortHandler) {
+        upstreamAbortSignal.removeEventListener('abort', upstreamAbortHandler);
+      }
     }
 
     // Generate commit message for squash merge (if available)
@@ -664,12 +673,17 @@ export class CliSkillExecutor {
     return this.observer.costCalc.totalCost(entries);
   }
 
-  private estimateUpcomingIterationCost(config: MartinLoopConfig): number {
+  private estimateUpcomingIterationCost(config: MartinLoopConfig, provider = config.provider): number {
     return this.observer.costCalc.totalCost([{
-      model: config.provider,
+      model: provider,
       promptTokens: Math.ceil(config.prompt.length / 4),
       completionTokens: Math.max(config.maxTurns, 1) * 1_000,
     }]);
+  }
+
+  private resetBudgetAbortedWorktree(): void {
+    if (this.git.getStatus().length === 0) return;
+    this.git.resetHard(this.git.getCurrentHead());
   }
 
   private recordSessionCommit(taskId: string, commitHash: string): void {

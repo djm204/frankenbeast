@@ -288,6 +288,7 @@ function spawnIteration(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let aborted = false;
     let timedOut = false;
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
@@ -296,6 +297,10 @@ function spawnIteration(
       if (settled) return;
       settled = true;
       config.abortSignal?.removeEventListener('abort', onAbort);
+      if (aborted) {
+        reject(abortError());
+        return;
+      }
       resolve(result);
     };
 
@@ -363,8 +368,24 @@ function spawnIteration(
     };
 
     const onAbort = (): void => {
+      aborted = true;
       try { child.kill('SIGTERM'); } catch { /* already dead */ }
-      fail(abortError());
+      escalationTimers.push(setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      }, 5_000));
+      escalationTimers.push(setTimeout(() => {
+        if (streamBuffer) {
+          const remaining = streamBuffer.flush();
+          for (const line of remaining) cleanParts.push(line);
+        }
+        finish({
+          stdout,
+          stderr: `${stderr}\n[MartinLoop] iteration aborted`,
+          exitCode: 130,
+          timedOut,
+          cleanStdout: cleanParts.join('\n'),
+        });
+      }, 7_000));
     };
     config.abortSignal?.addEventListener('abort', onAbort, { once: true });
 
