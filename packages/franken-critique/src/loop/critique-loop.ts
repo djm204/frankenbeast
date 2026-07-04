@@ -49,8 +49,9 @@ export class CritiqueLoop {
       const postResult = await this.checkBreakers(state, config, 'post');
       if (postResult) return postResult;
 
-      // Pass: return success
-      if (critiqueResult.verdict === 'pass') {
+      // Pass/warn: warnings are non-critical findings that should surface in
+      // results without forcing correction iterations.
+      if (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') {
         return { verdict: 'pass', iterations: state.iterations };
       }
 

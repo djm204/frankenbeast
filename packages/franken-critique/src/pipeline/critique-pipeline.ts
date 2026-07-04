@@ -34,9 +34,10 @@ export class CritiquePipeline {
 
     const overallScore = results.reduce((sum, r) => sum + r.score, 0) / results.length;
     const hasFailure = results.some((r) => r.verdict === 'fail');
+    const hasWarning = results.some((r) => r.verdict === 'warn');
 
     return {
-      verdict: hasFailure ? 'fail' : 'pass',
+      verdict: hasFailure ? 'fail' : hasWarning ? 'warn' : 'pass',
       overallScore,
       results,
       shortCircuited,
