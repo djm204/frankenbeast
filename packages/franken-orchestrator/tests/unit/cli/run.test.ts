@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -119,11 +119,13 @@ vi.mock('../../../src/cli/args.js', () => ({
 vi.mock('../../../src/cli/project-root.js', () => ({
   resolveProjectRoot: vi.fn((dir: string) => dir),
   generatePlanName: vi.fn(() => 'plan-2026-03-08'),
-  getProjectPaths: vi.fn((root: string) => ({
+  getProjectPaths: vi.fn((root: string, planName?: string) => {
+    const plansDir = planName ? `${root}/.fbeast/plans/${planName}` : `${root}/.fbeast/plans`;
+    return {
     root,
     frankenbeastDir: `${root}/.fbeast`,
     llmCacheDir: `${root}/.fbeast/.cache/llm`,
-    plansDir: `${root}/.fbeast/plans`,
+    plansDir,
     buildDir: `${root}/.fbeast/.build`,
     beastsDir: `${root}/.fbeast/.build/beasts`,
     beastLogsDir: `${root}/.fbeast/.build/beasts/logs`,
@@ -131,10 +133,11 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     checkpointFile: `${root}/.fbeast/.build/.checkpoint`,
     tracesDb: `${root}/.fbeast/.build/build-traces.db`,
     logFile: `${root}/.fbeast/.build/build.log`,
-    designDocFile: `${root}/.fbeast/plans/design.md`,
+    designDocFile: `${plansDir}/design.md`,
     configFile: `${root}/.fbeast/config.json`,
-    llmResponseFile: `${root}/.fbeast/plans/llm-response.json`,
-  })),
+    llmResponseFile: `${plansDir}/llm-response.json`,
+  };
+  }),
   scaffoldFrankenbeast: vi.fn(),
 }));
 
@@ -216,7 +219,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
@@ -236,6 +239,11 @@ describe('resolvePhases', () => {
 
   it('returns execute entry (no exit) for run subcommand', () => {
     const result = resolvePhases({ subcommand: 'run' });
+    expect(result).toEqual({ entryPhase: 'execute' });
+  });
+
+  it('returns execute entry for bare resume', () => {
+    const result = resolvePhases({ resume: true });
     expect(result).toEqual({ entryPhase: 'execute' });
   });
 
@@ -269,6 +277,46 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('discoverResumeTarget', () => {
+  it('selects the newest plan-scoped checkpoint and extracts the plan name', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+
+    const older = join(buildDir, 'plan-older.checkpoint');
+    const newer = join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint');
+    writeFileSync(older, 'impl:01:done');
+    writeFileSync(newer, 'impl:04:done');
+    utimesSync(older, new Date('2026-03-07T00:00:00Z'), new Date('2026-03-07T00:00:00Z'));
+    utimesSync(newer, new Date('2026-03-08T00:00:00Z'), new Date('2026-03-08T00:00:00Z'));
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'plan-2026-03-07-pluggable-providers',
+      checkpointFile: newer,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('returns undefined when no plan-scoped checkpoints exist', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-empty-${Date.now()}`);
+    mkdirSync(join(root, '.fbeast', '.build'), { recursive: true });
+
+    expect(discoverResumeTarget(root)).toBeUndefined();
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('falls back to main when resume base-branch reflog inference is unavailable', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-no-git-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+
+    expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
   });
 });
 
@@ -485,6 +533,60 @@ describe('main() execution', () => {
       entryPhase: 'execute',
       resume: true,
     }));
+  });
+
+  it('auto-detects plan dir and skips base-branch prompt for bare --resume', async () => {
+    const root = join(tmpdir(), `frankenbeast-main-resume-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    mkdirSync(buildDir, { recursive: true });
+    writeFileSync(join(buildDir, 'plan-2026-03-07-pluggable-providers.checkpoint'), 'impl:04:done');
+    vi.mocked(resolveBaseBranch).mockClear();
+
+    mockParseArgs.mockReturnValue({
+      subcommand: undefined,
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: root,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: true,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith(root, 'plan-2026-03-07-pluggable-providers');
+    expect(resolveBaseBranch).not.toHaveBeenCalled();
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      baseBranch: 'main',
+      entryPhase: 'execute',
+      resume: true,
+      paths: expect.objectContaining({
+        plansDir: `${root}/.fbeast/plans/plan-2026-03-07-pluggable-providers`,
+      }),
+    }));
+
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('uses config.providers.default when --provider is omitted', async () => {

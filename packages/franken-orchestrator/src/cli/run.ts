@@ -2,8 +2,8 @@
 
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
@@ -72,7 +72,7 @@ export function createStdinIO(): InterviewIO & { close(): void } {
  * Determines entry phase and exit behavior from CLI args.
  * Subcommand takes precedence, then flags, then default.
  */
-export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir'>): {
+export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir' | 'resume'>>): {
   entryPhase: SessionPhase;
   exitAfter?: SessionPhase;
 } {
@@ -91,6 +91,9 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   }
 
   // Default mode — detect entry from provided files
+  if (args.resume) {
+    return { entryPhase: 'execute' };
+  }
   if (args.planDir) {
     return { entryPhase: 'execute' };
   }
@@ -100,6 +103,58 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
 
   // No files, no subcommand — full interactive flow
   return { entryPhase: 'interview' };
+}
+
+export interface ResumeTarget {
+  planName: string;
+  checkpointFile: string;
+}
+
+export function discoverResumeTarget(root: string): ResumeTarget | undefined {
+  const buildDir = join(root, '.fbeast', '.build');
+  let newest: { checkpointFile: string; mtimeMs: number } | undefined;
+
+  try {
+    for (const entry of readdirSync(buildDir)) {
+      if (!entry.endsWith('.checkpoint')) continue;
+      const checkpointFile = join(buildDir, entry);
+      const stats = statSync(checkpointFile);
+      if (!stats.isFile()) continue;
+      if (!newest || stats.mtimeMs > newest.mtimeMs) {
+        newest = { checkpointFile, mtimeMs: stats.mtimeMs };
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (!newest) return undefined;
+
+  const fileName = newest.checkpointFile.split('/').pop() ?? '';
+  const planName = fileName.replace(/\.checkpoint$/i, '');
+  if (!planName || planName === '.checkpoint') return undefined;
+
+  return { planName, checkpointFile: newest.checkpointFile };
+}
+
+export function inferResumeBaseBranch(root: string): string {
+  try {
+    const reflog = execFileSync('git', ['reflog', '--format=%gs'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    for (const line of reflog.split('\n')) {
+      const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
+      if (match?.[1] && match[1] !== 'HEAD') {
+        return match[1];
+      }
+    }
+  } catch {
+    // Fall through to the conventional default when reflog is unavailable.
+  }
+
+  return 'main';
 }
 
 /**
@@ -244,8 +299,12 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
+  const resumeTarget = args.resume && !args.planDir && !args.planName
+    ? discoverResumeTarget(root)
+    : undefined;
+
   // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const planName = args.planDir ? undefined : (args.planName ?? resumeTarget?.planName ?? generatePlanName(args.designDoc));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
 
@@ -258,6 +317,10 @@ export async function main(): Promise<void> {
 
   if (args.verbose) {
     console.log('Config:', JSON.stringify(config, null, 2));
+  }
+
+  if (resumeTarget) {
+    logger.info(`Resuming ${resumeTarget.planName} from ${resumeTarget.checkpointFile}`, 'session');
   }
 
   scaffoldFrankenbeast(paths);
@@ -483,8 +546,12 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
-  // Resolve base branch
-  const baseBranch = await resolveBaseBranch(root, args.baseBranch, io);
+  // Resolve base branch. Resume usually starts from the interrupted run's
+  // feature branch, so infer the original base from git reflog unless the
+  // user supplied an explicit --base-branch override.
+  const baseBranch = args.resume && !args.baseBranch
+    ? inferResumeBaseBranch(root)
+    : await resolveBaseBranch(root, args.baseBranch, io);
 
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
