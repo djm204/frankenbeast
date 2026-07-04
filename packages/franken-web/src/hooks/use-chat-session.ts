@@ -176,10 +176,10 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
 function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
   const snapshot = applySessionSnapshot(session);
   const snapshotById = new Map(snapshot.map((message) => [message.id, message]));
-  const snapshotEquivalentCounts = new Map<string, number>();
+  const snapshotEquivalentMessages = new Map<string, ChatMessage[]>();
   for (const message of snapshot) {
     const key = `${message.role}\u0000${message.content}`;
-    snapshotEquivalentCounts.set(key, (snapshotEquivalentCounts.get(key) ?? 0) + 1);
+    snapshotEquivalentMessages.set(key, [...(snapshotEquivalentMessages.get(key) ?? []), message]);
   }
   const seen = new Set<string>();
   const merged = current.flatMap((message) => {
@@ -190,10 +190,11 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
     }
 
     const key = `${message.role}\u0000${message.content}`;
-    const equivalentCount = snapshotEquivalentCounts.get(key) ?? 0;
-    if (equivalentCount > 0) {
-      snapshotEquivalentCounts.set(key, equivalentCount - 1);
-      return [];
+    const equivalentMessages = snapshotEquivalentMessages.get(key) ?? [];
+    const equivalentMessage = equivalentMessages.shift();
+    if (equivalentMessage) {
+      seen.add(equivalentMessage.id);
+      return [equivalentMessage];
     }
 
     return [message];
@@ -468,6 +469,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         readyRef.current = true;
         setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
+        setActivity((current) => [
+          ...current,
+          {
+            type: 'turn.approval.resolved',
+            data: { approved },
+            timestamp: new Date().toISOString(),
+          },
+        ]);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setStatus('idle');

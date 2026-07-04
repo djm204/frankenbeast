@@ -347,6 +347,78 @@ describe('useChatSession', () => {
     }));
     expect(result.current.messages.filter((message) => message.content === 'Ready to deploy')).toHaveLength(1);
     expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.activity).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      data: { approved: true },
+    }));
+  });
+
+  it('replaces equivalent REST snapshot messages in place', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    await act(async () => {
+      await result.current.send('Deploy the generated fix');
+    });
+
+    act(() => {
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'approval-prompt',
+        chunk: 'Approve deployment?',
+        modelTier: 'cheap',
+      });
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+      socket.shutdown();
+    });
+
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{
+        id: 'server-user',
+        role: 'user',
+        content: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:07Z',
+      }],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 1, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.01,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      'Deploy the generated fix',
+      'Approve deployment?',
+    ]);
+    expect(result.current.messages[0]?.id).toBe('server-user');
   });
 
   it('ignores stale session.ready after HTTP approval fallback', async () => {
