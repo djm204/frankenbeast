@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 export type GitRunner = (args: readonly string[], cwd: string) => string;
 
@@ -15,6 +15,7 @@ export interface GitWorktreeIsolationConfig {
 export interface BeastWorktreeAllocation {
   readonly agentId: string;
   readonly branchName: string;
+  readonly executionCwd: string;
   readonly projectRoot: string;
   readonly worktreePath: string;
 }
@@ -39,6 +40,24 @@ function branchExists(runGit: GitRunner, projectRoot: string, branchName: string
   return runGit(['branch', '--list', branchName], projectRoot).length > 0;
 }
 
+function isGitRepository(runGit: GitRunner, projectRoot: string): boolean {
+  try {
+    return runGit(['rev-parse', '--is-inside-work-tree'], projectRoot) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function isolatedExecutionCwd(projectRoot: string, worktreePath: string, baseCwd: string | undefined): string {
+  if (!baseCwd) return worktreePath;
+  const resolvedBaseCwd = resolve(baseCwd);
+  const relativeBaseCwd = relative(projectRoot, resolvedBaseCwd);
+  if (!relativeBaseCwd || relativeBaseCwd.startsWith('..') || isAbsolute(relativeBaseCwd)) {
+    return worktreePath;
+  }
+  return join(worktreePath, relativeBaseCwd);
+}
+
 export function createBeastWorktree(
   config: GitWorktreeIsolationConfig | undefined,
   agentId: string,
@@ -53,11 +72,14 @@ export function createBeastWorktree(
   const branchName = `${config.branchPrefix ?? DEFAULT_BRANCH_PREFIX}${safeAgentId}`;
   const runGit = config.runGit ?? defaultRunGit;
 
+  if (!isGitRepository(runGit, projectRoot)) return undefined;
+
   mkdirSync(worktreesRoot, { recursive: true });
 
   const allocation: BeastWorktreeAllocation = {
     agentId: safeAgentId,
     branchName,
+    executionCwd: isolatedExecutionCwd(projectRoot, worktreePath, baseCwd),
     projectRoot,
     worktreePath,
   };

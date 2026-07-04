@@ -156,6 +156,7 @@ export class AgentService {
     return {
       agentId: worktreeAgentId,
       branchName,
+      executionCwd: typeof metadata.worktreeExecutionCwd === 'string' ? metadata.worktreeExecutionCwd : worktreePath,
       projectRoot,
       worktreePath,
     };

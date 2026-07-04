@@ -1,10 +1,10 @@
-import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
-import { createBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
+import { createBeastWorktree, removeBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -20,6 +20,30 @@ function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
     }
   }
   return env;
+}
+
+function materializeRuntimeDirectory(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  key: string,
+  sourceRoot: string | undefined,
+  targetRoot: string | undefined,
+): void {
+  if (!sourceRoot || !targetRoot) return;
+  const value = configSnapshot[key];
+  if (typeof value !== 'string' || isAbsolute(value)) return;
+  const source = resolve(sourceRoot, value);
+  const target = resolve(targetRoot, value);
+  if (!existsSync(source) || existsSync(target)) return;
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, { recursive: true });
+}
+
+function materializeIgnoredRuntimeState(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  sourceRoot: string | undefined,
+  targetRoot: string | undefined,
+): void {
+  materializeRuntimeDirectory(configSnapshot, 'chunkDirectory', sourceRoot, targetRoot);
 }
 
 export interface ProcessBeastExecutorOptions {
@@ -60,10 +84,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
       run.trackedAgentId ?? run.id,
       processSpec.cwd,
     );
+    if (worktree) {
+      materializeIgnoredRuntimeState(run.configSnapshot, processSpec.cwd, worktree.executionCwd);
+    }
     const isolatedSpec = worktree
       ? {
           ...processSpec,
-          cwd: worktree.worktreePath,
+          cwd: worktree.executionCwd,
           env: {
             ...processSpec.env,
             FRANKENBEAST_WORKTREE_PATH: worktree.worktreePath,
@@ -164,11 +191,14 @@ export class ProcessBeastExecutor implements BeastExecutor {
         data: { runId: run.id, event: spawnFailedEvent },
       });
 
-      // Clean up config file written before spawn
+      // Clean up config file and worktree allocation written before spawn
       const configPath = this.configFilePaths.get(run.id);
       if (configPath) {
         try { unlinkSync(configPath); } catch { /* already removed */ }
         this.configFilePaths.delete(run.id);
+      }
+      if (worktree) {
+        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* cleanup best effort */ }
       }
 
       this.options.eventBus?.publish({
@@ -195,6 +225,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
               worktreePath: worktree.worktreePath,
               worktreeBranch: worktree.branchName,
               worktreeAgentId: worktree.agentId,
+              worktreeExecutionCwd: worktree.executionCwd,
               worktreeProjectRoot: worktree.projectRoot,
             }
           : {}),
