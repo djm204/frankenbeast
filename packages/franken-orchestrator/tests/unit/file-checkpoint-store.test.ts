@@ -110,6 +110,87 @@ describe('FileCheckpointStore', () => {
     it('handles clear on non-existent file', () => {
       expect(() => store.clear()).not.toThrow();
     });
+
+    it('handles clear on a fresh nested checkpoint path', () => {
+      const nestedPath = join(tmpDir, 'fresh', 'nested', 'checkpoint.log');
+      const nestedStore = new FileCheckpointStore(nestedPath);
+
+      expect(() => nestedStore.clear()).not.toThrow();
+      expect(existsSync(nestedPath)).toBe(false);
+    });
+  });
+
+  describe('task output persistence', () => {
+    it('round-trips structured task outputs outside the line-oriented checkpoint markers', () => {
+      const output = new Map<string, unknown>([
+        ['dependency', { value: 42 }],
+        ['list', ['a', 'b']],
+      ]);
+
+      store.writeTaskOutput('task-1', output);
+
+      const result = store.readTaskOutput('task-1');
+      expect(result.found).toBe(true);
+      expect(result.output).toBeInstanceOf(Map);
+      expect(result.output).toEqual(output);
+      expect(store.readAll()).toEqual(new Set());
+    });
+
+    it('reports missing task output separately from an undefined output value', () => {
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+
+      store.writeTaskOutput('task-1', undefined);
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: true, output: undefined });
+    });
+
+    it('does not fail checkpointing when a task output cannot be serialized', () => {
+      expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('removes stale task output when falling back to marker-only recovery', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+
+      expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('treats corrupted task output sidecars as missing', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+      const [outputFile] = readdirSync(`${filePath}.outputs`);
+      writeFileSync(join(`${filePath}.outputs`, outputFile!), 'not-valid-base64-v8-payload');
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('does not persist outputs that cannot be rehydrated faithfully', () => {
+      store.writeTaskOutput('task-1', new URL('https://example.com/path'));
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('clears persisted sidecar task outputs', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+      expect(existsSync(`${filePath}.outputs`)).toBe(true);
+
+      store.clear();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+      expect(existsSync(`${filePath}.outputs`)).toBe(false);
+    });
+
+    it('stores task outputs under filesystem-safe hashed filenames', () => {
+      const taskId = `../${'nested/'.repeat(40)}task`;
+
+      store.writeTaskOutput(taskId, 'safe-output');
+
+      expect(store.readTaskOutput(taskId)).toEqual({ found: true, output: 'safe-output' });
+      expect(readdirSync(`${filePath}.outputs`)).toHaveLength(1);
+      expect(existsSync(join(tmpDir, 'nested'))).toBe(false);
+    });
   });
 
   describe('atomicity', () => {
