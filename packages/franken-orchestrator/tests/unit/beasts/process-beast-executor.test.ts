@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -159,6 +160,35 @@ describe('ProcessBeastExecutor', () => {
   });
 
   describe('ProcessCallbacks wiring', () => {
+    it('writes run config files to an explicit run-config directory and removes them on exit', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      let capturedCallbacks: ProcessCallbacks | undefined;
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          capturedCallbacks = callbacks as ProcessCallbacks;
+          return { pid: 4242 };
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
+      const run = createTestRun(repo);
+
+      await executor.start(run, martinLoopDefinition);
+
+      const [spawnedSpec] = supervisor.spawn.mock.calls[0];
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
+      expect(existsSync(configPath)).toBe(true);
+
+      capturedCallbacks!.onExit(0, null);
+
+      expect(existsSync(configPath)).toBe(false);
+    });
+
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -715,20 +745,19 @@ describe('ProcessBeastExecutor', () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
-      const { existsSync } = await import('node:fs');
+      const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
       const supervisor = {
         spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
         stop: vi.fn(async () => {}),
         kill: vi.fn(async () => {}),
       };
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
       const run = createTestRun(repo);
 
       await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow();
 
       // Config file should have been cleaned up
-      const configDir = join(process.cwd(), '.fbeast', '.build', 'run-configs');
-      const configPath = join(configDir, `${run.id}.json`);
+      const configPath = join(runConfigDir, `${run.id}.json`);
       expect(existsSync(configPath)).toBe(false);
     });
   });
