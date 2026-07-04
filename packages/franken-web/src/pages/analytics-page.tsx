@@ -97,7 +97,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
   const events = eventPage?.events ?? [];
   const totalEvents = eventPage?.total ?? 0;
-  const currentPage = page;
+  const currentPage = eventPage?.page ?? 1;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
   const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
   const canGoPrevious = currentPage > 1 && !isEventsLoading;
