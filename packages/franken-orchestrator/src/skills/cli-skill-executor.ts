@@ -243,7 +243,6 @@ export class CliSkillExecutor {
     const chunkId = this.extractChunkId(skillId);
     const budgetAbortController = new AbortController();
     let budgetAbortResult: CircuitBreakerResult | undefined;
-    let activeProvider = config.martin?.provider ?? this.defaultMartinConfig.provider;
 
     const abortForBudget = (result: CircuitBreakerResult): void => {
       budgetAbortResult = result;
@@ -301,6 +300,7 @@ export class CliSkillExecutor {
         `Git isolation failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    const preMartinUntrackedFiles = this.untrackedFilesFromStatus(this.git.getStatus());
 
     // Build martin config with defaults from input when not explicitly provided
     const isImpl = taskId ? !taskId.startsWith('harden:') : true;
@@ -328,7 +328,6 @@ export class CliSkillExecutor {
         return config.martin?.onRateLimit?.(provider);
       },
       onProviderAttempt: (provider: string, iteration: number, renderedPrompt?: string) => {
-        activeProvider = provider;
         const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider, renderedPrompt);
         const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
         if (estimatedBudgetResult.tripped) {
@@ -468,7 +467,7 @@ export class CliSkillExecutor {
     let lastStaleMateSignature = '';
     let stalledIterations = 0;
     const budgetPoll = setInterval(() => {
-      const currentCost = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, activeProvider);
+      const currentCost = this.computeCurrentCost();
       const budgetResult = this.observer.breaker.check(currentCost);
       if (budgetResult.tripped) {
         abortForBudget(budgetResult);
@@ -486,7 +485,7 @@ export class CliSkillExecutor {
           : undefined;
 
       if (budgetError) {
-        this.resetBudgetAbortedWorktree();
+        this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
         const postTokens = this.observer.counter.grandTotal();
         this.observer.setMetadata(chunkSpan, {
           budgetExceeded: true,
@@ -509,7 +508,7 @@ export class CliSkillExecutor {
     }
 
     if (budgetAbortResult) {
-      this.resetBudgetAbortedWorktree();
+      this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
       const postTokens = this.observer.counter.grandTotal();
       this.observer.setMetadata(chunkSpan, {
         budgetExceeded: true,
@@ -576,7 +575,7 @@ export class CliSkillExecutor {
     if (!martinResult.completed) {
       const finalBudgetResult = this.observer.breaker.check(this.computeCurrentCost());
       if (finalBudgetResult.tripped) {
-        this.resetBudgetAbortedWorktree();
+        this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
         this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
         return {
           output: `Budget exceeded: $${finalBudgetResult.spendUsd.toFixed(2)} / $${finalBudgetResult.limitUsd.toFixed(2)}`,
@@ -712,10 +711,24 @@ export class CliSkillExecutor {
     }]);
   }
 
-  private resetBudgetAbortedWorktree(): void {
-    if (this.git.getStatus().length === 0) return;
+  private resetBudgetAbortedWorktree(preExistingUntrackedFiles: readonly string[] = []): void {
+    const status = this.git.getStatus();
+    if (status.length === 0) return;
     this.git.resetHard(this.git.getCurrentHead());
-    this.git.cleanUntracked();
+    const preExisting = new Set(preExistingUntrackedFiles);
+    const newUntracked = this.untrackedFilesFromStatus(status).filter(file => !preExisting.has(file));
+    if (newUntracked.length > 0) {
+      this.git.cleanUntracked(newUntracked);
+    }
+  }
+
+  private untrackedFilesFromStatus(status: string): string[] {
+    return status
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('?? '))
+      .map(line => line.slice(3).trim())
+      .filter(file => file.length > 0);
   }
 
   private recordSessionCommit(taskId: string, commitHash: string): void {

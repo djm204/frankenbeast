@@ -5,13 +5,19 @@ import { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
 import { MartinLoop } from '../../src/skills/martin-loop.js';
 import { ProviderRegistry, type ICliProvider } from '../../src/skills/providers/cli-provider.js';
 
-function fakeGit(): GitBranchIsolator {
+const emptyContext = { adrs: [], knownErrors: [], rules: [] };
+
+function fakeGit(options: {
+  getStatus?: () => string;
+  resetHard?: (commitHash: string) => void;
+  cleanUntracked?: (paths?: readonly string[]) => void;
+} = {}): GitBranchIsolator {
   return {
     isolate: () => undefined,
     getWorkingDir: () => process.cwd(),
-    getStatus: () => '',
-    resetHard: () => undefined,
-    cleanUntracked: () => undefined,
+    getStatus: options.getStatus ?? (() => ''),
+    resetHard: options.resetHard ?? (() => undefined),
+    cleanUntracked: options.cleanUntracked ?? (() => undefined),
     autoCommit: () => false,
     getCurrentHead: () => 'HEAD',
     getDiffStat: () => '',
@@ -134,7 +140,7 @@ describe('Budget enforcement integration', () => {
 
     const result = await executor.execute(
       'cli:budget-preflight',
-      { objective: 'expensive task', context: '', sessionId: 'budget-preflight', dependencyOutputs: new Map() },
+      { objective: 'expensive task', context: emptyContext, sessionId: 'budget-preflight', projectId: 'test-project', dependencyOutputs: new Map() },
       {
         martin: {
           prompt: 'expensive task',
@@ -165,7 +171,7 @@ describe('Budget enforcement integration', () => {
     const startedAt = Date.now();
     const resultPromise = executor.execute(
       'cli:budget-mid-execution',
-      { objective: 'long running task', context: '', sessionId: 'budget-mid-execution', dependencyOutputs: new Map() },
+      { objective: 'long running task', context: emptyContext, sessionId: 'budget-mid-execution', projectId: 'test-project', dependencyOutputs: new Map() },
       {
         martin: {
           prompt: 'long running task',
@@ -194,5 +200,57 @@ describe('Budget enforcement integration', () => {
 
     expect(result.output).toContain('Budget exceeded:');
     expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it('cleans only untracked files created after Martin starts on budget abort', async () => {
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 0.02 });
+    bridge.startTrace('budget-clean-new-untracked-only');
+
+    const statuses = [
+      '?? user-notes.md',
+      ' M tracked.ts\n?? user-notes.md\n?? generated-output.md',
+    ];
+    const cleaned: string[][] = [];
+    const resetHeads: string[] = [];
+    const registry = new ProviderRegistry();
+    registry.register(provider('gpt-4o', 'setInterval(() => process.stdout.write("working\\n"), 50)'));
+    const executor = new CliSkillExecutor(
+      new MartinLoop(registry),
+      fakeGit({
+        getStatus: () => statuses.shift() ?? ' M tracked.ts\n?? user-notes.md\n?? generated-output.md',
+        resetHard: (commitHash) => resetHeads.push(commitHash),
+        cleanUntracked: (paths) => cleaned.push([...(paths ?? [])]),
+      }),
+      bridge.observerDeps,
+    );
+
+    const resultPromise = executor.execute(
+      'cli:budget-clean-new-untracked-only',
+      { objective: 'long running task', context: emptyContext, sessionId: 'budget-clean-new-untracked-only', projectId: 'test-project', dependencyOutputs: new Map() },
+      {
+        martin: {
+          prompt: 'long running task',
+          promiseTag: 'DONE',
+          maxIterations: 1,
+          maxTurns: 1,
+          provider: 'gpt-4o',
+          timeoutMs: 5_000,
+        },
+      },
+    );
+
+    const span = bridge.observerDeps.startSpan(bridge.observerDeps.trace, { name: 'mid-run-spend' });
+    bridge.observerDeps.recordTokenUsage(
+      span,
+      { promptTokens: 2_000, completionTokens: 2_000, model: 'gpt-4o' },
+      bridge.observerDeps.counter,
+    );
+    bridge.observerDeps.endSpan(span);
+
+    const result = await resultPromise;
+
+    expect(result.output).toContain('Budget exceeded:');
+    expect(resetHeads).toEqual(['HEAD']);
+    expect(cleaned).toEqual([['generated-output.md']]);
   });
 });
