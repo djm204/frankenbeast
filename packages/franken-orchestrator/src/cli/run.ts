@@ -2,8 +2,8 @@
 
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -51,6 +51,7 @@ import { resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
+import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -72,7 +73,7 @@ export function createStdinIO(): InterviewIO & { close(): void } {
  * Determines entry phase and exit behavior from CLI args.
  * Subcommand takes precedence, then flags, then default.
  */
-export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir'>): {
+export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir' | 'resume'>>): {
   entryPhase: SessionPhase;
   exitAfter?: SessionPhase;
 } {
@@ -91,6 +92,9 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   }
 
   // Default mode — detect entry from provided files
+  if (args.resume) {
+    return { entryPhase: 'execute' };
+  }
   if (args.planDir) {
     return { entryPhase: 'execute' };
   }
@@ -101,6 +105,150 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   // No files, no subcommand — full interactive flow
   return { entryPhase: 'interview' };
 }
+
+export interface ResumeTarget {
+  planName: string;
+  checkpointFile: string;
+  planDir?: string;
+  ambiguousPlanDir?: boolean;
+}
+
+function findUniquePlanDirByBasename(root: string, planName: string): string | undefined | null {
+  const skip = new Set(['.git', '.fbeast', 'node_modules']);
+  const matches: string[] = [];
+
+  function visit(dir: string): void {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (skip.has(entry)) continue;
+      const path = join(dir, entry);
+      let stats;
+      try {
+        stats = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (!stats.isDirectory()) continue;
+      if (entry === planName) {
+        matches.push(path);
+        continue;
+      }
+      visit(path);
+    }
+  }
+
+  visit(root);
+  if (matches.length === 0) return undefined;
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export function discoverResumeTarget(root: string): ResumeTarget | undefined {
+  const buildDir = join(root, '.fbeast', '.build');
+  let newest: { checkpointFile: string; mtimeMs: number } | undefined;
+
+  try {
+    for (const entry of readdirSync(buildDir)) {
+      if (entry === '.checkpoint') continue;
+      if (!entry.endsWith('.checkpoint')) continue;
+      const checkpointFile = join(buildDir, entry);
+      const stats = statSync(checkpointFile);
+      if (!stats.isFile()) continue;
+      if (!newest || stats.mtimeMs > newest.mtimeMs) {
+        newest = { checkpointFile, mtimeMs: stats.mtimeMs };
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (!newest) return undefined;
+
+  const fileName = basename(newest.checkpointFile);
+  const planName = fileName.replace(/\.checkpoint$/i, '');
+  if (!planName) return undefined;
+
+  const scopedPlanDir = join(root, '.fbeast', 'plans', planName);
+  const fbeastPlanDir = join(root, '.fbeast', planName);
+  const customPlanDir = join(root, planName);
+  const nestedPlanDir = !existsSync(scopedPlanDir) && !existsSync(customPlanDir) && !existsSync(fbeastPlanDir)
+    ? findUniquePlanDirByBasename(root, planName)
+    : undefined;
+  const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
+    ? customPlanDir
+    : !existsSync(scopedPlanDir) && existsSync(fbeastPlanDir)
+      ? fbeastPlanDir
+    : nestedPlanDir ?? undefined;
+
+  if (nestedPlanDir === null) {
+    return { planName, checkpointFile: newest.checkpointFile, ambiguousPlanDir: true };
+  }
+
+  return { planName, checkpointFile: newest.checkpointFile, ...(planDir ? { planDir } : {}) };
+}
+
+function ensureResumeTargetIsUsable(resumeTarget: ResumeTarget | undefined): void {
+  if (resumeTarget?.ambiguousPlanDir) {
+    throw new Error(
+      `Multiple custom plan directories named "${resumeTarget.planName}" match ${resumeTarget.checkpointFile}; pass --plan-dir explicitly to resume this checkpoint.`,
+    );
+  }
+}
+
+function branchExists(root: string, branch: string): boolean {
+  try {
+    execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isConventionalBaseBranch(branch: string): boolean {
+  return /^(main|master|trunk|develop|dev|release(?:\/.*)?)$/.test(branch);
+}
+
+export function inferResumeBaseBranch(root: string): string | undefined {
+  try {
+    const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const reflog = execFileSync('git', ['reflog', '--format=%gs'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const candidateBaseBranches: string[] = [];
+    for (const line of reflog.split('\n')) {
+      const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
+      if (!match) continue;
+      const [, fromBranch, toBranch] = match;
+      if (toBranch === currentBranch && isConventionalBaseBranch(toBranch) && branchExists(root, toBranch)) {
+        return toBranch;
+      }
+      if (toBranch === currentBranch && fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch) && branchExists(root, fromBranch)) {
+        candidateBaseBranches.push(fromBranch);
+      }
+    }
+    const originalBaseBranch = candidateBaseBranches.at(-1);
+    if (originalBaseBranch) return originalBaseBranch;
+  } catch {
+    // Fall through to the normal base-branch resolver when reflog is unavailable.
+  }
+
+  return undefined;
+}
+
 
 /**
  * Validates config path and loads config from all sources.
@@ -175,6 +323,162 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
+async function readEnvValueFromFile(filePath: string, key: string): Promise<string | undefined> {
+  try {
+    const contents = await readFile(filePath, 'utf8');
+    const parsed = parseDotenv(contents);
+    return parsed[key];
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveCommsSecret(root: string, ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  if (secretStore) {
+    try {
+      const resolved = await secretStore.resolve(ref);
+      if (resolved?.trim()) {
+        return resolved.trim();
+      }
+    } catch {
+      // Fall through to environment lookup for deploys that keep refs as env var names.
+    }
+  }
+  const envValue = process.env[ref]?.trim();
+  if (envValue) {
+    return envValue;
+  }
+  const rootEnvValue = await readEnvValueFromFile(join(root, '.env'), ref);
+  if (rootEnvValue?.trim()) {
+    return rootEnvValue.trim();
+  }
+  const webEnvValue = await readEnvValueFromFile(join(root, 'packages', 'franken-web', '.env.local'), ref);
+  return webEnvValue?.trim() ? webEnvValue.trim() : undefined;
+}
+
+async function resolveCommsPublicRef(
+  root: string,
+  ref: string | undefined,
+  secretStore: ISecretStore | undefined,
+  isLiteral: (value: string) => boolean,
+): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  const trimmed = ref.trim();
+  const resolved = await resolveCommsSecret(root, ref, secretStore);
+  if (resolved) {
+    return resolved;
+  }
+  return isLiteral(trimmed) ? trimmed : undefined;
+}
+
+const isDiscordPublicKeyLiteral = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value);
+const isWhatsappPhoneNumberIdLiteral = (value: string): boolean => /^\d{5,}$/.test(value);
+
+function requireCommsChannelFields(
+  channel: string,
+  enabled: boolean,
+  fields: Record<string, string | undefined>,
+): void {
+  if (!enabled) {
+    return;
+  }
+  const missing = Object.entries(fields)
+    .filter(([, value]) => !value?.trim())
+    .map(([field]) => field);
+  if (missing.length > 0) {
+    throw new Error(
+      `Cannot start enabled ${channel} comms channel; missing resolved ${missing.join(', ')}`,
+    );
+  }
+}
+
+async function buildChatServerCommsConfig(
+  config: OrchestratorConfig,
+  secretStore: ISecretStore | undefined,
+  root: string,
+): Promise<CommsConfig | undefined> {
+  if (!config.comms.enabled
+    && !config.comms.slack.enabled
+    && !config.comms.discord.enabled
+    && !config.comms.telegram.enabled
+    && !config.comms.whatsapp.enabled) {
+    return undefined;
+  }
+
+  const slackToken = await resolveCommsSecret(root, config.comms.slack.botTokenRef, secretStore);
+  const slackSigningSecret = await resolveCommsSecret(root, config.comms.slack.signingSecretRef, secretStore);
+  const discordToken = await resolveCommsSecret(root, config.comms.discord.botTokenRef, secretStore);
+  const discordPublicKey = await resolveCommsPublicRef(
+    root,
+    config.comms.discord.publicKeyRef,
+    secretStore,
+    isDiscordPublicKeyLiteral,
+  );
+  const telegramBotToken = await resolveCommsSecret(root, config.comms.telegram.botTokenRef, secretStore);
+  const whatsappAccessToken = await resolveCommsSecret(root, config.comms.whatsapp.accessTokenRef, secretStore);
+  const whatsappPhoneNumberId = await resolveCommsPublicRef(
+    root,
+    config.comms.whatsapp.phoneNumberIdRef,
+    secretStore,
+    isWhatsappPhoneNumberIdLiteral,
+  );
+  const whatsappAppSecret = await resolveCommsSecret(root, config.comms.whatsapp.appSecretRef, secretStore);
+  const whatsappVerifyToken = await resolveCommsSecret(root, config.comms.whatsapp.verifyTokenRef, secretStore);
+
+  requireCommsChannelFields('slack', config.comms.slack.enabled, {
+    token: slackToken,
+    signingSecret: slackSigningSecret,
+  });
+  requireCommsChannelFields('discord', config.comms.discord.enabled, {
+    token: discordToken,
+    publicKey: discordPublicKey,
+  });
+  requireCommsChannelFields('telegram', config.comms.telegram.enabled, {
+    botToken: telegramBotToken,
+  });
+  requireCommsChannelFields('whatsapp', config.comms.whatsapp.enabled, {
+    accessToken: whatsappAccessToken,
+    phoneNumberId: whatsappPhoneNumberId,
+    appSecret: whatsappAppSecret,
+    verifyToken: whatsappVerifyToken,
+  });
+
+  return CommsConfigSchema.parse({
+    orchestrator: {
+      wsUrl: config.comms.orchestratorWsUrl,
+      token: await resolveCommsSecret(root, config.comms.orchestratorTokenRef, secretStore),
+    },
+    channels: {
+      slack: {
+        enabled: config.comms.slack.enabled,
+        token: slackToken,
+        signingSecret: slackSigningSecret,
+      },
+      discord: {
+        enabled: config.comms.discord.enabled,
+        token: discordToken,
+        publicKey: discordPublicKey,
+      },
+      telegram: {
+        enabled: config.comms.telegram.enabled,
+        botToken: telegramBotToken,
+      },
+      whatsapp: {
+        enabled: config.comms.whatsapp.enabled,
+        accessToken: whatsappAccessToken,
+        phoneNumberId: whatsappPhoneNumberId,
+        appSecret: whatsappAppSecret,
+        verifyToken: whatsappVerifyToken,
+      },
+    },
+  });
+}
+
 async function createChatSurfaceDeps(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -244,8 +548,18 @@ export async function main(): Promise<void> {
     console.log(await renderBanner(root));
   }
 
+  const resumeTarget = args.resume && !args.planDir && !args.planName && (!args.subcommand || args.subcommand === 'run')
+    ? discoverResumeTarget(root)
+    : undefined;
+  ensureResumeTargetIsUsable(resumeTarget);
+  const planDirOverride = args.planDir ?? resumeTarget?.planDir;
+
   // Resolve project root — scope plans by name unless --plan-dir overrides
-  const planName = args.planDir ? undefined : (args.planName ?? generatePlanName(args.designDoc));
+  const planName = planDirOverride
+    ? undefined
+    : (args.planName ?? (args.subcommand === 'issues'
+      ? undefined
+      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
 
@@ -258,6 +572,10 @@ export async function main(): Promise<void> {
 
   if (args.verbose) {
     console.log('Config:', JSON.stringify(config, null, 2));
+  }
+
+  if (resumeTarget) {
+    logger.info(`Resuming ${resumeTarget.planName} from ${resumeTarget.checkpointFile}`, 'session');
   }
 
   scaffoldFrankenbeast(paths);
@@ -312,6 +630,8 @@ export async function main(): Promise<void> {
         skillManager,
         action: args.skillAction,
         target: args.skillTarget,
+        command: args.skillCommand,
+        commandArgs: args.skillCommandArgs,
         print: console.log,
       });
     } catch (err) {
@@ -326,6 +646,9 @@ export async function main(): Promise<void> {
       await handleSecurityCommand({
         action: args.securityAction,
         target: args.securityTarget,
+        configPath: args.config ?? paths.configFile,
+        ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
+        ...(config.security ? { currentSecurity: config.security } : {}),
         print: console.log,
       });
     } catch (err) {
@@ -396,6 +719,7 @@ export async function main(): Promise<void> {
       const analytics = createSqliteAnalyticsService({
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
+      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
       const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({
@@ -438,6 +762,7 @@ export async function main(): Promise<void> {
             mutableConfig = nextConfig;
           },
         },
+        ...(commsConfig ? { commsConfig } : {}),
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
         ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
@@ -483,8 +808,12 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
-  // Resolve base branch
-  const baseBranch = await resolveBaseBranch(root, args.baseBranch, io);
+  // Resolve base branch. Resume usually starts from the interrupted run's
+  // feature branch, so infer the original base from git reflog unless the
+  // user supplied an explicit --base-branch override.
+  const baseBranch = args.resume && !args.baseBranch
+    ? (inferResumeBaseBranch(root) ?? await resolveBaseBranch(root, args.baseBranch, io))
+    : await resolveBaseBranch(root, args.baseBranch, io);
 
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
@@ -507,7 +836,9 @@ export async function main(): Promise<void> {
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
-    ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+    ...(planDirOverride !== undefined
+      ? { planDirOverride }
+      : {}),
     // Issue-specific config
     issueLabel: args.issueLabel,
     issueMilestone: args.issueMilestone,
@@ -603,6 +934,7 @@ export interface NetworkCommandSupervisorLike {
     mode: 'secure' | 'insecure';
     secureBackend: string;
   }): Promise<{ services: { id: string; url?: string | undefined; status?: 'started' | 'already-running' | undefined }[] }>;
+  stopAll(state: Awaited<ReturnType<NetworkCommandSupervisorLike['up']>>): Promise<void>;
   down(): Promise<void>;
   status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
   stop(target: string | 'all'): Promise<void>;
@@ -750,8 +1082,13 @@ export async function runNetworkCommand(
     return;
   }
 
+  const configFile = args.config ? resolvePath(args.config) : undefined;
   const services = filterNetworkServices(
-    deps.resolveServices(config, { repoRoot: root }),
+    deps.resolveServices(config, {
+      repoRoot: root,
+      ...(configFile ? { configFile } : {}),
+      ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+    }),
     action === 'up' ? undefined : args.networkTarget,
   );
 
@@ -781,7 +1118,10 @@ export async function runNetworkCommand(
     }
     if (!args.networkDetached) {
       await deps.waitForShutdown();
-      await supervisor.stop(args.networkTarget ?? 'all');
+      await supervisor.stopAll({
+        ...state,
+        services: state.services.filter((service) => service.status === 'started'),
+      });
     }
     return;
   }

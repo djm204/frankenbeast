@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NetworkOperatorState } from './network-state-store.js';
 
@@ -10,13 +10,23 @@ export class NetworkLogStore {
     return join(this.logDir, `${serviceId}.log`);
   }
 
-  resolve(state: NetworkOperatorState, target: string | 'all'): string[] {
+  async resolve(state: NetworkOperatorState, target: string | 'all'): Promise<string[]> {
     const services = target === 'all'
       ? state.services
       : state.services.filter((service) => service.id === target);
 
-    return services
+    const logFiles = services
       .map((service) => service.logFile)
       .filter((logFile): logFile is string => Boolean(logFile));
+
+    const logs = await Promise.all(logFiles.map(async (logFile) => {
+      try {
+        return await readFile(logFile, 'utf-8');
+      } catch {
+        return '';
+      }
+    }));
+
+    return logs.flatMap((log) => log.split(/\r?\n/).filter((line) => line.length > 0));
   }
 }

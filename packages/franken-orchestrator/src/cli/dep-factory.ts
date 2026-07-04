@@ -247,16 +247,19 @@ function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
 
 function clearSessionArtifacts(options: CliDepOptions, artifacts: SessionArtifacts): void {
   const { paths } = options;
+  const checkpointOutputDir = `${artifacts.checkpointFile}.outputs`;
   if (options.reset) {
     const memoryDbPath = resolve(paths.buildDir, 'memory.db');
     for (const f of [artifacts.checkpointFile, paths.tracesDb, memoryDbPath]) {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
     }
+    try { if (existsSync(checkpointOutputDir)) rmSync(checkpointOutputDir, { recursive: true, force: true }); } catch {}
     for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
       try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   } else if (!options.resume) {
     try { if (existsSync(artifacts.checkpointFile)) unlinkSync(artifacts.checkpointFile); } catch {}
+    try { if (existsSync(checkpointOutputDir)) rmSync(checkpointOutputDir, { recursive: true, force: true }); } catch {}
     for (const dir of [paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
       try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
     }

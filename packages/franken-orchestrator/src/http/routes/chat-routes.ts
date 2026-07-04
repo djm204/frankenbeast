@@ -4,6 +4,14 @@ import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import type { ChatRuntime } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
+import type {
+  ApiDataEnvelope,
+  ApproveResult,
+  ChatSessionResponse,
+  ChatSessionSummary,
+  MessageResult,
+  TurnOutcome,
+} from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 
@@ -36,6 +44,13 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
   return session;
 }
 
+function sessionResponse(
+  session: NonNullable<ReturnType<ISessionStore['get']>>,
+  socketToken: string,
+): ChatSessionResponse {
+  return { ...session, socketToken };
+}
+
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketToken } = deps;
   const app = new Hono();
@@ -51,12 +66,15 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
-    return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } }, 201);
+    const response = {
+      data: sessionResponse(session, issueSocketToken(session.id)),
+    } satisfies ApiDataEnvelope<ChatSessionResponse>;
+    return c.json(response, 201);
   });
 
   app.get('/v1/chat/sessions', (c) => {
     const projectId = c.req.query('projectId');
-    const sessions = sessionStore.listSessions(projectId).map((session) => ({
+    const sessions: ChatSessionSummary[] = sessionStore.listSessions(projectId).map((session) => ({
       id: session.id,
       projectId: session.projectId,
       state: session.state,
@@ -65,14 +83,16 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    return c.json({ data: { sessions } });
+    return c.json({ data: { sessions } } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[] }>);
   });
 
   // Get session
   app.get('/v1/chat/sessions/:id', (c) => {
     const id = c.req.param('id');
     const session = getSessionOrThrow(sessionStore, id);
-    return c.json({ data: { ...session, socketToken: issueSocketToken(session.id) } });
+    return c.json({
+      data: sessionResponse(session, issueSocketToken(session.id)),
+    } satisfies ApiDataEnvelope<ChatSessionResponse>);
   });
 
   // Submit message
@@ -100,13 +120,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
-    return c.json({
+    const outcome: TurnOutcome = result.outcome ?? {
+      kind: 'reply',
+      content: result.displayMessages.map((message) => message.content).join('\n'),
+      modelTier: result.tier ?? 'unknown',
+    };
+
+    const response = {
       data: {
-        outcome: result.outcome,
-        tier: result.tier,
+        outcome,
+        tier: result.tier ?? 'unknown',
         state: session.state,
       },
-    });
+    } satisfies ApiDataEnvelope<MessageResult>;
+    return c.json(response);
   });
 
   // SSE stream
@@ -123,7 +150,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
-    return c.json({ data: { id: session.id, approved, state: session.state } });
+    return c.json({ data: { id: session.id, approved, state: session.state } } satisfies ApiDataEnvelope<ApproveResult>);
   });
 
   return app;

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { MaxIterationBreaker } from '../../../src/breakers/max-iteration.js';
 import { CritiqueLoop } from '../../../src/loop/critique-loop.js';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
-import type { Evaluator, EvaluationInput } from '../../../src/types/evaluation.js';
+import type { Evaluator, EvaluationFinding, EvaluationInput } from '../../../src/types/evaluation.js';
 import type { CircuitBreaker, LoopConfig, CircuitBreakerResult, LoopState } from '../../../src/types/loop.js';
 
 function createInput(content: string): EvaluationInput {
@@ -33,7 +34,7 @@ function createPassingPipeline(): CritiquePipeline {
   return new CritiquePipeline([evaluator]);
 }
 
-function createFailingPipeline(findings = [{ message: 'issue found', severity: 'warning' as const }]): CritiquePipeline {
+function createFailingPipeline(findings: readonly EvaluationFinding[] = [{ message: 'issue found', severity: 'warning' }]): CritiquePipeline {
   const evaluator: Evaluator = {
     name: 'mock',
     category: 'deterministic',
@@ -75,6 +76,18 @@ describe('CritiqueLoop', () => {
       expect(result.correction.findings).toHaveLength(1);
       expect(result.correction.summary).toBeTruthy();
       expect(result.correction.iterationCount).toBe(1);
+    }
+  });
+
+  it('runs exactly maxIterations failing iterations before returning correction', async () => {
+    const loop = new CritiqueLoop(createFailingPipeline(), [new MaxIterationBreaker()]);
+    const result = await loop.run(createInput('bad code'), createConfig({ maxIterations: 2 }));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.iterations).toHaveLength(2);
+    expect(result.iterations.map((iteration) => iteration.index)).toEqual([0, 1]);
+    if (result.verdict === 'fail') {
+      expect(result.correction.iterationCount).toBe(2);
     }
   });
 

@@ -420,6 +420,69 @@ describe('ChatShell', () => {
     });
   });
 
+  it('ignores stale network log responses after a later service selection wins', async () => {
+    window.location.hash = '#/network';
+    let resolveChatLogs!: (value: { logs: string[] }) => void;
+    const chatLogs = new Promise<{ logs: string[] }>((resolve) => {
+      resolveChatLogs = resolve;
+    });
+    mockNetworkGetLogs.mockImplementation((serviceId: string) => serviceId === 'chat-server'
+      ? chatLogs
+      : Promise.resolve({ logs: ['dashboard log line'] }));
+    mockNetworkGetStatus.mockResolvedValue({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      services: [
+        { id: 'chat-server', status: 'running' },
+        { id: 'dashboard', status: 'running' },
+      ],
+    });
+
+    render(<ChatShell baseUrl="http://localhost:3000" beastOperatorToken="operator-token" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Service logs')).toBeDefined();
+    });
+
+    fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });
+    fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'dashboard' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('dashboard log line')).toBeDefined();
+    });
+
+    resolveChatLogs({ logs: ['stale chat log line'] });
+
+    await waitFor(() => {
+      expect(screen.queryByText('stale chat log line')).toBeNull();
+      expect(screen.getByText('dashboard log line')).toBeDefined();
+    });
+  });
+
+  it('clears stale network logs and reports refresh failures', async () => {
+    window.location.hash = '#/network';
+    mockNetworkGetLogs.mockResolvedValueOnce({ logs: ['current log line'] });
+    render(<ChatShell baseUrl="http://localhost:3000" beastOperatorToken="operator-token" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Service logs')).toBeDefined();
+    });
+
+    fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('current log line')).toBeDefined();
+    });
+
+    mockNetworkGetLogs.mockRejectedValueOnce(new Error('log endpoint failed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('current log line')).toBeNull();
+      expect(screen.getByRole('alert').textContent).toContain('log endpoint failed');
+    });
+  });
+
   it('shows connection and session status in the top bar', () => {
     const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
     const topbar = container.querySelector('.topbar');

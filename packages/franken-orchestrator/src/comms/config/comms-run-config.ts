@@ -47,6 +47,15 @@ export interface ResolvedCommsSecrets {
   };
 }
 
+const isDiscordPublicKeyLiteral = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value);
+
+function resolvePublicRef(ref: string, env: Record<string, string | undefined>): string | undefined {
+  const resolved = env[ref]?.trim();
+  if (resolved) return resolved;
+  const trimmed = ref.trim();
+  return isDiscordPublicKeyLiteral(trimmed) ? trimmed : undefined;
+}
+
 /**
  * Resolve *Ref fields to actual values from an env map.
  * Throws if a required secret is missing for an enabled channel.
@@ -67,7 +76,7 @@ export function resolveCommsSecrets(
 
   if (config.channels.discord.enabled) {
     const token = env[config.channels.discord.tokenRef];
-    const publicKey = env[config.channels.discord.publicKeyRef];
+    const publicKey = resolvePublicRef(config.channels.discord.publicKeyRef, env);
     if (!token) throw new Error(`${config.channels.discord.tokenRef} not found in environment`);
     if (!publicKey) throw new Error(`${config.channels.discord.publicKeyRef} not found in environment`);
     secrets.discord = { token, publicKey };

@@ -6,7 +6,7 @@ import type { NetworkConfigResponse, NetworkStatusResponse } from '../lib/networ
 
 interface NetworkPageProps {
   status: Pick<NetworkStatusResponse, 'mode' | 'secureBackend'>;
-  services: Array<{ id: string; status: string; explanation?: string; url?: string }>;
+  services: NetworkStatusResponse['services'];
   logs: string[];
   selectedLogServiceId?: string;
   logsLoading?: boolean;
@@ -16,7 +16,7 @@ interface NetworkPageProps {
   onStart(serviceId: string): void;
   onStop(serviceId: string): void;
   onRestart(serviceId: string): void;
-  onSaveConfig(assignments: string[]): void;
+  onSaveConfig(assignments: string[]): Promise<void> | void;
   onSelectLogService(serviceId: string): void;
 }
 

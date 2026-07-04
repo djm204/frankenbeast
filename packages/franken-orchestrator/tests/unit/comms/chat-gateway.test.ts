@@ -101,6 +101,33 @@ describe('ChatGateway', () => {
     }
   });
 
+  it('passes channel routing metadata through to outbound replies', async () => {
+    for (const [type, expectedMetadata] of [
+      ['slack', { externalChannelId: 'C-slack', channelId: 'C-slack' }],
+      ['discord', { externalChannelId: 'C-discord', channelId: 'C-discord' }],
+      ['telegram', { externalChannelId: 'C-telegram', chatId: 'C-telegram' }],
+      ['whatsapp', { externalChannelId: 'C-whatsapp', phoneNumber: 'C-whatsapp' }],
+    ] as const) {
+      const adapter = mockAdapter(type);
+      gateway.registerAdapter(adapter);
+
+      await gateway.handleInbound({
+        channelType: type,
+        externalUserId: `U-${type}`,
+        externalChannelId: `C-${type}`,
+        externalMessageId: `M-${type}`,
+        text: 'test',
+        receivedAt: new Date().toISOString(),
+        rawEvent: {},
+      });
+
+      expect(adapter.send).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ metadata: expect.objectContaining(expectedMetadata) }),
+      );
+    }
+  });
+
   it('handleAction sends /approve for approve action', async () => {
     const slackAdapter = mockAdapter('slack');
     gateway.registerAdapter(slackAdapter);
@@ -111,6 +138,42 @@ describe('ChatGateway', () => {
       expect.objectContaining({
         sessionId: 'sess-1',
         text: '/approve',
+      }),
+    );
+  });
+
+  it('handleAction relays explicit route metadata after a restart', async () => {
+    const telegramAdapter = mockAdapter('telegram');
+    gateway.registerAdapter(telegramAdapter);
+
+    await gateway.handleAction('telegram', 'sess-telegram', 'approve', {
+      chatId: 'chat-123',
+      externalChannelId: 'chat-123',
+    });
+
+    expect(telegramAdapter.send).toHaveBeenCalledWith(
+      'sess-telegram',
+      expect.objectContaining({
+        metadata: expect.objectContaining({ chatId: 'chat-123' }),
+      }),
+    );
+  });
+
+  it('handleAction relays routing metadata returned by the runtime after a restart', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'approved',
+      status: 'reply',
+      metadata: { channelId: 'C-stored', threadTs: '456.789' },
+    } satisfies CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleAction('slack', 'sess-slack', 'approve');
+
+    expect(slackAdapter.send).toHaveBeenCalledWith(
+      'sess-slack',
+      expect.objectContaining({
+        metadata: expect.objectContaining({ channelId: 'C-stored', threadTs: '456.789' }),
       }),
     );
   });

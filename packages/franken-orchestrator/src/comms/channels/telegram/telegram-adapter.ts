@@ -9,6 +9,28 @@ export interface TelegramAdapterOptions {
   token: string;
 }
 
+const CALLBACK_DATA_PREFIX = 'fb';
+
+export function encodeTelegramCallbackData(sessionId: string, actionId: string): string {
+  const encoded = `${CALLBACK_DATA_PREFIX}:${sessionId}:${actionId}`;
+  return encoded.length <= 64 ? encoded : actionId;
+}
+
+export function decodeTelegramCallbackData(data: string): { actionId: string; sessionId?: string | undefined } {
+  const prefix = `${CALLBACK_DATA_PREFIX}:`;
+  if (!data.startsWith(prefix)) {
+    return { actionId: data };
+  }
+  const remainder = data.slice(prefix.length);
+  const separatorIndex = remainder.indexOf(':');
+  if (separatorIndex < 0) {
+    return { actionId: data };
+  }
+  const sessionId = remainder.slice(0, separatorIndex);
+  const actionId = remainder.slice(separatorIndex + 1);
+  return actionId && sessionId ? { actionId, sessionId } : { actionId: data };
+}
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly type: ChannelType = 'telegram';
   readonly capabilities: ChannelCapabilities = {
@@ -28,7 +50,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
     const chatId = (message.metadata?.chatId as string) || 'unknown';
-    const body = this.formatPayload(chatId, message);
+    const body = this.formatPayload(sessionId, chatId, message);
 
     const response = await fetch(`https://api.telegram.org/bot${this.token}/sendMessage`, {
       method: 'POST',
@@ -44,7 +66,7 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  private formatPayload(chatId: string, message: ChannelOutboundMessage): Record<string, unknown> {
+  private formatPayload(sessionId: string, chatId: string, message: ChannelOutboundMessage): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       chat_id: chatId,
       text: this.escapeMarkdown(message.text),
@@ -56,7 +78,7 @@ export class TelegramAdapter implements ChannelAdapter {
         inline_keyboard: [
           message.actions.map((action) => ({
             text: action.label,
-            callback_data: action.id,
+            callback_data: encodeTelegramCallbackData(sessionId, action.id),
           })),
         ],
       };

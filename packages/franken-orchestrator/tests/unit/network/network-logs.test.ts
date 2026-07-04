@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NetworkLogStore } from '../../../src/network/network-logs.js';
@@ -47,10 +47,14 @@ describe('NetworkLogStore', () => {
       ],
     };
 
-    expect(logs.resolve(state, 'chat-server')).toEqual([join(workDir, 'chat-server.log')]);
-    expect(logs.resolve(state, 'all')).toEqual([
-      join(workDir, 'chat-server.log'),
-      join(workDir, 'dashboard-web.log'),
+    await writeFile(join(workDir, 'chat-server.log'), 'chat line 1\nchat line 2\n');
+    await writeFile(join(workDir, 'dashboard-web.log'), 'dashboard line 1\n');
+
+    await expect(logs.resolve(state, 'chat-server')).resolves.toEqual(['chat line 1', 'chat line 2']);
+    await expect(logs.resolve(state, 'all')).resolves.toEqual([
+      'chat line 1',
+      'chat line 2',
+      'dashboard line 1',
     ]);
   });
 });

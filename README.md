@@ -537,27 +537,27 @@ Frankenbeast stores secrets outside the config file. The config references secre
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 | Local encrypted file | `local-encrypted` | CI/CD or offline environments |
 
-Set `network.secureBackend` in `frankenbeast.example.json` (or your project's `frankenbeast.config.json`) to choose a backend.
+Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. `frankenbeast init` reads and updates `.fbeast/config.json`.
 
 ### Setup per backend
 
-**OS keychain (default for local dev):**
+**Local encrypted file (the default):**
 ```bash
-frankenbeast init   # interactive — generates and stores token automatically
+frankenbeast init   # interactive — prompts for a passphrase, generates and stores the token
 ```
+When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment; `frankenbeast init --non-interactive` verifies an already-complete `.fbeast/config.json` and init state rather than creating a fresh vault.
 
-**Local encrypted file (CI/CD):**
-```bash
-export FRANKENBEAST_PASSPHRASE=<strong-random-passphrase>
-frankenbeast init --non-interactive
+**OS keychain:**
+```json
+{ "network": { "secureBackend": "os-keychain" } }
 ```
-The passphrase encrypts the local vault at `.fbeast/secrets.enc`. Set `FRANKENBEAST_PASSPHRASE` in your CI environment.
+Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
-```bash
-frankenbeast init --backend 1password   # opens browser sign-in flow
+```json
+{ "network": { "secureBackend": "1password" } }
 ```
-Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
@@ -571,10 +571,10 @@ Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the
 
 ```bash
 export FRANKENBEAST_PASSPHRASE=<passphrase>
-frankenbeast run --config frankenbeast.config.json
+frankenbeast run
 ```
 
-With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault without prompting.
+With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault from `.fbeast/config.json` without prompting. If you run with `--config <path>`, keep that file in sync with the backend and token refs written by `frankenbeast init`.
 
 ### References
 
@@ -633,7 +633,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is still stubbed in `franken-orchestrator/src/cli/dep-factory.ts`, so heartbeat-driven self-improvement should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `franken-orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
 
 ### Circuit Breakers
 
@@ -768,7 +768,7 @@ frankenbeast/
 │   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # 16 Architecture Decision Records
+│   ├── adr/                     # Architecture Decision Records
 │   ├── guides/                  # Quickstart, add-provider, wrap-agent, run-dashboard-chat
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests

@@ -75,6 +75,33 @@ describe('verifyInit', () => {
     expect(result.messages.join('\n')).not.toContain('Discord');
   });
 
+  it('validates enabled Telegram and WhatsApp transports', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = true;
+    config.comms.telegram.enabled = true;
+    config.comms.whatsapp.enabled = true;
+    config.comms.whatsapp.accessTokenRef = 'op://whatsapp/access-token';
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: ['comms'],
+      selectedCommsTransports: ['telegram', 'whatsapp'],
+    });
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join('\n')).toContain('Telegram config is incomplete: missing botTokenRef');
+    expect(result.messages.join('\n')).toContain('WhatsApp config is incomplete: missing phoneNumberIdRef, appSecretRef, verifyTokenRef');
+  });
+
   it('repair revisits only failing sections and preserves valid answers', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');
@@ -114,5 +141,75 @@ describe('verifyInit', () => {
     expect(result.config.comms.slack.signingSecretRef).toBe('op://slack/signing-secret');
     expect(prompts.some((prompt) => prompt.includes('Enable Chat'))).toBe(false);
     expect(prompts.some((prompt) => prompt.includes('Default provider'))).toBe(false);
+  });
+
+  it('repair keeps config-enabled transports even when init state is stale', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = true;
+    config.comms.slack.enabled = true;
+    config.comms.slack.appId = 'existing-app';
+    config.comms.slack.botTokenRef = 'op://slack/bot-token';
+    config.comms.slack.signingSecretRef = 'op://slack/signing-secret';
+    config.comms.telegram.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: ['comms'],
+      selectedCommsTransports: ['slack'],
+      completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
+      answers: {
+        'comms.slack.appId': 'existing-app',
+        'comms.slack.botTokenRef': 'op://slack/bot-token',
+        'comms.slack.signingSecretRef': 'op://slack/signing-secret',
+      },
+    });
+    const { io, prompts } = scriptedIo('op://telegram/bot-token');
+
+    const result = await runRepairInit({
+      configFile,
+      stateStore,
+      io,
+    });
+
+    expect(result.config.comms.slack.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(true);
+    expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.state.selectedCommsTransports).toEqual(['slack', 'telegram']);
+    expect(prompts).toEqual(['Telegram bot token ref']);
+  });
+
+  it('repair treats directly enabled channel flags as comms-enabled', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = false;
+    config.comms.telegram.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: [],
+      selectedCommsTransports: [],
+      completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
+      answers: {},
+    });
+    const { io, prompts } = scriptedIo('op://telegram/bot-token');
+
+    const result = await runRepairInit({
+      configFile,
+      stateStore,
+      io,
+    });
+
+    expect(result.config.comms.enabled).toBe(true);
+    expect(result.config.comms.telegram.enabled).toBe(true);
+    expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.state.selectedCommsTransports).toEqual(['telegram']);
+    expect(prompts).toEqual(['Telegram bot token ref']);
   });
 });

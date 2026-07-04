@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.5...franken-planner-v0.4.6) (2026-07-04)
+
+
+### Bug Fixes
+
+* **planner:** keep stub HITL gate test-only ([0b898b1](https://github.com/djm204/frankenbeast/commit/0b898b1a9dff2e761941c3945dac3099984147af)), closes [#412](https://github.com/djm204/frankenbeast/issues/412)
+
 ## [0.4.5](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.4...franken-planner-v0.4.5) (2026-07-04)
 
 

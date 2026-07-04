@@ -177,6 +177,159 @@ describe('ChatRuntimeCommsAdapter', () => {
       { id: 'approve', label: 'Approve', style: 'primary' },
       { id: 'reject', label: 'Reject', style: 'danger' },
     ]);
+    expect(store.save).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({
+        pendingApproval: expect.objectContaining({
+          description: 'rm -rf /',
+          requestedAt: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it('preserves existing pending approval metadata when a status turn remains pending', async () => {
+    const pendingApproval = { description: 'deploy production', requestedAt: '2026-03-10T00:00:00.000Z' };
+    store._sessions.set('pending-sess', {
+      sessionId: 'pending-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval,
+    });
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'reply', content: 'Still waiting for approval' }],
+      events: [],
+      pendingApproval: true,
+      state: 'pending_approval',
+      tier: null,
+      transcript: [],
+    });
+
+    await adapter.processInbound({
+      sessionId: 'pending-sess',
+      channelType: 'slack',
+      text: '/status',
+      externalUserId: 'U123',
+    });
+
+    expect(store.save).toHaveBeenCalledWith(
+      'pending-sess',
+      expect.objectContaining({ pendingApproval }),
+    );
+  });
+
+  it('does not treat stale approval metadata as pending after approval state resolves', async () => {
+    store._sessions.set('approved-sess', {
+      sessionId: 'approved-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: { description: 'deploy production', requestedAt: '2026-03-10T00:00:00.000Z' },
+    });
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'reply', content: 'No approval pending' }],
+      events: [],
+      pendingApproval: true,
+      state: 'active',
+      tier: null,
+      transcript: [],
+    });
+
+    await adapter.processInbound({
+      sessionId: 'approved-sess',
+      channelType: 'slack',
+      text: '/status',
+      externalUserId: 'U123',
+    });
+
+    expect(runtime.run).toHaveBeenCalledWith('/status', expect.objectContaining({ pendingApproval: false }));
+    expect(store.save).toHaveBeenCalledWith(
+      'approved-sess',
+      expect.objectContaining({ pendingApproval: null }),
+    );
+  });
+
+  it('normalizes and persists channel routing metadata for Slack and Discord adapters', async () => {
+    const result = await adapter.processInbound({
+      sessionId: 'route-sess',
+      channelType: 'slack',
+      text: 'hello',
+      externalUserId: 'U123',
+      metadata: {
+        externalChannelId: 'C123',
+        externalThreadId: '171234.000100',
+      },
+    });
+
+    expect(result.metadata).toEqual(expect.objectContaining({
+      externalChannelId: 'C123',
+      externalThreadId: '171234.000100',
+      channelId: 'C123',
+      threadTs: '171234.000100',
+      threadId: '171234.000100',
+    }));
+    expect(store.save).toHaveBeenCalledWith(
+      'route-sess',
+      expect.objectContaining({
+        routingMetadata: expect.objectContaining({ channelId: 'C123', threadTs: '171234.000100' }),
+      }),
+    );
+  });
+
+  it('reuses stored routing metadata when processing follow-up channel actions', async () => {
+    store._sessions.set('route-sess', {
+      sessionId: 'route-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'pending_approval',
+      routingMetadata: {
+        externalChannelId: 'C123',
+        externalThreadId: '171234.000100',
+        channelId: 'C123',
+        threadTs: '171234.000100',
+      },
+    });
+
+    const result = await adapter.processInbound({
+      sessionId: 'route-sess',
+      channelType: 'slack',
+      text: '/approve',
+      externalUserId: 'system',
+    });
+
+    expect(result.metadata).toEqual(expect.objectContaining({ channelId: 'C123', threadTs: '171234.000100' }));
+  });
+
+  it('persists explicit null beast context returned by the runtime', async () => {
+    store._sessions.set('beast-sess', {
+      sessionId: 'beast-sess',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'active',
+      beastContext: { definitionId: 'martin-loop', interviewSessionId: 'interview-1', status: 'interviewing' },
+    });
+    runtime.run.mockResolvedValue({
+      displayMessages: [{ kind: 'reply', content: 'started run' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active',
+      tier: null,
+      transcript: [],
+      beastContext: null,
+    });
+
+    await adapter.processInbound({
+      sessionId: 'beast-sess',
+      channelType: 'slack',
+      text: 'ship it',
+      externalUserId: 'U123',
+    });
+
+    expect(store.save).toHaveBeenCalledWith(
+      'beast-sess',
+      expect.objectContaining({ beastContext: null }),
+    );
   });
 
   it('does not add approval buttons when not pending', async () => {

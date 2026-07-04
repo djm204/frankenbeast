@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as plannerExports from '../../../src/index';
 import { StubHITLGate } from '../../../src/hitl/stub-hitl-gate';
 import { applyModifications } from '../../../src/hitl/plan-modifier';
 import { PlanGraph } from '../../../src/core/dag';
@@ -19,6 +20,10 @@ function makeTask(id: string): Task {
 // ─── StubHITLGate ─────────────────────────────────────────────────────────────
 
 describe('StubHITLGate', () => {
+  it('is kept out of the public package entrypoint', () => {
+    expect('StubHITLGate' in (plannerExports as Record<string, unknown>)).toBe(false);
+  });
+
   it('returns "approved" by default', async () => {
     const gate = new StubHITLGate();
     const result = await gate.requestApproval('# Plan\n');

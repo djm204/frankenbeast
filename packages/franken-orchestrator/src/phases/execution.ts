@@ -55,43 +55,47 @@ export async function runExecution(
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
   const completedOutputs = new Map<string, unknown>();
+  validateAcyclicPlan(ctx.plan.tasks);
   const knownTaskIds = new Set(ctx.plan.tasks.map((t) => t.id));
 
-  // Simple topological execution: iterate tasks, skip those with unmet deps
-  const pending = [...ctx.plan.tasks];
+  // Simple topological execution: keep a keyed FIFO queue so plan refreshes can
+  // atomically add newly discovered tasks without duplicating overlapping work.
+  const pending = new Map(ctx.plan.tasks.map((task) => [task.id, task]));
   let iterations = 0;
-  let maxIterations = Math.max(pending.length * 2, 10); // safety guard
+  let maxIterations = Math.max(pending.size * 2, 10); // safety guard
 
-  while (pending.length > 0 && iterations < maxIterations) {
+  while (pending.size > 0 && iterations < maxIterations) {
     iterations++;
     if (refreshPlanTasks) {
       const latestTasks = await refreshPlanTasks();
-      let addedCount = 0;
-      for (const task of latestTasks) {
-        if (!knownTaskIds.has(task.id)) {
+      const refreshedTasks = collectNewRefreshTasks(latestTasks, knownTaskIds);
+
+      if (refreshedTasks.length > 0) {
+        const refreshedPlan: PlanTask[] = [...ctx.plan.tasks, ...refreshedTasks];
+        validateAcyclicPlan(refreshedPlan);
+
+        for (const task of refreshedTasks) {
           knownTaskIds.add(task.id);
-          pending.push(task);
-          addedCount++;
+          pending.set(task.id, task);
         }
-      }
-      if (addedCount > 0) {
-        maxIterations += addedCount * 2;
-        ctx.plan = { tasks: [...ctx.plan.tasks, ...latestTasks.filter(t => !ctx.plan!.tasks.some(p => p.id === t.id))] };
+
+        maxIterations += refreshedTasks.length * 2;
+        ctx.plan = { tasks: refreshedPlan };
         logger.info('Execution: plan refreshed', {
-          addedTasks: addedCount,
+          addedTasks: refreshedTasks.length,
           totalTasks: knownTaskIds.size,
         });
       }
     }
 
-    const readyIndex = pending.findIndex(t =>
-      t.dependsOn.every(dep => completed.has(dep)),
+    const readyEntry = [...pending].find(([, task]) =>
+      task.dependsOn.every(dep => completed.has(dep)),
     );
 
-    if (readyIndex === -1) {
+    if (!readyEntry) {
       // All remaining tasks have unmet dependencies — deadlock
       ctx.circuitBreakerTripped = true;
-      for (const task of pending) {
+      for (const task of pending.values()) {
         outcomes.push({
           taskId: task.id,
           status: 'skipped',
@@ -101,12 +105,17 @@ export async function runExecution(
       break;
     }
 
-    const task = pending.splice(readyIndex, 1)[0]!;
+    const [taskId, task] = readyEntry;
+    pending.delete(taskId);
 
     // Skip tasks already completed in a previous run (checkpoint recovery)
     if (checkpoint?.has(`${task.id}:done`)) {
+      const checkpointedOutput = checkpoint.readTaskOutput?.(task.id);
       logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-      outcomes.push({ taskId: task.id, status: 'success' });
+      if (checkpointedOutput?.found) {
+        completedOutputs.set(task.id, checkpointedOutput.output);
+      }
+      outcomes.push({ taskId: task.id, status: 'success', output: checkpointedOutput?.output });
       completed.add(task.id);
       continue;
     }
@@ -127,6 +136,9 @@ export async function runExecution(
     outcomes.push(outcome);
 
     if (outcome.status === 'success') {
+      // Persist the task output before the done marker so a crash after marking
+      // done can still rehydrate dependency outputs for downstream tasks.
+      checkpoint?.writeTaskOutput?.(task.id, outcome.output);
       // Persist the checkpoint before mutating in-memory state so a crash here
       // is recovered as "done" on restart instead of silently re-running the task.
       checkpoint?.write(`${task.id}:done`);
@@ -149,6 +161,64 @@ export async function runExecution(
   });
 
   return outcomes;
+}
+
+function collectNewRefreshTasks(
+  latestTasks: readonly PlanTask[],
+  knownTaskIds: ReadonlySet<string>,
+): PlanTask[] {
+  const seen = new Set(knownTaskIds);
+  const newTasks: PlanTask[] = [];
+
+  for (const task of latestTasks) {
+    if (seen.has(task.id)) {
+      continue;
+    }
+    seen.add(task.id);
+    newTasks.push(task);
+  }
+
+  return newTasks;
+}
+
+function validateAcyclicPlan(tasks: readonly PlanTask[]): void {
+  const taskById = new Map<string, PlanTask>();
+  for (const task of tasks) {
+    if (taskById.has(task.id)) {
+      throw new Error(`Refreshed plan contains duplicate task id '${task.id}'`);
+    }
+    taskById.set(task.id, task);
+  }
+
+  const state = new Map<string, 'visiting' | 'visited'>();
+  const path: string[] = [];
+
+  const visit = (task: PlanTask): void => {
+    const currentState = state.get(task.id);
+    if (currentState === 'visited') {
+      return;
+    }
+    if (currentState === 'visiting') {
+      const cycleStart = path.indexOf(task.id);
+      const cycle = [...path.slice(cycleStart), task.id].join(' -> ');
+      throw new Error(`Refreshed plan cycle detected: ${cycle}`);
+    }
+
+    state.set(task.id, 'visiting');
+    path.push(task.id);
+    for (const dep of task.dependsOn) {
+      const dependency = taskById.get(dep);
+      if (dependency) {
+        visit(dependency);
+      }
+    }
+    path.pop();
+    state.set(task.id, 'visited');
+  };
+
+  for (const task of tasks) {
+    visit(task);
+  }
 }
 
 async function executeTask(

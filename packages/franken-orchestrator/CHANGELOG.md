@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.37.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.2...franken-orchestrator-v0.37.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **api:** share web DTO contracts ([#544](https://github.com/djm204/frankenbeast/issues/544)) ([ec1e29a](https://github.com/djm204/frankenbeast/commit/ec1e29ae21bed03d156f0a58c0f27964566e5e80))
+* **cli:** persist security profile changes ([2e51d07](https://github.com/djm204/frankenbeast/commit/2e51d072d332c0ce4ef4b7e780341caff0a034ac)), closes [#403](https://github.com/djm204/frankenbeast/issues/403)
+* **cli:** split runnable skill add from scaffold ([b1394aa](https://github.com/djm204/frankenbeast/commit/b1394aa4a4578535dd7b0876e32e58f8564af521)), closes [#404](https://github.com/djm204/frankenbeast/issues/404)
+* **cli:** validate numeric options ([61e3ffd](https://github.com/djm204/frankenbeast/commit/61e3ffd5ecda33263d6428a84913b95b5ba7c8cf))
+* **orchestrator:** abort martin loop on budget exceedance ([#486](https://github.com/djm204/frankenbeast/issues/486)) ([2040af2](https://github.com/djm204/frankenbeast/commit/2040af26e3c6ba24416782f3604a4db19816932e))
+* **orchestrator:** rehydrate checkpointed dependency outputs ([#483](https://github.com/djm204/frankenbeast/issues/483)) ([f23dbfe](https://github.com/djm204/frankenbeast/commit/f23dbfe9fb316338b49ae41cf82cc89e911bcf03))
+* **orchestrator:** validate refreshed execution plans ([#540](https://github.com/djm204/frankenbeast/issues/540)) ([a2c5a22](https://github.com/djm204/frankenbeast/commit/a2c5a222b4995ea333451cf712c28a6f8870c23f))
+* **web:** stream dashboard sse updates ([#539](https://github.com/djm204/frankenbeast/issues/539)) ([b7d429e](https://github.com/djm204/frankenbeast/commit/b7d429eacdb7f54f83a9cd24ca137415e679306c))
+
+## [0.37.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.1...franken-orchestrator-v0.37.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **runtime:** scope beast run configs to project root ([#525](https://github.com/djm204/frankenbeast/issues/525)) ([626b8de](https://github.com/djm204/frankenbeast/commit/626b8de0f3f3754b3ecfaa863924216fa063498b))
+
 ## [0.37.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.0...franken-orchestrator-v0.37.1) (2026-07-04)
 
 

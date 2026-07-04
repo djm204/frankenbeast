@@ -41,7 +41,7 @@ export type BeastAction =
   | 'delete'
   | undefined;
 
-export type SkillAction = 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
+export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 
 export interface CliArgs {
@@ -54,6 +54,8 @@ export interface CliArgs {
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
   skillTarget?: string | undefined;
+  skillCommand?: string | undefined;
+  skillCommandArgs?: string[] | undefined;
   securityAction?: SecurityAction;
   securityTarget?: string | undefined;
   baseDir: string;
@@ -96,8 +98,16 @@ export interface CliArgs {
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
-const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'remove', 'enable', 'disable', 'info']);
+const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
+const STRING_OPTIONS = new Set([
+  'base-dir', 'base-branch', 'budget', 'provider', 'providers', 'design-doc', 'plan-dir', 'plan-name', 'output-dir',
+  'goal', 'output', 'config', 'host', 'port', 'allow-origin', 'label', 'milestone', 'search', 'assignee', 'limit',
+  'repo', 'mode', 'set',
+]);
+const BOOLEAN_SHORT_OPTIONS = new Set(['d']);
+const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+const INTEGER_PATTERN = /^[+-]?\d+$/;
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -175,7 +185,8 @@ Beast Commands:
 
 Skill Commands:
   skill list                          List installed skills
-  skill add <name>                    Install a custom skill
+  skill add <name> <command> [args]   Install a custom skill with runnable MCP command
+  skill scaffold <name>               Scaffold an incomplete custom skill for manual config
   skill remove <name>                 Remove an installed skill
   skill enable <name>                 Enable a skill
   skill disable <name>                Disable a skill
@@ -214,7 +225,8 @@ Examples:
   frankenbeast issues --label critical,high # fetch filtered issues
   frankenbeast issues --dry-run             # preview issue fetch
   frankenbeast skill list                   # list installed skills
-  frankenbeast skill add my-tool            # scaffold a new skill
+  frankenbeast skill add my-tool node ./server.js     # install a runnable skill
+  frankenbeast skill scaffold my-tool       # scaffold a skill for manual config
   frankenbeast skill enable my-tool         # enable a skill
   frankenbeast skill info my-tool           # show skill details
   frankenbeast security status              # show security profile
@@ -223,6 +235,98 @@ Examples:
 
 export function printUsage(): void {
   console.log(USAGE);
+}
+
+function splitSkillAddArgs(args: string[]): { isSkillAdd: boolean; parsedFlagArgs: string[]; rawSkillAddCommandArgs: string[] } {
+  let positionalCount = 0;
+  let isSkillAdd = false;
+  let commandIndex = args.length;
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) break;
+
+    if (arg === '--') {
+      continue;
+    }
+
+    if (positionalCount < 3 && arg.startsWith('--')) {
+      const optionName = arg.slice(2).split('=', 1)[0] ?? '';
+      if (STRING_OPTIONS.has(optionName) && !arg.includes('=')) {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (positionalCount < 3 && arg.startsWith('-') && !arg.startsWith('--')) {
+      const shortName = arg.slice(1, 2);
+      if (BOOLEAN_SHORT_OPTIONS.has(shortName)) {
+        continue;
+      }
+    }
+
+    positionalCount += 1;
+    if (positionalCount === 1) {
+      if (arg !== 'add') {
+        return { isSkillAdd: false, parsedFlagArgs: args, rawSkillAddCommandArgs: [] };
+      }
+      isSkillAdd = true;
+    }
+    if (positionalCount === 3) {
+      commandIndex = i;
+      break;
+    }
+  }
+
+  let rawSkillAddCommandArgs = args.slice(commandIndex + 1);
+  if (rawSkillAddCommandArgs[0] === '--') {
+    rawSkillAddCommandArgs = rawSkillAddCommandArgs.slice(1);
+  }
+
+  return {
+    isSkillAdd,
+    parsedFlagArgs: args.slice(0, commandIndex + 1),
+    rawSkillAddCommandArgs,
+  };
+}
+
+function parseFiniteDecimalOption(name: string, value: string, options: { min?: number } = {}): number {
+  const trimmed = value.trim();
+  if (!DECIMAL_PATTERN.test(trimmed)) {
+    throw new TypeError(`Invalid ${name}: expected a finite number, got '${value}'`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new TypeError(`Invalid ${name}: expected a finite number, got '${value}'`);
+  }
+
+  if (options.min !== undefined && parsed < options.min) {
+    throw new TypeError(`Invalid ${name}: expected a value >= ${options.min}, got ${value}`);
+  }
+
+  return parsed;
+}
+
+function parseIntegerOption(name: string, value: string, options: { min?: number; max?: number } = {}): number {
+  const trimmed = value.trim();
+  if (!INTEGER_PATTERN.test(trimmed)) {
+    throw new TypeError(`Invalid ${name}: expected an integer, got '${value}'`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new TypeError(`Invalid ${name}: expected a safe integer, got '${value}'`);
+  }
+
+  if (options.min !== undefined && parsed < options.min) {
+    throw new TypeError(`Invalid ${name}: expected a value >= ${options.min}, got ${value}`);
+  }
+  if (options.max !== undefined && parsed > options.max) {
+    throw new TypeError(`Invalid ${name}: expected a value <= ${options.max}, got ${value}`);
+  }
+
+  return parsed;
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
@@ -235,8 +339,18 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     flagArgs = argv.slice(1);
   }
 
+  let rawSkillAddCommandArgs: string[] | undefined;
+  let parsedFlagArgs = flagArgs;
+  if (subcommand === 'skill') {
+    const split = splitSkillAddArgs(flagArgs);
+    if (split.isSkillAdd) {
+      parsedFlagArgs = split.parsedFlagArgs;
+      rawSkillAddCommandArgs = split.rawSkillAddCommandArgs;
+    }
+  }
+
   const { values, positionals } = nodeParseArgs({
-    args: flagArgs,
+    args: parsedFlagArgs,
     options: {
       detached: { type: 'boolean', short: 'd', default: false },
       'base-dir': { type: 'string' },
@@ -290,6 +404,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let beastTarget: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
+  let skillCommand: string | undefined;
+  let skillCommandArgs: string[] | undefined;
   let securityAction: SecurityAction;
   let securityTarget: string | undefined;
 
@@ -320,6 +436,10 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       skillAction = actionCandidate as SkillAction;
     }
     skillTarget = positionals[1];
+    skillCommand = positionals[2];
+    skillCommandArgs = rawSkillAddCommandArgs !== undefined
+      ? rawSkillAddCommandArgs
+      : positionals.length > 3 ? positionals.slice(3) : undefined;
   } else if (subcommand === 'security') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
@@ -389,10 +509,17 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   const limitRaw = values.limit;
   let issueLimit: number | undefined;
   if (limitRaw !== undefined) {
-    issueLimit = parseInt(limitRaw, 10);
+    issueLimit = parseIntegerOption('--limit', limitRaw, { min: 1 });
   } else if (subcommand === 'issues') {
     issueLimit = 30;
   }
+
+  const budget = values.budget !== undefined
+    ? parseFiniteDecimalOption('--budget', values.budget, { min: 0 })
+    : 10;
+  const port = values.port !== undefined
+    ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
+    : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined);
 
   const hasModuleFlags = values['no-firewall'] || values['no-skills'] || values['no-memory']
     || values['no-planner'] || values['no-critique'] || values['no-governor'] || values['no-heartbeat'];
@@ -419,11 +546,13 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     networkSet: values.set,
     skillAction,
     skillTarget,
+    skillCommand,
+    skillCommandArgs,
     securityAction,
     securityTarget,
     baseDir: values['base-dir'] ?? process.cwd(),
     baseBranch: values['base-branch'],
-    budget: values.budget ? parseFloat(values.budget) : 10,
+    budget,
     provider,
     providerSpecified: values.provider !== undefined,
     providers,
@@ -435,7 +564,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     interviewOutput: values.output,
     config: values.config,
     host: values.host ?? (subcommand === 'chat-server' || subcommand === 'beasts-daemon' ? '127.0.0.1' : undefined),
-    port: values.port ? parseInt(values.port, 10) : (subcommand === 'chat-server' ? 3737 : subcommand === 'beasts-daemon' ? 4050 : undefined),
+    port,
     allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,

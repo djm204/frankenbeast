@@ -4,6 +4,7 @@ import type { FbeastServer } from '../shared/config.js';
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
 ];
+const INIT_MODE_VALUES = ['standard', 'proxy'] as const;
 
 export interface ResolvedInitOptions {
   hooks: boolean;
@@ -42,8 +43,8 @@ export async function resolveInitOptions(
 }
 
 function parseModeArg(value: string): 'standard' | 'proxy' {
-  if (value === 'standard' || value === 'proxy') return value;
-  throw new Error(`Unknown --mode value: ${value}. Expected 'standard' or 'proxy'.`);
+  if ((INIT_MODE_VALUES as readonly string[]).includes(value)) return value as 'standard' | 'proxy';
+  throw new Error(`Unknown --mode value: ${value}. Expected one of: ${INIT_MODE_VALUES.join(', ')}.`);
 }
 
 export function parseServerSelection(value: string): FbeastServer[] {
@@ -60,7 +61,7 @@ export function parseServerSelection(value: string): FbeastServer[] {
   const invalid = [...requested].filter((entry) => !ALL_SERVERS.includes(entry));
 
   if (invalid.length > 0) {
-    throw new Error(`Unknown fbeast servers: ${invalid.join(', ')}`);
+    throw new Error(`Unknown --pick value(s): ${invalid.join(', ')}. Expected one or more of: ${ALL_SERVERS.join(', ')}.`);
   }
 
   return ALL_SERVERS.filter((server) => requested.has(server));

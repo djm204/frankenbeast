@@ -103,6 +103,9 @@ describe('whatsappRouter', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(gateway.handleAction).toHaveBeenCalledWith('whatsapp', 'session-123', 'approve');
+    expect(gateway.handleAction).toHaveBeenCalledWith('whatsapp', 'session-123', 'approve', {
+      externalChannelId: '123456',
+      phoneNumber: '123456',
+    });
   });
 });

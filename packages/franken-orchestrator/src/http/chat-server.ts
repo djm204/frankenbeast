@@ -1,8 +1,11 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
+import type { ChatSession } from '../chat/types.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
@@ -14,6 +17,7 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { BeastRoutesDeps } from './routes/beast-routes.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
+import { ChatRuntimeCommsAdapter } from '../comms/core/chat-runtime-comms-adapter.js';
 import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
@@ -68,8 +72,113 @@ const DEFAULT_PORT = 3737;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
+type ChatSessionWithRouting = ChatSession & { routingMetadata?: Record<string, unknown> | undefined };
+
+async function loadLegacyCommsSession(
+  sessionStoreDir: string,
+  id: string,
+): Promise<(ChatSessionWithRouting & { sessionId?: string }) | null> {
+  try {
+    return JSON.parse(
+      await readFile(join(sessionStoreDir, 'comms', `${encodeURIComponent(id)}.json`), 'utf-8'),
+    ) as ChatSessionWithRouting & { sessionId?: string };
+  } catch {
+    return null;
+  }
+}
+
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
+}
+
+function createCommsRuntimeAdapter(
+  runtime: ChatRuntimeBundle['runtime'],
+  sessionStore: ISessionStore,
+  sessionStoreDir: string,
+  projectName: string,
+): CommsRuntimePort {
+  const toStoredSessionId = (id: string): string => encodeURIComponent(id);
+  return new ChatRuntimeCommsAdapter(runtime, {
+    load: async (id) => {
+      const session = sessionStore.get(toStoredSessionId(id)) as ChatSessionWithRouting | undefined;
+      if (!session) {
+        const legacy = await loadLegacyCommsSession(sessionStoreDir, id);
+        if (!legacy) {
+          return null;
+        }
+        return {
+          sessionId: legacy.sessionId ?? id,
+          projectId: legacy.projectId,
+          transcript: legacy.transcript,
+          state: legacy.state,
+          pendingApproval: legacy.pendingApproval ?? null,
+          ...(legacy.beastContext !== undefined ? { beastContext: legacy.beastContext } : {}),
+          ...(legacy.routingMetadata !== undefined ? { routingMetadata: legacy.routingMetadata } : {}),
+        };
+      }
+      return {
+        sessionId: id,
+        projectId: session.projectId,
+        transcript: session.transcript,
+        state: session.state,
+        pendingApproval: session.pendingApproval ?? null,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.routingMetadata !== undefined ? { routingMetadata: session.routingMetadata } : {}),
+      };
+    },
+    create: async (id, data) => {
+      const now = new Date().toISOString();
+      const storedId = toStoredSessionId(id);
+      const session: ChatSessionWithRouting = {
+        id: storedId,
+        projectId: typeof data.projectId === 'string' ? data.projectId : projectName,
+        transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : [],
+        state: typeof data.state === 'string' ? data.state : 'active',
+        tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: 0,
+        createdAt: now,
+        updatedAt: now,
+        pendingApproval: data.pendingApproval === undefined ? null : data.pendingApproval as ChatSession['pendingApproval'],
+        beastContext: data.beastContext === undefined ? null : data.beastContext as ChatSession['beastContext'],
+        routingMetadata: data.routingMetadata as ChatSessionWithRouting['routingMetadata'],
+      };
+      sessionStore.save(session);
+      return {
+        sessionId: id,
+        projectId: session.projectId,
+        transcript: session.transcript,
+        state: session.state,
+        pendingApproval: session.pendingApproval ?? null,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.routingMetadata !== undefined ? { routingMetadata: session.routingMetadata } : {}),
+      };
+    },
+    save: async (id, data) => {
+      const storedId = toStoredSessionId(id);
+      const existing = sessionStore.get(storedId) as ChatSessionWithRouting | undefined;
+      const now = new Date().toISOString();
+      const session: ChatSessionWithRouting = {
+        id: storedId,
+        projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),
+        transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : (existing?.transcript ?? []),
+        state: typeof data.state === 'string' ? data.state : (existing?.state ?? 'active'),
+        tokenTotals: existing?.tokenTotals ?? { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: existing?.costUsd ?? 0,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        pendingApproval: data.pendingApproval === undefined
+          ? existing?.pendingApproval ?? null
+          : data.pendingApproval as ChatSession['pendingApproval'],
+        beastContext: data.beastContext === undefined
+          ? existing?.beastContext ?? null
+          : data.beastContext as ChatSession['beastContext'],
+        routingMetadata: data.routingMetadata === undefined
+          ? existing?.routingMetadata
+          : data.routingMetadata as ChatSessionWithRouting['routingMetadata'],
+      };
+      sessionStore.save(session);
+    },
+  });
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -138,6 +247,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         : {}),
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
+  const commsRuntime = options.commsRuntime
+    ?? (options.commsConfig
+      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
+      : undefined);
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -148,7 +261,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
-    ...(options.commsRuntime ? { commsRuntime: options.commsRuntime } : {}),
+    ...(commsRuntime ? { commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),

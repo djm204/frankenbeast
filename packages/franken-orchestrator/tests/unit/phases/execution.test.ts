@@ -185,6 +185,53 @@ describe('runExecution', () => {
     expect(secondInput.dependencyOutputs.get('t1')).toBe('alpha-output');
   });
 
+  it('rehydrates dependency outputs for checkpointed tasks on resume', async () => {
+    const execute = vi.fn(async (skillId: string, input: SkillInput) => {
+      if (skillId === 'alpha') {
+        return { output: { message: 'alpha-output' }, tokensUsed: 1 };
+      }
+      if (skillId === 'beta') {
+        return { output: input.dependencyOutputs.get('t1'), tokensUsed: 1 };
+      }
+      throw new Error(`Unexpected skill: ${skillId}`);
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const checkpointOutputs = new Map<string, unknown>();
+    const checkpointEntries = new Set<string>(['t1:done']);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => checkpointEntries.has(key)),
+      write: vi.fn((key: string) => checkpointEntries.add(key)),
+      readAll: vi.fn(() => new Set(checkpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      readTaskOutput: vi.fn((taskId: string) => ({
+        found: checkpointOutputs.has(taskId),
+        output: checkpointOutputs.get(taskId),
+      })),
+      writeTaskOutput: vi.fn((taskId: string, output: unknown) => {
+        checkpointOutputs.set(taskId, output);
+      }),
+    };
+    checkpointOutputs.set('t1', { message: 'persisted-alpha-output' });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['beta'], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]![0]).toBe('beta');
+    expect(checkpoint.readTaskOutput).toHaveBeenCalledWith('t1');
+    expect(outcomes[0]).toEqual({ taskId: 't1', status: 'success', output: { message: 'persisted-alpha-output' } });
+    expect(outcomes[1]!.output).toEqual({ message: 'persisted-alpha-output' });
+  });
+
   it('passes through dependency output when no skills are required', async () => {
     const execute = vi.fn(async (skillId: string) => ({
       output: `${skillId}-output`,
@@ -915,5 +962,78 @@ describe('runExecution', () => {
 
     expect(outcomes.map(o => o.taskId)).toEqual(['t1', 't2']);
     expect(outcomes.every(o => o.status === 'success')).toBe(true);
+  });
+
+  it('rejects refreshed tasks that introduce dependency cycles before mutating the plan', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+    ]);
+    const refreshPlanTasks = vi
+      .fn<() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>>()
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t3'] },
+        { id: 't3', objective: 'third', requiredSkills: [], dependsOn: ['t2'] },
+      ]);
+
+    await expect(
+      runExecution(
+        c,
+        makeSkills(),
+        makeGovernor(),
+        makeMemory(),
+        makeObserver(),
+        undefined,
+        makeLogger(),
+        undefined,
+        undefined,
+        refreshPlanTasks,
+      ),
+    ).rejects.toThrow('cycle detected');
+
+    expect(c.plan!.tasks.map(t => t.id)).toEqual(['t1']);
+  });
+
+  it('rejects duplicate initial task ids before queueing pending work', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+      { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+    ]);
+
+    await expect(runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver()))
+      .rejects.toThrow("duplicate task id 't1'");
+  });
+
+  it('keeps refreshed duplicate tasks out of the pending execution queue', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+    ]);
+    const refreshPlanTasks = vi
+      .fn<() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>>()
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+        { id: 't2', objective: 'duplicate second', requiredSkills: [], dependsOn: ['t1'] },
+      ])
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'duplicate first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+      ]);
+
+    const outcomes = await runExecution(
+      c,
+      makeSkills(),
+      makeGovernor(),
+      makeMemory(),
+      makeObserver(),
+      undefined,
+      makeLogger(),
+      undefined,
+      undefined,
+      refreshPlanTasks,
+    );
+
+    expect(outcomes.map(o => o.taskId)).toEqual(['t1', 't2']);
+    expect(c.plan!.tasks.map(t => t.id)).toEqual(['t1', 't2']);
   });
 });

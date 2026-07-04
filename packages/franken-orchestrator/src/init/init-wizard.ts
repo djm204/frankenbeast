@@ -10,7 +10,15 @@ export interface InitWizardResult {
   state: InitState;
 }
 
-export type InitWizardScope = 'modules' | 'provider' | 'security' | 'slack' | 'discord' | 'secret-backend';
+export type InitWizardScope =
+  | 'modules'
+  | 'provider'
+  | 'security'
+  | 'slack'
+  | 'discord'
+  | 'telegram'
+  | 'whatsapp'
+  | 'secret-backend';
 
 interface RunInitWizardOptions {
   io: InterviewIO;
@@ -36,6 +44,20 @@ function transportDefault(state: InitState, config: OrchestratorConfig, id: Supp
     return state.selectedCommsTransports.includes(id);
   }
   return config.comms[id].enabled;
+}
+
+function hasTransportOnlyScope(scope: readonly InitWizardScope[] | undefined): boolean {
+  return scope !== undefined
+    && scope.some((item) => item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
+    && !scope.includes('modules')
+    && !scope.includes('provider')
+    && !scope.includes('security');
+}
+
+function hasEnabledScopedTransport(config: OrchestratorConfig, scope: readonly InitWizardScope[] | undefined): boolean {
+  return hasTransportOnlyScope(scope)
+    && scope!.some((item) => (item === 'slack' || item === 'discord' || item === 'telegram' || item === 'whatsapp')
+      && config.comms[item].enabled);
 }
 
 async function askBoolean(io: InterviewIO, prompt: string, defaultValue: boolean): Promise<boolean> {
@@ -78,16 +100,29 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
       slack: {
         ...baseConfig.comms.slack,
         enabled: state.selectedCommsTransports.includes('slack'),
-        appId: stateValue(state, 'comms.slack.appId') as string | undefined,
-        botTokenRef: stateValue(state, 'comms.slack.botTokenRef') as string | undefined,
-        signingSecretRef: stateValue(state, 'comms.slack.signingSecretRef') as string | undefined,
+        appId: stateValue<string>(state, 'comms.slack.appId') ?? baseConfig.comms.slack.appId,
+        botTokenRef: stateValue<string>(state, 'comms.slack.botTokenRef') ?? baseConfig.comms.slack.botTokenRef,
+        signingSecretRef: stateValue<string>(state, 'comms.slack.signingSecretRef') ?? baseConfig.comms.slack.signingSecretRef,
       },
       discord: {
         ...baseConfig.comms.discord,
         enabled: state.selectedCommsTransports.includes('discord'),
-        applicationId: stateValue(state, 'comms.discord.applicationId') as string | undefined,
-        botTokenRef: stateValue(state, 'comms.discord.botTokenRef') as string | undefined,
-        publicKeyRef: stateValue(state, 'comms.discord.publicKeyRef') as string | undefined,
+        applicationId: stateValue<string>(state, 'comms.discord.applicationId') ?? baseConfig.comms.discord.applicationId,
+        botTokenRef: stateValue<string>(state, 'comms.discord.botTokenRef') ?? baseConfig.comms.discord.botTokenRef,
+        publicKeyRef: stateValue<string>(state, 'comms.discord.publicKeyRef') ?? baseConfig.comms.discord.publicKeyRef,
+      },
+      telegram: {
+        ...baseConfig.comms.telegram,
+        enabled: state.selectedCommsTransports.includes('telegram'),
+        botTokenRef: stateValue<string>(state, 'comms.telegram.botTokenRef') ?? baseConfig.comms.telegram.botTokenRef,
+      },
+      whatsapp: {
+        ...baseConfig.comms.whatsapp,
+        enabled: state.selectedCommsTransports.includes('whatsapp'),
+        accessTokenRef: stateValue<string>(state, 'comms.whatsapp.accessTokenRef') ?? baseConfig.comms.whatsapp.accessTokenRef,
+        phoneNumberIdRef: stateValue<string>(state, 'comms.whatsapp.phoneNumberIdRef') ?? baseConfig.comms.whatsapp.phoneNumberIdRef,
+        appSecretRef: stateValue<string>(state, 'comms.whatsapp.appSecretRef') ?? baseConfig.comms.whatsapp.appSecretRef,
+        verifyTokenRef: stateValue<string>(state, 'comms.whatsapp.verifyTokenRef') ?? baseConfig.comms.whatsapp.verifyTokenRef,
       },
     },
   });
@@ -103,12 +138,16 @@ function isSecretBackendOnlyScope(scope: readonly InitWizardScope[] | undefined)
 
 export async function runInitWizard(options: RunInitWizardOptions): Promise<InitWizardResult> {
   const config = options.baseConfig ?? defaultConfig();
-  const scope = new Set<InitWizardScope>(options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord']);
+  const scope = new Set<InitWizardScope>(
+    options.scope ?? ['modules', 'provider', 'security', 'slack', 'discord', 'telegram', 'whatsapp'],
+  );
   const secretBackendOnly = isSecretBackendOnlyScope(options.scope);
 
   let enableChat = moduleDefault(options.initialState, config, 'chat');
   let enableDashboard = moduleDefault(options.initialState, config, 'dashboard');
-  let enableComms = moduleDefault(options.initialState, config, 'comms');
+  let enableComms = hasEnabledScopedTransport(config, options.scope)
+    ? true
+    : moduleDefault(options.initialState, config, 'comms');
   if (!secretBackendOnly && scope.has('modules')) {
     enableChat = await askBoolean(options.io, 'Enable Chat? [Y/n]', enableChat);
     enableDashboard = await askBoolean(options.io, 'Enable Dashboard? [Y/n]', enableDashboard);
@@ -184,13 +223,19 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
 
   if (enableComms) {
     for (const transport of listSupportedCommsTransports()) {
-      const targetedTransportOnly = options.scope !== undefined
-        && !options.scope.includes('modules')
-        && !options.scope.includes('provider')
-        && !options.scope.includes('security')
-        && options.scope.includes(transport.id);
+      const activeScope = options.scope;
+      const activeTransportScope = activeScope !== undefined
+        && !activeScope.includes('modules')
+        && !activeScope.includes('provider')
+        && !activeScope.includes('security')
+        ? activeScope
+        : undefined;
+      if (activeTransportScope && !activeTransportScope.includes(transport.id)) {
+        continue;
+      }
+      const targetedTransportOnly = activeTransportScope !== undefined && activeTransportScope.includes(transport.id);
       const enabled = targetedTransportOnly
-        ? transportDefault(options.initialState, config, transport.id)
+        ? config.comms[transport.id].enabled
         : await askBoolean(
           options.io,
           `Enable ${transport.label}? [y/N]`,
@@ -267,6 +312,92 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
           const currentPublicKeyRef = String(stateValue(options.initialState, 'comms.discord.publicKeyRef') ?? '');
           if (!scope.has('discord') || currentPublicKeyRef.length === 0) {
             answers['comms.discord.publicKeyRef'] = await askText(options.io, 'Discord public key ref', currentPublicKeyRef);
+          }
+        }
+      }
+
+      if (transport.id === 'telegram') {
+        if (options.secretStore) {
+          const rawBotToken = await askText(options.io, 'Enter your Telegram bot token:', '');
+          if (rawBotToken.length > 0) {
+            await options.secretStore.store('comms.telegram.botTokenRef', rawBotToken);
+            answers['comms.telegram.botTokenRef'] = 'comms.telegram.botTokenRef';
+          }
+        } else {
+          const currentBotTokenRef = String(
+            stateValue(options.initialState, 'comms.telegram.botTokenRef')
+              ?? config.comms.telegram.botTokenRef
+              ?? '',
+          );
+          if (!scope.has('telegram') || currentBotTokenRef.length === 0) {
+            answers['comms.telegram.botTokenRef'] = await askText(options.io, 'Telegram bot token ref', currentBotTokenRef);
+          } else {
+            answers['comms.telegram.botTokenRef'] = currentBotTokenRef;
+          }
+        }
+      }
+
+      if (transport.id === 'whatsapp') {
+        if (options.secretStore) {
+          const rawAccessToken = await askText(options.io, 'Enter your WhatsApp access token:', '');
+          if (rawAccessToken.length > 0) {
+            await options.secretStore.store('comms.whatsapp.accessTokenRef', rawAccessToken);
+            answers['comms.whatsapp.accessTokenRef'] = 'comms.whatsapp.accessTokenRef';
+          }
+          const rawPhoneNumberId = await askText(options.io, 'Enter your WhatsApp phone number ID:', '');
+          if (rawPhoneNumberId.length > 0) {
+            answers['comms.whatsapp.phoneNumberIdRef'] = rawPhoneNumberId;
+          }
+          const rawAppSecret = await askText(options.io, 'Enter your WhatsApp app secret:', '');
+          if (rawAppSecret.length > 0) {
+            await options.secretStore.store('comms.whatsapp.appSecretRef', rawAppSecret);
+            answers['comms.whatsapp.appSecretRef'] = 'comms.whatsapp.appSecretRef';
+          }
+          const rawVerifyToken = await askText(options.io, 'Enter your WhatsApp verify token:', '');
+          if (rawVerifyToken.length > 0) {
+            await options.secretStore.store('comms.whatsapp.verifyTokenRef', rawVerifyToken);
+            answers['comms.whatsapp.verifyTokenRef'] = 'comms.whatsapp.verifyTokenRef';
+          }
+        } else {
+          const currentAccessTokenRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.accessTokenRef')
+              ?? config.comms.whatsapp.accessTokenRef
+              ?? '',
+          );
+          if (!scope.has('whatsapp') || currentAccessTokenRef.length === 0) {
+            answers['comms.whatsapp.accessTokenRef'] = await askText(options.io, 'WhatsApp access token ref', currentAccessTokenRef);
+          } else {
+            answers['comms.whatsapp.accessTokenRef'] = currentAccessTokenRef;
+          }
+          const currentPhoneNumberIdRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.phoneNumberIdRef')
+              ?? config.comms.whatsapp.phoneNumberIdRef
+              ?? '',
+          );
+          if (!scope.has('whatsapp') || currentPhoneNumberIdRef.length === 0) {
+            answers['comms.whatsapp.phoneNumberIdRef'] = await askText(options.io, 'WhatsApp phone number ID ref', currentPhoneNumberIdRef);
+          } else {
+            answers['comms.whatsapp.phoneNumberIdRef'] = currentPhoneNumberIdRef;
+          }
+          const currentAppSecretRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.appSecretRef')
+              ?? config.comms.whatsapp.appSecretRef
+              ?? '',
+          );
+          if (!scope.has('whatsapp') || currentAppSecretRef.length === 0) {
+            answers['comms.whatsapp.appSecretRef'] = await askText(options.io, 'WhatsApp app secret ref', currentAppSecretRef);
+          } else {
+            answers['comms.whatsapp.appSecretRef'] = currentAppSecretRef;
+          }
+          const currentVerifyTokenRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.verifyTokenRef')
+              ?? config.comms.whatsapp.verifyTokenRef
+              ?? '',
+          );
+          if (!scope.has('whatsapp') || currentVerifyTokenRef.length === 0) {
+            answers['comms.whatsapp.verifyTokenRef'] = await askText(options.io, 'WhatsApp verify token ref', currentVerifyTokenRef);
+          } else {
+            answers['comms.whatsapp.verifyTokenRef'] = currentVerifyTokenRef;
           }
         }
       }
