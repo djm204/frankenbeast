@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.8](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.7...franken-observer-v0.7.8) (2026-07-04)
+
+
+### Documentation
+
+* fix package README drift (governor, observer, brain, critique) ([#527](https://github.com/djm204/frankenbeast/issues/527)) ([4afdd51](https://github.com/djm204/frankenbeast/commit/4afdd51f0852cfb934c6db1307e61afc98ee51c4))
+
+## [0.7.7](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.6...franken-observer-v0.7.7) (2026-07-04)
+
+
+### Bug Fixes
+
+* **observer:** detect orphaned spans ([#484](https://github.com/djm204/frankenbeast/issues/484)) ([07d7814](https://github.com/djm204/frankenbeast/commit/07d7814cb4269e957f057a9008fc4e7e863301a5))
+
 ## [0.7.6](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.5...franken-observer-v0.7.6) (2026-07-03)
 
 

@@ -45,16 +45,50 @@ describe('handleSkillCommand()', () => {
     expect(print).toHaveBeenCalledWith('No skills installed.');
   });
 
-  it('adds a skill by name', async () => {
+  it('adds a runnable skill by name and command', async () => {
     const print = vi.fn();
     const installCustom = vi.fn().mockResolvedValue(undefined);
     const skillManager = createMockSkillManager({ installCustom });
 
-    await handleSkillCommand({ skillManager, action: 'add', target: 'my-skill', print });
+    await handleSkillCommand({
+      skillManager,
+      action: 'add',
+      target: 'my-skill',
+      command: 'node',
+      commandArgs: ['server.js', '--stdio'],
+      print,
+    });
 
-    expect(installCustom).toHaveBeenCalledWith('my-skill', { command: 'EDIT_ME', args: [] });
-    expect(print).toHaveBeenCalledWith("Created skill 'my-skill' in skills directory.");
-    expect(print).toHaveBeenCalledWith(expect.stringContaining('Edit skills/my-skill/mcp.json'));
+    expect(installCustom).toHaveBeenCalledWith('my-skill', { command: 'node', args: ['server.js', '--stdio'] });
+    expect(print).toHaveBeenCalledWith("Installed skill 'my-skill' with MCP command 'node'.");
+    expect(print).toHaveBeenCalledWith('Arguments: server.js --stdio');
+  });
+
+  it('rejects skill add without a runnable command', async () => {
+    const print = vi.fn();
+    const skillManager = createMockSkillManager();
+
+    await expect(
+      handleSkillCommand({ skillManager, action: 'add', target: 'my-skill', print }),
+    ).rejects.toThrow('skill add requires a runnable MCP server command');
+  });
+
+  it('scaffolds an incomplete skill with an explicit failing command', async () => {
+    const print = vi.fn();
+    const installCustom = vi.fn().mockResolvedValue(undefined);
+    const skillManager = createMockSkillManager({ installCustom });
+
+    await handleSkillCommand({ skillManager, action: 'scaffold', target: 'my-skill', print });
+
+    expect(installCustom).toHaveBeenCalledWith('my-skill', {
+      command: 'node',
+      args: [
+        '-e',
+        expect.stringContaining("Skill 'my-skill' was scaffolded but is not configured"),
+      ],
+    });
+    expect(print).toHaveBeenCalledWith("Scaffolded incomplete skill 'my-skill' in skills directory.");
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('real MCP server command'));
   });
 
   it('throws when add has no target', async () => {
@@ -64,6 +98,15 @@ describe('handleSkillCommand()', () => {
     await expect(
       handleSkillCommand({ skillManager, action: 'add', print }),
     ).rejects.toThrow('skill add requires a name');
+  });
+
+  it('throws when scaffold has no target', async () => {
+    const print = vi.fn();
+    const skillManager = createMockSkillManager();
+
+    await expect(
+      handleSkillCommand({ skillManager, action: 'scaffold', print }),
+    ).rejects.toThrow('skill scaffold requires a name');
   });
 
   it('removes a skill by name', async () => {

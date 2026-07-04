@@ -1,22 +1,6 @@
-export interface NetworkStatusResponse {
-  mode?: string;
-  secureBackend?: string;
-  services: Array<{
-    id: string;
-    status: string;
-    explanation?: string;
-    url?: string;
-    inProcess?: boolean;
-    channels?: Record<string, boolean>;
-  }>;
-}
+import type { ApiDataEnvelope, NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
-export interface NetworkConfigResponse {
-  network: { mode: string; secureBackend?: string };
-  chat: { model: string; enabled: boolean; host?: string; port?: number };
-  dashboard?: { enabled?: boolean; host?: string; port?: number; apiUrl?: string };
-  comms?: { enabled?: boolean };
-}
+export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
 export class NetworkApiClient {
   constructor(
@@ -73,7 +57,7 @@ export class NetworkApiClient {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const body = await response.json() as { data: T };
+    const body = await response.json() as ApiDataEnvelope<T>;
     return body.data;
   }
 }

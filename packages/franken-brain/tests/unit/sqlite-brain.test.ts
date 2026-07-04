@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type { EpisodicEvent, ExecutionState, BrainSnapshot } from '@franken/types';
@@ -437,6 +440,98 @@ describe('SqliteBrain', () => {
       tmpBrain.working.set('test', 'value');
       expect(tmpBrain.working.get('test')).toBe('value');
       tmpBrain.close();
+    });
+
+    it('hydrates persisted working memory from an existing SQLite file', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        first.working.set('adrs', ['ADR-001']);
+        first.working.set('rules', { review: 'required' });
+        first.flush();
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('adrs')).toEqual(['ADR-001']);
+        expect(reopened.working.get('rules')).toEqual({ review: 'required' });
+        expect(reopened.working.usage().entries).toBe(2);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('hydrates legacy plain-text working memory values', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        (first as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } })
+          .db.prepare('INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)')
+          .run('legacy', 'plain text value', '2026-07-04T00:00:00Z');
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('legacy')).toBe('plain text value');
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves special keys such as __proto__ when hydrating from SQLite', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        first.working.set('__proto__', 'safe value');
+        first.flush();
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.has('__proto__')).toBe(true);
+        expect(reopened.working.get('__proto__')).toBe('safe value');
+        expect(Object.entries(reopened.working.snapshot())).toEqual([['__proto__', 'safe value']]);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('skips existing SQLite working memory when hydrating from a snapshot', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('old-a', 1);
+        stale.working.set('old-b', 2);
+        stale.flush();
+        stale.close();
+
+        const snapshot: BrainSnapshot = {
+          version: 1,
+          timestamp: '2026-07-04T00:00:00Z',
+          working: { fresh: 'snapshot' },
+          episodic: [],
+          checkpoint: null,
+          metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+        };
+
+        const hydrated = SqliteBrain.hydrate(snapshot, dbPath, { maxEntries: 1 });
+        expect(hydrated.working.snapshot()).toEqual({ fresh: 'snapshot' });
+        hydrated.close();
+
+        const reopened = new SqliteBrain(dbPath, { maxEntries: 1 });
+        expect(reopened.working.snapshot()).toEqual({ fresh: 'snapshot' });
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('defaults to in-memory database', () => {

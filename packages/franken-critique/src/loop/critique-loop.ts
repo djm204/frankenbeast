@@ -9,6 +9,7 @@ import type {
 } from '../types/loop.js';
 import type { EscalationRequest } from '../types/contracts.js';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
+import { hasReachedMaxIterations } from './iteration-limit.js';
 
 export class CritiqueLoop {
   private readonly pipeline: CritiquePipeline;
@@ -49,8 +50,9 @@ export class CritiqueLoop {
       const postResult = await this.checkBreakers(state, config, 'post');
       if (postResult) return postResult;
 
-      // Pass: return success
-      if (critiqueResult.verdict === 'pass') {
+      // Pass/warn: warnings are non-critical findings that should surface in
+      // results without forcing correction iterations.
+      if (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') {
         return { verdict: 'pass', iterations: state.iterations };
       }
 
@@ -64,7 +66,7 @@ export class CritiqueLoop {
 
       // If this is the last possible iteration, return fail with correction
       // (next iteration's breaker check will halt, so build the correction now)
-      if (state.iterationCount >= config.maxIterations) {
+      if (hasReachedMaxIterations(state.iterationCount, config.maxIterations)) {
         return {
           verdict: 'fail',
           iterations: state.iterations,

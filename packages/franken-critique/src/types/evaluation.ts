@@ -26,7 +26,7 @@ export interface EvaluationFinding {
 export interface EvaluationResult {
   /** Name of the evaluator that produced this result. */
   readonly evaluatorName: string;
-  /** Pass or fail verdict. */
+  /** Pass, warn, or fail verdict. */
   readonly verdict: Verdict;
   /** Normalized score (0-1). */
   readonly score: Score;
@@ -36,7 +36,7 @@ export interface EvaluationResult {
 
 /** Aggregated result from all evaluators in the pipeline. */
 export interface CritiqueResult {
-  /** Overall verdict (fail if any evaluator fails). */
+  /** Overall verdict (fail if any evaluator fails, warn if only warnings exist). */
   readonly verdict: Verdict;
   /** Average score across all evaluators. */
   readonly overallScore: Score;

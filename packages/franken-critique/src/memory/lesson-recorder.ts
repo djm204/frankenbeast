@@ -37,7 +37,9 @@ export class LessonRecorder {
     taskId: TaskId,
   ): CritiqueLesson[] {
     const lessons: CritiqueLesson[] = [];
-    const passingIteration = allIterations.find((it) => it.result.verdict === 'pass');
+    const passingIteration = allIterations.find(
+      (it) => it.result.verdict === 'pass' || it.result.verdict === 'warn',
+    );
 
     for (const evalResult of failingIteration.result.results) {
       if (evalResult.verdict === 'fail' && evalResult.findings.length > 0) {

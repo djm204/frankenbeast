@@ -14,7 +14,7 @@ function createMockMemoryPort(): MemoryPort {
 
 function createIteration(
   index: number,
-  verdict: 'pass' | 'fail',
+  verdict: 'pass' | 'warn' | 'fail',
   evaluatorName = 'mock',
   findings: { message: string; severity: 'critical' | 'warning' | 'info' }[] = [],
 ): CritiqueIteration {
@@ -98,6 +98,26 @@ describe('LessonRecorder', () => {
     };
     expect(call.correctionApplied).toBeTruthy();
     expect(call.timestamp).toBeTruthy();
+  });
+
+  it('uses a warning-only terminal iteration as the applied correction', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
+        createIteration(1, 'warn', 'adr-compliance', [{ message: 'review ADR', severity: 'warning' }]),
+      ],
+    };
+
+    await recorder.record(result, 'task-123');
+
+    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      correctionApplied: string;
+    };
+    expect(call.correctionApplied).toBe('Corrected in iteration 1');
   });
 
   it('does not record on fail verdict', async () => {

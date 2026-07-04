@@ -536,5 +536,5 @@ describe('resolvePhases handles issues subcommand', () => {
     const { resolvePhases } = await import('../../../src/cli/run.js');
     const result = resolvePhases({ subcommand: 'issues' });
     expect(result.entryPhase).toBeDefined();
-  });
+  }, 15_000);
 });

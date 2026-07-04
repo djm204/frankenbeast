@@ -196,7 +196,8 @@ frankenbeast skill list
 frankenbeast skill info <name>
 frankenbeast skill enable <name>
 frankenbeast skill disable <name>
-frankenbeast skill add <name>
+frankenbeast skill add <name> <command> [args]
+frankenbeast skill scaffold <name>
 frankenbeast skill remove <name>
 ```
 

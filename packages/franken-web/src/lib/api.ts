@@ -1,68 +1,26 @@
-export interface PendingApproval {
-  description: string;
-  requestedAt: string;
-}
+import type {
+  ApiDataEnvelope,
+  ApiErrorEnvelope,
+  ApproveResult,
+  ChatSessionResponse as ChatSession,
+  ChatSessionSummary,
+  MessageResult,
+  PendingApproval,
+  TokenTotals,
+  TranscriptMessage,
+  TurnOutcome,
+} from '@franken/types';
 
-export interface TranscriptMessage {
-  id?: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: string;
-  modelTier?: string;
-  tokens?: number;
-  costUsd?: number;
-}
-
-export interface TokenTotals {
-  cheap: number;
-  premiumReasoning: number;
-  premiumExecution: number;
-}
-
-export interface ChatSession {
-  id: string;
-  projectId: string;
-  transcript: TranscriptMessage[];
-  state: string;
-  pendingApproval?: PendingApproval | null;
-  socketToken: string;
-  tokenTotals: TokenTotals;
-  costUsd: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ChatSessionSummary {
-  id: string;
-  projectId: string;
-  state: string;
-  messageCount: number;
-  preview: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type TurnOutcome =
-  | { kind: 'reply'; content: string; modelTier: string }
-  | { kind: 'clarify'; question: string; options: string[] }
-  | { kind: 'plan'; planSummary: string; chunkCount: number }
-  | { kind: 'execute'; taskDescription: string; approvalRequired: boolean };
-
-export interface MessageResult {
-  outcome: TurnOutcome;
-  tier: string;
-  state: string;
-}
-
-export interface ApproveResult {
-  id: string;
-  approved: boolean;
-  state: string;
-}
-
-interface ApiErrorEnvelope {
-  error: { code: string; message: string; details?: unknown };
-}
+export type {
+  ApproveResult,
+  ChatSessionSummary,
+  MessageResult,
+  PendingApproval,
+  TokenTotals,
+  TranscriptMessage,
+  TurnOutcome,
+} from '@franken/types';
+export type { ChatSessionResponse as ChatSession } from '@franken/types';
 
 export function toSocketUrl(baseUrl: string, sessionId: string, token: string): string {
   const url = new URL(baseUrl);
@@ -160,7 +118,7 @@ export class ChatApiClient {
       throw new Error(message);
     }
 
-    const body = (await res.json()) as { data: T };
+    const body = (await res.json()) as ApiDataEnvelope<T>;
     return body.data;
   }
 }

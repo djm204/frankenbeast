@@ -29,6 +29,13 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'comms.discord.applicationId': { type: 'string' },
   'comms.discord.botTokenRef': { type: 'string', sensitive: true },
   'comms.discord.publicKeyRef': { type: 'string' },
+  'comms.telegram.enabled': { type: 'boolean' },
+  'comms.telegram.botTokenRef': { type: 'string', sensitive: true },
+  'comms.whatsapp.enabled': { type: 'boolean' },
+  'comms.whatsapp.accessTokenRef': { type: 'string', sensitive: true },
+  'comms.whatsapp.phoneNumberIdRef': { type: 'string' },
+  'comms.whatsapp.appSecretRef': { type: 'string', sensitive: true },
+  'comms.whatsapp.verifyTokenRef': { type: 'string', sensitive: true },
 } as const;
 
 type ConfigValueType = 'boolean' | 'number' | 'string' | 'enum';

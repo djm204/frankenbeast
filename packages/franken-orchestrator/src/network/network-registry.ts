@@ -10,6 +10,8 @@ export type NetworkServiceKind = 'app' | 'infra';
 
 export interface NetworkRegistryContext {
   repoRoot: string;
+  configFile?: string | undefined;
+  configOverrides?: string[] | undefined;
 }
 
 export interface NetworkServiceRuntimeConfig {

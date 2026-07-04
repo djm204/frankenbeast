@@ -45,6 +45,10 @@ function abortError(): Error {
   return error;
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 /** Exported for tests: regression coverage that no abort listeners leak (issue #39). */
 export function sleepWithAbort(
   ms: number,
@@ -261,6 +265,11 @@ function spawnIteration(
   sessionContinue = false,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
+    if (config.abortSignal?.aborted) {
+      reject(abortError());
+      return;
+    }
+
     const cmd = config.command ?? provider.command;
     const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns, sessionContinue });
     const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;
@@ -279,6 +288,7 @@ function spawnIteration(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let aborted = false;
     let timedOut = false;
     const cleanParts: string[] = [];
     const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
@@ -286,6 +296,11 @@ function spawnIteration(
     const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
       settled = true;
+      config.abortSignal?.removeEventListener('abort', onAbort);
+      if (aborted) {
+        reject(abortError());
+        return;
+      }
       resolve(result);
     };
 
@@ -344,6 +359,42 @@ function spawnIteration(
       escalationTimers.length = 0;
     };
 
+    const clearProviderTimeout = (): void => {
+      clearTimeout(timer);
+    };
+
+    const fail = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      config.abortSignal?.removeEventListener('abort', onAbort);
+      reject(err);
+    };
+
+    const onAbort = (): void => {
+      aborted = true;
+      clearProviderTimeout();
+      try { child.kill('SIGTERM'); } catch { /* already dead */ }
+      escalationTimers.push(setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      }, 5_000));
+      escalationTimers.push(setTimeout(() => {
+        if (streamBuffer) {
+          const remaining = streamBuffer.flush();
+          for (const line of remaining) cleanParts.push(line);
+        }
+        clearTimers();
+        finish({
+          stdout,
+          stderr: `${stderr}\n[MartinLoop] iteration aborted`,
+          exitCode: 130,
+          timedOut,
+          cleanStdout: cleanParts.join('\n'),
+        });
+      }, 7_000));
+    };
+    config.abortSignal?.addEventListener('abort', onAbort, { once: true });
+
     child.on('close', (code) => {
       clearTimers();
       if (streamBuffer) {
@@ -354,8 +405,7 @@ function spawnIteration(
     });
 
     child.on('error', (err) => {
-      clearTimers();
-      reject(err);
+      fail(err);
     });
   });
 }
@@ -392,7 +442,6 @@ export class MartinLoop {
       const startTime = Date.now();
 
       const resolved = this.registry.get(activeProvider);
-      config.onProviderAttempt?.(activeProvider, iteration);
       let renderedPrompt = config.prompt;
       let sessionContinue = false;
 
@@ -402,13 +451,22 @@ export class MartinLoop {
         sessionContinue = rendered.sessionContinue;
       }
 
+      config.onProviderAttempt?.(activeProvider, iteration, renderedPrompt);
+
       let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string };
       try {
         result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
+        if (isAbortError(error)) {
+          throw error;
+        }
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
         continue;
+      }
+
+      if (config.abortSignal?.aborted) {
+        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
       }
 
       const durationMs = Date.now() - startTime;

@@ -383,10 +383,55 @@ describe('parseArgs', () => {
       expect(args.skillAction).toBe('list');
     });
 
-    it('parses skill add with target', () => {
-      const args = parseArgs(['skill', 'add', 'my-skill']);
+    it('parses skill add with target and runnable command', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'node', 'server.js']);
       expect(args.subcommand).toBe('skill');
       expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('node');
+      expect(args.skillCommandArgs).toEqual(['server.js']);
+    });
+
+    it('preserves option-like skill add command args without a delimiter', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+      expect(args.verbose).toBe(false);
+    });
+
+    it('parses global options between skill add and the skill name', () => {
+      const args = parseArgs(['skill', 'add', '--base-dir', '/tmp/beast', 'my-skill', 'npx', '-y', '@acme/mcp-server']);
+      expect(args.skillAction).toBe('add');
+      expect(args.baseDir).toBe('/tmp/beast');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server']);
+    });
+
+    it('preserves skill add command args when global options precede add', () => {
+      const args = parseArgs(['skill', '--base-dir', '/tmp/beast', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+      expect(args.skillAction).toBe('add');
+      expect(args.baseDir).toBe('/tmp/beast');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+      expect(args.verbose).toBe(false);
+    });
+
+    it('parses skill add command args after an optional delimiter', () => {
+      const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '--', '-y', '@acme/mcp-server']);
+      expect(args.skillAction).toBe('add');
+      expect(args.skillTarget).toBe('my-skill');
+      expect(args.skillCommand).toBe('npx');
+      expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server']);
+    });
+
+    it('parses skill scaffold with target', () => {
+      const args = parseArgs(['skill', 'scaffold', 'my-skill']);
+      expect(args.subcommand).toBe('skill');
+      expect(args.skillAction).toBe('scaffold');
       expect(args.skillTarget).toBe('my-skill');
     });
 
@@ -462,6 +507,58 @@ describe('parseArgs', () => {
         const args = parseArgs(['security', 'set', profile]);
         expect(args.securityTarget).toBe(profile);
       }
+    });
+  });
+
+  describe('numeric option validation', () => {
+    it('parses valid decimal and integer values', () => {
+      const chatArgs = parseArgs(['chat-server', '--budget', '12.5', '--port', '4242']);
+      expect(chatArgs.budget).toBe(12.5);
+      expect(chatArgs.port).toBe(4242);
+
+      const ephemeralPortArgs = parseArgs(['chat-server', '--port', '0']);
+      expect(ephemeralPortArgs.port).toBe(0);
+
+      const issueArgs = parseArgs(['issues', '--limit', '50']);
+      expect(issueArgs.issueLimit).toBe(50);
+    });
+
+    it.each([
+      ['NaN'],
+      ['Infinity'],
+      ['12abc'],
+    ])('rejects invalid budget value %s', (value) => {
+      expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
+    });
+
+    it('rejects a negative budget value', () => {
+      expect(() => parseArgs(['--budget=-0.01'])).toThrow(/Invalid --budget/);
+    });
+
+    it.each([
+      ['NaN'],
+      ['8080abc'],
+      ['3.5'],
+      ['65536'],
+    ])('rejects invalid port value %s', (value) => {
+      expect(() => parseArgs(['chat-server', '--port', value])).toThrow(/Invalid --port/);
+    });
+
+    it('rejects a negative port value', () => {
+      expect(() => parseArgs(['chat-server', '--port=-1'])).toThrow(/Invalid --port/);
+    });
+
+    it.each([
+      ['NaN'],
+      ['10abc'],
+      ['2.5'],
+      ['0'],
+    ])('rejects invalid issue limit value %s', (value) => {
+      expect(() => parseArgs(['issues', '--limit', value])).toThrow(/Invalid --limit/);
+    });
+
+    it('rejects a negative issue limit value', () => {
+      expect(() => parseArgs(['issues', '--limit=-1'])).toThrow(/Invalid --limit/);
     });
   });
 

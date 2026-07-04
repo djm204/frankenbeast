@@ -43,6 +43,10 @@ const SENSITIVE_CONFIG_PATHS = [
   'comms.slack.botTokenRef',
   'comms.slack.signingSecretRef',
   'comms.discord.botTokenRef',
+  'comms.telegram.botTokenRef',
+  'comms.whatsapp.accessTokenRef',
+  'comms.whatsapp.appSecretRef',
+  'comms.whatsapp.verifyTokenRef',
 ] as const;
 
 export function resolveSecretMode(config: OrchestratorConfig): 'secure' | 'insecure' {

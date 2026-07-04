@@ -3,10 +3,15 @@ import { listKnownCommsTransports, listSupportedCommsTransports } from '../../..
 
 describe('comms transport registry', () => {
   it('returns only runtime-supported transports', () => {
-    expect(listSupportedCommsTransports().map((transport) => transport.id)).toEqual(['slack', 'discord']);
+    expect(listSupportedCommsTransports().map((transport) => transport.id)).toEqual([
+      'slack',
+      'discord',
+      'telegram',
+      'whatsapp',
+    ]);
   });
 
-  it('keeps known future transports without surfacing them as supported', () => {
+  it('lists every known transport in runtime-supported order', () => {
     expect(listKnownCommsTransports().map((transport) => transport.id)).toEqual([
       'slack',
       'discord',

@@ -174,24 +174,25 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
-  it('attaches in-process comms gateway after verifying its own health endpoint', async () => {
+  it('records in-process services without spawning a child process', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
     const logStore = new NetworkLogStore(join(workDir, 'logs'));
     const config = defaultConfig();
-    config.comms.enabled = true;
-    config.comms.slack.enabled = true;
+    config.comms.telegram.enabled = true;
     const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
-    const startService = vi.fn(async (service: { id: string }) => ({ pid: service.id === 'dashboard-web' ? 203 : 202 }));
-    const healthcheck = vi.fn(async () => true);
+    const startService = vi.fn(async (service) => ({ pid: service.id === 'dashboard-web' ? 202 : 201 }));
+    const preflightService = vi.fn(async (service) => service.id === 'comms-gateway'
+      ? { action: 'conflict' as const, reason: 'Port conflict for comms-gateway on 127.0.0.1:3200' }
+      : { action: 'start' as const });
 
     const supervisor = new NetworkSupervisor({
       stateStore,
       logStore,
       startService,
       stopService: vi.fn(async () => undefined),
-      healthcheck,
-      preflightService: vi.fn(async () => ({ action: 'start' as const })),
+      healthcheck: vi.fn(async () => true),
+      preflightService,
       now: () => '2026-03-10T00:00:00.000Z',
     });
 
@@ -201,57 +202,36 @@ describe('NetworkSupervisor', () => {
       mode: 'secure',
       secureBackend: 'local-encrypted',
     });
-    await stateStore.save(state);
-    const status = await supervisor.status();
 
     expect(startService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }), expect.any(Object));
-    expect(startService).toHaveBeenCalledTimes(3);
+    expect(preflightService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }));
     expect(state.services).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'comms-gateway',
         pid: 0,
+        status: 'already-running',
         inProcess: true,
-        hostServiceId: 'chat-server',
-        channels: {
-          slack: true,
-          discord: false,
-        },
       }),
     ]));
-    expect(status.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'comms-gateway',
-        status: 'running',
-        inProcess: true,
-        channels: {
-          slack: true,
-          discord: false,
-        },
-      }),
-    ]));
-    expect(healthcheck).toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }));
-    expect(healthcheck).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
   });
 
-  it('fails startup when an in-process comms gateway health endpoint is not mounted', async () => {
+  it('probes in-process comms health before reporting it ready', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
     const logStore = new NetworkLogStore(join(workDir, 'logs'));
     const config = defaultConfig();
-    config.comms.enabled = true;
-    config.comms.slack.enabled = true;
+    config.comms.telegram.enabled = true;
     const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    const stopService = vi.fn(async () => undefined);
 
     const supervisor = new NetworkSupervisor({
       stateStore,
       logStore,
-      startService: vi.fn(async () => ({ pid: 202 })),
-      stopService: vi.fn(async () => undefined),
+      startService: vi.fn(async () => ({ pid: 501 })),
+      stopService,
       healthcheck: vi.fn(async (service) => service.id !== 'comms-gateway'),
-      preflightService: vi.fn(async () => ({ action: 'start' as const })),
       now: () => '2026-03-10T00:00:00.000Z',
       startupAttempts: 1,
-      startupDelayMs: 0,
     });
 
     await expect(supervisor.up({
@@ -259,34 +239,29 @@ describe('NetworkSupervisor', () => {
       detached: false,
       mode: 'secure',
       secureBackend: 'local-encrypted',
-    })).rejects.toThrow(/Service comms-gateway failed healthcheck during startup/);
+    })).rejects.toThrow(/Service comms-gateway failed healthcheck/);
+
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
   });
 
-  it('marks in-process comms gateway stale when its host is unhealthy', async () => {
+  it('allows reused pid-zero services to stop because they are not in-process markers', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
     const logStore = new NetworkLogStore(join(workDir, 'logs'));
-
+    const stopService = vi.fn(async () => undefined);
     await stateStore.save({
       mode: 'secure',
       secureBackend: 'local-encrypted',
       detached: true,
-      startedAt: '2026-03-09T00:00:00.000Z',
+      startedAt: '2026-03-10T00:00:00.000Z',
       services: [
         {
           id: 'chat-server',
-          pid: 301,
-          dependsOn: [],
-          startedAt: '2026-03-09T00:00:00.000Z',
-        },
-        {
-          id: 'comms-gateway',
           pid: 0,
-          dependsOn: ['chat-server'],
-          startedAt: '2026-03-09T00:00:00.000Z',
-          inProcess: true,
-          hostServiceId: 'chat-server',
-          channels: { slack: true, discord: false },
+          detached: true,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'already-running',
         },
       ],
     });
@@ -295,73 +270,55 @@ describe('NetworkSupervisor', () => {
       stateStore,
       logStore,
       startService: vi.fn(),
-      stopService: vi.fn(),
-      healthcheck: vi.fn(async () => false),
-      now: () => '2026-03-09T00:00:00.000Z',
-    });
-
-    const status = await supervisor.status();
-
-    expect(status.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'chat-server', status: 'stale' }),
-      expect.objectContaining({ id: 'comms-gateway', status: 'stale', inProcess: true }),
-    ]));
-  });
-
-  it('rejects stopping the in-process comms gateway without changing persisted state', async () => {
-    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
-    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
-    const logStore = new NetworkLogStore(join(workDir, 'logs'));
-    const stopped: string[] = [];
-
-    await stateStore.save({
-      mode: 'secure',
-      secureBackend: 'local-encrypted',
-      detached: true,
-      startedAt: '2026-03-09T00:00:00.000Z',
-      services: [
-        {
-          id: 'chat-server',
-          pid: 301,
-          dependsOn: [],
-          startedAt: '2026-03-09T00:00:00.000Z',
-        },
-        {
-          id: 'dashboard-web',
-          pid: 302,
-          dependsOn: ['chat-server'],
-          startedAt: '2026-03-09T00:00:00.000Z',
-        },
-        {
-          id: 'comms-gateway',
-          pid: 0,
-          dependsOn: ['chat-server'],
-          startedAt: '2026-03-09T00:00:00.000Z',
-          inProcess: true,
-          hostServiceId: 'chat-server',
-        },
-      ],
-    });
-
-    const supervisor = new NetworkSupervisor({
-      stateStore,
-      logStore,
-      startService: vi.fn(),
-      stopService: vi.fn(async (service) => { stopped.push(service.id); }),
+      stopService,
       healthcheck: vi.fn(async () => true),
-      now: () => '2026-03-09T00:00:00.000Z',
     });
 
-    await expect(supervisor.stop('comms-gateway')).rejects.toThrow(/Cannot stop in-process service comms-gateway independently/);
+    await supervisor.stop('chat-server');
+    expect(stopService).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-server' }));
+  });
 
-    expect(stopped).toEqual([]);
-    await expect(stateStore.load()).resolves.toEqual(expect.objectContaining({
-      services: expect.arrayContaining([
-        expect.objectContaining({ id: 'chat-server' }),
-        expect.objectContaining({ id: 'dashboard-web' }),
-        expect.objectContaining({ id: 'comms-gateway' }),
-      ]),
-    }));
+  it('rejects stopping an in-process service as an independent process', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const stopService = vi.fn(async () => undefined);
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: true,
+      startedAt: '2026-03-10T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 501,
+          detached: true,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'started',
+        },
+        {
+          id: 'comms-gateway',
+          pid: 0,
+          detached: true,
+          dependsOn: ['chat-server'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'already-running',
+          inProcess: true,
+        },
+      ],
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(),
+      stopService,
+      healthcheck: vi.fn(async () => true),
+    });
+
+    await expect(supervisor.stop('comms-gateway')).rejects.toThrow(/hosted in-process by chat-server/);
+    expect(stopService).not.toHaveBeenCalled();
   });
 
   it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {

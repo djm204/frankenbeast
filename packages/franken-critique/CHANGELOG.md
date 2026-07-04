@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.8](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.7...franken-critique-v0.6.8) (2026-07-04)
+
+
+### Bug Fixes
+
+* **critique:** share max-iteration boundary logic ([#530](https://github.com/djm204/frankenbeast/issues/530)) ([08f9eb7](https://github.com/djm204/frankenbeast/commit/08f9eb72b3d38f13fb811deeea25a7bd7bf8071a))
+
+
+### Documentation
+
+* fix package README drift (governor, observer, brain, critique) ([#527](https://github.com/djm204/frankenbeast/issues/527)) ([4afdd51](https://github.com/djm204/frankenbeast/commit/4afdd51f0852cfb934c6db1307e61afc98ee51c4))
+
+## [0.6.7](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.6...franken-critique-v0.6.7) (2026-07-04)
+
+
+### Bug Fixes
+
+* **critique:** align warning evaluator verdicts ([#492](https://github.com/djm204/frankenbeast/issues/492)) ([2a0d7a0](https://github.com/djm204/frankenbeast/commit/2a0d7a001f285c6703c422edc3d959a94b95ba18))
+
 ## [0.6.6](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.5...franken-critique-v0.6.6) (2026-07-01)
 
 

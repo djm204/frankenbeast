@@ -63,17 +63,15 @@ export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpSer
     },
     {
       name: 'fbeast_memory_frontload',
-      description: 'Load all memory entries for project context. Returns everything stored.',
+      description: 'Load all memory entries from this database. Returns everything stored.',
       inputSchema: {
         type: 'object',
         properties: {
-          projectId: { type: 'string', description: 'Project identifier (for future multi-project support)' },
+          projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
         },
-        required: ['projectId'],
       },
-      async handler(args) {
-        const projectId = String(args['projectId']);
-        const sections = await brain.frontload(projectId);
+      async handler(_args) {
+        const sections = await brain.frontload();
 
         if (sections.length === 0) {
           return { content: [{ type: 'text', text: 'No memory entries stored yet.' }] };

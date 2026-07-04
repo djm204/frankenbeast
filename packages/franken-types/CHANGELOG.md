@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.1...franken-types-v0.7.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **api:** share web DTO contracts ([#544](https://github.com/djm204/frankenbeast/issues/544)) ([ec1e29a](https://github.com/djm204/frankenbeast/commit/ec1e29ae21bed03d156f0a58c0f27964566e5e80))
+
+## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.0...franken-types-v0.7.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **critique:** align warning evaluator verdicts ([#492](https://github.com/djm204/frankenbeast/issues/492)) ([2a0d7a0](https://github.com/djm204/frankenbeast/commit/2a0d7a001f285c6703c422edc3d959a94b95ba18))
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.6.2...franken-types-v0.7.0) (2026-07-01)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.4](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.3...franken-brain-v0.6.4) (2026-07-04)
+
+
+### Documentation
+
+* fix package README drift (governor, observer, brain, critique) ([#527](https://github.com/djm204/frankenbeast/issues/527)) ([4afdd51](https://github.com/djm204/frankenbeast/commit/4afdd51f0852cfb934c6db1307e61afc98ee51c4))
+
+## [0.6.3](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.2...franken-brain-v0.6.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **brain:** hydrate sqlite working memory ([#478](https://github.com/djm204/frankenbeast/issues/478)) ([67ec25e](https://github.com/djm204/frankenbeast/commit/67ec25e6570f9ba8a0ac02208acea95d47206013))
+
 ## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.1...franken-brain-v0.6.2) (2026-07-01)
 
 

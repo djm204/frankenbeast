@@ -22,7 +22,7 @@ export interface BrainFrontloadSection {
 export interface BrainAdapter {
   query(input: BrainQueryInput): Promise<BrainMemoryEntry[]>;
   store(input: { key: string; value: string; type: string }): Promise<void>;
-  frontload(projectId: string): Promise<BrainFrontloadSection[]>;
+  frontload(): Promise<BrainFrontloadSection[]>;
   forget(key: string): Promise<boolean>;
 }
 
@@ -94,7 +94,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       brain.flush();
     },
 
-    async frontload(_projectId) {
+    async frontload() {
       const sections: BrainFrontloadSection[] = [];
 
       // Working memory

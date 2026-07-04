@@ -61,6 +61,47 @@ describe('CritiquePipeline', () => {
     expect(result.results).toHaveLength(2);
   });
 
+  it('returns warn when evaluators only report non-critical warnings', async () => {
+    const passing = createMockEvaluator('passing', 'deterministic');
+    const warning = createMockEvaluator('warning', 'heuristic', {
+      verdict: 'warn',
+      score: 0.5,
+      findings: [{ message: 'review this', severity: 'warning' }],
+    });
+    const pipeline = new CritiquePipeline([passing, warning]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('warn');
+    expect(result.overallScore).toBe(0.75);
+    expect(result.results).toHaveLength(2);
+  });
+
+  it('returns warn when a passing evaluator reports warning findings', async () => {
+    const warning = createMockEvaluator('warning-rule', 'deterministic', {
+      verdict: 'pass',
+      score: 0.8,
+      findings: [{ message: 'review this', severity: 'warning' }],
+    });
+    const pipeline = new CritiquePipeline([warning]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('warn');
+    expect(result.overallScore).toBe(0.8);
+  });
+
+  it('keeps passing evaluator info findings informational', async () => {
+    const informational = createMockEvaluator('reflection', 'heuristic', {
+      verdict: 'pass',
+      score: 0.9,
+      findings: [{ message: 'on track', severity: 'info' }],
+    });
+    const pipeline = new CritiquePipeline([informational]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.overallScore).toBe(0.9);
+  });
+
   it('runs deterministic evaluators before heuristic', async () => {
     const callOrder: string[] = [];
     const heuristic: Evaluator = {

@@ -461,6 +461,21 @@ describe('dep-factory provider wiring', () => {
     expect(existsSync(chunkSession)).toBe(false);
   });
 
+  it('clears session checkpoint sidecars on cold starts', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({ resume: false });
+    const checkpoint = resolve(opts.paths.buildDir, 'session.checkpoint');
+    const checkpointOutputs = `${checkpoint}.outputs`;
+    mkdirSync(checkpointOutputs, { recursive: true });
+    writeFileSync(checkpoint, 'task-1:done\n');
+    writeFileSync(resolve(checkpointOutputs, 'task-1.v8'), 'serialized-output');
+
+    await createCliDeps(opts);
+
+    expect(existsSync(checkpoint)).toBe(false);
+    expect(existsSync(checkpointOutputs)).toBe(false);
+  });
+
   it('fails closed when an enabled critique module is truly missing', async () => {
     delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
     optionalModuleMocks.critiqueError = Object.assign(

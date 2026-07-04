@@ -101,7 +101,7 @@ export class NetworkSupervisor {
 
     try {
       for (const service of options.services) {
-        if (service.runtimeConfig.inProcess) {
+        if (service.runtimeConfig.inProcess === true) {
           const serviceState = this.createInProcessState(service, startedAt, options.detached);
           services.push(serviceState);
           const healthy = await this.waitForHealthy(serviceState);
@@ -130,6 +130,8 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
             ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : existingService?.channels ? { channels: existingService.channels } : {}),
+            ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : existingService?.hostServiceId ? { hostServiceId: existingService.hostServiceId } : {}),
+            ...(existingService?.inProcess ? { inProcess: existingService.inProcess } : {}),
           });
           continue;
         }
@@ -150,7 +152,6 @@ export class NetworkSupervisor {
           ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
           ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
           ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
-          ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
         };
         services.push(serviceState);
         const healthy = await this.waitForHealthy(serviceState);
@@ -206,18 +207,16 @@ export class NetworkSupervisor {
       return;
     }
 
-    const targetService = target === 'all'
-      ? undefined
-      : state.services.find((service) => service.id === target);
-    if (targetService?.inProcess) {
-      throw new Error(
-        `Cannot stop in-process service ${targetService.id} independently; stop its host service ${targetService.hostServiceId ?? 'process'} or all services instead`,
-      );
-    }
-
     const selected = target === 'all'
       ? state.services
       : collectDependents(state.services, target);
+
+    const targetState = target === 'all' ? undefined : state.services.find((service) => service.id === target);
+    if (targetState && isInProcessService(targetState)) {
+      throw new Error(
+        `Service ${target} is hosted in-process by chat-server; stop chat-server or all services instead.`,
+      );
+    }
 
     for (const service of [...selected].reverse()) {
       await this.deps.stopService(service);
@@ -287,4 +286,8 @@ export class NetworkSupervisor {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isInProcessService(service: ManagedNetworkServiceState): boolean {
+  return service.inProcess === true;
 }

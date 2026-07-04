@@ -7,6 +7,7 @@ describe('fbeast main CLI', () => {
     process.argv = originalArgv;
     vi.restoreAllMocks();
     vi.resetModules();
+    vi.doUnmock('./init.js');
     vi.doUnmock('./uninstall.js');
   });
 
@@ -19,6 +20,76 @@ describe('fbeast main CLI', () => {
     await import('./main.js');
 
     expect(runUninstall).toHaveBeenCalledWith(expect.objectContaining({ client: 'codex' }));
+  });
+
+  it('reports invalid init mode as a clean CLI error without a stack trace', async () => {
+    const runInit = vi.fn();
+    vi.doMock('./init.js', () => ({ runInit }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'init', '--mode=bad', '--client=claude'];
+
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('fbeast mcp init: Unknown --mode value: bad');
+    expect(message).toContain('standard, proxy');
+    expect(message).toContain('--client=claude|gemini|codex');
+    expect(message).not.toContain(' at ');
+    expect(runInit).not.toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it('reports invalid init client as a clean CLI error without a stack trace', async () => {
+    const runInit = vi.fn();
+    vi.doMock('./init.js', () => ({ runInit }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'init', '--client=bad'];
+
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('fbeast mcp init: Invalid --client value "bad"');
+    expect(message).toContain('claude, gemini, or codex');
+    expect(message).not.toContain(' at ');
+    expect(runInit).not.toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it('reports invalid init pick values as a clean CLI error without a stack trace', async () => {
+    const runInit = vi.fn();
+    vi.doMock('./init.js', () => ({ runInit }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'init', '--client=claude', '--pick=memory,bad'];
+
+    const mockError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('fbeast mcp init: Unknown --pick value(s): bad');
+    expect(message).toContain('memory');
+    expect(message).not.toContain(' at ');
+    expect(runInit).not.toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it('passes through non-mcp commands to frankenbeast', async () => {

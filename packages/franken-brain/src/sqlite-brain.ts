@@ -42,7 +42,31 @@ class SqliteWorkingMemory implements IWorkingMemory {
   constructor(
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
-  ) {}
+    hydrateFromDb = true,
+  ) {
+    if (hydrateFromDb) {
+      this.loadFromDb();
+    }
+  }
+
+  /** Hydrate in-memory state from persisted SQLite working_memory rows. */
+  private loadFromDb(): void {
+    const rows = this.db
+      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string }>;
+    const snap: Record<string, unknown> = {};
+
+    for (const row of rows) {
+      Object.defineProperty(snap, row.key, {
+        value: parseStoredWorkingMemoryValue(row.value),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    this.restore(snap);
+  }
 
   /** Flush in-memory Map to SQLite working_memory table (called on checkpoint). */
   flushToDb(): void {
@@ -129,7 +153,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
   snapshot(): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     for (const [key, value] of this.store) {
-      result[key] = value;
+      Object.defineProperty(result, key, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
     return result;
   }
@@ -314,7 +343,11 @@ export class SqliteBrain implements IBrain {
 
   private db: Database.Database;
 
-  constructor(dbPath: string = ':memory:', workingMemoryLimits?: Partial<WorkingMemoryLimits>) {
+  constructor(
+    dbPath: string = ':memory:',
+    workingMemoryLimits?: Partial<WorkingMemoryLimits>,
+    options: { hydrateWorkingMemoryFromDb?: boolean } = {},
+  ) {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
@@ -322,7 +355,7 @@ export class SqliteBrain implements IBrain {
     this.working = new SqliteWorkingMemory(this.db, {
       ...DEFAULT_WORKING_MEMORY_LIMITS,
       ...workingMemoryLimits,
-    });
+    }, options.hydrateWorkingMemoryFromDb ?? true);
     this.episodic = new SqliteEpisodicMemory(this.db);
     this.recovery = new SqliteRecoveryMemory(this.db, () => this.working.flushToDb());
   }
@@ -377,8 +410,9 @@ export class SqliteBrain implements IBrain {
     dbPath: string = ':memory:',
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
   ): SqliteBrain {
-    const brain = new SqliteBrain(dbPath, workingMemoryLimits);
+    const brain = new SqliteBrain(dbPath, workingMemoryLimits, { hydrateWorkingMemoryFromDb: false });
     brain.working.restore(snapshot.working);
+    brain.flush();
     for (const event of snapshot.episodic) {
       brain.episodic.record(event);
     }
@@ -409,6 +443,14 @@ const STOPWORDS = new Set([
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
+}
+
+function parseStoredWorkingMemoryValue(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
 }
 
 function rowToEvent(row: EpisodicRow): EpisodicEvent {

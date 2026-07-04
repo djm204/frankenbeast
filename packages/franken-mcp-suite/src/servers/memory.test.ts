@@ -46,8 +46,11 @@ describe('Memory Server', () => {
     expect(brain.query).toHaveBeenCalledWith({ query: 'adr', type: 'working', limit: 5 });
     expect(queryResult.content[0]!.text).toContain('use adapters');
 
+    expect(frontloadTool.inputSchema.required).toBeUndefined();
+    expect(frontloadTool.inputSchema.properties).toHaveProperty('projectId');
+
     const frontloadResult = await frontloadTool.handler({ projectId: 'test-project' });
-    expect(brain.frontload).toHaveBeenCalledWith('test-project');
+    expect(brain.frontload).toHaveBeenCalledWith();
     expect(frontloadResult.content[0]!.text).toContain('adr: use adapters');
 
     const forgetResult = await forgetTool.handler({ key: 'adr' });

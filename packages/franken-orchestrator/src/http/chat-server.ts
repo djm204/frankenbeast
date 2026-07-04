@@ -70,6 +70,8 @@ const DEFAULT_PORT = 3737;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 
+type ChatSessionWithRouting = ChatSession & { routingMetadata?: Record<string, unknown> | undefined };
+
 export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
   return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
 }
@@ -81,7 +83,7 @@ function createCommsRuntimeAdapter(
 ): CommsRuntimePort {
   return new ChatRuntimeCommsAdapter(runtime, {
     load: async (id) => {
-      const session = sessionStore.get(id);
+      const session = sessionStore.get(id) as ChatSessionWithRouting | undefined;
       if (!session) {
         return null;
       }
@@ -92,33 +94,39 @@ function createCommsRuntimeAdapter(
         state: session.state,
         pendingApproval: session.pendingApproval ?? null,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.routingMetadata !== undefined ? { routingMetadata: session.routingMetadata } : {}),
       };
     },
     create: async (id, data) => {
       const now = new Date().toISOString();
-      const session: ChatSession = {
+      const session: ChatSessionWithRouting = {
         id,
-        projectId: projectName,
-        transcript: [],
-        state: 'active',
+        projectId: typeof data.projectId === 'string' ? data.projectId : projectName,
+        transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : [],
+        state: typeof data.state === 'string' ? data.state : 'active',
         tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
         costUsd: 0,
         createdAt: now,
         updatedAt: now,
+        pendingApproval: data.pendingApproval === undefined ? null : data.pendingApproval as ChatSession['pendingApproval'],
+        beastContext: data.beastContext === undefined ? null : data.beastContext as ChatSession['beastContext'],
+        routingMetadata: data.routingMetadata as ChatSessionWithRouting['routingMetadata'],
       };
       sessionStore.save(session);
       return {
-        sessionId: id,
-        projectId: projectName,
-        transcript: [],
-        state: 'active',
-        ...data,
+        sessionId: session.id,
+        projectId: session.projectId,
+        transcript: session.transcript,
+        state: session.state,
+        pendingApproval: session.pendingApproval ?? null,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(session.routingMetadata !== undefined ? { routingMetadata: session.routingMetadata } : {}),
       };
     },
     save: async (id, data) => {
-      const existing = sessionStore.get(id);
+      const existing = sessionStore.get(id) as ChatSessionWithRouting | undefined;
       const now = new Date().toISOString();
-      const session: ChatSession = {
+      const session: ChatSessionWithRouting = {
         id,
         projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),
         transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : (existing?.transcript ?? []),
@@ -133,6 +141,9 @@ function createCommsRuntimeAdapter(
         beastContext: data.beastContext === undefined
           ? existing?.beastContext ?? null
           : data.beastContext as ChatSession['beastContext'],
+        routingMetadata: data.routingMetadata === undefined
+          ? existing?.routingMetadata
+          : data.routingMetadata as ChatSessionWithRouting['routingMetadata'],
       };
       sessionStore.save(session);
     },
@@ -206,7 +217,9 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.executionLlm ? { executionLlm: options.executionLlm } : {}),
   });
   const commsRuntime = options.commsRuntime
-    ?? (options.commsConfig ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.projectName) : undefined);
+    ?? (options.commsConfig
+      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.projectName)
+      : undefined);
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,

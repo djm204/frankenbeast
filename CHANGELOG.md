@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.40.3](https://github.com/djm204/frankenbeast/compare/v0.40.2...v0.40.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **api:** share web DTO contracts ([#544](https://github.com/djm204/frankenbeast/issues/544)) ([ec1e29a](https://github.com/djm204/frankenbeast/commit/ec1e29ae21bed03d156f0a58c0f27964566e5e80))
+* **cli:** split runnable skill add from scaffold ([b1394aa](https://github.com/djm204/frankenbeast/commit/b1394aa4a4578535dd7b0876e32e58f8564af521)), closes [#404](https://github.com/djm204/frankenbeast/issues/404)
+* **mcp:** render init validation errors cleanly ([#535](https://github.com/djm204/frankenbeast/issues/535)) ([ba6dd5c](https://github.com/djm204/frankenbeast/commit/ba6dd5c93e7b0fd345d2b81dca05d61922d79912))
+* **web:** sync network config editor ([#538](https://github.com/djm204/frankenbeast/issues/538)) ([55fcfe3](https://github.com/djm204/frankenbeast/commit/55fcfe38702c11a9e86b46b5ff048e1fd6252a87))
+
+## [0.40.2](https://github.com/djm204/frankenbeast/compare/v0.40.1...v0.40.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **mcp-memory:** align frontload scope contract ([#523](https://github.com/djm204/frankenbeast/issues/523)) ([bf85b30](https://github.com/djm204/frankenbeast/commit/bf85b30a79d77aa742881eca5b8047fe50ca3bfd))
+
+## [0.40.1](https://github.com/djm204/frankenbeast/compare/v0.40.0...v0.40.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **mcp:** label planner scaffold provenance ([#485](https://github.com/djm204/frankenbeast/issues/485)) ([aa4cf8e](https://github.com/djm204/frankenbeast/commit/aa4cf8ed7eb9d14d746f296fc52dbe1a454a5f75))
+
 ## [0.40.0](https://github.com/djm204/frankenbeast/compare/v0.39.0...v0.40.0) (2026-07-03)
 
 

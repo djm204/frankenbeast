@@ -85,4 +85,41 @@ describe('commsRoutes', () => {
   it('throws when runtime is not provided', () => {
     expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });
+
+  it('requires the full Telegram token segment before accepting updates', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          telegram: { enabled: true, botToken: '123456:secret-token' },
+        },
+      }),
+      runtime: mockRuntime(),
+    });
+
+    const body = {
+      update_id: 1,
+      message: {
+        message_id: 10,
+        date: 1,
+        text: 'hello',
+        chat: { id: 123456, type: 'private' },
+        from: { id: 42, is_bot: false, first_name: 'Ada' },
+      },
+    };
+    const headers = { 'Content-Type': 'application/json' };
+
+    const partial = await app.request('/webhooks/telegram/123456anything', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    expect(partial.status).toBe(404);
+
+    const exact = await app.request('/webhooks/telegram/123456:secret-token', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    expect(exact.status).toBe(200);
+  });
 });
