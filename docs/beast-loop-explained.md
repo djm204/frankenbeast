@@ -204,7 +204,7 @@ Checks cumulative token spend against a USD budget limit. When the limit is exce
 
 **Source:** `franken-orchestrator/src/adapters/reflection-heartbeat-adapter.ts`; closure heartbeat is invoked through `deps.heartbeat.pulse()` from `franken-orchestrator/src/phases/closure.ts`, while optional phase-boundary reflection is invoked from `franken-orchestrator/src/beast-loop.ts`
 
-Runs during the Closure phase and, when `enableReflection` is configured, after planning/execution phase boundaries. The current default adapter is lightweight: if no reflection function is configured it returns an empty pulse with `No reflection configured.` Target reflection implementations should follow a cost-conscious pattern:
+Runs during the Closure phase when `enableHeartbeat` is true, and after planning/execution phase boundaries when `enableReflection` is true. These flags are independent in the normal CLI wiring: `enableReflection=false` disables phase-boundary reflection, but closure still calls `heartbeat.pulse()` unless `enableHeartbeat=false`. If the CLI dependency factory installs a reflection function, closure heartbeat can make an LLM-backed reflection call; if no reflection function is configured, the adapter returns an empty pulse with `No reflection configured.` Target reflection implementations should follow a cost-conscious pattern:
 
 1. **Deterministic check** (zero LLM cost) — checks watchlist items, git state, token budget
 2. If everything is healthy → **early exit**, no LLM call needed
