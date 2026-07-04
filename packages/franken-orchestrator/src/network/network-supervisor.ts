@@ -300,7 +300,7 @@ export class NetworkSupervisor {
     if (!state) {
       return [];
     }
-    return this.deps.logStore.resolve(state, target);
+    return await this.deps.logStore.resolve(state, target);
   }
 
   async status(_registry?: Map<string, NetworkServiceDefinition>): Promise<NetworkSupervisorStatus> {

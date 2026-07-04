@@ -68,11 +68,21 @@ export class DashboardApiClient {
   // access logs). The dashboard page is not currently mounted in the live
   // shell (not in ChatShell ROUTES); wire ticket-based auth here when it is.
   subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): () => void {
-    const eventSource = new EventSource(`${this.baseUrl}/api/dashboard/events`);
-    eventSource.addEventListener('snapshot', (event) => {
+    // EventSource may be mocked as a plain function in tests; prefer browser
+    // constructor semantics, then fall back to callable test doubles.
+    const EventSourceCtor: any = (globalThis as any).EventSource;
+    const url = `${this.baseUrl}/api/dashboard/events`;
+    let eventSource: EventSource;
+    try {
+      eventSource = new EventSourceCtor(url);
+    } catch {
+      eventSource = EventSourceCtor(url);
+    }
+    eventSource.addEventListener('snapshot', (event: any) => {
       const snapshot = JSON.parse(event.data) as DashboardSnapshot;
       onSnapshot(snapshot);
     });
     return () => eventSource.close();
   }
+
 }

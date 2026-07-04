@@ -4,6 +4,7 @@ export interface NetworkServiceHealthStatus {
   id: string;
   status: 'running' | 'stale';
   inProcess?: boolean;
+  hostServiceId?: string;
   channels?: Record<string, boolean>;
 }
 
@@ -23,6 +24,7 @@ export async function resolveServiceHealth(
       id: service.id,
       status: healthy ? 'running' : 'stale',
       inProcess: true,
+      ...(service.hostServiceId ? { hostServiceId: service.hostServiceId } : {}),
       ...(service.channels ? { channels: service.channels } : {}),
     };
   }

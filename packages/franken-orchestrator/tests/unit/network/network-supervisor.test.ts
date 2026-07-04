@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NetworkLogStore } from '../../../src/network/network-logs.js';
@@ -83,6 +83,39 @@ describe('NetworkSupervisor', () => {
       expect.stringMatching(/chat-server\.log$/),
       expect.stringMatching(/dashboard-web\.log$/),
     ]));
+  });
+
+  it('returns log file contents instead of log file paths', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const chatLogFile = await logStore.register('chat-server');
+    await writeFile(chatLogFile, 'chat line 1\nchat line 2\n', 'utf-8');
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: true,
+      startedAt: '2026-03-09T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 301,
+          dependsOn: [],
+          startedAt: '2026-03-09T00:00:00.000Z',
+          logFile: chatLogFile,
+        },
+      ],
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(),
+      stopService: vi.fn(),
+      healthcheck: vi.fn(async () => true),
+    });
+
+    await expect(supervisor.logs('chat-server')).resolves.toEqual(['chat line 1', 'chat line 2']);
   });
 
   it('marks stored services stale when healthchecks fail', async () => {

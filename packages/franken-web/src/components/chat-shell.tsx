@@ -176,6 +176,10 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
   });
   const [networkLogs, setNetworkLogs] = useState<string[]>([]);
+  const [selectedNetworkLogServiceId, setSelectedNetworkLogServiceId] = useState<string | undefined>(undefined);
+  const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
+  const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
+  const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
     approve,
@@ -766,9 +770,37 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
           <NetworkPage
             config={networkConfig}
             logs={networkLogs}
+            logsError={networkLogsError}
+            logsLoading={networkLogsLoading}
             onRefresh={() => {
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
-              void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+              const logServiceId = selectedNetworkLogServiceId;
+              const requestId = ++networkLogsRequestIdRef.current;
+              if (logServiceId) {
+                setNetworkLogsLoading(true);
+                setNetworkLogsError(null);
+              }
+              void Promise.allSettled([client.getStatus(), logServiceId ? client.getLogs(logServiceId) : Promise.resolve(null)])
+                .then(([statusResult, logsResult]) => {
+                  if (statusResult.status === 'fulfilled') {
+                    setNetworkStatus(statusResult.value);
+                  }
+                  if (requestId !== networkLogsRequestIdRef.current) {
+                    return;
+                  }
+                  if (logsResult.status === 'fulfilled' && logsResult.value) {
+                    setNetworkLogs(logsResult.value.logs);
+                    setNetworkLogsError(null);
+                  } else if (logServiceId && logsResult.status === 'rejected') {
+                    setNetworkLogs([]);
+                    setNetworkLogsError(logsResult.reason instanceof Error ? logsResult.reason.message : 'Unable to refresh logs.');
+                  }
+                })
+                .finally(() => {
+                  if (requestId === networkLogsRequestIdRef.current && logServiceId) {
+                    setNetworkLogsLoading(false);
+                  }
+                });
             }}
             onRestart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
@@ -780,6 +812,39 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setNetworkConfig(nextConfig);
               });
             }}
+            onSelectLogService={(serviceId) => {
+              const nextServiceId = serviceId.trim();
+              const requestId = ++networkLogsRequestIdRef.current;
+              setSelectedNetworkLogServiceId(nextServiceId || undefined);
+              setNetworkLogs([]);
+              setNetworkLogsError(null);
+              if (!nextServiceId) {
+                setNetworkLogsLoading(false);
+                return;
+              }
+              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              setNetworkLogsLoading(true);
+              void client.getLogs(nextServiceId)
+                .then(({ logs }) => {
+                  if (requestId !== networkLogsRequestIdRef.current) {
+                    return;
+                  }
+                  setNetworkLogs(logs);
+                  setNetworkLogsError(null);
+                })
+                .catch((error: unknown) => {
+                  if (requestId !== networkLogsRequestIdRef.current) {
+                    return;
+                  }
+                  setNetworkLogs([]);
+                  setNetworkLogsError(error instanceof Error ? error.message : 'Unable to load logs.');
+                })
+                .finally(() => {
+                  if (requestId === networkLogsRequestIdRef.current) {
+                    setNetworkLogsLoading(false);
+                  }
+                });
+            }}
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.start(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
@@ -788,6 +853,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               const client = new NetworkApiClient(baseUrl, beastOperatorToken);
               void client.stop(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
+            selectedLogServiceId={selectedNetworkLogServiceId}
             services={networkStatus.services}
             status={networkStatus}
           />
