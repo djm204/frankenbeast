@@ -557,7 +557,7 @@ Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is
 ```json
 { "network": { "secureBackend": "1password" } }
 ```
-Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; items are stored with titles like `frankenbeast/operator-token`. Bitwarden stores secure-note items with the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
@@ -571,10 +571,10 @@ Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is
 
 ```bash
 export FRANKENBEAST_PASSPHRASE=<passphrase>
-frankenbeast run --config frankenbeast.config.json
+frankenbeast run
 ```
 
-With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault without prompting.
+With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault from `.fbeast/config.json` without prompting. If you run with `--config <path>`, keep that file in sync with the backend and token refs written by `frankenbeast init`.
 
 ### References
 
