@@ -31,8 +31,5 @@
   },
   "overrides": {
     "esbuild": "^0.28.1"
-  },
-  "optionalDependencies": {
-    "lightningcss-linux-x64-gnu": "^1.31.1"
   }
 }
