@@ -728,6 +728,13 @@ export async function main(): Promise<void> {
             root,
           })
         : undefined;
+      const dashboardOrigin = config.dashboard?.enabled
+        ? `http://${config.dashboard.host}:${config.dashboard.port}`
+        : undefined;
+      const allowedOrigins = Array.from(new Set([
+        ...(args.allowOrigin ? [args.allowOrigin] : []),
+        ...(dashboardOrigin ? [dashboardOrigin] : []),
+      ]));
       const server = await startChatServer({
         sessionStoreDir,
         llm: chatLlm,
@@ -765,7 +772,7 @@ export async function main(): Promise<void> {
         ...(commsConfig ? { commsConfig } : {}),
         ...(args.host ? { host: args.host } : {}),
         ...(args.port !== undefined ? { port: args.port } : {}),
-        ...(args.allowOrigin ? { allowedOrigins: [args.allowOrigin] } : {}),
+        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
         // Consolidated deps — skill/dashboard routes activate when providers are configured
         ...(skillManager ? { skillManager } : {}),
         ...(providerRegistry ? { providerRegistry } : {}),

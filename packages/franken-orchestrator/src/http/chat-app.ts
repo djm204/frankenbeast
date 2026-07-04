@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
 import type { ISessionStore } from '../chat/session-store.js';
@@ -38,6 +39,7 @@ export interface ChatAppOptions {
   sessionContinuation?: boolean;
   sessionTokenSecret?: string;
   operatorToken?: string;
+  allowedOrigins?: string[];
   engine?: ConversationEngine;
   runtime?: ChatRuntime;
   turnRunner?: TurnRunner;
@@ -101,6 +103,16 @@ export function createChatApp(opts: ChatAppOptions): Hono {
 
   const app = new Hono();
   app.use('*', requestId);
+  if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
+    const allowedOrigins = new Set(opts.allowedOrigins);
+    app.use('*', cors({
+      origin: (origin) => (allowedOrigins.has(origin) ? origin : null),
+      allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['authorization', 'content-type', 'x-frankenbeast-operator-token'],
+      credentials: true,
+      maxAge: 600,
+    }));
+  }
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   // Chat /v1/chat/* is gated by an operator token whenever one is configured.
   // The same operator token authorizes the beast control plane and chat in

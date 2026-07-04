@@ -37,8 +37,10 @@ function toRequest(request: IncomingMessage): Request {
   const abortController = new AbortController();
 
   const abortRequest = () => abortController.abort();
-  request.once('aborted', abortRequest);
-  request.once('close', abortRequest);
+  request.on('aborted', abortRequest);
+  request.on('close', abortRequest);
+  request.on('error', abortRequest);
+  // If the request is already aborted or destroyed, abort immediately.
   if (request.aborted || request.destroyed) {
     abortRequest();
   }

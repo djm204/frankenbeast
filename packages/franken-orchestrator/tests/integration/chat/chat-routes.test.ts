@@ -51,6 +51,59 @@ describe('Chat HTTP Routes', () => {
     expect(body.status).toBe('ok');
   });
 
+  it('allows configured dashboard origins to call authenticated API routes directly', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      operatorToken: 'operator-token',
+      allowedOrigins: ['http://127.0.0.1:5173'],
+    });
+
+    const preflight = await app.request('/v1/chat/sessions', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://127.0.0.1:5173',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization, content-type',
+      },
+    });
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:5173');
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('authorization');
+
+    const response = await app.request('/v1/chat/sessions', {
+      headers: {
+        origin: 'http://127.0.0.1:5173',
+        authorization: 'Bearer operator-token',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:5173');
+  });
+
+  it('does not emit CORS headers for unconfigured origins', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      operatorToken: 'operator-token',
+      allowedOrigins: ['http://127.0.0.1:5173'],
+    });
+
+    const response = await app.request('/v1/chat/sessions', {
+      headers: {
+        origin: 'https://evil.example',
+        authorization: 'Bearer operator-token',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   // --- Create session ---
 
   it('POST /v1/chat/sessions creates a session', async () => {
