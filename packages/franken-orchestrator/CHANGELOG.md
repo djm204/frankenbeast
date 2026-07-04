@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.37.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.36.0...franken-orchestrator-v0.37.0) (2026-07-03)
+
+
+### Features
+
+* **orchestrator:** add standalone beast daemon ([#477](https://github.com/djm204/frankenbeast/issues/477)) ([6b770a4](https://github.com/djm204/frankenbeast/commit/6b770a48f33d05e0c91a9b32800499e95049ade1))
+* **web:** add beast execution mode selection ([#469](https://github.com/djm204/frankenbeast/issues/469)) ([be44a79](https://github.com/djm204/frankenbeast/commit/be44a79b26d8c8dd2fcef0626e42541d78d6736d))
+
+
+### Bug Fixes
+
+* address codex sandbox and route follow-ups ([cda3cce](https://github.com/djm204/frankenbeast/commit/cda3ccec1ae728ec75f38bdb93069245bdcf8bd9))
+* **orchestrator:** close graph-builder critique bypass in local CLI path ([#462](https://github.com/djm204/frankenbeast/issues/462)) ([3174314](https://github.com/djm204/frankenbeast/commit/31743147cbd0a4e497f7285ab59fe3b458a5224a))
+* **orchestrator:** make chunk session writes atomic and quarantine corrupt sessions ([#451](https://github.com/djm204/frankenbeast/issues/451)) ([6ab8f53](https://github.com/djm204/frankenbeast/commit/6ab8f530651d5c1c8dd3648920c1cdab1174c9d7))
+* **orchestrator:** mark container workspaces git-safe ([#476](https://github.com/djm204/frankenbeast/issues/476)) ([c6fb6a8](https://github.com/djm204/frankenbeast/commit/c6fb6a892748b077443a1f1c924324d19124f348))
+* **web:** wire dashboard Kill action to a real agent/run endpoint ([#450](https://github.com/djm204/frankenbeast/issues/450)) ([562ffad](https://github.com/djm204/frankenbeast/commit/562ffad0661821d7be53ce3d93dbb673b40262a5))
+
 ## [0.36.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.5...franken-orchestrator-v0.36.0) (2026-07-01)
 
 
