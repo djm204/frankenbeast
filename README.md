@@ -537,7 +537,7 @@ Frankenbeast stores secrets outside the config file. The config references secre
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 | Local encrypted file | `local-encrypted` | CI/CD or offline environments |
 
-Set `network.secureBackend` in `frankenbeast.example.json` or in `.fbeast/config.json`, the project config that `frankenbeast init` reads and updates, to choose a backend.
+Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. `frankenbeast init` reads and updates `.fbeast/config.json`.
 
 ### Setup per backend
 
@@ -545,7 +545,7 @@ Set `network.secureBackend` in `frankenbeast.example.json` or in `.fbeast/config
 ```bash
 frankenbeast init   # interactive — prompts for a passphrase, generates and stores the token
 ```
-When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment and run `frankenbeast init --non-interactive`.
+When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment; `frankenbeast init --non-interactive` verifies an already-complete `.fbeast/config.json` and init state rather than creating a fresh vault.
 
 **OS keychain:**
 ```json
@@ -557,7 +557,7 @@ Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is
 ```json
 { "network": { "secureBackend": "1password" } }
 ```
-Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). Secrets are stored in your vault under the `frankenbeast` item. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; items are stored with titles like `frankenbeast/operator-token`. Bitwarden stores secure-note items with the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
