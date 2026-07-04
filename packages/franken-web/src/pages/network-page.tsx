@@ -6,7 +6,7 @@ import type { NetworkConfigResponse, NetworkStatusResponse } from '../lib/networ
 
 interface NetworkPageProps {
   status: Pick<NetworkStatusResponse, 'mode' | 'secureBackend'>;
-  services: Array<{ id: string; status: string; explanation?: string; url?: string }>;
+  services: NetworkStatusResponse['services'];
   logs: string[];
   config: NetworkConfigResponse;
   onRefresh(): void;

@@ -16,7 +16,9 @@ export async function resolveServiceHealth(
     const healthSource = service.hostServiceId
       ? services.find((candidate) => candidate.id === service.hostServiceId)
       : undefined;
-    const healthy = healthSource ? await healthcheck(healthSource) : false;
+    const healthy = service.healthUrl
+      ? await healthcheck(service)
+      : healthSource ? await healthcheck(healthSource) : false;
     return {
       id: service.id,
       status: healthy ? 'running' : 'stale',

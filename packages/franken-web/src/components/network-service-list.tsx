@@ -26,7 +26,9 @@ export function NetworkServiceList({
         <p className="eyebrow">Services</p>
       </div>
       <div className="network-services__list">
-        {services.map((service) => (
+        {services.map((service) => {
+          const disableInProcessControls = Boolean(service.inProcess);
+          return (
           <article key={service.id} className="network-services__item">
             <div>
               <strong>{service.id}</strong>
@@ -38,11 +40,12 @@ export function NetworkServiceList({
             </div>
             <div className="network-services__actions">
               <button className="button button--secondary button--small" type="button" onClick={() => onStart(service.id)} aria-label={`Start ${service.id}`}>Start</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => onStop(service.id)} aria-label={`Stop ${service.id}`}>Stop</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => onRestart(service.id)} aria-label={`Restart ${service.id}`}>Restart</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => onStop(service.id)} aria-label={`Stop ${service.id}`} disabled={disableInProcessControls}>Stop</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => onRestart(service.id)} aria-label={`Restart ${service.id}`} disabled={disableInProcessControls}>Restart</button>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

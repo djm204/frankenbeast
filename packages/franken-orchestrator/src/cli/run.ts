@@ -603,7 +603,14 @@ async function resolveManagedCommsConfig(
     return undefined;
   }
 
-  const secrets = secretStore ? await new SecretResolver(secretStore).resolveAll(config) : {};
+  let secrets: Awaited<ReturnType<SecretResolver['resolveAll']>> = {};
+  if (secretStore) {
+    try {
+      secrets = await new SecretResolver(secretStore).resolveAll(config);
+    } catch {
+      secrets = {};
+    }
+  }
   const slackBotToken = secrets.slackBotToken
     ?? await resolveConfiguredSecret(root, config.comms.slack.botTokenRef, secretStore);
   const slackSigningSecret = secrets.slackSigningSecret
