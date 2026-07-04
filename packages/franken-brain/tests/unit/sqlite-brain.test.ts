@@ -463,6 +463,73 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('hydrates legacy plain-text working memory values', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        (first as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } })
+          .db.prepare('INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)')
+          .run('legacy', 'plain text value', '2026-07-04T00:00:00Z');
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('legacy')).toBe('plain text value');
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves special keys such as __proto__ when hydrating from SQLite', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const first = new SqliteBrain(dbPath);
+        first.working.set('__proto__', 'safe value');
+        first.flush();
+        first.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.has('__proto__')).toBe(true);
+        expect(reopened.working.get('__proto__')).toBe('safe value');
+        expect(Object.entries(reopened.working.snapshot())).toEqual([['__proto__', 'safe value']]);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('skips existing SQLite working memory when hydrating from a snapshot', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('old-a', 1);
+        stale.working.set('old-b', 2);
+        stale.flush();
+        stale.close();
+
+        const snapshot: BrainSnapshot = {
+          version: 1,
+          timestamp: '2026-07-04T00:00:00Z',
+          working: { fresh: 'snapshot' },
+          episodic: [],
+          checkpoint: null,
+          metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+        };
+
+        const hydrated = SqliteBrain.hydrate(snapshot, dbPath, { maxEntries: 1 });
+        expect(hydrated.working.snapshot()).toEqual({ fresh: 'snapshot' });
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('defaults to in-memory database', () => {
       const memBrain = new SqliteBrain();
       memBrain.working.set('test', true);
