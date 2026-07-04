@@ -207,11 +207,17 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
 
   if (enableComms) {
     for (const transport of listSupportedCommsTransports()) {
-      const targetedTransportOnly = options.scope !== undefined
-        && !options.scope.includes('modules')
-        && !options.scope.includes('provider')
-        && !options.scope.includes('security')
-        && options.scope.includes(transport.id);
+      const activeScope = options.scope;
+      const activeTransportScope = activeScope !== undefined
+        && !activeScope.includes('modules')
+        && !activeScope.includes('provider')
+        && !activeScope.includes('security')
+        ? activeScope
+        : undefined;
+      if (activeTransportScope && !activeTransportScope.includes(transport.id)) {
+        continue;
+      }
+      const targetedTransportOnly = activeTransportScope !== undefined && activeTransportScope.includes(transport.id);
       const enabled = targetedTransportOnly
         ? transportDefault(options.initialState, config, transport.id)
         : await askBoolean(
@@ -302,7 +308,11 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
             answers['comms.telegram.botTokenRef'] = 'comms.telegram.botTokenRef';
           }
         } else {
-          const currentBotTokenRef = String(stateValue(options.initialState, 'comms.telegram.botTokenRef') ?? '');
+          const currentBotTokenRef = String(
+            stateValue(options.initialState, 'comms.telegram.botTokenRef')
+              ?? config.comms.telegram.botTokenRef
+              ?? '',
+          );
           if (!scope.has('telegram') || currentBotTokenRef.length === 0) {
             answers['comms.telegram.botTokenRef'] = await askText(options.io, 'Telegram bot token ref', currentBotTokenRef);
           }
@@ -331,19 +341,35 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
             answers['comms.whatsapp.verifyTokenRef'] = 'comms.whatsapp.verifyTokenRef';
           }
         } else {
-          const currentAccessTokenRef = String(stateValue(options.initialState, 'comms.whatsapp.accessTokenRef') ?? '');
+          const currentAccessTokenRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.accessTokenRef')
+              ?? config.comms.whatsapp.accessTokenRef
+              ?? '',
+          );
           if (!scope.has('whatsapp') || currentAccessTokenRef.length === 0) {
             answers['comms.whatsapp.accessTokenRef'] = await askText(options.io, 'WhatsApp access token ref', currentAccessTokenRef);
           }
-          const currentPhoneNumberIdRef = String(stateValue(options.initialState, 'comms.whatsapp.phoneNumberIdRef') ?? '');
+          const currentPhoneNumberIdRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.phoneNumberIdRef')
+              ?? config.comms.whatsapp.phoneNumberIdRef
+              ?? '',
+          );
           if (!scope.has('whatsapp') || currentPhoneNumberIdRef.length === 0) {
             answers['comms.whatsapp.phoneNumberIdRef'] = await askText(options.io, 'WhatsApp phone number ID ref', currentPhoneNumberIdRef);
           }
-          const currentAppSecretRef = String(stateValue(options.initialState, 'comms.whatsapp.appSecretRef') ?? '');
+          const currentAppSecretRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.appSecretRef')
+              ?? config.comms.whatsapp.appSecretRef
+              ?? '',
+          );
           if (!scope.has('whatsapp') || currentAppSecretRef.length === 0) {
             answers['comms.whatsapp.appSecretRef'] = await askText(options.io, 'WhatsApp app secret ref', currentAppSecretRef);
           }
-          const currentVerifyTokenRef = String(stateValue(options.initialState, 'comms.whatsapp.verifyTokenRef') ?? '');
+          const currentVerifyTokenRef = String(
+            stateValue(options.initialState, 'comms.whatsapp.verifyTokenRef')
+              ?? config.comms.whatsapp.verifyTokenRef
+              ?? '',
+          );
           if (!scope.has('whatsapp') || currentVerifyTokenRef.length === 0) {
             answers['comms.whatsapp.verifyTokenRef'] = await askText(options.io, 'WhatsApp verify token ref', currentVerifyTokenRef);
           }

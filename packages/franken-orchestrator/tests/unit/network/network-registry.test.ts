@@ -26,6 +26,33 @@ describe('network-registry', () => {
     ]);
   });
 
+  it('starts comms gateway when Telegram or WhatsApp channels are enabled', () => {
+    const telegramConfig = defaultConfig();
+    telegramConfig.comms.telegram.enabled = true;
+    const telegramServices = resolveNetworkServices(telegramConfig, context);
+    const telegramGateway = telegramServices.find((service) => service.id === 'comms-gateway');
+
+    expect(telegramServices.map((service) => service.id)).toContain('comms-gateway');
+    expect(telegramGateway?.runtimeConfig).toMatchObject({
+      channels: {
+        telegram: true,
+        whatsapp: false,
+      },
+    });
+
+    const whatsappConfig = defaultConfig();
+    whatsappConfig.comms.whatsapp.enabled = true;
+    const whatsappGateway = resolveNetworkServices(whatsappConfig, context)
+      .find((service) => service.id === 'comms-gateway');
+
+    expect(whatsappGateway?.runtimeConfig).toMatchObject({
+      channels: {
+        telegram: false,
+        whatsapp: true,
+      },
+    });
+  });
+
   it('skips disabled services cleanly', () => {
     const config = defaultConfig();
     config.dashboard.enabled = false;

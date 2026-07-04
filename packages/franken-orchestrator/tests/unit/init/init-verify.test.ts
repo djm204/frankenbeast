@@ -142,4 +142,43 @@ describe('verifyInit', () => {
     expect(prompts.some((prompt) => prompt.includes('Enable Chat'))).toBe(false);
     expect(prompts.some((prompt) => prompt.includes('Default provider'))).toBe(false);
   });
+
+  it('repair maps Telegram and WhatsApp verification issues to their transport scopes', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    config.comms.enabled = true;
+    config.comms.telegram.enabled = true;
+    config.comms.whatsapp.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await stateStore.save({
+      ...createEmptyInitState(configFile),
+      selectedModules: ['comms'],
+      selectedCommsTransports: ['telegram', 'whatsapp'],
+      completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
+    });
+    const { io, prompts } = scriptedIo(
+      'op://telegram/bot-token',
+      'op://whatsapp/access-token',
+      'wa-phone-number-id',
+      'op://whatsapp/app-secret',
+      'op://whatsapp/verify-token',
+    );
+
+    const result = await runRepairInit({
+      configFile,
+      stateStore,
+      io,
+    });
+
+    expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.config.comms.whatsapp.accessTokenRef).toBe('op://whatsapp/access-token');
+    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe('wa-phone-number-id');
+    expect(result.config.comms.whatsapp.appSecretRef).toBe('op://whatsapp/app-secret');
+    expect(result.config.comms.whatsapp.verifyTokenRef).toBe('op://whatsapp/verify-token');
+    expect(prompts.every((prompt) => !prompt.includes('Enable Slack'))).toBe(true);
+    expect(prompts.every((prompt) => !prompt.includes('Enable Discord'))).toBe(true);
+  });
 });

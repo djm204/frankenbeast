@@ -117,8 +117,8 @@ export class SecretResolver {
     const whatsappAccessToken = config.comms.whatsapp.enabled && config.comms.whatsapp.accessTokenRef
       ? await this.store.resolve(config.comms.whatsapp.accessTokenRef)
       : undefined;
-    const whatsappPhoneNumberId = config.comms.whatsapp.enabled && config.comms.whatsapp.phoneNumberIdRef
-      ? await this.store.resolve(config.comms.whatsapp.phoneNumberIdRef)
+    const whatsappPhoneNumberId = config.comms.whatsapp.enabled
+      ? config.comms.whatsapp.phoneNumberIdRef
       : undefined;
     const whatsappAppSecret = config.comms.whatsapp.enabled && config.comms.whatsapp.appSecretRef
       ? await this.store.resolve(config.comms.whatsapp.appSecretRef)

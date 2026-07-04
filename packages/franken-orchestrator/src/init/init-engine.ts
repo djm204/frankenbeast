@@ -86,6 +86,10 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
         return ['slack'] as const;
       case 'discord-incomplete':
         return ['discord'] as const;
+      case 'telegram-incomplete':
+        return ['telegram'] as const;
+      case 'whatsapp-incomplete':
+        return ['whatsapp'] as const;
       default:
         return [] as const;
     }

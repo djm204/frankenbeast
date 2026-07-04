@@ -37,7 +37,6 @@ describe('SecretResolver', () => {
       'my-slack-signing-key': 'signing-test',
       'my-telegram-bot-key': 'telegram-token',
       'my-wa-access-key': 'wa-access-token',
-      'my-wa-phone-key': 'wa-phone-number-id',
       'my-wa-app-key': 'wa-app-secret',
       'my-wa-verify-key': 'wa-verify-token',
     });
@@ -52,7 +51,7 @@ describe('SecretResolver', () => {
     config.comms.telegram.botTokenRef = 'my-telegram-bot-key';
     config.comms.whatsapp.enabled = true;
     config.comms.whatsapp.accessTokenRef = 'my-wa-access-key';
-    config.comms.whatsapp.phoneNumberIdRef = 'my-wa-phone-key';
+    config.comms.whatsapp.phoneNumberIdRef = 'wa-phone-number-id';
     config.comms.whatsapp.appSecretRef = 'my-wa-app-key';
     config.comms.whatsapp.verifyTokenRef = 'my-wa-verify-key';
 
