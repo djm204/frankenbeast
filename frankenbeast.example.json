@@ -2,8 +2,8 @@
   "maxCritiqueIterations": 3,
   "maxTotalTokens": 100000,
   "maxDurationMs": 300000,
-  "enableHeartbeat": true,
-  "enableTracing": true,
+  "enableHeartbeat": false,
+  "enableTracing": false,
   "minCritiqueScore": 0.7,
 
   "providers": {
@@ -43,14 +43,14 @@
     "enabled": true,
     "host": "127.0.0.1",
     "port": 5173,
-    "apiUrl": "http://127.0.0.1:3737"
+    "apiUrl": "https://127.0.0.1:3737"
   },
 
   "comms": {
     "enabled": false,
     "host": "127.0.0.1",
     "port": 3200,
-    "orchestratorWsUrl": "ws://127.0.0.1:3737/v1/chat/ws",
+    "orchestratorWsUrl": "wss://127.0.0.1:3737/v1/chat/ws",
     "orchestratorTokenRef": "frankenbeast/comms-token",
     "slack": {
       "enabled": false,

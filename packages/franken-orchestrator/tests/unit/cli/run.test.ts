@@ -212,12 +212,12 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
     beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
     chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
-    dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+    dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'https://127.0.0.1:3737' },
     comms: {
       enabled: false,
       host: '127.0.0.1',
       port: 3200,
-      orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+      orchestratorWsUrl: 'wss://127.0.0.1:3737/v1/chat/ws',
       slack: { enabled: false },
       discord: { enabled: false },
       telegram: { enabled: false },
@@ -542,7 +542,7 @@ describe('resolveDashboardAllowedOrigins', () => {
         enabled: true,
         host: '127.0.0.1',
         port: 5173,
-        apiUrl: 'http://127.0.0.1:3737',
+        apiUrl: 'https://127.0.0.1:3737',
       },
     } as never)).toEqual(['http://127.0.0.1:5173', 'http://localhost:5173']);
   });
@@ -553,7 +553,7 @@ describe('resolveDashboardAllowedOrigins', () => {
         enabled: true,
         host: '::1',
         port: 5173,
-        apiUrl: 'http://127.0.0.1:3737',
+        apiUrl: 'https://127.0.0.1:3737',
       },
     } as never)).toEqual(['http://[::1]:5173', 'http://localhost:5173']);
   });
@@ -564,7 +564,7 @@ describe('resolveDashboardAllowedOrigins', () => {
         enabled: true,
         host: '0.0.0.0',
         port: 5173,
-        apiUrl: 'http://127.0.0.1:3737',
+        apiUrl: 'https://127.0.0.1:3737',
       },
     } as never)).toEqual(['http://0.0.0.0:5173', 'http://localhost:5173', 'http://127.0.0.1:5173']);
   });
@@ -575,7 +575,7 @@ describe('resolveDashboardAllowedOrigins', () => {
         enabled: true,
         host: 'dashboard.example.com',
         port: 5173,
-        apiUrl: 'http://127.0.0.1:3737',
+        apiUrl: 'https://127.0.0.1:3737',
       },
     } as never)).toEqual(['http://dashboard.example.com:5173']);
   });
@@ -1070,12 +1070,12 @@ describe('main() execution', () => {
       network: { mode: 'insecure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
-      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'https://127.0.0.1:3737' },
       comms: {
         enabled: true,
         host: '127.0.0.1',
         port: 3200,
-        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        orchestratorWsUrl: 'wss://127.0.0.1:3737/v1/chat/ws',
         slack: { enabled: false },
         discord: { enabled: true, botTokenRef: 'DISCORD_BOT_TOKEN', publicKeyRef: publicKey },
         telegram: { enabled: false },
@@ -1190,7 +1190,7 @@ describe('main() execution', () => {
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
     writeFileSync(
       join(root, '.env'),
-      'CHROMA_URL=http://localhost:8000\n',
+      'CHROMA_URL=https://localhost:8000\n',
     );
     writeFileSync(
       join(root, 'packages', 'franken-web', '.env.local'),
@@ -1260,12 +1260,12 @@ describe('main() execution', () => {
       network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
-      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'https://127.0.0.1:3737' },
       comms: {
         enabled: true,
         host: '127.0.0.1',
         port: 3200,
-        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        orchestratorWsUrl: 'wss://127.0.0.1:3737/v1/chat/ws',
         slack: { enabled: false },
         discord: { enabled: true, botTokenRef: 'DISCORD_BOT_TOKEN', publicKeyRef: 'DISCORD_PUBLIC_KEY' },
         telegram: { enabled: false },
