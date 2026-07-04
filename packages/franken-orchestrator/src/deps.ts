@@ -200,12 +200,19 @@ export interface McpToolInfo {
 }
 
 /** Checkpoint persistence for crash recovery. */
+export interface CheckpointTaskOutput {
+  readonly found: boolean;
+  readonly output?: unknown;
+}
+
 export interface ICheckpointStore {
   readonly checkpointPath?: string | undefined;
   has(key: string): boolean;
   write(key: string): void;
   readAll(): Set<string>;
   clear(): void;
+  writeTaskOutput?(taskId: string, output: unknown): void;
+  readTaskOutput?(taskId: string): CheckpointTaskOutput;
   recordCommit(taskId: string, stage: string, iteration: number, commitHash: string): void;
   lastCommit(taskId: string, stage: string): string | undefined;
 }

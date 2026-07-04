@@ -112,6 +112,47 @@ describe('FileCheckpointStore', () => {
     });
   });
 
+  describe('task output persistence', () => {
+    it('round-trips structured task outputs outside the line-oriented checkpoint markers', () => {
+      const output = new Map<string, unknown>([
+        ['dependency', { value: 42 }],
+        ['list', ['a', 'b']],
+      ]);
+
+      store.writeTaskOutput('task-1', output);
+
+      const result = store.readTaskOutput('task-1');
+      expect(result.found).toBe(true);
+      expect(result.output).toBeInstanceOf(Map);
+      expect(result.output).toEqual(output);
+      expect(store.readAll()).toEqual(new Set());
+    });
+
+    it('reports missing task output separately from an undefined output value', () => {
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+
+      store.writeTaskOutput('task-1', undefined);
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: true, output: undefined });
+    });
+
+    it('does not fail checkpointing when a task output cannot be serialized', () => {
+      expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
+    it('stores task outputs under filesystem-safe hashed filenames', () => {
+      const taskId = `../${'nested/'.repeat(40)}task`;
+
+      store.writeTaskOutput(taskId, 'safe-output');
+
+      expect(store.readTaskOutput(taskId)).toEqual({ found: true, output: 'safe-output' });
+      expect(readdirSync(`${filePath}.outputs`)).toHaveLength(1);
+      expect(existsSync(join(tmpDir, 'nested'))).toBe(false);
+    });
+  });
+
   describe('atomicity', () => {
     it('leaves no temp or lock files behind after writes', () => {
       store.write('key-a');

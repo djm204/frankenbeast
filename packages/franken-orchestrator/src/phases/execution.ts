@@ -105,8 +105,12 @@ export async function runExecution(
 
     // Skip tasks already completed in a previous run (checkpoint recovery)
     if (checkpoint?.has(`${task.id}:done`)) {
+      const checkpointedOutput = checkpoint.readTaskOutput?.(task.id);
       logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-      outcomes.push({ taskId: task.id, status: 'success' });
+      if (checkpointedOutput?.found) {
+        completedOutputs.set(task.id, checkpointedOutput.output);
+      }
+      outcomes.push({ taskId: task.id, status: 'success', output: checkpointedOutput?.output });
       completed.add(task.id);
       continue;
     }
@@ -127,6 +131,9 @@ export async function runExecution(
     outcomes.push(outcome);
 
     if (outcome.status === 'success') {
+      // Persist the task output before the done marker so a crash after marking
+      // done can still rehydrate dependency outputs for downstream tasks.
+      checkpoint?.writeTaskOutput?.(task.id, outcome.output);
       // Persist the checkpoint before mutating in-memory state so a crash here
       // is recovered as "done" on restart instead of silently re-running the task.
       checkpoint?.write(`${task.id}:done`);
