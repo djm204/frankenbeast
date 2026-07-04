@@ -174,6 +174,63 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
+  it('attaches in-process comms gateway without spawning a standalone process', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const config = defaultConfig();
+    config.comms.enabled = true;
+    config.comms.slack.enabled = true;
+    const services = resolveNetworkServices(config, { repoRoot: '/repo/frankenbeast' });
+    const startService = vi.fn(async (service: { id: string }) => ({ pid: service.id === 'dashboard-web' ? 203 : 202 }));
+    const healthcheck = vi.fn(async () => true);
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService,
+      stopService: vi.fn(async () => undefined),
+      healthcheck,
+      preflightService: vi.fn(async () => ({ action: 'start' as const })),
+      now: () => '2026-03-10T00:00:00.000Z',
+    });
+
+    const state = await supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    });
+    await stateStore.save(state);
+    const status = await supervisor.status();
+
+    expect(startService).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }), expect.any(Object));
+    expect(startService).toHaveBeenCalledTimes(3);
+    expect(state.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'comms-gateway',
+        pid: 0,
+        inProcess: true,
+        channels: {
+          slack: true,
+          discord: false,
+        },
+      }),
+    ]));
+    expect(status.services).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'comms-gateway',
+        status: 'running',
+        inProcess: true,
+        channels: {
+          slack: true,
+          discord: false,
+        },
+      }),
+    ]));
+    expect(healthcheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'comms-gateway' }));
+  });
+
   it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));

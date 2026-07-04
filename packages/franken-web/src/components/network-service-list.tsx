@@ -3,6 +3,8 @@ interface NetworkServiceItem {
   status: string;
   explanation?: string;
   url?: string;
+  inProcess?: boolean;
+  channels?: Record<string, boolean>;
 }
 
 interface NetworkServiceListProps {
@@ -29,8 +31,10 @@ export function NetworkServiceList({
             <div>
               <strong>{service.id}</strong>
               <p>{service.status}</p>
+              {service.inProcess && <small>in-process</small>}
               {service.explanation && <span>{service.explanation}</span>}
               {service.url && <small>{service.url}</small>}
+              {service.channels && <small>{Object.entries(service.channels).map(([name, enabled]) => `${name}:${enabled ? 'on' : 'off'}`).join(' ')}</small>}
             </div>
             <div className="network-services__actions">
               <button className="button button--secondary button--small" type="button" onClick={() => onStart(service.id)} aria-label={`Start ${service.id}`}>Start</button>

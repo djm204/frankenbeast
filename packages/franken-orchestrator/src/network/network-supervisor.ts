@@ -68,6 +68,26 @@ export class NetworkSupervisor {
     this.startupDelayMs = deps.startupDelayMs ?? 250;
   }
 
+  private createInProcessState(
+    service: ResolvedNetworkService,
+    startedAt: string,
+    detached: boolean,
+  ): ManagedNetworkServiceState {
+    return {
+      id: service.id,
+      pid: 0,
+      detached,
+      dependsOn: [...service.dependsOn],
+      startedAt,
+      status: 'already-running',
+      inProcess: true,
+      ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
+      ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
+      ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+      ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
+    };
+  }
+
   async up(options: {
     services: ResolvedNetworkService[];
     detached: boolean;
@@ -80,6 +100,11 @@ export class NetworkSupervisor {
 
     try {
       for (const service of options.services) {
+        if (service.runtimeConfig.inProcess) {
+          services.push(this.createInProcessState(service, startedAt, options.detached));
+          continue;
+        }
+
         const preflight = await this.resolvePreflight(service);
         if (preflight.action === 'conflict') {
           throw new Error(preflight.reason ?? `Port conflict for ${service.id}`);
@@ -98,6 +123,7 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : existingService?.url ? { url: existingService.url } : {}),
             ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : existingService?.healthUrl ? { healthUrl: existingService.healthUrl } : {}),
             ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : existingService?.serviceIdentity ? { serviceIdentity: existingService.serviceIdentity } : {}),
+            ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : existingService?.channels ? { channels: existingService.channels } : {}),
           });
           continue;
         }
@@ -118,6 +144,7 @@ export class NetworkSupervisor {
           ...(service.runtimeConfig.url ? { url: service.runtimeConfig.url } : {}),
           ...(service.runtimeConfig.healthUrl ? { healthUrl: service.runtimeConfig.healthUrl } : {}),
           ...(service.runtimeConfig.serviceIdentity ? { serviceIdentity: service.runtimeConfig.serviceIdentity } : {}),
+          ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : {}),
         };
         services.push(serviceState);
         const healthy = await this.waitForHealthy(serviceState);

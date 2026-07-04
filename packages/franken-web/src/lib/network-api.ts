@@ -1,7 +1,14 @@
 export interface NetworkStatusResponse {
   mode?: string;
   secureBackend?: string;
-  services: Array<{ id: string; status: string; explanation?: string; url?: string }>;
+  services: Array<{
+    id: string;
+    status: string;
+    explanation?: string;
+    url?: string;
+    inProcess?: boolean;
+    channels?: Record<string, boolean>;
+  }>;
 }
 
 export interface NetworkConfigResponse {

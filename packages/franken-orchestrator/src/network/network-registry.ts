@@ -26,6 +26,7 @@ export interface NetworkServiceRuntimeConfig {
   composeFile?: string;
   services?: string[];
   suppressManagedBanner?: boolean;
+  inProcess?: boolean;
   process?: {
     command: string;
     args: string[];

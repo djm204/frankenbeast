@@ -24,6 +24,13 @@ describe('network-registry', () => {
       'dashboard-web',
       'comms-gateway',
     ]);
+    expect(services.find((service) => service.id === 'comms-gateway')?.runtimeConfig).toMatchObject({
+      inProcess: true,
+      channels: {
+        slack: true,
+        discord: false,
+      },
+    });
   });
 
   it('skips disabled services cleanly', () => {

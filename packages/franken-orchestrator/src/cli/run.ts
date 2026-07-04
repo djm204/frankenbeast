@@ -674,7 +674,7 @@ async function waitForTerminationSignal(root: string): Promise<void> {
   });
 }
 
-function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }): string[] {
+function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string; inProcess?: boolean; channels?: Record<string, boolean> }> }): string[] {
   const lines = [
     `Mode: ${status.mode ?? 'unknown'}`,
   ];
@@ -684,7 +684,11 @@ function formatStatus(status: { mode?: string; secureBackend?: string; services:
   }
 
   for (const service of status.services) {
-    lines.push(`${service.id}: ${service.status}`);
+    const details = [
+      service.inProcess ? 'in-process' : undefined,
+      service.channels ? `channels=${Object.entries(service.channels).map(([name, enabled]) => `${name}:${enabled ? 'on' : 'off'}`).join(',')}` : undefined,
+    ].filter(Boolean).join(' ');
+    lines.push(`${service.id}: ${service.status}${details ? ` (${details})` : ''}`);
   }
 
   return lines;

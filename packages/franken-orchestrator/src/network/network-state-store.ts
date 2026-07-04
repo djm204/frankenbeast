@@ -12,6 +12,8 @@ export interface ManagedNetworkServiceState {
   url?: string | undefined;
   healthUrl?: string | undefined;
   serviceIdentity?: string | undefined;
+  inProcess?: boolean | undefined;
+  channels?: Record<string, boolean> | undefined;
 }
 
 export interface NetworkOperatorState {
