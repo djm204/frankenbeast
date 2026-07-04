@@ -34,6 +34,10 @@ describe('network-registry', () => {
 
     expect(telegramServices.map((service) => service.id)).toContain('comms-gateway');
     expect(telegramGateway?.runtimeConfig).toMatchObject({
+      host: '127.0.0.1',
+      port: 3737,
+      url: 'http://127.0.0.1:3737',
+      healthUrl: 'http://127.0.0.1:3737/comms/health',
       channels: {
         telegram: true,
         whatsapp: false,

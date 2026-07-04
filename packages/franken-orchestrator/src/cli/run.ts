@@ -193,6 +193,13 @@ async function resolveCommsSecret(ref: string | undefined, secretStore: ISecretS
   return process.env[ref]?.trim() || undefined;
 }
 
+async function resolveCommsPublicRef(ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
+  if (!ref?.trim()) {
+    return undefined;
+  }
+  return (await resolveCommsSecret(ref, secretStore)) ?? ref.trim();
+}
+
 async function buildChatServerCommsConfig(
   config: OrchestratorConfig,
   secretStore: ISecretStore | undefined,
@@ -219,7 +226,7 @@ async function buildChatServerCommsConfig(
       discord: {
         enabled: config.comms.discord.enabled,
         token: await resolveCommsSecret(config.comms.discord.botTokenRef, secretStore),
-        publicKey: config.comms.discord.publicKeyRef,
+        publicKey: await resolveCommsPublicRef(config.comms.discord.publicKeyRef, secretStore),
       },
       telegram: {
         enabled: config.comms.telegram.enabled,
@@ -228,7 +235,7 @@ async function buildChatServerCommsConfig(
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,
         accessToken: await resolveCommsSecret(config.comms.whatsapp.accessTokenRef, secretStore),
-        phoneNumberId: config.comms.whatsapp.phoneNumberIdRef,
+        phoneNumberId: await resolveCommsPublicRef(config.comms.whatsapp.phoneNumberIdRef, secretStore),
         appSecret: await resolveCommsSecret(config.comms.whatsapp.appSecretRef, secretStore),
         verifyToken: await resolveCommsSecret(config.comms.whatsapp.verifyTokenRef, secretStore),
       },

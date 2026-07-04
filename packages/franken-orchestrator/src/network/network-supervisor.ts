@@ -192,6 +192,13 @@ export class NetworkSupervisor {
       ? state.services
       : collectDependents(state.services, target);
 
+    const targetState = target === 'all' ? undefined : state.services.find((service) => service.id === target);
+    if (targetState && isInProcessService(targetState)) {
+      throw new Error(
+        `Service ${target} is hosted in-process by chat-server; stop chat-server or all services instead.`,
+      );
+    }
+
     for (const service of [...selected].reverse()) {
       await this.deps.stopService(service);
     }
@@ -260,4 +267,8 @@ export class NetworkSupervisor {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isInProcessService(service: ManagedNetworkServiceState): boolean {
+  return service.pid <= 0 && service.status === 'already-running';
 }

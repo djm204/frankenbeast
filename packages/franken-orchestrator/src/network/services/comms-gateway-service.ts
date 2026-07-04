@@ -29,9 +29,10 @@ export const commsGatewayService: NetworkServiceDefinition = {
       + `slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled} `
       + `telegram=${config.comms.telegram.enabled} whatsapp=${config.comms.whatsapp.enabled}.`,
   buildRuntimeConfig: (config: OrchestratorConfig) => ({
-    host: config.comms.host,
-    port: config.comms.port,
-    url: `http://${config.comms.host}:${config.comms.port}`,
+    host: config.chat.host,
+    port: config.chat.port,
+    url: `http://${config.chat.host}:${config.chat.port}`,
+    healthUrl: `http://${config.chat.host}:${config.chat.port}/comms/health`,
     orchestratorWsUrl: config.comms.orchestratorWsUrl,
     channels: {
       slack: config.comms.slack.enabled,

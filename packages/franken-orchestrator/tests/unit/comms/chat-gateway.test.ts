@@ -101,6 +101,31 @@ describe('ChatGateway', () => {
     }
   });
 
+  it('passes channel routing metadata through to outbound replies', async () => {
+    for (const [type, expectedMetadata] of [
+      ['telegram', { externalChannelId: 'C-telegram', chatId: 'C-telegram' }],
+      ['whatsapp', { externalChannelId: 'C-whatsapp', phoneNumber: 'C-whatsapp' }],
+    ] as const) {
+      const adapter = mockAdapter(type);
+      gateway.registerAdapter(adapter);
+
+      await gateway.handleInbound({
+        channelType: type,
+        externalUserId: `U-${type}`,
+        externalChannelId: `C-${type}`,
+        externalMessageId: `M-${type}`,
+        text: 'test',
+        receivedAt: new Date().toISOString(),
+        rawEvent: {},
+      });
+
+      expect(adapter.send).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ metadata: expect.objectContaining(expectedMetadata) }),
+      );
+    }
+  });
+
   it('handleAction sends /approve for approve action', async () => {
     const slackAdapter = mockAdapter('slack');
     gateway.registerAdapter(slackAdapter);

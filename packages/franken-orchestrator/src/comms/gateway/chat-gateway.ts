@@ -11,6 +11,7 @@ import type {
 export class ChatGateway extends EventEmitter {
   private readonly adapters = new Map<ChannelType, ChannelAdapter>();
   private readonly sessionMapper = new SessionMapper();
+  private readonly routeMetadataBySession = new Map<string, Record<string, unknown>>();
   private readonly runtime: CommsRuntimePort;
 
   constructor(runtime: CommsRuntimePort) {
@@ -29,6 +30,8 @@ export class ChatGateway extends EventEmitter {
       externalChannelId: message.externalChannelId,
       externalThreadId: message.externalThreadId,
     });
+    const routeMetadata = this.toRouteMetadata(message);
+    this.routeMetadataBySession.set(sessionId, routeMetadata);
 
     const result = await this.runtime.processInbound({
       sessionId,
@@ -36,15 +39,14 @@ export class ChatGateway extends EventEmitter {
       text: message.text,
       externalUserId: message.externalUserId,
       metadata: {
-        externalChannelId: message.externalChannelId,
-        externalThreadId: message.externalThreadId,
+        ...routeMetadata,
       },
     });
 
-    const outbound: ChannelOutboundMessage = { text: result.text };
+    const outbound: ChannelOutboundMessage = { text: result.text, metadata: routeMetadata };
     if (result.status) outbound.status = result.status;
     if (result.actions) outbound.actions = result.actions;
-    if (result.metadata) outbound.metadata = result.metadata;
+    if (result.metadata) outbound.metadata = { ...routeMetadata, ...result.metadata };
     if (result.provider) outbound.provider = result.provider;
     if (result.phase) outbound.phase = result.phase;
     this.relayToChannel(sessionId, message.channelType, outbound);
@@ -70,9 +72,22 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const outbound: ChannelOutboundMessage = { text: result.text };
+    const routeMetadata = this.routeMetadataBySession.get(sessionId);
+    const outbound: ChannelOutboundMessage = {
+      text: result.text,
+      ...(routeMetadata ? { metadata: routeMetadata } : {}),
+    };
     if (result.status) outbound.status = result.status;
     this.relayToChannel(sessionId, channelType, outbound);
+  }
+
+  private toRouteMetadata(message: ChannelInboundMessage): Record<string, unknown> {
+    return {
+      externalChannelId: message.externalChannelId,
+      externalThreadId: message.externalThreadId,
+      ...(message.channelType === 'telegram' ? { chatId: message.externalChannelId } : {}),
+      ...(message.channelType === 'whatsapp' ? { phoneNumber: message.externalChannelId } : {}),
+    };
   }
 
   private relayToChannel(

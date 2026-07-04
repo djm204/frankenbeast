@@ -214,6 +214,48 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
+  it('rejects stopping an in-process service as an independent process', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const stopService = vi.fn(async () => undefined);
+    await stateStore.save({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: true,
+      startedAt: '2026-03-10T00:00:00.000Z',
+      services: [
+        {
+          id: 'chat-server',
+          pid: 501,
+          detached: true,
+          dependsOn: ['beasts-daemon'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'started',
+        },
+        {
+          id: 'comms-gateway',
+          pid: 0,
+          detached: true,
+          dependsOn: ['chat-server'],
+          startedAt: '2026-03-10T00:00:00.000Z',
+          status: 'already-running',
+        },
+      ],
+    });
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(),
+      stopService,
+      healthcheck: vi.fn(async () => true),
+    });
+
+    await expect(supervisor.stop('comms-gateway')).rejects.toThrow(/hosted in-process by chat-server/);
+    expect(stopService).not.toHaveBeenCalled();
+  });
+
   it('fails fast and rolls back started services when an unmanaged conflict owns a service port', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
