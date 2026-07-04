@@ -742,6 +742,14 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setBeastError(err instanceof Error ? err.message : 'Unable to resume tracked agent.');
               });
             }}
+            onSaveAgentConfig={async (agentId, values) => {
+              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
+              setBeastError(null);
+              await beastClient.patchAgentConfig(agentId, values);
+              const detail = await beastClient.getAgent(agentId);
+              setBeastAgentDetail(detail);
+              setBeastRefreshNonce((current) => current + 1);
+            }}
             onSelectAgent={(agentId) => {
               setSelectedBeastAgentId(agentId);
             }}

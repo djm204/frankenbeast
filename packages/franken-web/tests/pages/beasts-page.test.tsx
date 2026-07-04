@@ -31,6 +31,7 @@ const baseProps = {
   onKill: vi.fn(),
   onRestart: vi.fn(),
   onResume: vi.fn(),
+  onSaveAgentConfig: vi.fn(),
   onSelectAgent: vi.fn(),
   onStart: vi.fn(),
   onStop: vi.fn(),
