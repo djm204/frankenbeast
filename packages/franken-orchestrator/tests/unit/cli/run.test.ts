@@ -341,6 +341,25 @@ describe('discoverResumeTarget', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('preserves a unique nested custom plan directory', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-nested-custom-${Date.now()}`);
+    const buildDir = join(root, '.fbeast', '.build');
+    const nestedPlanDir = join(root, 'docs', 'chunks');
+    mkdirSync(buildDir, { recursive: true });
+    mkdirSync(nestedPlanDir, { recursive: true });
+
+    const checkpoint = join(buildDir, 'chunks.checkpoint');
+    writeFileSync(checkpoint, 'impl:01:done');
+
+    expect(discoverResumeTarget(root)).toEqual({
+      planName: 'chunks',
+      checkpointFile: checkpoint,
+      planDir: nestedPlanDir,
+    });
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('returns undefined when no plan-scoped checkpoints exist', () => {
     const root = join(tmpdir(), `frankenbeast-resume-empty-${Date.now()}`);
     mkdirSync(join(root, '.fbeast', '.build'), { recursive: true });
@@ -400,6 +419,23 @@ describe('discoverResumeTarget', () => {
     execFileSync('git', ['checkout', '-b', 'feat/chunk-05'], { cwd: root, stdio: 'ignore' });
 
     expect(inferResumeBaseBranch(root)).toBe('main');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('uses the original conventional base branch after later checkout detours', () => {
+    const root = join(tmpdir(), `frankenbeast-resume-git-original-base-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+    writeFileSync(join(root, 'README.md'), 'test');
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'develop'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', '-b', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'main'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['checkout', 'feat/chunk-04'], { cwd: root, stdio: 'ignore' });
+
+    expect(inferResumeBaseBranch(root)).toBe('develop');
 
     rmSync(root, { recursive: true, force: true });
   });

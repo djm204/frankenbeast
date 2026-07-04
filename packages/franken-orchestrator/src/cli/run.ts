@@ -111,6 +111,40 @@ export interface ResumeTarget {
   planDir?: string;
 }
 
+function findUniquePlanDirByBasename(root: string, planName: string): string | undefined {
+  const skip = new Set(['.git', '.fbeast', 'node_modules']);
+  const matches: string[] = [];
+
+  function visit(dir: string): void {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (skip.has(entry)) continue;
+      const path = join(dir, entry);
+      let stats;
+      try {
+        stats = statSync(path);
+      } catch {
+        continue;
+      }
+      if (!stats.isDirectory()) continue;
+      if (entry === planName) {
+        matches.push(path);
+        continue;
+      }
+      visit(path);
+    }
+  }
+
+  visit(root);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function discoverResumeTarget(root: string): ResumeTarget | undefined {
   const buildDir = join(root, '.fbeast', '.build');
   let newest: { checkpointFile: string; mtimeMs: number } | undefined;
@@ -140,6 +174,8 @@ export function discoverResumeTarget(root: string): ResumeTarget | undefined {
   const customPlanDir = join(root, planName);
   const planDir = !existsSync(scopedPlanDir) && existsSync(customPlanDir)
     ? customPlanDir
+    : !existsSync(scopedPlanDir)
+      ? findUniquePlanDirByBasename(root, planName)
     : undefined;
 
   return { planName, checkpointFile: newest.checkpointFile, ...(planDir ? { planDir } : {}) };
@@ -161,6 +197,7 @@ export function inferResumeBaseBranch(root: string): string {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
+    const candidateBaseBranches: string[] = [];
     for (const line of reflog.split('\n')) {
       const match = /^checkout: moving from (\S+) to (\S+)$/.exec(line.trim());
       if (!match) continue;
@@ -168,10 +205,12 @@ export function inferResumeBaseBranch(root: string): string {
       if (toBranch === currentBranch && isConventionalBaseBranch(toBranch)) {
         return toBranch;
       }
-      if (fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch)) {
-        return fromBranch;
+      if (toBranch === currentBranch && fromBranch && fromBranch !== 'HEAD' && isConventionalBaseBranch(fromBranch)) {
+        candidateBaseBranches.push(fromBranch);
       }
     }
+    const originalBaseBranch = candidateBaseBranches.at(-1);
+    if (originalBaseBranch) return originalBaseBranch;
   } catch {
     // Fall through to the conventional default when reflog is unavailable.
   }
