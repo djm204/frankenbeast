@@ -24,7 +24,7 @@ This document covers:
 
 | Object | Meaning | Current producers | Current consumers |
 |---|---|---|---|
-| `sanitizedIntent` | normalized goal/strategy/context derived from raw input | Firewall pipeline or stub firewall | planning phase |
+| `sanitizedIntent` | normalized goal/strategy/context derived from raw input | `MiddlewareChainFirewallAdapter` (ingestion) | planning phase |
 | `PlanGraph` | ordered task graph for execution | `ChunkFileGraphBuilder`, `LlmGraphBuilder`, `IssueGraphBuilder` | execution phase |
 | `PlanTask` | one executable task in the graph | graph builders | `runExecution()` |
 | `SkillInput` | objective + context + dependency outputs for a task | execution phase | `CliSkillExecutor` or skills module |
@@ -84,16 +84,17 @@ flowchart TD
 
 ### Current Beast Loop in the Local CLI Path
 
-The current local Beast Loop is no longer fully stubbed. `createCliDeps()` now attempts real wiring for `firewall`, `skills`, and `memory`, while `planner`, `critique`, `governor`, and `heartbeat` still fall back to stubs in the local dep factory.
+The current local Beast Loop wires real adapters for every module except the planner port. `createCliDeps()` builds real critique/governor adapters directly and delegates the rest to `createBeastDeps()` (`create-beast-deps.ts`), which constructs internal adapters unconditionally — there are no optional `@franken/firewall` or `@franken/skills` packages gating the wiring.
 
 That means the current path is:
 
-- real ingestion sanitization when `@franken/firewall` is available and enabled
-- real local skill discovery and skill execution adapter wiring when `@franken/skills` is available and enabled
-- real episodic memory persistence through `franken-brain` when enabled
-- graph-builder-driven planning for chunk files or design-doc decomposition
+- real ingestion sanitization through `MiddlewareChainFirewallAdapter` (the security middleware chain)
+- real local skill discovery and skill execution wiring through `SkillManagerAdapter`
+- real episodic memory persistence through `SqliteBrainMemoryAdapter` (`franken-brain`)
+- graph-builder-driven planning for chunk files or design-doc decomposition; the planner port itself is `stubPlanner`, which throws if invoked
+- real plan critique through `CritiquePortAdapter` over `@franken/critique`, and real HITL approval through `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (non-TTY runs default to reject). If either safety module is enabled but not installed, the dep factory fails closed unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`
+- real reflection heartbeat through `ReflectionHeartbeatAdapter`; `McpSdkAdapter` is always constructed but fails closed until an MCP transport is configured
 - real CLI task execution, chunk sessions, observer telemetry, checkpoints, PR creation
-- stub planner/critique/governor/heartbeat unless a different integration path is added
 
 ```mermaid
 flowchart LR
@@ -105,15 +106,15 @@ flowchart LR
     Close["Phase 4: Closure"]
     Result["BeastResult"]
 
-    FW["FirewallPortAdapter or stub"]
-    MEM["EpisodicMemoryPortAdapter or stub"]
+    FW["MiddlewareChainFirewallAdapter"]
+    MEM["SqliteBrainMemoryAdapter"]
     GB["GraphBuilder when present"]
-    Planner["Planner module stub"]
-    Critique["Critique module stub"]
-    Skills["SkillsPortAdapter or stub skill list"]
-    Governor["Governor stub"]
+    Planner["stubPlanner (throws if invoked)"]
+    Critique["CritiquePortAdapter"]
+    Skills["SkillManagerAdapter"]
+    Governor["GovernorPortAdapter (CLI HITL)"]
     Observer["CliObserverBridge"]
-    Heartbeat["Heartbeat stub"]
+    Heartbeat["ReflectionHeartbeatAdapter"]
     PR["PrCreator"]
 
     Input --> Ingest --> Hydrate --> Plan --> Execute --> Close --> Result
@@ -441,7 +442,7 @@ flowchart TD
     Critique["MOD-06 critique"]
     Governor["MOD-07 governor"]
     Heartbeat["MOD-08 heartbeat"]
-    MCP["franken-mcp"]
+    MCP["MCP suite (@fbeast/mcp-suite)"]
 
     User --> Dashboard --> Orchestrator
     User --> CLI --> Orchestrator
@@ -460,7 +461,7 @@ flowchart TD
 
 ### Target Full Beast Loop
 
-In the target architecture, all 8 modules participate as real components rather than a mix of graph builders and stubs.
+In the target architecture, all 8 modules participate as real components, with the planner owning graph generation instead of external graph builders backed by a stubbed planner port.
 
 ```mermaid
 sequenceDiagram
@@ -527,7 +528,7 @@ flowchart TD
 Target differences from current:
 
 - planner owns task generation instead of relying mostly on external graph builders
-- critique is a real loop, not a stub
+- critique reviews every plan in-loop; graph-builder plans are reviewed too (the former graph-builder bypass was closed in #462)
 - plan approval can escalate through governor instead of failing only as a local critique spiral
 
 ### Target Execution, Tooling, and Approval Flow
@@ -621,12 +622,12 @@ The target goal is one canonical service control model across CLI and dashboard,
 
 | Area | Current | Target |
 |---|---|---|
-| Ingestion | real firewall possible through dep factory | fully wired firewall in all entry modes |
-| Memory | episodic memory adapter can be real | full working + episodic + semantic memory |
-| Planning | usually graph-builder driven; planner often stubbed | planner owns graph generation with critique loop |
-| Critique | stubbed in local CLI dep path | real critique loop with escalation |
+| Ingestion | real firewall (`MiddlewareChainFirewallAdapter`) wired unconditionally | fully wired firewall in all entry modes |
+| Memory | real SQLite-backed episodic memory (`SqliteBrainMemoryAdapter`) | full working + episodic + semantic memory |
+| Planning | graph-builder driven; the planner port is a stub that throws if invoked | planner owns graph generation with critique loop |
+| Critique | real critique loop (`CritiquePortAdapter` over `@franken/critique`); graph-builder plans included since #462 | real critique loop with escalation |
 | Execution | real CLI execution, chunk sessions, checkpoints, observer | same plus broader tool and policy integrations |
-| Governance | dashboard/operator auth and run control exist; local CLI governor still stubbed | true HITL gating inside task execution |
+| Governance | dashboard/operator auth and run control exist; local CLI wires real HITL approval (`ApprovalGateway`/`CliChannel`; non-TTY defaults to reject) | true HITL gating inside task execution |
 | Chat | real HTTP + websocket dashboard chat | same shared runtime extended to all channels |
 | External comms | package exists but gateway shape is still target-oriented | normalized multi-channel ingress via comms gateway |
 | Control plane | network operator manages local services | one canonical service model with secret-aware ops |

@@ -4,27 +4,32 @@
 
 ## Port Interfaces
 
+Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package consolidation there are no standalone firewall (MOD-01), skills (MOD-02), or heartbeat (MOD-08) packages — those capabilities live inside `franken-orchestrator`. The orchestrator's Beast Loop ports (`IFirewallModule`, `ISkillsModule`, `IMemoryModule`, `IPlannerModule`, `IObserverModule`, `ICritiqueModule`, `IGovernorModule`, `IHeartbeatModule`, `IMcpModule`) are all defined in `packages/franken-orchestrator/src/deps.ts`. (`IObservabilityModule` and `IHitlGateway` do not exist; the observer and governor ports are `IObserverModule` and `IGovernorModule`.)
+
 | Port Interface | Defining Module | Consuming Module(s) | Structural Match? |
 |---|---|---|---|
-| `IAdapter` | MOD-01 firewall | Orchestrator | Yes |
-| `ISkillRegistry` | MOD-02 skills | MOD-04 planner (via `SkillsModule`) | Needs adapter |
-| `ILlmClient` (brain) | MOD-03 brain | MOD-03 internal | Yes |
-| `ILlmClient` (heartbeat) | MOD-08 heartbeat | MOD-08 internal | Resolved via `IResultLlmClient` projection |
-| `GuardrailsModule` | MOD-04 planner | MOD-01 firewall impl | Yes |
-| `SkillsModule` | MOD-04 planner | MOD-02 skills impl | Needs adapter |
-| `MemoryModule` | MOD-04 planner | MOD-03 brain impl | Needs adapter |
-| `SelfCritiqueModule` | MOD-04 planner | MOD-07 governor impl | Resolved for shared `TaskId` via `@franken/types`; still adapter-shaped |
-| `GuardrailsPort` | MOD-06 critique | MOD-01 firewall impl | Needs adapter |
-| `MemoryPort` | MOD-06 critique | MOD-03 brain impl | Needs adapter |
-| `ObservabilityPort` | MOD-06 critique | MOD-05 observer impl | Needs adapter |
-| `EscalationPort` | MOD-06 critique | MOD-07 governor impl | Needs adapter |
-| `GovernorMemoryPort` | MOD-07 governor | MOD-03 brain impl | Needs adapter |
-| `ApprovalChannel` | MOD-07 governor | CLI/Slack channel impl | Yes |
-| `IMemoryModule` | MOD-08 heartbeat | MOD-03 brain impl | Needs adapter |
-| `IObservabilityModule` | MOD-08 heartbeat | MOD-05 observer impl | Needs adapter |
-| `IPlannerModule` | MOD-08 heartbeat | MOD-04 planner impl | Needs adapter |
-| `ICritiqueModule` | MOD-08 heartbeat | MOD-06 critique impl | Needs adapter |
-| `IHitlGateway` | MOD-08 heartbeat | MOD-07 governor impl | Needs adapter |
+| `IAdapter` | Orchestrator (`franken-orchestrator/src/adapters/adapter-llm-client.ts`) | Orchestrator LLM wiring (`CliLlmAdapter`, `AdapterLlmClient`) | Yes |
+| `ILlmClient` | `@franken/types` (`src/llm.ts`) | Orchestrator planning/closure/adapters | Yes |
+| `IResultLlmClient` | `@franken/types` (`src/llm.ts`) | Result-shaped LLM callers | Yes |
+| `GuardrailsModule` | MOD-04 planner (`src/modules/mod01.ts`) | Firewall-capability impl (orchestrator security middleware) | Needs adapter |
+| `SkillsModule` | MOD-04 planner (`src/modules/mod02.ts`) | Skills-capability impl (orchestrator skill manager) | Needs adapter |
+| `MemoryModule` | MOD-04 planner (`src/modules/mod03.ts`) | MOD-03 brain impl | Needs adapter |
+| `SelfCritiqueModule` | MOD-04 planner (`src/modules/mod07.ts`) | Critique-capability impl (verifies `RationaleBlock`) | Resolved for shared `TaskId` via `@franken/types`; still adapter-shaped |
+| `GuardrailsPort` | MOD-06 critique (`src/types/contracts.ts`) | Wired with an inline all-pass stub in `dep-factory.ts` | Needs real impl |
+| `MemoryPort` | MOD-06 critique (`src/types/contracts.ts`) | Wired with an inline no-op stub in `dep-factory.ts` | Needs real impl |
+| `ObservabilityPort` | MOD-06 critique (`src/types/contracts.ts`) | `CliObserverBridge.getTokenSpend` (real) | Yes |
+| `EscalationPort` | MOD-06 critique (`src/types/contracts.ts`) | MOD-07 governor impl | Needs adapter |
+| `GovernorMemoryPort` | MOD-07 governor (`src/audit/governor-memory-port.ts`) | MOD-03 brain impl | Needs adapter |
+| `ApprovalChannel` | MOD-07 governor (`src/gateway/approval-channel.ts`) | `CliChannel` (CLI impl) | Yes |
+| `IFirewallModule` | Orchestrator (`src/deps.ts`) | `MiddlewareChainFirewallAdapter` | Yes — adapter shipped |
+| `ISkillsModule` | Orchestrator (`src/deps.ts`) | `SkillManagerAdapter` | Yes — adapter shipped |
+| `IMemoryModule` | Orchestrator (`src/deps.ts`) | `SqliteBrainMemoryAdapter` (over `franken-brain`) | Yes — adapter shipped |
+| `IPlannerModule` | Orchestrator (`src/deps.ts`) | `stubPlanner` in the CLI path; graph builders own planning | Stub only |
+| `IObserverModule` | Orchestrator (`src/deps.ts`) | `AuditTrailObserverAdapter` / observer bridge | Yes — adapter shipped |
+| `ICritiqueModule` | Orchestrator (`src/deps.ts`) | `CritiquePortAdapter` (over `@franken/critique`) | Yes — adapter shipped |
+| `IGovernorModule` | Orchestrator (`src/deps.ts`) | `GovernorPortAdapter` (over `ApprovalGateway`) | Yes — adapter shipped |
+| `IHeartbeatModule` | Orchestrator (`src/deps.ts`) | `ReflectionHeartbeatAdapter` | Yes — adapter shipped |
+| `IMcpModule` | Orchestrator (`src/deps.ts`) | `McpSdkAdapter` | Adapter shipped; fail-closed until an MCP transport is configured |
 
 ## Resolved Type Mismatches
 
