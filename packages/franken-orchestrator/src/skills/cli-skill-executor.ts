@@ -502,6 +502,21 @@ export class CliSkillExecutor {
       }
     }
 
+    if (budgetAbortResult) {
+      this.resetBudgetAbortedWorktree();
+      const postTokens = this.observer.counter.grandTotal();
+      this.observer.setMetadata(chunkSpan, {
+        budgetExceeded: true,
+        spent: budgetAbortResult.spendUsd,
+        limit: budgetAbortResult.limitUsd,
+      });
+      this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
+      return {
+        output: `Budget exceeded: $${budgetAbortResult.spendUsd.toFixed(2)} / $${budgetAbortResult.limitUsd.toFixed(2)}`,
+        tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
+      };
+    }
+
     // Generate commit message for squash merge (if available)
     let commitMessage: string | undefined;
     if (this.commitMessageFn) {
