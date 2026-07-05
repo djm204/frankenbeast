@@ -184,6 +184,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const {
     activity,
     approve,
+    approvalError,
+    approvalResolving,
     connectionStatus,
     costUsd,
     messages,
@@ -674,7 +676,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <ActivityPane events={activity} />
               <ApprovalCard
                 pending={Boolean(pendingApproval)}
+                approval={pendingApproval}
                 description={pendingApproval?.description ?? ''}
+                resolving={approvalResolving}
+                error={approvalError}
+                sessionId={activeSessionId}
                 onApprove={() => {
                   void approve(true);
                 }}

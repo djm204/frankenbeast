@@ -242,6 +242,11 @@ export class ChatSocketController {
         type: 'turn.approval.requested',
         description: session.pendingApproval.description,
         timestamp: session.pendingApproval.requestedAt,
+        ...(session.pendingApproval.tool ? { tool: session.pendingApproval.tool } : {}),
+        ...(session.pendingApproval.command ? { command: session.pendingApproval.command } : {}),
+        ...(session.pendingApproval.risk ? { risk: session.pendingApproval.risk } : {}),
+        ...(session.pendingApproval.affectedFiles ? { affectedFiles: session.pendingApproval.affectedFiles } : {}),
+        ...(session.pendingApproval.sessionId ? { sessionId: session.pendingApproval.sessionId } : {}),
       });
     }
 

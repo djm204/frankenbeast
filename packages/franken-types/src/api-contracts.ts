@@ -11,6 +11,11 @@ export interface ApiErrorEnvelope {
 export const PendingApprovalSchema = z.object({
   description: z.string(),
   requestedAt: z.string(),
+  tool: z.string().optional(),
+  command: z.string().optional(),
+  risk: z.string().optional(),
+  affectedFiles: z.array(z.string()).optional(),
+  sessionId: z.string().optional(),
 });
 export type PendingApproval = z.infer<typeof PendingApprovalSchema>;
 

@@ -294,7 +294,49 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledWith('chat-1');
     expect(socket.sent).toHaveLength(0);
     expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toBeNull();
     expect(result.current.status).toBe('idle');
+  });
+
+  it('guards against duplicate approval submissions and exposes retryable HTTP failures', async () => {
+    let rejectApproval: (error: Error) => void = () => undefined;
+    mockApprove.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectApproval = reject;
+    }));
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    void act(() => {
+      void result.current.approve(true);
+    });
+    await waitFor(() => {
+      expect(result.current.approvalResolving).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.approve(false);
+    });
+
+    expect(mockApprove).toHaveBeenCalledTimes(1);
+    act(() => rejectApproval(new Error('approval endpoint unavailable')));
+
+    await waitFor(() => {
+      expect(result.current.approvalResolving).toBe(false);
+      expect(result.current.approvalError).toBe('approval endpoint unavailable');
+      expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
+    });
   });
 
   it('preserves streamed messages after HTTP approval fallback', async () => {
