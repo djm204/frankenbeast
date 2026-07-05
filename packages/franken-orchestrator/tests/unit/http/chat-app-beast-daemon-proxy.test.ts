@@ -25,19 +25,6 @@ function createProxyAppWithGatewayTokenOnly() {
   });
 }
 
-function createFirstPartyProxyApp() {
-  return createChatApp({
-    sessionStoreDir: '/tmp/chat-app-beast-daemon-proxy-test',
-    llm: { complete: vi.fn().mockResolvedValue('hello') },
-    projectName: 'proxy-test',
-    allowedOrigins: ['http://127.0.0.1:5173'],
-    beastDaemon: {
-      baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
-    },
-  });
-}
-
 describe('chat app beast daemon proxy', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -51,39 +38,6 @@ describe('chat app beast daemon proxy', () => {
     const app = createProxyApp();
 
     const response = await app.request('/v1/beasts/catalog');
-
-    expect(response.status).toBe(401);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('allows same-origin dashboard requests without exposing operator tokens to the browser', async () => {
-    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
-    vi.stubGlobal('fetch', fetchMock);
-    const app = createFirstPartyProxyApp();
-
-    const response = await app.request('/v1/beasts/catalog', {
-      headers: {
-        origin: 'http://127.0.0.1:5173',
-        'sec-fetch-site': 'same-origin',
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects cross-origin browser requests that omit operator auth', async () => {
-    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
-    vi.stubGlobal('fetch', fetchMock);
-    const app = createFirstPartyProxyApp();
-
-    const response = await app.request('/v1/beasts/runs', {
-      method: 'POST',
-      headers: {
-        origin: 'https://evil.example',
-        'sec-fetch-site': 'cross-site',
-      },
-    });
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();

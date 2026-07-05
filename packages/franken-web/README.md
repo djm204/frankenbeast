@@ -86,7 +86,7 @@ VITE_PROJECT_ID=my-project
 
 1. The browser calls same-origin dashboard, Beast, and network routes without an operator-token header.
 2. In local Vite dev mode, the proxy reads `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from server-side env files and injects `Authorization: Bearer <token>` into protected proxied requests only.
-3. When served by the orchestrator, the backend remains responsible for resolving and applying operator credentials server-side.
+3. In managed `frankenbeast network` mode, the dashboard service resolves the same server-side token and passes it to the Vite proxy process; standalone built deployments must provide an equivalent server-side proxy/integration before enabling token-protected control-plane routes.
 4. If the server-side token is missing or invalid for a protected route, the server returns `401 UNAUTHORIZED`.
 
 **Server side:** For local development, the Vite dev proxy reads `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from server-side env files. Keep the value server-side; do not expose it with a `VITE_` prefix.

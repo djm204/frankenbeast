@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { createMiddleware } from 'hono/factory';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
 import type { ISessionStore } from '../chat/session-store.js';
@@ -17,11 +16,11 @@ import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
 import { createSecurityRoutes } from './routes/security-routes.js';
 import type { SecurityConfig } from '../middleware/security-profiles.js';
-import { errorHandler, HttpError, requestId, requestSizeLimit } from './middleware.js';
+import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
 import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
-import { extractOperatorToken } from './operator-auth.js';
+import { requireOperatorAuth } from './operator-auth.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import type { CommsConfig } from '../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../comms/core/comms-runtime-port.js';
@@ -137,10 +136,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   // intentionally left open. `startChatServer` separately fails closed when an
   // exposed server has no operator token configured.
   if (effectiveOperatorToken) {
-    const requireAuth = () => requireControlPlaneAccess({
+    const requireAuth = () => requireOperatorAuth({
       operatorToken: effectiveOperatorToken,
       security: operatorSecurity,
-      allowedOrigins: opts.allowedOrigins ?? [],
     });
     // Register both the exact base path and the wildcard: Hono's `/base/*` does
     // not match the base path itself (e.g. `/api/skills`), so collection roots
@@ -215,7 +213,10 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
-    app.route('/', networkRoutes(opts.networkControl));
+    app.route('/', networkRoutes({
+      ...opts.networkControl,
+      ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
+    }));
   }
   if (opts.commsConfig && opts.commsRuntime) {
     const commsRoutesOpts: Parameters<typeof commsRoutes>[0] = {
@@ -244,55 +245,6 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
 
   return app;
-}
-
-function requireControlPlaneAccess(options: {
-  operatorToken: string;
-  security: TransportSecurityService;
-  allowedOrigins: string[];
-}) {
-  return createMiddleware(async (c, next) => {
-    const provided = extractOperatorToken(c.req.header('authorization'))
-      ?? c.req.header('x-frankenbeast-operator-token')
-      ?? undefined;
-
-    if (options.security.verifyOperatorToken(provided, options.operatorToken)
-      || isTrustedFirstPartyDashboardRequest({
-        method: c.req.method,
-        origin: c.req.header('origin'),
-        secFetchSite: c.req.header('sec-fetch-site'),
-        allowedOrigins: options.allowedOrigins,
-      })) {
-      await next();
-      return;
-    }
-
-    throw new HttpError(401, 'UNAUTHORIZED', 'Operator authentication is required');
-  });
-}
-
-function isTrustedFirstPartyDashboardRequest(options: {
-  method: string;
-  origin?: string | undefined;
-  secFetchSite?: string | undefined;
-  allowedOrigins: string[];
-}): boolean {
-  const allowedOrigins = new Set(options.allowedOrigins.filter((origin) => origin !== '*'));
-  if (allowedOrigins.size === 0) {
-    return false;
-  }
-
-  const origin = options.origin?.trim();
-  if (origin) {
-    return allowedOrigins.has(origin);
-  }
-
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(options.method.toUpperCase())) {
-    return false;
-  }
-
-  const site = options.secFetchSite?.toLowerCase();
-  return site === 'same-origin' || site === 'same-site' || site === 'none';
 }
 
 const HOP_BY_HOP_HEADERS = [

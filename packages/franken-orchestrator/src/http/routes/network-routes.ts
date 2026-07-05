@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { OrchestratorConfigSchema, type OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../../network/network-config-paths.js';
-import { filterNetworkServices, resolveNetworkServices } from '../../network/network-registry.js';
+import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../../network/network-registry.js';
 import { NetworkLogStore } from '../../network/network-logs.js';
 import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
@@ -31,8 +31,37 @@ export interface NetworkRoutesDeps {
   root: string;
   frankenbeastDir: string;
   configFile: string;
+  operatorToken?: string | undefined;
   getConfig(): OrchestratorConfig;
   setConfig(config: OrchestratorConfig): void;
+}
+
+function withDashboardOperatorToken(
+  services: ResolvedNetworkService[],
+  operatorToken: string | undefined,
+): ResolvedNetworkService[] {
+  if (!operatorToken) {
+    return services;
+  }
+
+  return services.map((service) => {
+    if (service.id !== 'dashboard-web' || !service.runtimeConfig.process) {
+      return service;
+    }
+    return {
+      ...service,
+      runtimeConfig: {
+        ...service.runtimeConfig,
+        process: {
+          ...service.runtimeConfig.process,
+          env: {
+            ...service.runtimeConfig.process.env,
+            FRANKENBEAST_BEAST_OPERATOR_TOKEN: operatorToken,
+          },
+        },
+      },
+    };
+  });
 }
 
 function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
@@ -75,7 +104,10 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/up', async (c) => {
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const services = resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root });
+    const services = withDashboardOperatorToken(
+      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+      deps.operatorToken,
+    );
     const state = await supervisor.up({
       services,
       detached: true,
@@ -94,9 +126,12 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/start', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
-      body.target,
+    const services = withDashboardOperatorToken(
+      filterNetworkServices(
+        resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+        body.target,
+      ),
+      deps.operatorToken,
     );
     const state = await supervisor.up({
       services,
@@ -118,9 +153,12 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
     await supervisor.stop(body.target);
-    const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
-      body.target,
+    const services = withDashboardOperatorToken(
+      filterNetworkServices(
+        resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+        body.target,
+      ),
+      deps.operatorToken,
     );
     const state = await supervisor.up({
       services,
