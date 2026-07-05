@@ -66,6 +66,17 @@ export class DashboardApiClient {
       eventSource = undefined;
     };
 
+    const scheduleReconnect = () => {
+      if (closed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect().catch((err) => {
+          console.error(err);
+          scheduleReconnect();
+        });
+      }, 1_000);
+    };
+
     const connect = async () => {
       const ticketRes = await fetch(`${this.baseUrl}/api/dashboard/events/ticket`, { method: 'POST' });
       if (!ticketRes.ok) throw new Error(`HTTP ${ticketRes.status}`);
@@ -92,11 +103,7 @@ export class DashboardApiClient {
       });
       nextEventSource.addEventListener('error', () => {
         closeActiveSource();
-        if (closed) return;
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = undefined;
-          void connect().catch(console.error);
-        }, 1_000);
+        scheduleReconnect();
       });
     };
 

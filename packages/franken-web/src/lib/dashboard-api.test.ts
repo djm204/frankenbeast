@@ -250,6 +250,59 @@ describe('DashboardApiClient', () => {
       }
     });
 
+    it('retries ticket minting failures during reconnect', async () => {
+      vi.useFakeTimers();
+      const closeFns = [vi.fn(), vi.fn()];
+      const listeners: Array<Record<string, (event: { data?: string }) => void>> = [];
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data?: string }) => void) => void;
+        close?: () => void;
+      }) {
+        const index = listeners.length;
+        listeners[index] = {};
+        this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
+          listeners[index]![type] = handler;
+        });
+        this.close = closeFns[index];
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-1' }) })
+        .mockResolvedValueOnce({ ok: false, status: 503 })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-2' }) });
+
+      try {
+        const client = new DashboardApiClient(BASE_URL);
+        const unsub = await client.subscribeToDashboard(vi.fn());
+
+        listeners[0]!.error!({});
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(errorSpy).toHaveBeenCalledWith(expect.any(Error));
+        expect(MockEventSource).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+        expect(MockEventSource).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/dashboard/events?ticket=ticket-2`);
+
+        unsub();
+        expect(closeFns[1]).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        errorSpy.mockRestore();
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
     it('opens the local loopback stream without a ticket when auth is disabled', async () => {
       const closeFn = vi.fn();
       const MockEventSource = vi.fn(function (this: {
