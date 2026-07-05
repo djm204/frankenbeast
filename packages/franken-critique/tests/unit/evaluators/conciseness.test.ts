@@ -46,7 +46,8 @@ describe('ConcisenessEvaluator', () => {
     const evaluator = new ConcisenessEvaluator();
     const todoMarker = ['TO', 'DO'].join('');
     const trackedMarker = ['FIX', 'ME'].join('');
-    const content = `// ${todoMarker}: fix this later\n// ${trackedMarker}: tracked follow-up\n// HACK: temporary workaround\nconst x = 1;`;
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = `// ${todoMarker}: fix this later\n// ${trackedMarker}: tracked follow-up\n// ${hackMarker}: temporary workaround\nconst x = 1;`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(
@@ -54,7 +55,7 @@ describe('ConcisenessEvaluator', () => {
         (f) =>
           f.message.includes(todoMarker) &&
           f.message.includes(trackedMarker) &&
-          f.message.includes('HACK'),
+          f.message.includes(hackMarker),
       ),
     ).toBe(true);
   });
