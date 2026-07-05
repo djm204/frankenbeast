@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { createServer, type IncomingHttpHeaders, type Server as HttpServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, relative, resolve, sep } from 'node:path';
@@ -20,6 +21,19 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+export interface DashboardStaticResponseOptions {
+  apiTarget?: string | undefined;
+  operatorToken?: string | undefined;
+}
+
+export interface DashboardStaticServerOptions extends DashboardStaticResponseOptions {
+  host: string;
+  port: number;
+  staticDir: string;
+  buildCommand?: string | undefined;
+  buildArgs?: string[] | undefined;
+}
+
 function response(body: BodyInit | null, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set('x-frankenbeast-service', SERVICE_IDENTITY);
@@ -28,6 +42,66 @@ function response(body: BodyInit | null, init: ResponseInit = {}): Response {
 
 function isReservedBackendPath(pathname: string): boolean {
   return RESERVED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function normalizeBaseUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/\/+$/, '');
+}
+
+function isSameOriginProxyRequest(request: Request): boolean {
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite && !['none', 'same-origin'].includes(fetchSite)) {
+    return false;
+  }
+
+  const origin = request.headers.get('origin');
+  if (!origin && !fetchSite) {
+    return true;
+  }
+  if (!origin) {
+    return fetchSite === 'same-origin';
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    const requestUrl = new URL(request.url);
+    return originUrl.protocol === requestUrl.protocol && originUrl.host === requestUrl.host;
+  } catch {
+    return false;
+  }
+}
+
+async function createProxyResponse(
+  request: Request,
+  options: DashboardStaticResponseOptions,
+): Promise<Response | undefined> {
+  const apiTarget = normalizeBaseUrl(options.apiTarget);
+  const sourceUrl = new URL(request.url);
+  if (!apiTarget || !isReservedBackendPath(sourceUrl.pathname)) {
+    return undefined;
+  }
+  if (options.operatorToken && !isSameOriginProxyRequest(request)) {
+    return response('Forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
+
+  const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, `${apiTarget}/`);
+  const headers = new Headers(request.headers);
+  headers.delete('host');
+  if (options.operatorToken) {
+    headers.set('authorization', `Bearer ${options.operatorToken}`);
+  }
+
+  const init: RequestInit = {
+    method: request.method,
+    headers,
+    redirect: 'manual',
+  };
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    init.body = await request.arrayBuffer();
+  }
+  return fetch(targetUrl, init);
 }
 
 function resolveSafeAssetPath(staticDir: string, pathname: string): string | undefined {
@@ -59,11 +133,11 @@ async function readStaticFile(filePath: string): Promise<Response | undefined> {
   }
 }
 
-export async function createDashboardStaticResponse(request: Request, staticDir: string): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return response('Method Not Allowed', { status: 405, headers: { allow: 'GET, HEAD' } });
-  }
-
+export async function createDashboardStaticResponse(
+  request: Request,
+  staticDir: string,
+  options: DashboardStaticResponseOptions = {},
+): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') {
     return response(JSON.stringify({ service: SERVICE_IDENTITY, ok: true }), {
@@ -73,7 +147,12 @@ export async function createDashboardStaticResponse(request: Request, staticDir:
   }
 
   if (isReservedBackendPath(url.pathname)) {
-    return response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    return await createProxyResponse(request, options)
+      ?? response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return response('Method Not Allowed', { status: 405, headers: { allow: 'GET, HEAD' } });
   }
 
   const safePath = resolveSafeAssetPath(staticDir, url.pathname === '/' ? '/index.html' : url.pathname);
@@ -113,11 +192,23 @@ function headersFromIncoming(headers: IncomingHttpHeaders): Headers {
   return result;
 }
 
-export async function startDashboardStaticServer(options: {
-  host: string;
-  port: number;
-  staticDir: string;
-}): Promise<HttpServer> {
+function startOptionalBuild(options: DashboardStaticServerOptions): void {
+  if (!options.buildCommand) {
+    return;
+  }
+  const child = spawn(options.buildCommand, options.buildArgs ?? [], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'inherit',
+  });
+  child.once('exit', (code) => {
+    if (code && code !== 0) {
+      console.error(`Dashboard build command exited with status ${code}`);
+    }
+  });
+}
+
+export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
     const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
@@ -126,7 +217,7 @@ export async function startDashboardStaticServer(options: {
     }
     const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
     const request = new Request(requestUrl, requestInit);
-    void createDashboardStaticResponse(request, options.staticDir)
+    void createDashboardStaticResponse(request, options.staticDir, options)
       .then(async (staticResponse) => {
         res.statusCode = staticResponse.status;
         staticResponse.headers.forEach((value, key) => res.setHeader(key, value));
@@ -151,10 +242,11 @@ export async function startDashboardStaticServer(options: {
       resolveListen();
     });
   });
+  startOptionalBuild(options);
   return server;
 }
 
-function parseCliArgs(argv: string[]): { host: string; port: number; staticDir: string } {
+function parseCliArgs(argv: string[]): DashboardStaticServerOptions {
   const readValue = (flag: string): string | undefined => {
     const index = argv.indexOf(flag);
     return index >= 0 ? argv[index + 1] : undefined;
@@ -165,7 +257,16 @@ function parseCliArgs(argv: string[]): { host: string; port: number; staticDir: 
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid --port value: ${readValue('--port') ?? ''}`);
   }
-  return { host, port, staticDir };
+  const buildArgStart = argv.indexOf('--build-args');
+  return {
+    host,
+    port,
+    staticDir,
+    apiTarget: readValue('--api-target') ?? process.env.FRANKENBEAST_DASHBOARD_API_URL,
+    operatorToken: process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN,
+    buildCommand: readValue('--build-command'),
+    buildArgs: buildArgStart >= 0 ? argv.slice(buildArgStart + 1) : undefined,
+  };
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : undefined;

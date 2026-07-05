@@ -9,4 +9,8 @@ describe('resolveBaseUrl', () => {
   it('uses the configured production API URL when building static dashboard assets', () => {
     expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737')).toBe('http://127.0.0.1:3737');
   });
+
+  it('strips trailing slashes from configured API URLs before clients append paths', () => {
+    expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737/')).toBe('http://127.0.0.1:3737');
+  });
 });

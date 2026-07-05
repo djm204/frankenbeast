@@ -19,15 +19,24 @@ export const dashboardWebService: NetworkServiceDefinition = {
     serviceIdentity: 'dashboard-web',
     apiUrl: config.dashboard.apiUrl,
     process: {
-      command: 'sh',
+      command: 'node',
       args: [
-        '-c',
-        'npm --workspace franken-orchestrator run build && '
-        + 'VITE_API_URL="$FRANKENBEAST_DASHBOARD_API_URL" npm --workspace @frankenbeast/web run build && '
-        + 'exec node packages/franken-orchestrator/dist/http/dashboard-static-server.js '
-        + '--host "$FRANKENBEAST_DASHBOARD_HOST" '
-        + '--port "$FRANKENBEAST_DASHBOARD_PORT" '
-        + '--static-dir packages/franken-web/dist',
+        'packages/franken-orchestrator/dist/http/dashboard-static-server.js',
+        '--host',
+        config.dashboard.host,
+        '--port',
+        String(config.dashboard.port),
+        '--static-dir',
+        'packages/franken-web/dist',
+        '--api-target',
+        config.dashboard.apiUrl,
+        '--build-command',
+        'npm',
+        '--build-args',
+        '--workspace',
+        '@frankenbeast/web',
+        'run',
+        'build',
       ],
       cwd: context.repoRoot,
       env: {

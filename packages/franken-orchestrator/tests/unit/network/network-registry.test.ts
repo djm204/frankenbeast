@@ -23,10 +23,12 @@ describe('network-registry', () => {
       healthUrl: 'http://127.0.0.1:5173/health',
       serviceIdentity: 'dashboard-web',
     });
-    expect(dashboard?.runtimeConfig.process?.command).toBe('sh');
+    expect(dashboard?.runtimeConfig.process?.command).toBe('node');
     const dashboardCommand = dashboard?.runtimeConfig.process?.args.join(' ') ?? '';
-    expect(dashboardCommand).toContain('npm --workspace @frankenbeast/web run build');
-    expect(dashboardCommand).toContain('node packages/franken-orchestrator/dist/http/dashboard-static-server.js');
+    expect(dashboardCommand).toContain('packages/franken-orchestrator/dist/http/dashboard-static-server.js');
+    expect(dashboardCommand).toContain('--api-target http://127.0.0.1:3737');
+    expect(dashboardCommand).toContain('--build-command npm');
+    expect(dashboardCommand).toContain('--workspace @frankenbeast/web run build');
     expect(dashboardCommand).not.toContain('run dev');
   });
 
