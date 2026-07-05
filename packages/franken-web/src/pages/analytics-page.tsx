@@ -375,7 +375,7 @@ function DetailDrawer({
   }, [detail.id]);
 
   return (
-    <aside aria-label="Analytics event detail" aria-modal="true" className="analytics-drawer" role="dialog">
+    <aside aria-label="Analytics event detail" className="analytics-drawer" role="dialog">
       <div className="analytics-drawer__header">
         <div>
           <p className="eyebrow">{detail.source}</p>
