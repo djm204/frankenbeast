@@ -4,7 +4,7 @@ Generated from the 2026-03-08 codebase audit.
 
 > **Status annotations added 2026-07-04** after re-verifying each issue against the live code.
 
-1. `001-cli-config-surface-not-applied.md` — **FIXED** (config flows into BeastLoop; budgets enforced; provider default honored)
+1. `001-cli-config-surface-not-applied.md` — **PARTIALLY FIXED** (config flows into BeastLoop; budgets enforced; provider default honored; provider-override `extraArgs` are still dropped in the main execution path — `CliLlmAdapter.execute()` calls `buildArgs()` without them)
 2. `002-plan-mode-drops-chunk-metadata.md` — **FIXED** (plan mode writes rich `ChunkDefinition`s via `ChunkFileWriter`)
 3. `003-cli-safety-pipeline-still-stubbed.md` — **FIXED** (real critique/governor wired fail-closed; stubs only behind `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`)
 4. `004-cli-uses-synthetic-skill-registry-and-no-mcp.md` — **PARTIALLY FIXED** (real `SkillManager` wired; MCP dispatch still unreachable — open issue [#21](https://github.com/djm204/frankenbeast/issues/21))

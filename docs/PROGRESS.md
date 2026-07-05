@@ -188,9 +188,9 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 | franken-orchestrator | 2,129 | 219 | PASS (1 skipped) |
 | franken-planner | 187 | 17 | PASS |
 | franken-types | 61 | 3 | PASS |
-| franken-web | 193 | 47 | PASS (EventSource caveat resolved; 252/252 direct `vitest run` on 2026-07-04) |
+| franken-web | 193 | 47 | PASS (EventSource caveat resolved 2026-07-04; suite has since grown — 252/252 on a current direct `vitest run`, counts in this row are the older tally) |
 | Root integration/docs guard | 135 | 11 | PASS for `tests/docs-issue-86.test.ts`; broader root suite not re-counted in this update |
-| **Current tracked total** | **3,594** | **394** | **ALL GREEN as of 2026-07-04 (franken-web caveat resolved)** |
+| **Current tracked total** | **3,594** | **394** | **ALL GREEN as of 2026-07-04 (counts are the older tally — see Current State at top for verified 2026-07-04 numbers)** |
 
 ## Phase 8: CLI Gap Closure
 
