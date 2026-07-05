@@ -127,7 +127,7 @@ function ChatErrorBanners({
 }: {
   banners?: ChatErrorBanner[];
   onDismiss?: (id: string) => void;
-  onRetry?: (id: string) => void;
+  onRetry?: (id: string) => void | Promise<unknown>;
 }) {
   if (banners.length === 0) {
     return null;
@@ -253,6 +253,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const wasSidebarOpenRef = useRef(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
+  const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
   const [chatSessionsError, setChatSessionsError] = useState<string | null>(null);
@@ -288,6 +289,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     approve,
     approvalError,
     approvalResolving,
+    clearedFailedDraft: reconciledFailedDraft,
     connectionStatus,
     costUsd,
     dismissError,
@@ -297,6 +299,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     projectId: activeProjectId,
     reconnect,
     retryError,
+    retryMessage,
     send,
     sessionId: activeSessionId,
     showTypingIndicator,
@@ -309,6 +312,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     sessionId: selectedSessionId,
     sessionSeed,
   });
+
+  useEffect(() => {
+    if (reconciledFailedDraft) {
+      setClearedFailedDraft((current) => ({
+        content: reconciledFailedDraft.content,
+        nonce: (current?.nonce ?? 0) + 1,
+      }));
+    }
+  }, [reconciledFailedDraft]);
 
   const chatClient = useMemo(
     () => new ChatApiClient(baseUrl),
@@ -857,15 +869,42 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 </div>
               </section>
 
-              <ChatErrorBanners banners={errorBanners} onDismiss={dismissError} onRetry={retryError} />
-              <TranscriptPane messages={messages} showTypingIndicator={showTypingIndicator} />
+              <ChatErrorBanners
+                banners={errorBanners}
+                onDismiss={dismissError}
+                onRetry={(bannerId) => {
+                  void retryError(bannerId).then((retriedContent) => {
+                    if (retriedContent) {
+                      setClearedFailedDraft((current) => ({
+                        content: retriedContent,
+                        nonce: (current?.nonce ?? 0) + 1,
+                      }));
+                    }
+                  }).catch(() => undefined);
+                }}
+              />
+              <TranscriptPane
+                messages={messages}
+                onRetryMessage={(messageId) => {
+                  const retriedMessage = messages.find((message) => message.id === messageId);
+                  void retryMessage(messageId).then(() => {
+                    if (retriedMessage?.role === 'user') {
+                      setClearedFailedDraft((current) => ({
+                        content: retriedMessage.content,
+                        nonce: (current?.nonce ?? 0) + 1,
+                      }));
+                    }
+                  }).catch(() => undefined);
+                }}
+                retryDisabled={status !== 'idle' && status !== 'error'}
+                showTypingIndicator={showTypingIndicator}
+              />
               <Composer
                 connectionStatus={connectionStatus}
+                clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
                 onReconnect={reconnect}
-                onSend={(content) => {
-                  void send(content);
-                }}
+                onSend={send}
                 status={status}
               />
             </section>

@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConnectionStatus, SessionStatus } from '../hooks/use-chat-session';
 
 export interface ComposerProps {
   connectionStatus: ConnectionStatus;
+  clearedFailedDraft?: { content: string; nonce: number };
   disabled: boolean;
   onReconnect?: () => void;
-  onSend: (content: string) => void;
+  onSend: (content: string) => Promise<void> | void;
   status: SessionStatus;
 }
 
@@ -75,31 +76,63 @@ function canRetryConnection(connectionStatus: ConnectionStatus): boolean {
   return connectionStatus === 'disconnected' || connectionStatus === 'offline' || connectionStatus === 'error';
 }
 
-export function Composer({ connectionStatus, disabled, onReconnect, onSend, status }: ComposerProps) {
+export function Composer({ connectionStatus, clearedFailedDraft, disabled, onReconnect, onSend, status }: ComposerProps) {
+  const [error, setError] = useState<{ content: string; message: string } | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
+  const lastClearedFailedDraftNonceRef = useRef<number | null>(null);
   const helpText = disabledReason(status)
     ?? connectionHelp(connectionStatus)
     ?? 'Type a message, then press Dispatch or Ctrl+Enter to send.';
   const liveStatus = `${connectionStatusLabel(connectionStatus)}. ${sessionStatusLabel(status)}.`;
   const showReconnect = canRetryConnection(connectionStatus);
 
-  function submitCurrentValue() {
+  useEffect(() => {
+    if (!clearedFailedDraft || lastClearedFailedDraftNonceRef.current === clearedFailedDraft.nonce) {
+      return;
+    }
+
+    lastClearedFailedDraftNonceRef.current = clearedFailedDraft.nonce;
+    setError((current) => (
+      current && current.content.trim() !== clearedFailedDraft.content.trim()
+        ? current
+        : null
+    ));
+    setValue((current) => (
+      current.trim() === clearedFailedDraft.content.trim()
+        ? ''
+        : current
+    ));
+  }, [clearedFailedDraft]);
+
+  async function submitCurrentValue() {
     if (disabled) {
       return;
     }
 
     const trimmed = value.trim();
-    if (!trimmed) {
+    if (!trimmed || isSending) {
       return;
     }
 
-    onSend(trimmed);
-    setValue('');
+    setError(null);
+    setIsSending(true);
+    try {
+      await onSend(trimmed);
+      setValue((current) => (current === value ? '' : current));
+    } catch (err) {
+      setError({
+        content: trimmed,
+        message: err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.',
+      });
+    } finally {
+      setIsSending(false);
+    }
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    submitCurrentValue();
+    void submitCurrentValue();
   }
 
   return (
@@ -115,7 +148,7 @@ export function Composer({ connectionStatus, disabled, onReconnect, onSend, stat
           onKeyDown={(event) => {
             if (event.key === 'Enter' && event.ctrlKey) {
               event.preventDefault();
-              submitCurrentValue();
+              void submitCurrentValue();
             }
           }}
           placeholder="Ask Frankenbeast to plan, explain, execute, or use slash commands like /run or /plan."
@@ -126,6 +159,14 @@ export function Composer({ connectionStatus, disabled, onReconnect, onSend, stat
           {helpText}
         </span>
       </label>
+      {error && (
+        <div className="composer__error" role="alert">
+          <span>{error.message}</span>
+          <button className="button button--secondary button--small" type="button" onClick={() => void submitCurrentValue()} disabled={disabled || isSending}>
+            Retry send
+          </button>
+        </div>
+      )}
       <div className="composer__footer">
         <p className="composer__status" id="composer-live-status" role="status" aria-live="polite" aria-atomic="true">
           <span>{connectionStatusLabel(connectionStatus)}</span>
@@ -138,8 +179,8 @@ export function Composer({ connectionStatus, disabled, onReconnect, onSend, stat
               Try reconnecting
             </button>
           ) : null}
-          <button className="button button--primary" type="submit" disabled={disabled}>
-            Dispatch
+          <button className="button button--primary" type="submit" disabled={disabled || isSending}>
+            {isSending ? 'Dispatching…' : 'Dispatch'}
           </button>
         </div>
       </div>

@@ -3,10 +3,12 @@ import type { ChatMessage } from '../hooks/use-chat-session';
 
 export interface TranscriptPaneProps {
   messages: ChatMessage[];
+  onRetryMessage?: (messageId: string) => void;
+  retryDisabled?: boolean;
   showTypingIndicator: boolean;
 }
 
-export function TranscriptPane({ messages, showTypingIndicator }: TranscriptPaneProps) {
+export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false, showTypingIndicator }: TranscriptPaneProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,6 +43,17 @@ export function TranscriptPane({ messages, showTypingIndicator }: TranscriptPane
               {message.receipt && <span className="message-card__receipt">{message.receipt}</span>}
             </div>
             <p className="message-card__content">{message.content}</p>
+            {message.error && <p className="message-card__error">{message.error}</p>}
+            {message.role === 'user' && message.receipt === 'failed' && message.canRetry !== false && onRetryMessage && (
+              <button
+                className="button button--secondary button--small message-card__action"
+                disabled={retryDisabled}
+                type="button"
+                onClick={() => onRetryMessage(message.id)}
+              >
+                Resend failed message
+              </button>
+            )}
           </article>
         ))}
 

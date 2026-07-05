@@ -578,6 +578,16 @@ button {
   white-space: pre-wrap;
 }
 
+.message-card__error {
+  margin-top: 0.65rem;
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
+.message-card__action {
+  margin-top: 0.8rem;
+}
+
 .empty-state,
 .rail-card__empty {
   padding: 1rem;
@@ -633,6 +643,26 @@ button {
 .composer__textarea {
   resize: vertical;
   min-height: 8rem;
+}
+
+.composer__help {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.composer__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(255, 126, 126, 0.32);
+  border-radius: 0.9rem;
+  background: rgba(255, 126, 126, 0.1);
+  color: var(--danger);
 }
 
 .button {
