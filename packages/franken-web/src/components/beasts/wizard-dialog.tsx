@@ -64,7 +64,6 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
         <Dialog.Content
           className="fixed top-[10vh] left-[12vw] w-[76vw] h-[80vh] bg-beast-panel border border-beast-border
             rounded-2xl z-[70] flex flex-col shadow-2xl shadow-black/40"
-          aria-busy={launching || undefined}
           aria-describedby={undefined}
         >
           {/* Header */}

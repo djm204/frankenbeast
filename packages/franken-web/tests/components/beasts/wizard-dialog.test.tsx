@@ -50,11 +50,11 @@ describe('WizardDialog', () => {
     });
   });
 
-  it('announces launch progress and marks the dialog busy while launching', () => {
+  it('announces launch progress and marks launch controls busy while launching', () => {
     render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} launching={true} />);
 
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
+    const launchButton = screen.getByRole('button', { name: /launching/i });
+    expect(launchButton.closest('[aria-busy="true"]')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('Launching agent');
   });
 
