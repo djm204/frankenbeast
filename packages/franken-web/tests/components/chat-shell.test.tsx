@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatShell } from '../../src/components/chat-shell.js';
+import { useDashboardStore } from '../../src/stores/dashboard-store.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
   {
@@ -163,6 +164,25 @@ const mockNetworkGetLogs = vi.fn().mockResolvedValue({ logs: ['chat log line'] }
 const mockNetworkStart = vi.fn().mockResolvedValue(undefined);
 const mockNetworkStop = vi.fn().mockResolvedValue(undefined);
 const mockNetworkRestart = vi.fn().mockResolvedValue(undefined);
+const mockDashboardSnapshot = {
+  skills: [
+    { name: 'github', enabled: true, hasContext: false, mcpServerCount: 1 },
+  ],
+  security: {
+    profile: 'standard',
+    injectionDetection: true,
+    piiMasking: true,
+    outputValidation: true,
+    requireApproval: 'destructive',
+  },
+  providers: [
+    { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+  ],
+};
+const mockDashboardFetchSnapshot = vi.fn().mockResolvedValue(mockDashboardSnapshot);
+const mockDashboardToggleSkill = vi.fn().mockResolvedValue(undefined);
+const mockDashboardUpdateSecurityProfile = vi.fn().mockResolvedValue(undefined);
+const mockDashboardSubscribe = vi.fn().mockReturnValue(vi.fn());
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -270,11 +290,26 @@ vi.mock('../../src/lib/network-api.js', () => ({
   }),
 }));
 
+vi.mock('../../src/lib/dashboard-api.js', () => ({
+  DashboardApiClient: vi.fn(function (this: {
+    fetchSnapshot: ReturnType<typeof vi.fn>;
+    toggleSkill: ReturnType<typeof vi.fn>;
+    updateSecurityProfile: ReturnType<typeof vi.fn>;
+    subscribeToDashboard: ReturnType<typeof vi.fn>;
+  }) {
+    this.fetchSnapshot = mockDashboardFetchSnapshot;
+    this.toggleSkill = mockDashboardToggleSkill;
+    this.updateSecurityProfile = mockDashboardUpdateSecurityProfile;
+    this.subscribeToDashboard = mockDashboardSubscribe;
+  }),
+}));
+
 afterEach(() => {
   cleanup();
   window.location.hash = '';
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  useDashboardStore.getState().reset();
   latestBeastEventHandlers = null;
   mockSubscribeToEvents.mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
     latestBeastEventHandlers = handlers;
@@ -380,6 +415,14 @@ afterEach(() => {
   mockNetworkStop.mockResolvedValue(undefined);
   mockNetworkRestart.mockReset();
   mockNetworkRestart.mockResolvedValue(undefined);
+  mockDashboardFetchSnapshot.mockReset();
+  mockDashboardFetchSnapshot.mockResolvedValue(mockDashboardSnapshot);
+  mockDashboardToggleSkill.mockReset();
+  mockDashboardToggleSkill.mockResolvedValue(undefined);
+  mockDashboardUpdateSecurityProfile.mockReset();
+  mockDashboardUpdateSecurityProfile.mockResolvedValue(undefined);
+  mockDashboardSubscribe.mockReset();
+  mockDashboardSubscribe.mockReturnValue(vi.fn());
   mockGetRun.mockReset();
   mockGetRun.mockResolvedValue({
     run: {
@@ -405,10 +448,28 @@ describe('ChatShell', () => {
 
     expect(footer?.textContent).toContain('v0.9.0');
     expect(brand?.textContent).not.toContain('v0.9.0');
+    expect(nav?.textContent).toContain('Overview');
     expect(nav?.textContent).toContain('Chat');
     expect(nav?.textContent).toContain('Beasts');
     expect(nav?.textContent).toContain('Sessions');
     expect(nav?.textContent).toContain('Analytics');
+  });
+
+  it('mounts the dashboard overview as a first-class navigation route', async () => {
+    window.location.hash = '#/dashboard';
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    expect(screen.getByRole('link', { name: /Overview/ })).toHaveProperty('hash', '#/dashboard');
+    expect(screen.getAllByText('Snapshot controls for skills, security, and providers').length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(mockDashboardFetchSnapshot).toHaveBeenCalledTimes(1);
+      expect(mockDashboardSubscribe).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('github')).toBeDefined();
+      expect(screen.getByText('Injection Detection: [on]')).toBeDefined();
+      expect(screen.getByText('claude')).toBeDefined();
+    });
   });
 
   it('renders the chat workspace inside the dashboard shell', () => {

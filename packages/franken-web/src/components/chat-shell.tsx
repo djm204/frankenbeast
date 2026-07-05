@@ -22,6 +22,8 @@ import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusRespons
 import { BeastsPage } from '../pages/beasts-page';
 import { AnalyticsApiClient } from '../lib/analytics-api';
 import { AnalyticsPage } from '../pages/analytics-page';
+import { DashboardApiClient } from '../lib/dashboard-api';
+import { DashboardPage } from '../pages/dashboard-page';
 
 export interface ChatShellProps {
   baseUrl: string;
@@ -30,9 +32,11 @@ export interface ChatShellProps {
   version: string;
 }
 
-type RouteId = 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
+type RouteId = 'dashboard' | 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
+type PlaceholderRouteId = Exclude<RouteId, 'dashboard' | 'chat' | 'beasts' | 'network' | 'analytics'>;
 
 const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean }> = [
+  { id: 'dashboard', label: 'Overview', summary: 'Snapshot controls for skills, security, and providers', live: true },
   { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console', live: true },
   { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
   { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
@@ -107,7 +111,7 @@ function routeFromHash(hash: string): RouteId {
   return ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
 }
 
-function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
+function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
   const route = ROUTES.find((item) => item.id === routeId)!;
 
   return (
@@ -328,6 +332,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   );
   const analyticsClient = useMemo(
     () => new AnalyticsApiClient(baseUrl),
+    [baseUrl],
+  );
+  const dashboardClient = useMemo(
+    () => new DashboardApiClient(baseUrl),
     [baseUrl],
   );
   const beastClient = useMemo(
@@ -800,7 +808,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           </dl>
         </header>
 
-        {route === 'chat' ? (
+        {route === 'dashboard' ? (
+          <main className="dashboard-overview-page">
+            <DashboardPage client={dashboardClient} />
+          </main>
+        ) : route === 'chat' ? (
           <main className="chat-page">
             <section className="chat-page__main">
               <section className="session-switcher rail-card">
