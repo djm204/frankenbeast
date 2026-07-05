@@ -40,51 +40,57 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const skillMutationSequenceRef = useRef<Record<string, number>>({});
   const securityMutationSequenceRef = useRef(0);
   const confirmedSnapshotRef = useRef<DashboardSnapshot | null>(null);
-  const confirmedSnapshotVersionRef = useRef(0);
+  const serverSnapshotVersionRef = useRef(0);
+  const confirmedSkillMutationSequenceRef = useRef<Record<string, number>>({});
+  const confirmedSecurityMutationSequenceRef = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillError, setSkillError] = useState<SkillMutationError | null>(null);
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
 
-  const applyConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
+  const setConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
     confirmedSnapshotRef.current = snapshot;
-    confirmedSnapshotVersionRef.current += 1;
     setSnapshot(snapshot);
   }, [setSnapshot]);
 
+  const applyServerSnapshot = useCallback((snapshot: DashboardSnapshot) => {
+    serverSnapshotVersionRef.current += 1;
+    setConfirmedSnapshot(snapshot);
+  }, [setConfirmedSnapshot]);
+
   const restoreConfirmedSnapshot = useCallback(() => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
-    if (confirmedSnapshot) applyConfirmedSnapshot(confirmedSnapshot);
-  }, [applyConfirmedSnapshot]);
+    if (confirmedSnapshot) setConfirmedSnapshot(confirmedSnapshot);
+  }, [setConfirmedSnapshot]);
 
   const confirmSkillState = useCallback((name: string, enabled: boolean) => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
     if (!confirmedSnapshot) return;
-    applyConfirmedSnapshot({
+    setConfirmedSnapshot({
       ...confirmedSnapshot,
       skills: confirmedSnapshot.skills.map((skill) => (
         skill.name === name ? { ...skill, enabled } : skill
       )),
     });
-  }, [applyConfirmedSnapshot]);
+  }, [setConfirmedSnapshot]);
 
   const confirmSecurityProfile = useCallback((profile: string) => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
     if (!confirmedSnapshot) return;
-    applyConfirmedSnapshot({
+    setConfirmedSnapshot({
       ...confirmedSnapshot,
       security: { ...confirmedSnapshot.security, profile },
     });
-  }, [applyConfirmedSnapshot]);
+  }, [setConfirmedSnapshot]);
 
   const loadSnapshot = useCallback(() => {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
     setLoadError(null);
-    setLoading(true);
+    if (!confirmedSnapshotRef.current) setLoading(true);
     client.fetchSnapshot()
       .then((snap) => {
         if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
-        applyConfirmedSnapshot(snap);
+        applyServerSnapshot(snap);
       })
       .catch((error) => {
         if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
@@ -95,19 +101,22 @@ export function DashboardPage({ client }: DashboardPageProps) {
         setLoadError(`Unable to load dashboard. ${describeError(error)}`);
         setLoading(false);
       });
-  }, [applyConfirmedSnapshot, client, setLoading]);
+  }, [applyServerSnapshot, client, setLoading]);
 
   useEffect(() => {
     // Note: SSE snapshot events replace full store state. If the server pushes
     // a snapshot while an optimistic update is in-flight, the server state wins.
     // Currently only the initial snapshot is pushed (heartbeats carry no data).
     mountedRef.current = true;
+    if (!confirmedSnapshotRef.current && security) {
+      setConfirmedSnapshot({ skills, security, providers });
+    }
     loadSnapshot();
     let unsub: (() => void) | undefined;
     client.subscribeToDashboard((snap) => {
       if (!mountedRef.current) return;
       setLoadError(null);
-      applyConfirmedSnapshot(snap);
+      applyServerSnapshot(snap);
     })
       .then((nextUnsub) => {
         if (!mountedRef.current) {
@@ -121,16 +130,20 @@ export function DashboardPage({ client }: DashboardPageProps) {
         setLoadError(`Unable to stream dashboard updates. ${describeError(error)}`);
       });
     return () => { mountedRef.current = false; unsub?.(); };
-  }, [applyConfirmedSnapshot, client, loadSnapshot]);
+  }, [applyServerSnapshot, client, loadSnapshot, setConfirmedSnapshot]);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
     const sequence = (skillMutationSequenceRef.current[name] ?? 0) + 1;
+    const serverSnapshotVersion = serverSnapshotVersionRef.current;
     skillMutationSequenceRef.current[name] = sequence;
     toggleSkill(name);
     setSkillError(null);
     client.toggleSkill(name, enabled)
       .then(() => {
-        if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
+        if (!mountedRef.current) return;
+        if (serverSnapshotVersionRef.current !== serverSnapshotVersion) return;
+        if (sequence < (confirmedSkillMutationSequenceRef.current[name] ?? 0)) return;
+        confirmedSkillMutationSequenceRef.current[name] = sequence;
         confirmSkillState(name, enabled);
       })
       .catch((error) => {
@@ -146,12 +159,16 @@ export function DashboardPage({ client }: DashboardPageProps) {
 
   const handleSecurityProfileChange = useCallback((profile: string) => {
     const sequence = securityMutationSequenceRef.current + 1;
+    const serverSnapshotVersion = serverSnapshotVersionRef.current;
     securityMutationSequenceRef.current = sequence;
     setSecurityProfile(profile);
     setSecurityError(null);
     client.updateSecurityProfile(profile)
       .then(() => {
-        if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
+        if (!mountedRef.current) return;
+        if (serverSnapshotVersionRef.current !== serverSnapshotVersion) return;
+        if (sequence < confirmedSecurityMutationSequenceRef.current) return;
+        confirmedSecurityMutationSequenceRef.current = sequence;
         confirmSecurityProfile(profile);
       })
       .catch((error) => {

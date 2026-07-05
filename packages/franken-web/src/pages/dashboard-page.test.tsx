@@ -278,4 +278,103 @@ describe('DashboardPage', () => {
     });
     expect(screen.queryByText(/Unable to load dashboard/)).toBeNull();
   });
+
+  it('preserves an earlier successful skill toggle when a newer overlapping toggle fails', async () => {
+    const successfulEnable = deferred<void>();
+    const failedDisable = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(successfulEnable.promise)
+        .mockReturnValueOnce(failedDisable.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+
+    successfulEnable.resolve(undefined);
+    failedDisable.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  it('preserves an earlier successful profile save when a newer overlapping save fails', async () => {
+    const successfulStrictSave = deferred<void>();
+    const failedPermissiveSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(successfulStrictSave.promise)
+        .mockReturnValueOnce(failedPermissiveSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+
+    successfulStrictSave.resolve(undefined);
+    failedPermissiveSave.reject(new Error('HTTP 409'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+    });
+  });
+
+  it('does not overwrite a newer SSE skill snapshot when an older toggle succeeds late', async () => {
+    const successfulEnable = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      toggleSkill: vi.fn().mockReturnValue(successfulEnable.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    pushSnapshot(snapshot);
+    successfulEnable.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
+  it('does not overwrite a newer SSE profile snapshot when an older save succeeds late', async () => {
+    const successfulStrictSave = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      updateSecurityProfile: vi.fn().mockReturnValue(successfulStrictSave.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    pushSnapshot({ ...snapshot, security: { ...snapshot.security, profile: 'permissive' } });
+    successfulStrictSave.resolve(undefined);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('permissive');
+    });
+  });
+
+  it('uses a cached dashboard as the rollback baseline when refresh fails on remount', async () => {
+    useDashboardStore.getState().setSnapshot(snapshot);
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockRejectedValue(new Error('HTTP 503')),
+      toggleSkill: vi.fn().mockRejectedValue(new Error('HTTP 500')),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
 });
