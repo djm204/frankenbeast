@@ -46,10 +46,10 @@ describe('NetworkPage', () => {
     expect(screen.getByRole('button', { name: 'Save config' }).getAttribute('class')).toContain('button--primary');
   });
 
-  it('invokes service controls and saves all changed config assignments atomically', () => {
-    const onStart = vi.fn();
-    const onStop = vi.fn();
-    const onRestart = vi.fn();
+  it('invokes service controls and saves all changed config assignments atomically', async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const onStop = vi.fn().mockResolvedValue(undefined);
+    const onRestart = vi.fn().mockResolvedValue(undefined);
     const onSaveConfig = vi.fn();
 
     render(
@@ -75,8 +75,11 @@ describe('NetworkPage', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Start chat-server' }));
+    await waitFor(() => expect(screen.getByText('Started chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Stop chat-server' }));
+    await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat-server' }));
+    await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
     fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'hybrid' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
     fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
