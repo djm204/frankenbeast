@@ -2,6 +2,7 @@ import { basename, isAbsolute, normalize, sep } from 'node:path';
 
 export interface ProviderCommandOverridePolicyConfig {
   readonly command?: string | undefined;
+  readonly cliPath?: string | undefined;
   readonly trustCommandOverride?: boolean | undefined;
   readonly trustedCommandPaths?: readonly string[] | undefined;
 }
@@ -17,8 +18,12 @@ const BUILTIN_PROVIDER_COMMANDS: Record<string, readonly string[]> = {
   aider: ['aider'],
 };
 
+function providerNameForType(provider: string): string {
+  return provider.endsWith('-cli') ? provider.slice(0, -'-cli'.length) : provider;
+}
+
 function allowedCommandNames(provider: string): readonly string[] {
-  return BUILTIN_PROVIDER_COMMANDS[provider] ?? [provider];
+  return BUILTIN_PROVIDER_COMMANDS[providerNameForType(provider)] ?? [providerNameForType(provider)];
 }
 
 function isTrustedPath(command: string, trustedPaths: readonly string[] | undefined): boolean {
@@ -38,22 +43,23 @@ export function validateProviderCommandOverride(
   provider: string,
   override: ProviderCommandOverridePolicyConfig,
 ): string[] {
-  if (!override.command) {
+  const command = override.command ?? override.cliPath;
+  if (!command) {
     return [];
   }
 
   const issues: string[] = [];
   if (override.trustCommandOverride !== true) {
     issues.push(
-      `providers.overrides.${provider}.command requires trustCommandOverride: true before a repo-configured command override may be used`,
+      `provider command override for ${provider} requires trustCommandOverride: true before a repo-configured command override may be used`,
     );
   }
 
-  const commandName = basename(override.command);
+  const commandIsBareName = command === basename(command);
   const allowed = allowedCommandNames(provider);
-  if (!allowed.includes(commandName) && !isTrustedPath(override.command, override.trustedCommandPaths)) {
+  if (!(commandIsBareName && allowed.includes(command)) && !isTrustedPath(command, override.trustedCommandPaths)) {
     issues.push(
-      `providers.overrides.${provider}.command must resolve to an allowed provider binary `
+      `provider command override for ${provider} must be a bare allowed provider binary `
         + `(${allowed.join(', ')}) or an absolute path under trustedCommandPaths`,
     );
   }
@@ -70,9 +76,10 @@ export function assertTrustedProviderCommandOverrides(
   const issues: string[] = [];
   for (const [provider, override] of Object.entries(overrides)) {
     issues.push(...validateProviderCommandOverride(provider, override));
-    if (override.command && override.trustCommandOverride === true) {
+    const command = override.command ?? override.cliPath;
+    if (command && override.trustCommandOverride === true) {
       options?.logger?.warn(
-        `SECURITY AUDIT: using trusted provider command override for ${provider}: ${override.command}`,
+        `SECURITY AUDIT: using trusted provider command override for ${provider}: ${command}`,
         'provider-command-policy',
       );
     }

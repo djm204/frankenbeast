@@ -30,6 +30,8 @@ export interface ProviderConfig {
   readonly type: ProviderType;
   readonly apiKey?: string | undefined;
   readonly cliPath?: string | undefined;
+  readonly trustCommandOverride?: boolean | undefined;
+  readonly trustedCommandPaths?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly extraArgs?: readonly string[] | undefined;
 }

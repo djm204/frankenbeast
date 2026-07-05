@@ -374,7 +374,13 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
-      providersConfig: { claude: { command: '/usr/local/bin/claude', trustCommandOverride: true } },
+      providersConfig: {
+        claude: {
+          command: '/usr/local/bin/claude',
+          trustCommandOverride: true,
+          trustedCommandPaths: ['/usr/local/bin'],
+        },
+      },
     });
     await createCliDeps(opts);
     expect(MockCliLlmAdapter).toHaveBeenCalledWith(
@@ -402,7 +408,13 @@ describe('dep-factory provider wiring', () => {
     const opts = makeOpts({
       provider: 'codex',
       providers: ['codex'],
-      providersConfig: { codex: { command: '/usr/local/bin/codex', trustCommandOverride: true } },
+      providersConfig: {
+        codex: {
+          command: '/usr/local/bin/codex',
+          trustCommandOverride: true,
+          trustedCommandPaths: ['/usr/local/bin'],
+        },
+      },
     });
 
     await createCliDeps(opts);

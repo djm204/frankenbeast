@@ -37,12 +37,22 @@ describe('OrchestratorConfigSchema providers section', () => {
     })).toThrow(/trustCommandOverride: true/);
   });
 
+  it('rejects provider command path overrides that only match by basename', () => {
+    expect(() => OrchestratorConfigSchema.parse({
+      providers: {
+        overrides: {
+          claude: { command: '/tmp/claude', trustCommandOverride: true },
+        },
+      },
+    })).toThrow(/absolute path under trustedCommandPaths/);
+  });
+
   it('accepts trusted overrides with command, model, and extraArgs', () => {
     const config = OrchestratorConfigSchema.parse({
       providers: {
         overrides: {
           gemini: {
-            command: '/usr/local/bin/gemini-cli',
+            command: 'gemini-cli',
             trustCommandOverride: true,
             model: 'gemini-pro',
             extraArgs: ['--temperature', '0.5'],
@@ -52,7 +62,7 @@ describe('OrchestratorConfigSchema providers section', () => {
     });
     const gemini = config.providers.overrides['gemini'];
     expect(gemini).toBeDefined();
-    expect(gemini!.command).toBe('/usr/local/bin/gemini-cli');
+    expect(gemini!.command).toBe('gemini-cli');
     expect(gemini!.model).toBe('gemini-pro');
     expect(gemini!.extraArgs).toEqual(['--temperature', '0.5']);
   });
@@ -97,6 +107,44 @@ describe('OrchestratorConfigSchema providers section', () => {
       providers: { overrides: {} },
     });
     expect(config.providers.overrides).toEqual({});
+  });
+
+  it('rejects consolidated CLI provider cliPath overrides without trust', () => {
+    expect(() => OrchestratorConfigSchema.parse({
+      consolidatedProviders: [
+        { name: 'local-claude', type: 'claude-cli', cliPath: './tools/claude' },
+      ],
+    })).toThrow(/trustCommandOverride: true/);
+  });
+
+  it('rejects consolidated CLI provider cliPath paths outside trustedCommandPaths', () => {
+    expect(() => OrchestratorConfigSchema.parse({
+      consolidatedProviders: [
+        { name: 'local-claude', type: 'claude-cli', cliPath: '/tmp/claude', trustCommandOverride: true },
+      ],
+    })).toThrow(/absolute path under trustedCommandPaths/);
+  });
+
+  it('accepts trusted consolidated CLI provider cliPath overrides under trustedCommandPaths', () => {
+    const config = OrchestratorConfigSchema.parse({
+      consolidatedProviders: [
+        {
+          name: 'local-claude',
+          type: 'claude-cli',
+          cliPath: '/opt/frankenbeast/bin/claude-wrapper',
+          trustCommandOverride: true,
+          trustedCommandPaths: ['/opt/frankenbeast/bin'],
+        },
+      ],
+    });
+
+    expect(config.consolidatedProviders?.[0]).toEqual({
+      name: 'local-claude',
+      type: 'claude-cli',
+      cliPath: '/opt/frankenbeast/bin/claude-wrapper',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/opt/frankenbeast/bin'],
+    });
   });
 
   it('preserves existing config fields alongside providers', () => {

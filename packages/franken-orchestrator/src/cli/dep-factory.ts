@@ -747,6 +747,7 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const config = resolveEffectiveConfig(options);
+  assertTrustedProviderCommandOverrides(options.providersConfig);
   const artifacts = createSessionArtifacts(options);
   clearSessionArtifacts(options, artifacts);
 

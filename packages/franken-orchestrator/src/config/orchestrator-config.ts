@@ -16,6 +16,8 @@ export const ProviderConfigSchema = z.object({
   ]),
   apiKey: z.string().optional(),
   cliPath: z.string().optional(),
+  trustCommandOverride: z.literal(true).optional(),
+  trustedCommandPaths: z.array(z.string()).optional(),
   model: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
 });
@@ -117,6 +119,21 @@ const BaseOrchestratorConfigSchema = z.object({
 export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(
   NetworkConfigSchema.shape,
 ).superRefine((config, ctx) => {
+  config.consolidatedProviders?.forEach((provider, index) => {
+    if (!provider.type.endsWith('-cli') || !provider.cliPath) return;
+    for (const message of validateProviderCommandOverride(provider.type, {
+      cliPath: provider.cliPath,
+      trustCommandOverride: provider.trustCommandOverride,
+      trustedCommandPaths: provider.trustedCommandPaths,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['consolidatedProviders', index, 'cliPath'],
+        message,
+      });
+    }
+  });
+
   const minDurationMs =
     config.maxCritiqueIterations * MIN_DURATION_MS_PER_CRITIQUE_ITERATION;
   if (config.maxDurationMs < minDurationMs) {
