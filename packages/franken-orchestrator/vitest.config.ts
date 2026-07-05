@@ -11,7 +11,9 @@ const requestedPaths = process.argv
   .slice(2)
   .filter((arg) => !arg.startsWith('-') && arg !== 'run');
 const requestedIntegration = requestedPaths.some((arg) => arg.includes('tests/integration/'));
-const requestedE2e = requestedPaths.some((arg) => arg.includes('tests/e2e/'));
+const requestedE2e = requestedPaths.some(
+  (arg) => arg.includes('tests/e2e/') || arg.includes('test/e2e/'),
+);
 const runIntegration = isIntegration || requestedIntegration;
 const runE2e = isE2e || requestedE2e;
 const requestedUnit = requestedPaths.some((arg) => arg.includes('tests/unit/'));
@@ -25,7 +27,7 @@ export default defineConfig({
     include: runMixed
       ? ['tests/**/*.test.ts', 'test/**/*.test.ts']
       : runE2e
-        ? ['tests/e2e/**/*.test.ts']
+        ? ['tests/e2e/**/*.test.ts', 'test/e2e/**/*.test.ts']
         : runIntegration
           ? ['tests/integration/**/*.test.ts']
           : ['tests/unit/**/*.test.ts', 'test/**/*.test.ts'],
@@ -35,7 +37,7 @@ export default defineConfig({
         ? []
         : runIntegration
           ? []
-          : ['tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
+          : ['tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts', 'test/e2e/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
