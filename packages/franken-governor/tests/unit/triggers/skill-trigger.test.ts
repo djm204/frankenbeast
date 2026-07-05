@@ -40,10 +40,21 @@ describe('SkillTrigger', () => {
     }
   });
 
-  it('sets severity to high when triggered', () => {
+  it('sets severity to high when HITL is required but skill is not destructive', () => {
     const result = trigger.evaluate(makeSkillContext({ requiresHitl: true }));
-    if (result.triggered) {
-      expect(result.severity).toBe('high');
-    }
+    expect(result.triggered).toBe(true);
+    expect(result.severity).toBe('high');
+  });
+
+  it('sets severity to critical when the skill is destructive', () => {
+    const result = trigger.evaluate(makeSkillContext({ isDestructive: true }));
+    expect(result.triggered).toBe(true);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('sets severity to critical when destructive and HITL-requiring', () => {
+    const result = trigger.evaluate(makeSkillContext({ requiresHitl: true, isDestructive: true }));
+    expect(result.triggered).toBe(true);
+    expect(result.severity).toBe('critical');
   });
 });

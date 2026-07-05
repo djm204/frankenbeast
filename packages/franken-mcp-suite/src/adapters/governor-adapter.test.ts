@@ -32,20 +32,27 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
-  it('flags a destructive fbeast tool (fbeast_memory_forget) on the SHARED path', async () => {
+  it('denies a destructive fbeast tool (fbeast_memory_forget) on the SHARED path', async () => {
     // The word heuristic does not catch "forget"; classification lives in the
     // shared governor so every caller (hook, fbeast_governor_check, central
-    // gate, governor_log) gets the same non-approved decision for a benign key.
+    // gate, governor_log) gets the same 'denied' decision for a benign key.
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' });
-    expect(result.decision).not.toBe('approved');
-    expect(result.decision).toBe('review_recommended');
+    expect(result.decision).toBe('denied');
   });
 
-  it('still flags raw destructive patterns (rm -rf)', async () => {
+  it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
-    expect(result.decision).not.toBe('approved');
+    expect(result.decision).toBe('denied');
+  });
+
+  it('denies when the dangerous pattern is only in the context payload', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    // 'rm -rf' is in DANGEROUS_PATTERNS; the tool name alone is benign.
+    // (Word-order variants like 'push --force' are #475's split-flag scope.)
+    const result = await governor.check({ action: 'run_shell', context: 'rm -rf /var/data' });
+    expect(result.decision).toBe('denied');
   });
 
   it('exempts non-executing tools on the SHARED path even with dangerous-looking payload', async () => {

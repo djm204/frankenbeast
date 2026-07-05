@@ -93,6 +93,9 @@ const triggerRegistry = new TriggerRegistry([skillTrigger]);
 function mapSeverityToDecision(
   severity: TriggerSeverity | undefined,
 ): GovernorCheckResult['decision'] {
+  // SkillTrigger emits 'critical' for destructive matches (dangerous patterns
+  // and DESTRUCTIVE_ACTIONS), so destructive actions map to a hard 'denied';
+  // lower severities (e.g. HITL-only 'high') stay 'review_recommended'.
   if (severity === 'critical') return 'denied';
   return 'review_recommended';
 }

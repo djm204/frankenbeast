@@ -40,11 +40,19 @@ import * as readline from 'node:readline/promises';
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const readlineAdapter = { question: (prompt: string) => rl.question(prompt) };
 
-// Wire up the governor with triggers
+// Wire up the governor with triggers. SkillTrigger and BudgetTrigger need
+// context sources: skillMetadata supplies HITL/destructive flags for the
+// rationale's selectedTool, and budgetState supplies the circuit-breaker
+// state. A trigger whose source is missing is skipped (it cannot fire).
 const governor = createGovernor({
   readline: readlineAdapter,
   memoryPort: { recordDecision: async (trace) => console.log('Audit:', trace) },
   evaluators: [new BudgetTrigger(), new SkillTrigger()],
+  skillMetadata: {
+    getSkillMetadata: (skillId) =>
+      skillId === 'deploy-prod' ? { requiresHitl: true, isDestructive: true } : undefined,
+  },
+  budgetState: { getBudgetState: () => ({ tripped: false, spendUsd: 0, limitUsd: 50 }) },
   projectId: 'my-project',
   operatorName: 'alice',
 });
@@ -58,6 +66,8 @@ const result = await governor.verifyRationale({
   timestamp: new Date(),
 });
 
+// 'deploy-prod' is flagged destructive above, so the SkillTrigger fires and
+// the operator is prompted; a rejection (or non-TTY default) lands here:
 if (result.verdict === 'approved') {
   console.log('Proceeding with execution');
 } else {

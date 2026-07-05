@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { GovernorCritiqueAdapter } from '../../../src/gateway/governor-critique-adapter.js';
+import type { SkillMetadataSource } from '../../../src/gateway/governor-critique-adapter.js';
 import type { ApprovalRequest, ApprovalOutcome } from '../../../src/core/types.js';
 import type { ApprovalChannel } from '../../../src/gateway/approval-channel.js';
 import type { TriggerEvaluator } from '../../../src/triggers/trigger-evaluator.js';
 import type { TriggerResult } from '../../../src/core/types.js';
+import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
+import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
 
 interface RationaleBlock {
   taskId: string;
@@ -154,5 +157,175 @@ describe('GovernorCritiqueAdapter', () => {
     await adapter.verifyRationale(makeRationale());
     expect(channel.requestApproval).not.toHaveBeenCalled();
     expect(auditRecorder.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)', () => {
+  function makeSkillMetadataSource(
+    metadata: Record<string, { requiresHitl: boolean; isDestructive: boolean }>,
+  ): SkillMetadataSource {
+    return { getSkillMetadata: (skillId) => metadata[skillId] };
+  }
+
+  it('a destructive skill produces a non-approved verdict through verifyRationale', async () => {
+    const channel = makeFakeChannel('REGEN');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: false, isDestructive: true },
+      }),
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    expect(result.verdict).toBe('rejected');
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.severity).toBe('critical');
+    expect(request.trigger.reason).toContain('deploy-prod');
+  });
+
+  it('a HITL-requiring skill produces a non-approved verdict through verifyRationale', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: false },
+      }),
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    expect(result.verdict).toBe('rejected');
+  });
+
+  it('a benign skill does not fire the SkillTrigger', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'read-docs': { requiresHitl: false, isDestructive: false },
+      }),
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'read-docs' }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('a tripped budget produces a non-approved verdict through verifyRationale', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+      budgetState: { getBudgetState: () => ({ tripped: true, limitUsd: 50, spendUsd: 52.3 }) },
+    });
+
+    const result = await adapter.verifyRationale(makeRationale());
+
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    expect(result.verdict).toBe('rejected');
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('budget');
+    expect(request.trigger.severity).toBe('critical');
+  });
+
+  it('an untripped budget does not fire the BudgetTrigger', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+      budgetState: { getBudgetState: () => ({ tripped: false, limitUsd: 50, spendUsd: 1 }) },
+    });
+
+    const result = await adapter.verifyRationale(makeRationale());
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('skips a SkillTrigger when no skill metadata source is injected', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('skips a SkillTrigger when the rationale has no selectedTool or the skill is unknown', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+    });
+
+    const noTool = makeRationale();
+    delete noTool.selectedTool;
+    expect(await adapter.verifyRationale(noTool)).toEqual({ verdict: 'approved' });
+
+    const unknownSkill = await adapter.verifyRationale(makeRationale({ selectedTool: 'unknown-skill' }));
+    expect(unknownSkill).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('skips a BudgetTrigger when no budget state source is injected', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+    });
+
+    const result = await adapter.verifyRationale(makeRationale());
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('still passes the rationale to custom evaluators', async () => {
+    const seen: unknown[] = [];
+    const custom: TriggerEvaluator = {
+      triggerId: 'custom',
+      evaluate: (context) => {
+        seen.push(context);
+        return { triggered: false, triggerId: 'custom' };
+      },
+    };
+    const adapter = new GovernorCritiqueAdapter({
+      channel: makeFakeChannel(),
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [custom],
+      projectId: 'proj-001',
+    });
+
+    const rationale = makeRationale();
+    await adapter.verifyRationale(rationale);
+    expect(seen).toEqual([rationale]);
   });
 });

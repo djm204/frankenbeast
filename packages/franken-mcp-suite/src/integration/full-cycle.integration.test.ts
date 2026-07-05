@@ -106,7 +106,7 @@ describe('full-cycle integration', () => {
         `SELECT decision FROM governor_log WHERE action = 'rm -rf /data' ORDER BY id DESC LIMIT 1`,
       ).get() as { decision: string } | undefined;
       raw.close();
-      expect(['denied', 'review_recommended']).toContain(row?.decision);
+      expect(row?.decision).toBe('denied');
     }
 
     // ── 4. Post-tool hook — real observer writes to audit_trail ──────────────
