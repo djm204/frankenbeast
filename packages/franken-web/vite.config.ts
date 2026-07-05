@@ -13,6 +13,7 @@ const rootPackageJson = JSON.parse(
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
+  const chatProxyTarget = env.VITE_CHAT_API_PROXY_TARGET || env.VITE_API_URL || proxyTarget;
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
 
   // The orchestrator resolves its operator token from the root .env's
@@ -37,8 +38,8 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/v1': {
-          ...operatorProxy(proxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat')),
-          target: proxyTarget,
+          ...operatorProxy(chatProxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat')),
+          target: chatProxyTarget,
           changeOrigin: true,
           ws: true,
         },

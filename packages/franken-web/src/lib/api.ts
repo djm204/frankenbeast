@@ -42,7 +42,7 @@ export function resolveChatRequestBaseUrl(
 
   try {
     const configured = new URL(baseUrl, locationOrigin);
-    return configured.origin === locationOrigin ? baseUrl : locationOrigin;
+    return configured.origin === locationOrigin ? configured.origin : locationOrigin;
   } catch {
     return locationOrigin;
   }
@@ -104,7 +104,7 @@ export class ChatApiClient {
   }
 
   socketUrl(sessionId: string, token: string): string {
-    return toSocketUrl(this.baseUrl, sessionId, token);
+    return toSocketUrl(this.requestBaseUrl, sessionId, token);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

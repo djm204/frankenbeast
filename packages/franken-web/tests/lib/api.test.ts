@@ -54,7 +54,7 @@ describe('ChatApiClient', () => {
   describe('resolveChatRequestBaseUrl', () => {
     it('preserves same-origin explicit base URLs', () => {
       expect(resolveChatRequestBaseUrl('http://dashboard.local/api-root', 'http://dashboard.local')).toBe(
-        'http://dashboard.local/api-root',
+        'http://dashboard.local',
       );
     });
 
@@ -218,6 +218,12 @@ describe('ChatApiClient', () => {
   describe('socketUrl', () => {
     it('returns the websocket URL for a session', () => {
       const url = client.socketUrl('sess-1', 'signed-token');
+      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1&token=signed-token');
+    });
+
+    it('keeps cross-origin websocket connections on the same-origin proxy', () => {
+      const crossOrigin = new ChatApiClient('https://chat-api.example.test');
+      const url = crossOrigin.socketUrl('sess-1', 'signed-token');
       expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1&token=signed-token');
     });
   });
