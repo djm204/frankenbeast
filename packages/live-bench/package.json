@@ -10,7 +10,8 @@
   },
   "files": [
     "dist",
-    "corpus"
+    "corpus",
+    "fixtures"
   ],
   "publishConfig": {
     "access": "public"

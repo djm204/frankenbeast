@@ -56,8 +56,10 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +79,8 @@ jobs:
           npx turbo run build typecheck test lint
 
       - name: Publish released npm packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then

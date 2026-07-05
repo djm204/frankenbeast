@@ -91,10 +91,15 @@ describe('release-please.yml publishes released npm packages', () => {
     expect(content).toContain('PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}');
   });
 
-  it('authenticates npm with the NPM_TOKEN secret and registry auth', () => {
+  it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content).toContain('registry-url: https://registry.npmjs.org');
-    expect(content).toContain('NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}');
+    expect(content).toMatch(/- name: Publish released npm packages\n\s+env:\n\s+NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+  });
+
+  it('drops repository write permissions from the publish job', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content).toMatch(/publish-npm:[\s\S]*permissions:\n\s+contents: read\n\s+id-token: write/);
   });
 
   it('gates publish on build, typecheck, test, and lint before npm publish', () => {

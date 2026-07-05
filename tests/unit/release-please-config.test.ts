@@ -92,6 +92,11 @@ describe('release-please monorepo config', () => {
     }
   });
 
+  it('live-bench publishes fixtures referenced by its bundled corpus', () => {
+    const pkg = readJson('packages/live-bench/package.json') as { files?: string[] };
+    expect(pkg.files).toEqual(expect.arrayContaining(['corpus', 'fixtures']));
+  });
+
   it('no per-module release-please-config.json files exist', () => {
     for (const dir of PACKAGE_DIRS) {
       const configPath = resolve(ROOT, `packages/${dir}/release-please-config.json`);
