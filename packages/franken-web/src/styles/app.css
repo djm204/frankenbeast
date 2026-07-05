@@ -1306,6 +1306,14 @@ button {
     transform: translateX(0);
   }
 
+  .app-shell-error .sidebar {
+    position: relative;
+    inset: auto;
+    width: auto;
+    min-height: auto;
+    transform: none;
+  }
+
   .sidebar__toggle {
     display: inline-flex;
   }

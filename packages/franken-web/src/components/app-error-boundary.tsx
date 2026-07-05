@@ -5,33 +5,52 @@ type AppErrorBoundaryProps = {
   version: string;
 };
 
+type CopyStatus = 'idle' | 'copied' | 'manual' | 'failed';
+
 type AppErrorBoundaryState = {
-  error: Error | null;
+  hasError: boolean;
+  error: unknown;
   errorInfo: ErrorInfo | null;
-  copied: boolean;
+  copyStatus: CopyStatus;
 };
 
 export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
   state: AppErrorBoundaryState = {
+    hasError: false,
     error: null,
     errorInfo: null,
-    copied: false,
+    copyStatus: 'idle',
   };
 
-  static getDerivedStateFromError(error: Error): Partial<AppErrorBoundaryState> {
-    return { error };
+  static getDerivedStateFromError(error: unknown): Partial<AppErrorBoundaryState> {
+    return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
     this.setState({ error, errorInfo });
+  }
+
+  private getErrorMessage(): string {
+    const { error } = this.state;
+
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    if (typeof error === 'string' && error.trim()) {
+      return error;
+    }
+
+    return 'Unknown app-shell error';
   }
 
   private buildDiagnostics(): string {
     const { error, errorInfo } = this.state;
     return JSON.stringify(
       {
-        message: error?.message ?? 'Unknown app-shell error',
-        stack: error?.stack ?? null,
+        message: this.getErrorMessage(),
+        stack: error instanceof Error ? error.stack ?? null : null,
+        thrownValue: error instanceof Error ? undefined : error ?? null,
         componentStack: errorInfo?.componentStack ?? null,
         version: this.props.version,
         location: typeof window !== 'undefined' ? window.location.href : null,
@@ -46,13 +65,17 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   private copyDiagnostics = async () => {
     const diagnostics = this.buildDiagnostics();
 
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(diagnostics);
-      this.setState({ copied: true });
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      this.setState({ copyStatus: 'manual' });
       return;
     }
 
-    this.setState({ copied: true });
+    try {
+      await navigator.clipboard.writeText(diagnostics);
+      this.setState({ copyStatus: 'copied' });
+    } catch {
+      this.setState({ copyStatus: 'failed' });
+    }
   };
 
   private reload = () => {
@@ -60,9 +83,10 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   };
 
   render() {
-    const { error, copied } = this.state;
+    const { hasError, copyStatus } = this.state;
+    const errorMessage = this.getErrorMessage();
 
-    if (!error) {
+    if (!hasError) {
       return this.props.children;
     }
 
@@ -95,7 +119,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
             <dl className="app-shell-error__details">
               <div>
                 <dt>Error</dt>
-                <dd>{error.message || 'Unknown error'}</dd>
+                <dd>{errorMessage}</dd>
               </div>
               <div>
                 <dt>Build</dt>
@@ -108,14 +132,20 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
                 Reload dashboard
               </button>
               <button type="button" className="secondary-action" onClick={this.copyDiagnostics}>
-                {copied ? 'Diagnostics copied' : 'Copy diagnostics'}
+                {copyStatus === 'copied'
+                  ? 'Diagnostics copied'
+                  : copyStatus === 'manual'
+                    ? 'Copy manually below'
+                    : copyStatus === 'failed'
+                      ? 'Copy failed — view below'
+                      : 'Copy diagnostics'}
               </button>
               <a className="secondary-action" href="https://github.com/djm204/frankenbeast/issues" target="_blank" rel="noreferrer">
                 Open support issues
               </a>
             </div>
 
-            <details className="app-shell-error__diagnostics">
+            <details className="app-shell-error__diagnostics" open={copyStatus === 'manual' || copyStatus === 'failed'}>
               <summary>View diagnostics</summary>
               <pre>{this.buildDiagnostics()}</pre>
             </details>

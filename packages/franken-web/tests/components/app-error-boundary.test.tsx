@@ -7,6 +7,10 @@ function BrokenDashboard(): ReactElement {
   throw new Error('Boom while rendering dashboard');
 }
 
+function ThrowsNull(): ReactElement {
+  throw null;
+}
+
 describe('AppErrorBoundary', () => {
   afterEach(() => {
     cleanup();
@@ -51,5 +55,37 @@ describe('AppErrorBoundary', () => {
     expect(writeText.mock.calls[0]?.[0]).toContain('Boom while rendering dashboard');
     expect(writeText.mock.calls[0]?.[0]).toContain('0.1.0-test');
     expect(screen.getByRole('button', { name: /diagnostics copied/i })).toBeTruthy();
+  });
+
+  it('prompts for manual diagnostics when the clipboard API is unavailable', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+
+    render(
+      <AppErrorBoundary version="0.1.0-test">
+        <BrokenDashboard />
+      </AppErrorBoundary>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /copy diagnostics/i }));
+
+    expect(await screen.findByRole('button', { name: /copy manually below/i })).toBeTruthy();
+    expect(screen.getByText(/view diagnostics/i).closest('details')?.hasAttribute('open')).toBe(true);
+  });
+
+  it('shows the recovery shell even when the thrown value is falsy', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <AppErrorBoundary version="0.1.0-test">
+        <ThrowsNull />
+      </AppErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getByText('Unknown app-shell error')).toBeTruthy();
   });
 });
