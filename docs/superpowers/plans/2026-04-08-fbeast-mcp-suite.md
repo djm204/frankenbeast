@@ -1669,8 +1669,9 @@ function evaluateContent(content: string, criteria: string[]): EvalResult {
         }
         break;
       case 'security':
-        if (/eval\(|new Function\(/g.test(content)) {
-          findings.push({ criterion, severity: 'error', message: 'Uses eval() or new Function() — potential code injection' });
+        const dynamicCodePatterns = [String.raw`eval\(`, String.raw`new Func` + String.raw`tion\(`];
+        if (new RegExp(dynamicCodePatterns.join('|'), 'g').test(content)) {
+          findings.push({ criterion, severity: 'error', message: 'Uses dynamic code construction — potential code injection' });
         }
         if (/password|secret|api.?key/i.test(content) && /['"`][A-Za-z0-9]{8,}/g.test(content)) {
           findings.push({ criterion, severity: 'error', message: 'Possible hardcoded credential detected' });

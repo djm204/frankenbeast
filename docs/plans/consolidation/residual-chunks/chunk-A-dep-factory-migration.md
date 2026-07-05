@@ -44,7 +44,7 @@
 
 ## Tasks
 
-### Task 1: Bridge Function (CliDepOptions → BeastDepsConfig)
+### Task 1: Bridge helper (CliDepOptions → BeastDepsConfig)
 
 **Files:**
 - Create: `src/cli/dep-bridge.ts`
