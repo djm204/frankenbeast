@@ -7,6 +7,15 @@ const MAX_FUNCTION_LINES = 50;
 const FUNCTION_PATTERN = /function\s+\w+\s*\(([^)]*)\)\s*\{([\s\S]*?)\}/g;
 const ARROW_FUNCTION_PATTERN = /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
 
+enum ScannerState {
+  Code = 'code',
+  SingleLineComment = 'singleLineComment',
+  MultiLineComment = 'multiLineComment',
+  SingleQuote = 'singleQuote',
+  DoubleQuote = 'doubleQuote',
+  TemplateString = 'templateString',
+}
+
 export class ComplexityEvaluator implements Evaluator {
   readonly name = 'complexity';
   readonly category = 'heuristic' as const;
@@ -16,11 +25,13 @@ export class ComplexityEvaluator implements Evaluator {
       return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
     }
 
+    const sanitizedContent = this.stripCommentsAndStrings(input.content);
+
     const findings: EvaluationFinding[] = [];
 
-    this.checkParameterCount(input.content, findings);
-    this.checkNestingDepth(input.content, findings);
-    this.checkFunctionLength(input.content, findings);
+    this.checkParameterCount(sanitizedContent, findings);
+    this.checkNestingDepth(sanitizedContent, findings);
+    this.checkFunctionLength(sanitizedContent, findings);
 
     const score = Math.max(0, 1 - findings.length * 0.25);
 
@@ -30,6 +41,131 @@ export class ComplexityEvaluator implements Evaluator {
       score,
       findings,
     };
+  }
+
+  private stripCommentsAndStrings(content: string): string {
+    let result = '';
+    let state: ScannerState = ScannerState.Code;
+
+    for (let i = 0; i < content.length; i++) {
+      const ch = content[i]!;
+      const next = content[i + 1]!;
+
+      if (state === ScannerState.Code) {
+        if (ch === '/' && next === '/') {
+          state = ScannerState.SingleLineComment;
+          result += '  ';
+          i += 1;
+          continue;
+        }
+
+        if (ch === '/' && next === '*') {
+          state = ScannerState.MultiLineComment;
+          result += '  ';
+          i += 1;
+          continue;
+        }
+
+        if (ch === "'") {
+          state = ScannerState.SingleQuote;
+          result += ' ';
+          continue;
+        }
+
+        if (ch === '"') {
+          state = ScannerState.DoubleQuote;
+          result += ' ';
+          continue;
+        }
+
+        if (ch === '`') {
+          state = ScannerState.TemplateString;
+          result += ' ';
+          continue;
+        }
+
+        result += ch;
+        continue;
+      }
+
+      if (state === ScannerState.SingleLineComment) {
+        if (ch === '\n') {
+          state = ScannerState.Code;
+          result += '\n';
+        } else {
+          result += ' ';
+        }
+        continue;
+      }
+
+      if (state === ScannerState.MultiLineComment) {
+        if (ch === '*' && next === '/') {
+          state = ScannerState.Code;
+          result += '  ';
+          i += 1;
+          continue;
+        }
+
+        result += ch === '\n' ? '\n' : ' ';
+        continue;
+      }
+
+      if (state === ScannerState.SingleQuote) {
+        if (ch === '\\') {
+          result += ' ';
+          if (i + 1 < content.length) {
+            result += ' ';
+            i += 1;
+          }
+          continue;
+        }
+
+        if (ch === "'") {
+          state = ScannerState.Code;
+          result += ' ';
+          continue;
+        }
+
+        result += ch === '\n' ? '\n' : ' ';
+        continue;
+      }
+
+      if (state === ScannerState.DoubleQuote) {
+        if (ch === '\\') {
+          result += ' ';
+          if (i + 1 < content.length) {
+            result += ' ';
+            i += 1;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          state = ScannerState.Code;
+          result += ' ';
+          continue;
+        }
+
+        result += ch === '\n' ? '\n' : ' ';
+        continue;
+      }
+
+      if (state === ScannerState.TemplateString) {
+        if (ch === '`') {
+          state = ScannerState.Code;
+          result += ' ';
+          continue;
+        }
+
+        if (ch === '\n') {
+          result += '\n';
+        } else {
+          result += ' ';
+        }
+      }
+    }
+
+    return result;
   }
 
   private checkParameterCount(content: string, findings: EvaluationFinding[]): void {
