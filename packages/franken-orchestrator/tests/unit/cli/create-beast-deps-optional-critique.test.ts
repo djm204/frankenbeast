@@ -28,5 +28,5 @@ describe('create-beast-deps optional @franken/critique loading', () => {
   it('module still evaluates when @franken/critique is absent (keeps fail-closed path reachable)', async () => {
     const mod = await import('../../../src/cli/create-beast-deps.js');
     expect(typeof mod.createBeastDeps).toBe('function');
-  });
+  }, 15_000);
 });

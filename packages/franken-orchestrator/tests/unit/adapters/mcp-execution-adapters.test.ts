@@ -42,6 +42,24 @@ describe('MCP execution adapters', () => {
       .toEqual(['query', 'search/query', 'summarize', 'search/summarize']);
   });
 
+  it('SkillManagerAdapter preserves requiresHitl metadata from tool manifests', () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
+    mkdirSync(join(skillsDir, 'github'));
+    writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({ mcpServers: { github: { command: 'github' } } }));
+    writeFileSync(join(skillsDir, 'github', 'tools.json'), JSON.stringify([
+      { name: 'create_issue', description: 'Create issue', inputSchema: {}, requiresHitl: true },
+      { name: 'list_repos', description: 'List repos', inputSchema: {} },
+    ]));
+    const manager = new SkillManager(skillsDir, new Set(['github']));
+    const adapter = new SkillManagerAdapter(manager);
+
+    expect(adapter.getAvailableSkills()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'create_issue', requiresHitl: true, executionType: 'mcp' }),
+      expect.objectContaining({ id: 'github/create_issue', requiresHitl: true, executionType: 'mcp' }),
+      expect.objectContaining({ id: 'list_repos', requiresHitl: false, executionType: 'mcp' }),
+    ]));
+  });
+
   it('SkillManagerAdapter keeps server aliases only when they resolve to one tool', () => {
     const skillsDir = mkdtempSync(join(tmpdir(), 'franken-skills-'));
     mkdirSync(join(skillsDir, 'memory'));

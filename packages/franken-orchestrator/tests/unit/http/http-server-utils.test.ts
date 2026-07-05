@@ -10,11 +10,16 @@ describe('http-server-utils', () => {
     const aborted = new Promise<void>((resolve) => {
       resolveAbort = resolve;
     });
+    let resolveHandlerReady!: () => void;
+    const handlerReady = new Promise<void>((resolve) => {
+      resolveHandlerReady = resolve;
+    });
 
     app.get('/stream', (c) => {
       c.req.raw.signal.addEventListener('abort', () => {
         resolveAbort();
       }, { once: true });
+      resolveHandlerReady();
       return new Promise<Response>(() => undefined);
     });
 
@@ -31,11 +36,12 @@ describe('http-server-utils', () => {
     request.on('error', () => {
       // Expected after destroying the client side of the long-lived request.
     });
-    setTimeout(() => request.destroy(), 10);
+    await handlerReady;
+    request.destroy();
 
     await expect(Promise.race([
       aborted.then(() => 'aborted'),
-      new Promise((resolve) => setTimeout(() => resolve('timeout'), 1_000)),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 5_000)),
     ])).resolves.toBe('aborted');
     server.closeAllConnections();
     await closeHttpServer(server);

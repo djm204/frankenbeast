@@ -121,7 +121,7 @@ describe('SkillInfoSchema', () => {
 describe('SkillToolManifestSchema', () => {
   it('validates array of tool definitions', () => {
     const manifest: SkillToolManifest = [
-      { name: 'create_issue', description: 'Create an issue', inputSchema: { type: 'object' } },
+      { name: 'create_issue', description: 'Create an issue', inputSchema: { type: 'object' }, requiresHitl: true },
       { name: 'list_repos', description: 'List repos', inputSchema: {} },
     ];
     expect(SkillToolManifestSchema.parse(manifest)).toEqual(manifest);

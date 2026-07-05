@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { MartinLoopConfig, MartinLoopResult, IterationResult, CliSkillConfig, MergeResult } from './cli-types.js';
 import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps.js';
 import type { MartinLoop } from './martin-loop.js';
@@ -165,6 +165,47 @@ function safeReplayJson(value: unknown): string {
 type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
 const BUDGET_POLL_INTERVAL_MS = 100;
 
+type VerifyCommandSpec = {
+  readonly command: string;
+  readonly args: readonly string[];
+};
+
+const ALLOWED_VERIFY_COMMANDS = new Map<string, VerifyCommandSpec>([
+  ['npx tsc --noEmit', { command: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['tsc', '--noEmit'] }],
+  ['npm run typecheck', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['run', 'typecheck'] }],
+  ['npm run build', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['run', 'build'] }],
+  ['npm run lint', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['run', 'lint'] }],
+  ['npm test', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['test'] }],
+  ['npm run test', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['run', 'test'] }],
+]);
+
+/**
+ * Verification commands intentionally use a small exact whitelist and execFileSync.
+ * The verifyCommand option can come from caller-controlled configuration, so never
+ * pass it to a shell or parse arbitrary command text.
+ */
+function normalizeVerifyCommand(verifyCommand: string): VerifyCommandSpec {
+  const normalized = verifyCommand.trim().replace(/\s+/g, ' ');
+  const spec = ALLOWED_VERIFY_COMMANDS.get(normalized);
+  if (!spec) {
+    throw new Error(`Unsafe verifyCommand rejected: ${verifyCommand}`);
+  }
+  return spec;
+}
+
+function runVerifyCommand(verifyCommand: string, cwd: string): void {
+  const spec = normalizeVerifyCommand(verifyCommand);
+  execFileSync(spec.command, [...spec.args], {
+    encoding: 'utf-8',
+    cwd,
+    stdio: 'pipe',
+    // Windows requires cmd.exe to launch npm/npx .cmd shims. This remains safe
+    // because verifyCommand is matched against exact hard-coded commands above;
+    // caller-provided command text is never passed through the shell.
+    shell: process.platform === 'win32',
+  });
+}
+
 type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<
   MartinLoopConfig,
   'command' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
@@ -209,11 +250,7 @@ export class CliSkillExecutor {
 
     if (this.verifyCommand) {
       try {
-        execSync(this.verifyCommand, {
-          encoding: 'utf-8',
-          cwd: this.git.getWorkingDir(),
-          stdio: 'pipe',
-        });
+        runVerifyCommand(this.verifyCommand, this.git.getWorkingDir());
       } catch {
         // Verification failed — reset to last known good commit
         const lastHash = checkpoint.lastCommit(taskId, stage);

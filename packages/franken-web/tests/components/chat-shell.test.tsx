@@ -412,6 +412,7 @@ describe('ChatShell', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Service logs')).toBeDefined();
+      expect(screen.getByRole('option', { name: /chat-server/i })).toBeDefined();
     });
 
     fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });

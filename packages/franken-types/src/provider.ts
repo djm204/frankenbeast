@@ -89,6 +89,8 @@ export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** True when using this tool requires human approval before execution. */
+  requiresHitl?: boolean | undefined;
 }
 
 // --- Stream Events ---
@@ -163,6 +165,7 @@ export const ToolDefinitionSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   inputSchema: z.record(z.unknown()),
+  requiresHitl: z.boolean().optional(),
 });
 
 export const TokenUsageSchema = z.object({
