@@ -230,6 +230,19 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
   ];
 }
 
+function preserveLocalFailedMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
+  const snapshot = normalizeTranscript(transcript);
+  const snapshotKeys = new Set(snapshot.map((message) => `${message.role}\u0000${message.content}`));
+  const snapshotIds = new Set(snapshot.map((message) => message.id));
+  const localFailures = current.filter((message) => (
+    message.receipt === 'failed'
+    && !snapshotIds.has(message.id)
+    && !snapshotKeys.has(`${message.role}\u0000${message.content}`)
+  ));
+
+  return [...snapshot, ...localFailures];
+}
+
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -359,7 +372,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'session.ready':
           if (!readyRef.current) {
             readyRef.current = true;
-            setMessages(normalizeTranscript(payload.transcript));
+            setMessages((current) => preserveLocalFailedMessages(current, payload.transcript));
             setPendingApproval(payload.pendingApproval ?? null);
             setProjectId(payload.projectId);
           }
@@ -493,6 +506,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     return () => {
       shouldReconnect = false;
+      failAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
       socket.close();
       socketRef.current = null;
     };
@@ -506,7 +520,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     const clientMessageId = makeId('user');
     setMessages((current) => [
-      ...current,
+      ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
       {
         id: clientMessageId,
         role: 'user',
@@ -565,6 +579,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   }
 
   async function retryMessage(messageId: string): Promise<void> {
+    if (status !== 'idle' && status !== 'error') {
+      return;
+    }
     const message = messages.find((candidate) => candidate.id === messageId);
     if (!message || message.role !== 'user') {
       return;

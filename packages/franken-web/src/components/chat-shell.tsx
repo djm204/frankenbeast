@@ -666,6 +666,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 onRetryMessage={(messageId) => {
                   void retryMessage(messageId).catch(() => undefined);
                 }}
+                retryDisabled={status !== 'idle' && status !== 'error'}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer

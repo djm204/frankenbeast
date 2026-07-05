@@ -295,6 +295,96 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('removes stale failed drafts when retrying the same prompt', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let failedSend!: Promise<void>;
+    act(() => {
+      failedSend = result.current.send('retry without duplicates');
+    });
+    const failedId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.error();
+    });
+    await expect(failedSend).rejects.toThrow('WebSocket send failed');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: failedId,
+      receipt: 'failed',
+    }));
+
+    let retrySend!: Promise<void>;
+    act(() => {
+      retrySend = result.current.retryMessage(failedId);
+    });
+    const retryId = (JSON.parse(socket.sent[1] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        clientMessageId: retryId,
+        timestamp: '2026-03-09T00:00:02Z',
+      });
+    });
+    await act(async () => {
+      await retrySend;
+    });
+
+    expect(result.current.messages.filter((message) => message.content === 'retry without duplicates')).toHaveLength(1);
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ id: failedId }));
+  });
+
+  it('preserves local failed sends when reconnect snapshots omit them', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let failedSend!: Promise<void>;
+    act(() => {
+      failedSend = result.current.send('keep failed draft after reconnect');
+    });
+    const failedId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.shutdown();
+    });
+    await expect(failedSend).rejects.toThrow('Connection closed');
+
+    const reconnect = MockWebSocket.instances[1]!;
+    act(() => {
+      reconnect.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: failedId,
+      content: 'keep failed draft after reconnect',
+      receipt: 'failed',
+    }));
+  });
+
   it('surfaces pending approvals and sends approval responses over the socket', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 

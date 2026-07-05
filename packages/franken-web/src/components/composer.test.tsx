@@ -88,4 +88,27 @@ describe('Composer failed-send recovery', () => {
 
     expect(onRetryMessage).toHaveBeenCalledWith('user-failed-1');
   });
+
+  it('disables failed-message resends while another turn is active', () => {
+    render(
+      <TranscriptPane
+        messages={[
+          {
+            id: 'user-failed-1',
+            role: 'user',
+            content: 'retry this failed dispatch',
+            timestamp: '2026-07-05T00:00:00.000Z',
+            receipt: 'failed',
+            error: 'Socket ack timed out',
+          },
+        ]}
+        onRetryMessage={vi.fn()}
+        retryDisabled
+        showTypingIndicator={false}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Resend failed message' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
 });
