@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
 import { createBeastServices, type BeastServiceBundle, type BeastServicePaths } from '../beasts/create-beast-services.js';
+import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { createBeastDaemonApp } from './beast-daemon-app.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 
@@ -76,7 +77,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
     throw new Error('Beast daemon did not bind to a TCP address');
   }
 
-  const url = `http://${host}:${address.port}`;
+  const url = localPlaintextOrSecureEndpoint(host, address.port);
 
   return {
     app,

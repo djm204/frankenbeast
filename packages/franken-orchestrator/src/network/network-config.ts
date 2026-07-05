@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+const HostSchema = z.string().min(1).default('127.0.0.1');
 const PortSchema = z.number().int().min(1).max(65_535);
 
 export function isLoopbackHost(host: string): boolean {
@@ -15,10 +16,28 @@ export function isLoopbackHost(host: string): boolean {
   return normalized.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
-const LocalServiceHostSchema = z.string().min(1).refine(
-  isLoopbackHost,
-  { message: 'Managed service hosts must be loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.' },
-).default('127.0.0.1');
+function requireLoopbackServiceHost(ctx: z.RefinementCtx, host: string): void {
+  if (!isLoopbackHost(host)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['host'],
+      message: 'Managed service hosts must be loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.',
+    });
+  }
+}
+
+function requireLocalPlaintextOrSecureUrl(
+  ctx: z.RefinementCtx,
+  path: string,
+  value: string,
+  secureProtocols: string[],
+  localProtocols: string[],
+  message: string,
+): void {
+  if (!isLocalPlaintextOrSecureUrl(value, secureProtocols, localProtocols)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  }
+}
 
 function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], localProtocols: string[]): boolean {
   try {
@@ -32,15 +51,7 @@ function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], l
   }
 }
 
-const LocalHttpOrHttpsUrlSchema = z.string().url().refine(
-  (value) => isLocalPlaintextOrSecureUrl(value, ['https:'], ['http:']),
-  { message: 'Must use https:// unless the URL targets a loopback-only development host.' },
-);
-
-const LocalWsOrWssUrlSchema = z.string().url().refine(
-  (value) => isLocalPlaintextOrSecureUrl(value, ['wss:'], ['ws:']),
-  { message: 'Must use wss:// unless the URL targets a loopback-only development host.' },
-);
+const UrlSchema = z.string().url();
 
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
@@ -63,22 +74,37 @@ export const NetworkOperatorConfigSchema = z.object({
 
 export const ChatServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: LocalServiceHostSchema,
+  host: HostSchema,
   port: PortSchema.default(3737),
   model: z.string().min(1).default('claude-sonnet-4-6'),
+}).superRefine((value, ctx) => {
+  if (value.enabled) requireLoopbackServiceHost(ctx, value.host);
 });
 
 export const BeastDaemonServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: LocalServiceHostSchema,
+  host: HostSchema,
   port: PortSchema.default(4050),
+}).superRefine((value, ctx) => {
+  if (value.enabled) requireLoopbackServiceHost(ctx, value.host);
 });
 
 export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: LocalServiceHostSchema,
+  host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: LocalHttpOrHttpsUrlSchema.default('http://127.0.0.1:3737'),
+  apiUrl: UrlSchema.default('http://127.0.0.1:3737'),
+}).superRefine((value, ctx) => {
+  if (!value.enabled) return;
+  requireLoopbackServiceHost(ctx, value.host);
+  requireLocalPlaintextOrSecureUrl(
+    ctx,
+    'apiUrl',
+    value.apiUrl,
+    ['https:'],
+    ['http:'],
+    'Must use https:// unless the URL targets a loopback-only development host.',
+  );
 });
 
 export const SlackChannelConfigSchema = z.object({
@@ -110,14 +136,25 @@ export const WhatsAppChannelConfigSchema = z.object({
 
 export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  host: LocalServiceHostSchema,
+  host: HostSchema,
   port: PortSchema.default(3200),
-  orchestratorWsUrl: LocalWsOrWssUrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
+  orchestratorWsUrl: UrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
   slack: SlackChannelConfigSchema.default({}),
   discord: DiscordChannelConfigSchema.default({}),
   telegram: TelegramChannelConfigSchema.default({}),
   whatsapp: WhatsAppChannelConfigSchema.default({}),
+}).superRefine((value, ctx) => {
+  if (!value.enabled) return;
+  requireLoopbackServiceHost(ctx, value.host);
+  requireLocalPlaintextOrSecureUrl(
+    ctx,
+    'orchestratorWsUrl',
+    value.orchestratorWsUrl,
+    ['wss:'],
+    ['ws:'],
+    'Must use wss:// unless the URL targets a loopback-only development host.',
+  );
 });
 
 export const NetworkConfigSchema = z.object({

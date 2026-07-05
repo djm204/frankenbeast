@@ -21,4 +21,6 @@ jobs:
 
       - run: npm run test:root -- tests/workspaces.test.ts
 
+      - run: npm run lint:security
+
       - run: npx turbo run build test lint

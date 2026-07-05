@@ -63,7 +63,7 @@ function literalUrlFromMatch(value) {
     const parsed = new URL(prefix);
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
-    return undefined;
+    return value;
   }
 }
 

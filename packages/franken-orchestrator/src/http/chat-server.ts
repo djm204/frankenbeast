@@ -23,6 +23,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } from '../network/network-url.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 
@@ -337,8 +338,8 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     throw new Error('Chat server did not bind to a TCP address');
   }
 
-  const url = `http://${host}:${address.port}`;
-  const wsUrl = `ws://${host}:${address.port}${path}`;
+  const url = localPlaintextOrSecureEndpoint(host, address.port);
+  const wsUrl = localPlaintextOrSecureWebSocketUrl(host, address.port, path);
 
   return {
     app,

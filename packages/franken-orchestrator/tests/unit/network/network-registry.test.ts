@@ -109,7 +109,7 @@ describe('network-registry', () => {
     })).toThrow(/https:\/\//);
 
     expect(() => NetworkConfigSchema.parse({
-      comms: { orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+      comms: { enabled: true, orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
     })).toThrow(/wss:\/\//);
 
     expect(() => NetworkConfigSchema.parse({
@@ -130,6 +130,21 @@ describe('network-registry', () => {
     expect(() => NetworkConfigSchema.parse({
       beastsDaemon: { host: '0.0.0.0' },
     })).toThrow(/loopback-only/);
+  });
+
+  it('does not validate disabled service endpoint settings', () => {
+    expect(NetworkConfigSchema.parse({
+      dashboard: {
+        enabled: false,
+        host: '0.0.0.0',
+        apiUrl: 'http://internal-service:3737',
+      },
+      comms: {
+        enabled: false,
+        host: '0.0.0.0',
+        orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws',
+      },
+    }).dashboard.enabled).toBe(false);
   });
 
   it('projects runtime config for each service', () => {
