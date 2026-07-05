@@ -83,7 +83,7 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 | Server | Tools | Description |
 |--------|-------|-------------|
 | `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget` | Key-value and episodic memory via SqliteBrain |
-| `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail` | Audit trail with chained hashes, token/cost logging and summaries |
+| `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
 | `fbeast-critique` | `fbeast_critique_evaluate`, `fbeast_critique_compare` | Content evaluation and revision comparison |
@@ -94,7 +94,7 @@ All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is sco
 
 ## Combined server
 
-`fbeast-mcp` runs all 20 tools in a single MCP server process.
+`fbeast-mcp` runs all 21 tools in a single MCP server process.
 
 ## Hooks
 
