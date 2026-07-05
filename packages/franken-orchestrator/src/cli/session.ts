@@ -1,5 +1,5 @@
 import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, join } from 'node:path';
+import { isAbsolute, relative, resolve, join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
@@ -36,7 +36,7 @@ function resolveContainedExistingPath(projectRoot: string, requestedPath: string
   const requested = isAbsolute(requestedPath) ? requestedPath : resolve(root, requestedPath);
   const target = realpathSync(requested);
   const rel = relative(root, target);
-  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {
     throw new Error(`${fieldName} resolves outside project root: ${requestedPath}`);
   }
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
@@ -11,7 +11,7 @@ function resolveContainedConfigPath(fieldName: string, projectRoot: string | und
   const root = resolve(projectRoot);
   const target = isAbsolute(requested) ? resolve(requested) : resolve(root, requested);
   const rel = relative(root, target);
-  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {
     throw new Error(`${fieldName} resolves outside project root: ${requested}`);
   }
 
