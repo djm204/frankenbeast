@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitest/config'
+import { readVitestFlags } from '../../scripts/vitest-env.js'
 
-const isIntegration = Boolean(process.env['INTEGRATION'])
-const isEval = Boolean(process.env['EVAL'])
+const vitestFlags = readVitestFlags()
+const isIntegration = vitestFlags.INTEGRATION
+const isEval = vitestFlags.EVAL
 
 export default defineConfig({
   test: {
