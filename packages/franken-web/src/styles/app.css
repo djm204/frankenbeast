@@ -448,6 +448,39 @@ button {
   gap: 1rem;
 }
 
+.chat-alerts {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.chat-alert {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(255, 122, 107, 0.38);
+  border-radius: 1.1rem;
+  background: rgba(255, 122, 107, 0.1);
+  color: #ffd0ca;
+}
+
+.chat-alert__body {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.chat-alert__body h2 {
+  font-size: 1rem;
+}
+
+.chat-alert__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
 .session-switcher {
   display: flex;
   justify-content: space-between;
@@ -808,6 +841,23 @@ button {
   word-break: break-word;
 }
 
+.activity-event__details {
+  margin-top: 0.55rem;
+  color: var(--text-muted);
+}
+
+.activity-event__details summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+}
+
+.activity-event__details pre {
+  margin-top: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .approval-card__description {
   margin-bottom: 0.9rem;
 }
@@ -1002,6 +1052,44 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+.beast-confirm-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.beast-confirm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 61;
+  width: min(92vw, 28rem);
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+  border: 1px solid rgba(255, 122, 107, 0.36);
+  border-radius: 1rem;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.beast-confirm-dialog__title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.beast-confirm-dialog__description {
+  color: var(--text-muted);
+}
+
+.beast-confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .beast-detail {
