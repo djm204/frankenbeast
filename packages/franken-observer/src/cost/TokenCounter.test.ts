@@ -57,6 +57,26 @@ describe('TokenCounter', () => {
       const grand = counter.grandTotal()
       expect(grand.totalTokens).toBe(0)
     })
+
+    it('keeps grand totals in sync with record() and reset()', () => {
+      for (let i = 0; i < 1_000; i += 1) {
+        counter.record({ model: `model-${i}`, promptTokens: 2, completionTokens: 3 })
+      }
+
+      expect(counter.grandTotal()).toEqual({
+        promptTokens: 2_000,
+        completionTokens: 3_000,
+        totalTokens: 5_000,
+      })
+
+      counter.reset()
+
+      expect(counter.grandTotal()).toEqual({
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      })
+    })
   })
 
   describe('allModels()', () => {

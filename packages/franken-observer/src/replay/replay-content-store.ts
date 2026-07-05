@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
 
 export class ReplayContentStore {
@@ -14,7 +15,7 @@ export class ReplayContentStore {
 
   put(content: string): string {
     const ref = hashContent(content);
-    const path = join(this.dir, ref);
+    const path = this.blobPath(ref);
     if (!existsSync(path)) {
       writeFileSync(path, content, 'utf8');
     }
@@ -22,14 +23,18 @@ export class ReplayContentStore {
   }
 
   get(ref: string): string {
-    const content = readFileSync(join(this.dir, ref), 'utf8');
-    if (hashContent(content) !== ref) {
+    const content = readFileSync(this.blobPath(ref), 'utf8');
+    if (!contentHashMatches(content, ref)) {
       throw new Error(`Replay blob hash mismatch for ${ref}`);
     }
     return content;
   }
 
   __corruptForTest(ref: string, replacement: string): void {
-    writeFileSync(join(this.dir, ref), replacement, 'utf8');
+    writeFileSync(this.blobPath(ref), replacement, 'utf8');
+  }
+
+  private blobPath(ref: string): string {
+    return join(this.dir, ref.replace(/^sha256:/, ''));
   }
 }

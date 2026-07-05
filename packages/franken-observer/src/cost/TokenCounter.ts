@@ -12,6 +12,8 @@ export interface TokenTotals {
 
 export class TokenCounter {
   private readonly counts = new Map<string, { prompt: number; completion: number }>()
+  private totalPromptTokens = 0
+  private totalCompletionTokens = 0
 
   /** A token delta must be a non-negative safe integer. */
   private static assertValidDelta(value: number, label: string): void {
@@ -47,11 +49,12 @@ export class TokenCounter {
     // grandTotal() past the safe-integer range even when every per-model total
     // is safe (e.g. model A with MAX_SAFE_INTEGER prompt, model B with 1). The
     // current stored state is always valid, so grandTotal() will not throw here.
-    const global = this.grandTotal()
-    const globalPrompt = TokenCounter.safeAdd(global.promptTokens, entry.promptTokens)
-    const globalCompletion = TokenCounter.safeAdd(global.completionTokens, entry.completionTokens)
+    const globalPrompt = TokenCounter.safeAdd(this.totalPromptTokens, entry.promptTokens)
+    const globalCompletion = TokenCounter.safeAdd(this.totalCompletionTokens, entry.completionTokens)
     TokenCounter.safeAdd(globalPrompt, globalCompletion)
     this.counts.set(entry.model, { prompt, completion })
+    this.totalPromptTokens = globalPrompt
+    this.totalCompletionTokens = globalCompletion
   }
 
   totalsFor(model: string): TokenTotals {
@@ -64,16 +67,10 @@ export class TokenCounter {
   }
 
   grandTotal(): TokenTotals {
-    let prompt = 0
-    let completion = 0
-    for (const entry of this.counts.values()) {
-      prompt = TokenCounter.safeAdd(prompt, entry.prompt)
-      completion = TokenCounter.safeAdd(completion, entry.completion)
-    }
     return {
-      promptTokens: prompt,
-      completionTokens: completion,
-      totalTokens: TokenCounter.safeAdd(prompt, completion),
+      promptTokens: this.totalPromptTokens,
+      completionTokens: this.totalCompletionTokens,
+      totalTokens: TokenCounter.safeAdd(this.totalPromptTokens, this.totalCompletionTokens),
     }
   }
 
@@ -83,5 +80,7 @@ export class TokenCounter {
 
   reset(): void {
     this.counts.clear()
+    this.totalPromptTokens = 0
+    this.totalCompletionTokens = 0
   }
 }
