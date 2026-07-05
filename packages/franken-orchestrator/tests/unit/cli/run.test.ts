@@ -760,6 +760,7 @@ describe('main() execution', () => {
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+    delete process.env.FRANKENBEAST_RUN_CONFIG;
     delete process.env.DISCORD_BOT_TOKEN;
     delete process.env.DISCORD_PUBLIC_KEY;
     for (const dir of tempDirs.splice(0)) {
@@ -816,6 +817,45 @@ describe('main() execution', () => {
     expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
       entryPhase: 'execute',
       resume: true,
+    }));
+  });
+
+  it('uses FRANKENBEAST_RUN_CONFIG provider for availability preflight before creating the Session', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-config-provider-${Date.now()}`);
+    const runConfigPath = join(root, 'run-config.json');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(runConfigPath, JSON.stringify({ provider: 'codex' }));
+    tempDirs.push(root);
+    process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
+
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: {
+        default: 'claude',
+        fallbackChain: [],
+        overrides: {
+          claude: { command: 'definitely-missing-frankenbeast-claude' },
+          codex: { command: 'sh' },
+        },
+      },
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+    } as any);
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'claude',
+      orchestratorConfig: expect.objectContaining({
+        providers: expect.objectContaining({ default: 'claude' }),
+      }),
     }));
   });
 
