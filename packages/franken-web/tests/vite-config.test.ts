@@ -22,6 +22,8 @@ describe('operator token bridge', () => {
     expect(CONFIG_SOURCE).toContain("env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || ''");
     expect(CONFIG_SOURCE).toContain('operatorProxy(beastProxyTarget, operatorToken)');
     expect(CONFIG_SOURCE).toContain("path.startsWith('/v1/network') || path.startsWith('/v1/chat')");
+    expect(CONFIG_SOURCE).toContain('isTrustedProxyRequest(req)');
+    expect(CONFIG_SOURCE).toContain("new URL(origin).host === host");
     expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('authorization'");
   });
 });

@@ -50,11 +50,34 @@ function operatorProxy(
     changeOrigin: true,
     configure(proxy) {
       proxy.on('proxyReq', (proxyReq, req) => {
-        if (!operatorToken || !shouldInject(req.url ?? '')) {
+        if (!operatorToken || !shouldInject(req.url ?? '') || !isTrustedProxyRequest(req)) {
           return;
         }
         proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
       });
     },
   };
+}
+
+function isTrustedProxyRequest(req: { method?: string; headers: Record<string, string | string[] | undefined> }): boolean {
+  const origin = headerValue(req.headers.origin);
+  const host = headerValue(req.headers.host);
+  if (origin && host) {
+    try {
+      return new URL(origin).host === host;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!['GET', 'HEAD', 'OPTIONS'].includes((req.method ?? '').toUpperCase())) {
+    return false;
+  }
+
+  const fetchSite = headerValue(req.headers['sec-fetch-site'])?.toLowerCase();
+  return fetchSite === 'same-origin' || fetchSite === 'same-site' || fetchSite === 'none';
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

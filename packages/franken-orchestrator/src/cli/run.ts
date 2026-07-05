@@ -1043,6 +1043,22 @@ function formatStatus(status: { mode?: string; secureBackend?: string; services:
   return lines;
 }
 
+async function resolveBeastOperatorTokenForNetwork(root: string, config: OrchestratorConfig): Promise<string | undefined> {
+  let secretStore: ISecretStore | undefined;
+  try {
+    secretStore = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
+      projectRoot: root,
+      passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+    });
+  } catch {
+    secretStore = undefined;
+  }
+  return resolveBeastOperatorToken(root, {
+    ...(secretStore ? { secretStore } : {}),
+    config,
+  });
+}
+
 export async function runNetworkCommand(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -1104,7 +1120,7 @@ export async function runNetworkCommand(
   }
 
   const configFile = args.config ? resolvePath(args.config) : undefined;
-  const services = filterNetworkServices(
+  let services = filterNetworkServices(
     deps.resolveServices(config, {
       repoRoot: root,
       ...(configFile ? { configFile } : {}),
@@ -1112,6 +1128,32 @@ export async function runNetworkCommand(
     }),
     action === 'up' ? undefined : args.networkTarget,
   );
+
+  if ((action === 'up' || action === 'start' || action === 'restart')
+    && services.some((service) => service.id === 'dashboard-web')) {
+    const dashboardOperatorToken = await resolveBeastOperatorTokenForNetwork(root, config);
+    if (dashboardOperatorToken) {
+      services = services.map((service) => {
+        if (service.id !== 'dashboard-web' || !service.runtimeConfig.process) {
+          return service;
+        }
+        const updatedService: ResolvedNetworkService = {
+          ...service,
+          runtimeConfig: {
+            ...service.runtimeConfig,
+            process: {
+              ...service.runtimeConfig.process,
+              env: {
+                ...service.runtimeConfig.process.env,
+                FRANKENBEAST_BEAST_OPERATOR_TOKEN: dashboardOperatorToken,
+              },
+            },
+          },
+        };
+        return updatedService;
+      });
+    }
+  }
 
   if (action === 'restart') {
     await supervisor.stop(args.networkTarget ?? 'all');
