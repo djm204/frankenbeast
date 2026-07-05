@@ -190,6 +190,8 @@ describe('createSqliteAnalyticsService', () => {
     service.close?.();
 
     expect(closeSpy).toHaveBeenCalledTimes(1);
+    await expect(service.listEvents({ timeWindow: 'all' })).resolves.toMatchObject({ total: 0 });
+    expect(closeSpy).toHaveBeenCalledTimes(1);
     closeSpy.mockRestore();
   });
 

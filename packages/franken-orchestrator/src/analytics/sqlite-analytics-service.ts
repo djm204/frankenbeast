@@ -89,6 +89,7 @@ export function createSqliteAnalyticsService(options: SqliteAnalyticsServiceOpti
 
 class SqliteAnalyticsService implements AnalyticsService {
   private db: Database.Database | null;
+  private closed = false;
 
   constructor(private readonly options: SqliteAnalyticsServiceOptions) {
     this.db = existsSync(options.dbPath)
@@ -99,9 +100,13 @@ class SqliteAnalyticsService implements AnalyticsService {
   close(): void {
     this.db?.close();
     this.db = null;
+    this.closed = true;
   }
 
   private getDb(): Database.Database | null {
+    if (this.closed) {
+      return null;
+    }
     if (!this.db && existsSync(this.options.dbPath)) {
       this.db = new Database(this.options.dbPath, { readonly: true, fileMustExist: true });
     }
