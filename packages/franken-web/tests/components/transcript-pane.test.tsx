@@ -1,8 +1,17 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TranscriptPane } from '../../src/components/transcript-pane.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function setScrollMetrics(element: Element, metrics: { scrollHeight: number; scrollTop: number; clientHeight: number }) {
+  Object.defineProperty(element, 'scrollHeight', { configurable: true, value: metrics.scrollHeight });
+  Object.defineProperty(element, 'scrollTop', { configurable: true, value: metrics.scrollTop });
+  Object.defineProperty(element, 'clientHeight', { configurable: true, value: metrics.clientHeight });
+}
 
 describe('TranscriptPane', () => {
   it('renders messages with role labels', () => {
@@ -47,5 +56,35 @@ describe('TranscriptPane', () => {
     ];
     render(<TranscriptPane messages={messages} showTypingIndicator={false} />);
     expect(screen.queryByText(/cheap|premium/i)).toBeNull();
+  });
+
+  it('preserves scroll position and offers a jump button when new messages arrive while scrolled up', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const firstMessage = { id: 'u1', role: 'user' as const, content: 'Original', timestamp: new Date().toISOString() };
+    const { container, rerender } = render(<TranscriptPane messages={[firstMessage]} showTypingIndicator={false} />);
+    scrollIntoView.mockClear();
+
+    const body = container.querySelector('.transcript-pane__body');
+    expect(body).toBeTruthy();
+    setScrollMetrics(body!, { scrollHeight: 1000, scrollTop: 100, clientHeight: 300 });
+    fireEvent.scroll(body!);
+
+    rerender(
+      <TranscriptPane
+        messages={[
+          firstMessage,
+          { id: 'a1', role: 'assistant' as const, content: 'New reply', timestamp: new Date().toISOString() },
+        ]}
+        showTypingIndicator={false}
+      />,
+    );
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    const jumpButton = screen.getByRole('button', { name: /new messages/i });
+    expect(jumpButton).toBeTruthy();
+
+    fireEvent.click(jumpButton);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'end' });
   });
 });

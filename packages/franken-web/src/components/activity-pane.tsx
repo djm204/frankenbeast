@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
 import type { ActivityEvent } from '../hooks/use-chat-session';
+import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface ActivityPaneProps {
   events: ActivityEvent[];
@@ -28,13 +28,7 @@ function summarizeActivity(event: ActivityEvent): string {
 }
 
 export function ActivityPane({ events }: ActivityPaneProps) {
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [events.length]);
+  const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll(events.length);
 
   return (
     <section className="rail-card" aria-label="Activity">
@@ -43,7 +37,7 @@ export function ActivityPane({ events }: ActivityPaneProps) {
         <h2>Runtime Events</h2>
       </div>
       {events.length === 0 && <p className="rail-card__empty">Waiting for execution events.</p>}
-      <div className="activity-list">
+      <div ref={containerRef} className="activity-list" onScroll={handleScroll}>
         {events.map((event, index) => (
           <article key={`${event.type}-${event.timestamp}-${index}`} className="activity-event">
             <strong className="activity-event__type">{event.type}</strong>
@@ -56,6 +50,11 @@ export function ActivityPane({ events }: ActivityPaneProps) {
         ))}
         <div ref={endRef} />
       </div>
+      {hasNewItems && (
+        <button className="scroll-jump-button" type="button" onClick={() => scrollToLatest()}>
+          New activity — jump to latest
+        </button>
+      )}
     </section>
   );
 }

@@ -497,6 +497,7 @@ button {
 }
 
 .transcript-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 32rem;
@@ -522,6 +523,25 @@ button {
   gap: 1rem;
   padding: 1.25rem 1.25rem 1.5rem;
   overflow: auto;
+}
+
+.scroll-jump-button {
+  align-self: center;
+  margin: 0.75rem auto 1rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid rgba(134, 228, 95, 0.4);
+  border-radius: 999px;
+  background: rgba(134, 228, 95, 0.16);
+  color: var(--accent-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.scroll-jump-button:hover,
+.scroll-jump-button:focus-visible {
+  background: rgba(134, 228, 95, 0.24);
 }
 
 .message-card {

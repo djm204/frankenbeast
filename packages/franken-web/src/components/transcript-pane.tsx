@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '../hooks/use-chat-session';
+import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface TranscriptPaneProps {
   messages: ChatMessage[];
@@ -9,13 +9,9 @@ export interface TranscriptPaneProps {
 }
 
 export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false, showTypingIndicator }: TranscriptPaneProps) {
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [messages.length, showTypingIndicator]);
+  const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll(
+    `${messages.length}:${showTypingIndicator}`,
+  );
 
   return (
     <section className="transcript-pane" aria-label="Transcript">
@@ -27,7 +23,7 @@ export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false
         <p className="transcript-pane__meta">CLI-parity conversation stream with live execution telemetry.</p>
       </div>
 
-      <div className="transcript-pane__body">
+      <div ref={containerRef} className="transcript-pane__body" onScroll={handleScroll}>
         {messages.length === 0 && (
           <div className="empty-state">
             <p>No messages yet.</p>
@@ -68,6 +64,11 @@ export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false
 
         <div ref={endRef} />
       </div>
+      {hasNewItems && (
+        <button className="scroll-jump-button" type="button" onClick={() => scrollToLatest()}>
+          New messages — jump to latest
+        </button>
+      )}
     </section>
   );
 }
