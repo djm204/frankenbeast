@@ -1,7 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "separate-pull-requests": false,
-  "plugins": ["node-workspace"],
+  "plugins": [
+    "node-workspace"
+  ],
   "changelog-sections": [
     {
       "type": "feat",
@@ -61,7 +63,8 @@
         "packages/franken-planner",
         "packages/franken-types",
         "packages/franken-mcp-suite",
-        "packages/live-bench"
+        "packages/live-bench",
+        "packages/franken-web"
       ]
     },
     "packages/franken-brain": {
@@ -99,6 +102,10 @@
     "packages/live-bench": {
       "release-type": "node",
       "component": "live-bench"
+    },
+    "packages/franken-web": {
+      "release-type": "node",
+      "component": "franken-web"
     }
   }
 }
