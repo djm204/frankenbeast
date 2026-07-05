@@ -15,15 +15,15 @@ describe('local setup scripts', () => {
         .filter((rel) => existsSync(join(ROOT, rel))),
     ];
 
-    expect(read('.nvmrc').trim()).toBe('22.12.0');
+    expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
-      expect(manifest.engines?.node).toBe('>=22.12.0');
+      expect(manifest.engines?.node).toBe('>=22.13.0 <23 || >=24.0.0');
     }
 
-    expect(read('scripts/verify-setup.ts')).toContain("check('Node.js >= 22.12.0'");
+    expect(read('scripts/verify-setup.ts')).toContain("check('Node.js >= 22.13.0 <23 || >=24.0.0'");
   });
 
   it('verify-setup checks the live Chroma v2 heartbeat and no removed firewall service', () => {

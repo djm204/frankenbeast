@@ -316,7 +316,7 @@ The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat ser
 
 ## Prerequisites
 
-- **Node.js** >= 22.12.0 (see `.nvmrc`; npm enforces this with `engine-strict=true`)
+- **Node.js** >= 22.13.0 (see `.nvmrc`; npm enforces this with `engine-strict=true`)
 - **npm** >= 10.0.0
 
 ### Optional
