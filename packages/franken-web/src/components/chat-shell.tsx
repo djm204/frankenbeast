@@ -229,6 +229,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     messages,
     pendingApproval,
     projectId: activeProjectId,
+    reconnect,
     retryError,
     send,
     sessionId: activeSessionId,
@@ -704,6 +705,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <Composer
                 connectionStatus={connectionStatus}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
+                onReconnect={reconnect}
                 onSend={(content) => {
                   void send(content);
                 }}
