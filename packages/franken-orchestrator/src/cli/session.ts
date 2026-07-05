@@ -1,5 +1,5 @@
-import { readFileSync, mkdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
@@ -30,6 +30,18 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
+
+function resolveContainedExistingPath(projectRoot: string, requestedPath: string, fieldName: string): string {
+  const root = realpathSync(resolve(projectRoot));
+  const requested = isAbsolute(requestedPath) ? requestedPath : resolve(root, requestedPath);
+  const target = realpathSync(requested);
+  const rel = relative(root, target);
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+    throw new Error(`${fieldName} resolves outside project root: ${requestedPath}`);
+  }
+
+  return target;
+}
 
 export interface SessionConfig {
   paths: ProjectPaths;
@@ -293,7 +305,8 @@ export class Session {
     let designContent: string;
     if (designDocPath) {
       try {
-        designContent = readFileSync(designDocPath, 'utf-8');
+        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath');
+        designContent = readFileSync(safeDesignDocPath, 'utf-8');
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           throw new Error(

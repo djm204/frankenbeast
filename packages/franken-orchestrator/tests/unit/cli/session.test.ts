@@ -353,22 +353,31 @@ describe('Session', () => {
 
     it('uses designDocPath when provided (--design-doc flag)', async () => {
       const { Session } = await import('../../../src/cli/session.js');
-      const testDir = resolve(tmpdir(), `fb-test-design-${Date.now()}`);
-      mkdirSync(testDir, { recursive: true });
-      const designPath = resolve(testDir, 'custom-design.md');
+      const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
+      const designPath = resolve(config.paths.root, 'custom-design.md');
       writeFileSync(designPath, '# Custom Design');
 
-      const config = makeConfig({
-        entryPhase: 'plan',
-        exitAfter: 'plan',
-        designDocPath: designPath,
-      });
+      config.designDocPath = designPath;
       await new Session(config).start();
 
       // readDesignDoc should NOT be called when designDocPath is provided
       expect(mockReadDesignDoc).not.toHaveBeenCalled();
 
-      rmSync(testDir, { recursive: true, force: true });
+      rmSync(designPath, { force: true });
+    });
+
+    it('rejects designDocPath values outside the project root', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
+      const outsidePath = resolve(config.paths.root, '..', `outside-design-${Date.now()}.md`);
+      writeFileSync(outsidePath, '# Outside Design');
+      config.designDocPath = outsidePath;
+
+      await expect(new Session(config).start()).rejects.toThrow(
+        /designDocPath.*outside project root/,
+      );
+
+      rmSync(outsidePath, { force: true });
     });
 
     it('throws friendly ENOENT error when designDocPath file is missing', async () => {

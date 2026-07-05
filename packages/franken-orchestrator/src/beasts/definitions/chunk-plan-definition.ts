@@ -1,6 +1,22 @@
 import { z } from 'zod';
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
+
+function resolveContainedConfigPath(fieldName: string, projectRoot: string | undefined, requested: string): string {
+  if (!projectRoot) {
+    return requested;
+  }
+
+  const root = resolve(projectRoot);
+  const target = isAbsolute(requested) ? resolve(requested) : resolve(root, requested);
+  const rel = relative(root, target);
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) {
+    throw new Error(`${fieldName} resolves outside project root: ${requested}`);
+  }
+
+  return target;
+}
 
 export const chunkPlanDefinition: BeastDefinition = {
   id: 'chunk-plan',
@@ -27,17 +43,26 @@ export const chunkPlanDefinition: BeastDefinition = {
       required: true,
     },
   ],
-  buildProcessSpec: (config) => ({
-    command: process.execPath,
-    args: [
-      resolveCliEntrypoint(),
-      'plan',
-      '--design-doc', String(config.designDocPath),
-      '--output-dir', String(config.outputDir),
-    ],
-    env: { FRANKENBEAST_SPAWNED: '1' },
-    cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
-  }),
+  buildProcessSpec: (config) => {
+    const projectRoot = String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const designDocPath = resolveContainedConfigPath(
+      'designDocPath',
+      projectRoot,
+      String(config.designDocPath),
+    );
+
+    return {
+      command: process.execPath,
+      args: [
+        resolveCliEntrypoint(),
+        'plan',
+        '--design-doc', designDocPath,
+        '--output-dir', String(config.outputDir),
+      ],
+      env: { FRANKENBEAST_SPAWNED: '1' },
+      cwd: projectRoot,
+    };
+  },
   telemetryLabels: {
     family: 'chunk-plan',
   },
