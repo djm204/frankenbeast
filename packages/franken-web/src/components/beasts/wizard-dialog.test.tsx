@@ -58,4 +58,23 @@ describe('WizardDialog validation', () => {
 
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', false);
   });
+
+  it('shows form view validation errors when launch is blocked', () => {
+    const onLaunch = vi.fn();
+    render(
+      <WizardDialog
+        isOpen
+        onClose={vi.fn()}
+        onLaunch={onLaunch}
+        containerRuntime={{ available: true }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle form mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Agent' }));
+
+    expect(onLaunch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Identity: Agent name is required');
+    expect(screen.getByRole('alert').textContent).toContain('Workflow: Workflow type is required');
+  });
 });

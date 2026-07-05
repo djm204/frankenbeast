@@ -48,6 +48,8 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   const isFirstStep = wizardStep === 0;
   const currentValidationErrors = validateWizardStep(wizardStep, stepValues);
   const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
+  const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues);
+  const formIsValid = Object.keys(formValidationErrors).length === 0;
   const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues);
 
   function syncValidationErrors(step: number, errors: WizardValidationErrors) {
@@ -64,7 +66,9 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
       for (let i = 0; i < STEP_LABELS.length - 1; i += 1) {
         syncValidationErrors(i, validateWizardStep(i, stepValues));
       }
-      setWizardStep(firstInvalidStep);
+      if (wizardMode === 'wizard') {
+        setWizardStep(firstInvalidStep);
+      }
       return;
     }
 
@@ -175,6 +179,9 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
             </div>
             {wizardMode === 'wizard' && !launchError && !currentStepIsValid && (
               <ValidationSummary stepLabel={STEP_LABELS[wizardStep] ?? 'Current step'} errors={currentValidationErrors} />
+            )}
+            {wizardMode === 'form' && !launchError && !formIsValid && (
+              <ValidationSummary stepLabel="Form View" errors={formValidationErrors} />
             )}
             {launchError && (
               <div
