@@ -300,6 +300,47 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toContain('destructive payload blocked');
   });
 
+  it('preserves command text inside object-array command fields', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    // A command field holding an array of command OBJECTS must not collapse to
+    // "[object Object]" — the dangerous text has to survive into the context.
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { commands: [{ command: 'rm -rf /tmp/x' }] },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('extracts the tool name even when NODE_OPTIONS forces ESM eval mode', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    // If the parse eval ran as an ES module, require("fs") would throw and the
+    // tool name would come back empty (fail-closed deny). The scripts force
+    // --input-type=commonjs, so a destructive payload is still governed.
+    const result = runScript(preTool, {
+      tool_name: 'shell',
+      tool_input: { command: 'rm -rf /tmp/x' },
+      session_id: 'sess-1',
+    }, binDir, {
+      NODE_OPTIONS: '--input-type=module',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toContain('"permissionDecision":"deny"');
+    expect(result.stdout).toContain('destructive payload blocked');
+  });
+
   it('allows benign file paths that contain destructive substrings', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -593,7 +634,7 @@ describe('generated script runtime dependencies', () => {
       for (const script of [preTool, postTool]) {
         const body = readFileSync(script, 'utf8');
         expect(body, `${client} ${script}`).not.toContain('python3');
-        expect(body, `${client} ${script}`).toContain("node -e");
+        expect(body, `${client} ${script}`).toContain("node --input-type=commonjs -e");
       }
     }
   });

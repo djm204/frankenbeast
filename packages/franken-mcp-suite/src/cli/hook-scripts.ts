@@ -54,7 +54,7 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -63,7 +63,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").rea
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(String).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(function(e){return typeof e==="string"?e:JSON.stringify(e);}).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -85,7 +85,7 @@ set -e
 # denial, timeout (124), timeout-internal failure (125/126), kill (137), and
 # missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
-  SAFE_RESULT=$(printf '%s' "$RESULT" | node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(0,"utf8")))' 2>/dev/null || echo '"blocked by fbeast governor"')
+  SAFE_RESULT=$(printf '%s' "$RESULT" | node --input-type=commonjs -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(0,"utf8")))' 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"decision":"deny","reason":%s}\\n' "$SAFE_RESULT" >&1
   exit 2
 fi
@@ -106,8 +106,8 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
@@ -144,7 +144,7 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -153,7 +153,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").rea
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(String).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(function(e){return typeof e==="string"?e:JSON.stringify(e);}).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -195,8 +195,8 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
@@ -233,7 +233,7 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -242,7 +242,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").rea
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(String).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const ti=d.tool_input??{};const tn=d.tool_name??"";const ks=["command","cmd","commands","args","argv","script"];let body="";if(typeof ti==="string"){body=ti;}else if(ti&&typeof ti==="object"&&!Array.isArray(ti)){body=ks.filter(k=>k in ti).map(k=>{const v=ti[k];return Array.isArray(v)?v.map(function(e){return typeof e==="string"?e:JSON.stringify(e);}).join(" "):typeof v==="string"?v:JSON.stringify(v);}).join(" ");}process.stdout.write(tn==="apply_patch"?"":body)' 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -264,7 +264,7 @@ set -e
 # denial, timeout (124), timeout-internal failure (125/126), kill (137), and
 # missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
-  SAFE_REASON=$(printf '%s' "$RESULT" | node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(0,"utf8")))' 2>/dev/null || echo '"blocked by fbeast governor"')
+  SAFE_REASON=$(printf '%s' "$RESULT" | node --input-type=commonjs -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(0,"utf8")))' 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$SAFE_REASON" >&1
   exit 2
 fi
@@ -285,8 +285,8 @@ DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
