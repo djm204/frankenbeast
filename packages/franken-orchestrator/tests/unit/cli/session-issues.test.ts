@@ -286,7 +286,7 @@ function makeConfig(
 // ── Tests ──
 
 describe('Session.runIssues()', () => {
-  const origLog = console.log;
+  const origLog = console.info;
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetcher.fetch.mockReset();
@@ -304,10 +304,10 @@ describe('Session.runIssues()', () => {
     });
     mockRunnerInstance.run.mockResolvedValue([makeOutcome()]);
     mockResolveUpstreamRepo.mockResolvedValue('upstream/repo');
-    console.log = vi.fn();
+    console.info = vi.fn();
   });
   afterEach(() => {
-    console.log = origLog;
+    console.info = origLog;
   });
 
   it('happy path: fetch → triage → review → run → summary', async () => {
@@ -484,7 +484,7 @@ describe('Session.runIssues()', () => {
     await session.runIssues();
 
     // Summary header should be printed
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('ISSUE SUMMARY'));
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('ISSUE SUMMARY'));
   });
 
   it('passes only approved issues to IssueRunner', async () => {

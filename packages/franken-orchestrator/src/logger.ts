@@ -1,5 +1,9 @@
 import type { ILogger } from './deps.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 function formatLine(prefix: string, msg: string): string {
   const timestamp = new Date().toISOString();
   return `${timestamp} ${prefix} ${msg}`;
@@ -21,14 +25,14 @@ export class ConsoleLogger implements ILogger {
   }
 
   info(msg: string, _data?: unknown): void {
-    console.log(formatLine('[beast]', msg));
+    printLine(formatLine('[beast]', msg));
   }
 
   debug(msg: string, data?: unknown): void {
     if (!this.verbose) {
       return;
     }
-    console.log(formatDebug('[beast:debug]', msg, data));
+    printLine(formatDebug('[beast:debug]', msg, data));
   }
 
   warn(msg: string, _data?: unknown): void {

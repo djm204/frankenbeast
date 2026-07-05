@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
+
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
@@ -63,7 +68,7 @@ export function createStdinIO(): InterviewIO & { close(): void } {
   return {
     ask: (question: string) =>
       new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
-    display: (message: string) => console.log(message),
+    display: (message: string) => printLine(message),
     close: () => {
       rl.close();
       process.stdin.pause();
@@ -690,7 +695,7 @@ export async function main(): Promise<void> {
     const root = resolveProjectRoot(args.baseDir);
     const paths = getProjectPaths(root);
     const removed = cleanupBuild(paths.buildDir);
-    console.log(removed > 0
+    printLine(removed > 0
       ? `Cleaned up ${removed} file${removed === 1 ? '' : 's'} from ${paths.buildDir}`
       : 'Nothing to clean up.');
     process.exit(0);
@@ -698,7 +703,7 @@ export async function main(): Promise<void> {
 
   const root = resolveProjectRoot(args.baseDir);
   if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
-    console.log(await renderBanner(root));
+    printLine(await renderBanner(root));
   }
 
   const resumeTarget = args.resume && !args.planDir && !args.planName && (!args.subcommand || args.subcommand === 'run')
@@ -726,7 +731,7 @@ export async function main(): Promise<void> {
   }
 
   if (args.verbose) {
-    console.log('Config:', JSON.stringify(config, null, 2));
+    printLine('Config:', JSON.stringify(config, null, 2));
   }
 
   if (resumeTarget) {
@@ -734,7 +739,7 @@ export async function main(): Promise<void> {
   }
 
   if (shouldShowMissingRunPlanGuidance(args, runPlanNeedsGuidance)) {
-    console.log(formatMissingRunPlanGuidance(runPlanDir));
+    printLine(formatMissingRunPlanGuidance(runPlanDir));
     return;
   }
 
@@ -757,7 +762,7 @@ export async function main(): Promise<void> {
         args,
         io,
         paths,
-        print: console.log,
+        print: printLine,
       });
     } finally {
       io.close();
@@ -773,7 +778,7 @@ export async function main(): Promise<void> {
         config,
         io,
         paths,
-        print: console.log,
+        print: printLine,
       });
     } finally {
       io.close();
@@ -792,7 +797,7 @@ export async function main(): Promise<void> {
         target: args.skillTarget,
         command: args.skillCommand,
         commandArgs: args.skillCommandArgs,
-        print: console.log,
+        print: printLine,
       });
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
@@ -809,7 +814,7 @@ export async function main(): Promise<void> {
         configPath: args.config ?? paths.configFile,
         ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
         ...(config.security ? { currentSecurity: config.security } : {}),
-        print: console.log,
+        print: printLine,
       });
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
@@ -951,7 +956,7 @@ export async function main(): Promise<void> {
           : {}),
         analyticsDeps: { analytics },
       });
-      console.log(`Chat server listening on ${server.url}`);
+      printLine(`Chat server listening on ${server.url}`);
       return;
     }
 
@@ -1089,7 +1094,7 @@ async function runBeastDaemonCommand(
     ...(args.host ? { host: args.host } : {}),
     ...(args.port !== undefined ? { port: args.port } : {}),
   });
-  console.log(`Beast daemon listening on ${daemon.url}`);
+  printLine(`Beast daemon listening on ${daemon.url}`);
 
   const shutdown = async (): Promise<void> => {
     process.off('SIGINT', onSignal);
@@ -1161,7 +1166,7 @@ function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
         preflightService: preflightNetworkService,
       });
     },
-    print: (message: string) => console.log(message),
+    print: (message: string) => printLine(message),
     printError: (message: string) => console.error(message),
     renderHelp: renderNetworkHelp,
     waitForShutdown: () => waitForTerminationSignal(root),

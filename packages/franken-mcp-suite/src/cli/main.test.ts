@@ -191,7 +191,7 @@ describe('fbeast main CLI', () => {
 
     process.argv = ['node', 'fbeast', 'mcp', 'beast'];
 
-    const mockLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const mockLog = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
     await import('./main.js');
 

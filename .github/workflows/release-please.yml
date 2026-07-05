@@ -118,14 +118,14 @@ jobs:
               continue
             fi
 
-            is_private=$(node -e "const p=require('./${package_json}'); console.log(p.private === true ? 'true' : 'false')")
+            is_private=$(node -e "const p=require('./${package_json}'); process.stdout.write(p.private === true ? 'true' : 'false')")
             if [ "$is_private" = "true" ]; then
               echo "Skipping $package_path: package is private"
               continue
             fi
 
-            name=$(node -e "console.log(require('./${package_json}').name)")
-            version=$(node -e "console.log(require('./${package_json}').version)")
+            name=$(node -e "process.stdout.write(require('./${package_json}').name)")
+            version=$(node -e "process.stdout.write(require('./${package_json}').version)")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "Skipping $name@$version: already published"
               continue

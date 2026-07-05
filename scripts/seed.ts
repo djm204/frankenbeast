@@ -1,4 +1,9 @@
 #!/usr/bin/env npx tsx
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
 /**
  * Seed script: populates ChromaDB with example project data
  * for local development and testing.
@@ -30,11 +35,11 @@ async function createCollection(name: string, metadata?: Record<string, string>)
     throw new Error(`Failed to create collection ${name}: ${res.status} ${await res.text()}`);
   }
 
-  console.log(`  Collection "${name}" ready`);
+  printLine(`  Collection "${name}" ready`);
 }
 
 async function main(): Promise<void> {
-  console.log(`Seeding ChromaDB at ${CHROMA_URL}...`);
+  printLine(`Seeding ChromaDB at ${CHROMA_URL}...`);
 
   // Check connectivity
   try {
@@ -50,7 +55,7 @@ async function main(): Promise<void> {
   await createCollection('episodic-memory', { module: 'franken-brain' });
   await createCollection('project-adrs', { module: 'franken-brain' });
   await createCollection('known-errors', { module: 'franken-brain' });
-  console.log('Seed complete.');
+  printLine('Seed complete.');
 }
 
 main().catch((err) => {

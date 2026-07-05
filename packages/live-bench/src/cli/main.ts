@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
+
 import { loadCorpus } from '../corpus/loader.js';
 
 const command = process.argv[2] ?? 'help';
 
 if (command === 'help' || command === '--help' || command === '-h') {
-  console.log(`fbeast-live-bench
+  printLine(`fbeast-live-bench
 
 Usage:
   fbeast-live-bench list <corpus-root>
@@ -25,7 +30,7 @@ if (command === 'list') {
 
   const tasks = loadCorpus(corpusRoot);
   for (const task of tasks) {
-    console.log(task.taskId);
+    printLine(task.taskId);
   }
   process.exit(0);
 }

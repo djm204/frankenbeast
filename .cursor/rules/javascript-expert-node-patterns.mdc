@@ -11,7 +11,7 @@ Production Node.js patterns for services, CLIs, and tooling.
 
 ```typescript
 const shutdown = async (signal: string) => {
-  console.log(`Received ${signal}, shutting down...`);
+  process.stdout.write(`Received ${signal}, shutting down...`);
   server.close();
   await db.disconnect();
   process.exit(0);

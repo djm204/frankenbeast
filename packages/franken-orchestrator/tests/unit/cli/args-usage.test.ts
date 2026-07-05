@@ -7,7 +7,7 @@ describe('CLI usage text', () => {
   });
 
   it('documents the non-interactive approval escape hatch', () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     printUsage();
 

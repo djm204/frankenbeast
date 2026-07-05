@@ -625,7 +625,7 @@ if (args.subcommand === 'skill') {
     reset: false,
     orchestratorConfig: config,
   });
-  await handleSkillCommand({ skillManager, action: args.skillAction, target: args.skillTarget, print: console.log });
+  await handleSkillCommand({ skillManager, action: args.skillAction, target: args.skillTarget, print: process.stdout.write });
   return;
 }
 ```
@@ -636,7 +636,7 @@ if (args.subcommand === 'security') {
   await handleSecurityCommand({
     action: args.securityAction,
     target: args.securityTarget,
-    print: console.log,
+    print: process.stdout.write,
   });
   return;
 }

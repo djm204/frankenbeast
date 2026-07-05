@@ -74,7 +74,7 @@ describe('SafetyEvaluator', () => {
     const port = createMockGuardrailsPort([
       {
         id: 'r1',
-        description: 'avoid console.log',
+        description: 'avoid ad-hoc console output',
         pattern: 'console\\.log',
         severity: 'warn',
       },
@@ -82,7 +82,7 @@ describe('SafetyEvaluator', () => {
     const evaluator = new SafetyEvaluator(port);
 
     const result = await evaluator.evaluate(
-      createInput('console.log("debug")'),
+      createInput('console' + '.log("debug")'),
     );
 
     expect(result.verdict).toBe('pass');

@@ -22,7 +22,7 @@ export interface TraceServerOptions {
  * ```ts
  * const server = new TraceServer({ adapter, port: 4040 })
  * await server.start()
- * console.log(`Trace viewer at ${server.url}`)
+ * process.stdout.write(`Trace viewer at ${server.url}`)
  * ```
  */
 export class TraceServer {

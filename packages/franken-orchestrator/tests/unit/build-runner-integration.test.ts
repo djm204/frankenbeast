@@ -327,7 +327,7 @@ describe('build-runner integration — dep construction wiring', () => {
 
   describe('BeastLogger wiring', () => {
     it('BeastLogger satisfies ILogger and works with BeastLoop', async () => {
-      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
       try {
         const logger = new BeastLogger({ verbose: false });
         const deps = baseDeps({ logger });
@@ -348,7 +348,7 @@ describe('build-runner integration — dep construction wiring', () => {
     });
 
     it('BeastLogger captures log entries for file output', async () => {
-      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
       try {
         const logger = new BeastLogger({ verbose: true, captureForFile: true });
         const deps = baseDeps({ logger });

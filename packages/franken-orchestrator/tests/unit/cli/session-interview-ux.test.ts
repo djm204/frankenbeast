@@ -146,7 +146,7 @@ function createConfig(
 describe('Session interview UX', () => {
   let testDir: string;
   let paths: ProjectPaths;
-  const originalLog = console.log;
+  const originalLog = console.info;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,11 +182,11 @@ describe('Session interview UX', () => {
     mkdirSync(testDir, { recursive: true });
     paths = getProjectPaths(testDir);
     scaffoldFrankenbeast(paths);
-    console.log = vi.fn();
+    console.info = vi.fn();
   });
 
   afterEach(() => {
-    console.log = originalLog;
+    console.info = originalLog;
     rmSync(testDir, { recursive: true, force: true });
   });
 

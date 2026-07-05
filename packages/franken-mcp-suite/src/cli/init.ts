@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
 import { FbeastConfig, type FbeastServer } from '../shared/config.js';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
@@ -119,12 +124,12 @@ function initJsonClient(options: {
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 
-  console.log(`fbeast initialized in ${root}`);
-  console.log(`  Config:     ${config.configPath}`);
-  console.log(`  Database:   ${config.dbPath}`);
-  console.log(`  MCP config: ${settingsPath}`);
-  console.log(`  Servers:    ${mode === 'proxy' ? 'fbeast-proxy (proxy mode)' : servers.join(', ')}`);
-  if (hooks) console.log(`  Hooks:      enabled (${client})`);
+  printLine(`fbeast initialized in ${root}`);
+  printLine(`  Config:     ${config.configPath}`);
+  printLine(`  Database:   ${config.dbPath}`);
+  printLine(`  MCP config: ${settingsPath}`);
+  printLine(`  Servers:    ${mode === 'proxy' ? 'fbeast-proxy (proxy mode)' : servers.join(', ')}`);
+  if (hooks) printLine(`  Hooks:      enabled (${client})`);
 }
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
@@ -155,13 +160,13 @@ function initCodex(options: {
     config.save();
   }
 
-  console.log(`fbeast initialized in ${root}`);
-  console.log(`  Config:   ${config.configPath}`);
-  console.log(`  Database: ${config.dbPath}`);
-  console.log(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
-  console.log(`  MCP config: ${join(root, '.codex', 'config.toml')}`);
-  console.log(`  Servers:  ${mode === 'proxy' ? `${codexServerName(root, 'proxy')} (proxy mode, project-scoped)` : `${servers.map((srv) => codexServerName(root, srv)).join(', ')} (project-scoped)`}`);
-  if (hooks) console.log(`  Hooks:    enabled (codex hooks.json)`);
+  printLine(`fbeast initialized in ${root}`);
+  printLine(`  Config:   ${config.configPath}`);
+  printLine(`  Database: ${config.dbPath}`);
+  printLine(`  AGENTS.md: ${join(root, 'AGENTS.md')}`);
+  printLine(`  MCP config: ${join(root, '.codex', 'config.toml')}`);
+  printLine(`  Servers:  ${mode === 'proxy' ? `${codexServerName(root, 'proxy')} (proxy mode, project-scoped)` : `${servers.map((srv) => codexServerName(root, srv)).join(', ')} (project-scoped)`}`);
+  if (hooks) printLine(`  Hooks:    enabled (codex hooks.json)`);
 }
 
 function migrateLegacyCodexServers(

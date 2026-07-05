@@ -13,7 +13,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('logs info with timestamp and prefix, ignoring data', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const logger = new ConsoleLogger({ verbose: false });
 
     logger.info('hello', { secret: 'ignored' });
@@ -25,7 +25,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('logs debug only when verbose and includes JSON data', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     const quiet = new ConsoleLogger({ verbose: false });
     quiet.debug('hidden', { ok: true });

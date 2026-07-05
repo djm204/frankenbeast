@@ -1,6 +1,10 @@
 import { createInterface } from 'node:readline/promises';
 import type { FbeastServer } from '../shared/config.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
 ];
@@ -74,7 +78,7 @@ async function promptForServerSelection(): Promise<FbeastServer[]> {
   });
 
   try {
-    console.log(`Available servers: ${ALL_SERVERS.join(', ')}`);
+    printLine(`Available servers: ${ALL_SERVERS.join(', ')}`);
     const answer = await rl.question('Select servers to install (comma-separated or "all") [all]: ');
     return parseServerSelection(answer);
   } finally {

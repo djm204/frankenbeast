@@ -689,7 +689,7 @@ const adapter = new SQLiteAdapter('./traces.db')
 const server  = new TraceServer({ adapter, port: 4040 })
 
 await server.start()
-console.log(`Trace viewer: ${server.url}`)
+process.stdout.write(`Trace viewer: ${server.url}`)
 // → http://localhost:4040
 
 // Later:

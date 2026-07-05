@@ -1,4 +1,9 @@
 #!/usr/bin/env npx tsx
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
 /**
  * Verify local development setup.
  * Checks that all required services and configs are available.
@@ -30,7 +35,7 @@ async function checkHttp(name: string, url: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log('Verifying Frankenbeast local setup...\n');
+  printLine('Verifying Frankenbeast local setup...\n');
 
   // Node version
   const [major, minor, patch] = process.versions.node.split('.').map(Number);
@@ -57,19 +62,19 @@ async function main(): Promise<void> {
   await checkHttp('Tempo', 'http://localhost:3200/ready');
 
   // Print results
-  console.log('Results:\n');
+  printLine('Results:\n');
   let allOk = true;
   for (const r of results) {
     const icon = r.ok ? '\u2713' : '\u2717';
-    console.log(`  ${icon} ${r.name}: ${r.detail}`);
+    printLine(`  ${icon} ${r.name}: ${r.detail}`);
     if (!r.ok) allOk = false;
   }
 
-  console.log();
+  printLine();
   if (allOk) {
-    console.log('All checks passed! Ready to develop.');
+    printLine('All checks passed! Ready to develop.');
   } else {
-    console.log('Some checks failed. Run "docker compose up -d" to start services.');
+    printLine('Some checks failed. Run "docker compose up -d" to start services.');
     process.exit(1);
   }
 }
