@@ -37,12 +37,13 @@ npm --workspace @frankenbeast/web run dev:chat
 The frontend automatically resolves the API URL at runtime:
 
 - If `VITE_API_URL` is set, requests target that absolute URL.
-- Otherwise requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
+- Chat requests are the exception: they always use same-origin `/v1/chat/*` paths so the browser never needs an operator bearer token. In local Vite development, the `/v1/chat` proxy forwards to `VITE_API_URL`, `VITE_CHAT_API_PROXY_TARGET`, or the default local chat server and injects operator auth server-side. In production, serve the dashboard behind the orchestrator or another same-origin BFF/proxy that performs this server-side forwarding.
+- Otherwise requests use same-origin `/v1/*` and `/api/*` paths when `VITE_API_URL` is omitted, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
 - Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
-If you use a non-default backend port:
+If you use a non-default backend port in local development, `VITE_API_URL` also becomes the Vite `/v1/chat` proxy target so chat auth remains server-side:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
@@ -75,9 +76,14 @@ FRANKENBEAST_BEAST_OPERATOR_TOKEN=<your-operator-token>
 For web-only overrides, you can still create a `.env.local` file in this package directory (never committed):
 
 ```env
-# Required — Base URL of the franken-orchestrator HTTP server.
-# Defaults to window.location.origin if omitted (works when served by the orchestrator).
+# Optional — Base URL of the franken-orchestrator HTTP server for non-chat APIs.
+# Also used as the local Vite /v1/chat proxy target when VITE_CHAT_API_PROXY_TARGET is unset.
+# Defaults to window.location.origin if omitted (works when served by the orchestrator/BFF).
 VITE_API_URL=http://localhost:3737
+
+# Optional — chat-specific local Vite proxy target. Browser chat requests still use
+# same-origin /v1/chat/* so operator auth can be injected outside bundled code.
+VITE_CHAT_API_PROXY_TARGET=http://localhost:3737
 
 # Fallback for Beast control when root .env does not define FRANKENBEAST_BEAST_OPERATOR_TOKEN.
 # Must match the operatorToken configured on the orchestrator server.
