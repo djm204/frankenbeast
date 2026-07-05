@@ -12,7 +12,7 @@ All sibling Frankenbeast modules (franken-governor, franken-brain, franken-skill
 
 ## Decision
 
-Use **TypeScript (strict mode)** targeting Node.js 22+, compiled with `tsc`.
+Use **TypeScript (strict mode)** targeting Node.js `>=22.13.0 <23 || >=24.0.0 <26`, compiled with `tsc`.
 
 - `tsconfig.json`: `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`
 - ESM modules (`"type": "module"` in `package.json`)
