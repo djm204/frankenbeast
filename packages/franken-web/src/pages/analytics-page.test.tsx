@@ -191,6 +191,8 @@ describe('AnalyticsPage', () => {
     expect(await screen.findByText('summary timeout')).toBeTruthy();
     expect(screen.getByText('Metric values are still from Last 24h; refresh for Session session-a · Last 24h failed or is incomplete.')).toBeTruthy();
     expect(screen.getByText('Showing previous metric values until refreshed.')).toBeTruthy();
+    expect(screen.queryByText('Updating')).toBeNull();
+    expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Analytics summary').getAttribute('aria-busy')).toBe('false');
     expect(screen.getByText('3')).toBeTruthy();
   });

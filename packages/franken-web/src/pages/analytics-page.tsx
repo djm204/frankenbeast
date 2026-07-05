@@ -121,6 +121,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const currentFilterLabel = describeFilters(filters);
   const isSummaryStale = summary !== null && summaryFilter !== null && summaryFilter !== currentFilterLabel;
   const hasStaleOverview = (isOverviewLoading && summary !== null) || isSummaryStale;
+  const metricStatusLabel = isOverviewLoading ? 'Updating' : 'Stale';
   const overviewStatus = isOverviewLoading
     ? hasStaleOverview
       ? `Updating metrics for ${currentFilterLabel}...`
@@ -231,18 +232,19 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
           </div>
         )}
         <div className="analytics-summary-grid">
-          <MetricCard label="Total Events" value={summary?.totalEvents ?? '—'} isStale={hasStaleOverview} />
-          <MetricCard label="Sessions" value={summary?.uniqueSessions ?? '—'} isStale={hasStaleOverview} />
-          <MetricCard label="Denials" value={summary?.denialCount ?? '—'} tone="danger" isStale={hasStaleOverview} />
+          <MetricCard label="Total Events" value={summary?.totalEvents ?? '—'} isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
+          <MetricCard label="Sessions" value={summary?.uniqueSessions ?? '—'} isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
+          <MetricCard label="Denials" value={summary?.denialCount ?? '—'} tone="danger" isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
           <MetricCard
             label="Errors"
             value={summary ? summary.errorCount + summary.failureCount : '—'}
             tone="danger"
             isStale={hasStaleOverview}
+            staleLabel={metricStatusLabel}
           />
-          <MetricCard label="Detections" value={summary?.securityDetectionCount ?? '—'} tone="warning" isStale={hasStaleOverview} />
-          <MetricCard label="Tokens" value={summary?.tokenTotals.total ?? '—'} isStale={hasStaleOverview} />
-          <MetricCard label="Cost" value={summary ? `$${summary.costTotals.usd.toFixed(2)}` : '—'} isStale={hasStaleOverview} />
+          <MetricCard label="Detections" value={summary?.securityDetectionCount ?? '—'} tone="warning" isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
+          <MetricCard label="Tokens" value={summary?.tokenTotals.total ?? '—'} isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
+          <MetricCard label="Cost" value={summary ? `$${summary.costTotals.usd.toFixed(2)}` : '—'} isStale={hasStaleOverview} staleLabel={metricStatusLabel} />
         </div>
       </section>
 
@@ -382,11 +384,13 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 function MetricCard({
   isStale = false,
   label,
+  staleLabel = 'Stale',
   tone,
   value,
 }: {
   isStale?: boolean;
   label: string;
+  staleLabel?: string;
   value: string | number;
   tone?: 'danger' | 'warning';
 }) {
@@ -394,7 +398,7 @@ function MetricCard({
     <article className={`analytics-metric ${tone ? `analytics-metric--${tone}` : ''} ${isStale ? 'analytics-metric--stale' : ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-      {isStale && <small>Updating</small>}
+      {isStale && <small>{staleLabel}</small>}
     </article>
   );
 }
