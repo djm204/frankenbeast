@@ -36,20 +36,30 @@ export function DashboardPage({ client }: DashboardPageProps) {
     setLoading,
   } = useDashboardStore();
   const mountedRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const skillMutationSequenceRef = useRef<Record<string, number>>({});
+  const securityMutationSequenceRef = useRef(0);
+  const skillsRef = useRef(skills);
+  const securityProfileRef = useRef(security?.profile);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillError, setSkillError] = useState<SkillMutationError | null>(null);
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
 
+  useEffect(() => { skillsRef.current = skills; }, [skills]);
+  useEffect(() => { securityProfileRef.current = security?.profile; }, [security?.profile]);
+
   const loadSnapshot = useCallback(() => {
+    const sequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = sequence;
     setLoadError(null);
     setLoading(true);
     client.fetchSnapshot()
       .then((snap) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
         setSnapshot(snap);
       })
       .catch((error) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
         setLoadError(`Unable to load dashboard. ${describeError(error)}`);
         setLoading(false);
       });
@@ -82,11 +92,14 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [client, loadSnapshot, setSnapshot]);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
+    const sequence = (skillMutationSequenceRef.current[name] ?? 0) + 1;
+    skillMutationSequenceRef.current[name] = sequence;
     toggleSkill(name);
     setSkillError(null);
     client.toggleSkill(name, enabled).catch((error) => {
-      if (!mountedRef.current) return;
-      toggleSkill(name);
+      if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
+      const currentSkill = skillsRef.current.find((skill) => skill.name === name);
+      if (currentSkill?.enabled === enabled) toggleSkill(name);
       setSkillError({
         name,
         enabled,
@@ -96,18 +109,20 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [client, toggleSkill]);
 
   const handleSecurityProfileChange = useCallback((profile: string) => {
-    const previousProfile = security?.profile;
+    const sequence = securityMutationSequenceRef.current + 1;
+    securityMutationSequenceRef.current = sequence;
+    const previousProfile = securityProfileRef.current;
     setSecurityProfile(profile);
     setSecurityError(null);
     client.updateSecurityProfile(profile).catch((error) => {
-      if (!mountedRef.current) return;
-      if (previousProfile) setSecurityProfile(previousProfile);
+      if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
+      if (previousProfile && securityProfileRef.current === profile) setSecurityProfile(previousProfile);
       setSecurityError({
         profile,
         message: `Could not save security profile ${profile}; the previous profile was restored. ${describeError(error)}`,
       });
     });
-  }, [client, security?.profile, setSecurityProfile]);
+  }, [client, setSecurityProfile]);
 
   if (loading) return <div className="dashboard-loading">Loading dashboard...</div>;
 

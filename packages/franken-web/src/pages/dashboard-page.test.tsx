@@ -29,6 +29,17 @@ function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiCl
   } as unknown as DashboardApiClient;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe('DashboardPage', () => {
   afterEach(() => {
     cleanup();
@@ -101,5 +112,45 @@ describe('DashboardPage', () => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
     });
     expect(screen.queryByText(/Could not save security profile/)).toBeNull();
+  });
+
+  it('does not roll back a newer skill toggle when an older request fails late', async () => {
+    const firstToggle = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(firstToggle.promise)
+        .mockResolvedValueOnce(undefined),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+
+    firstToggle.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+    expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+  });
+
+  it('does not restore an older security profile after a newer save starts', async () => {
+    const firstSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(firstSave.promise)
+        .mockResolvedValueOnce(undefined),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+
+    firstSave.reject(new Error('HTTP 409'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('permissive');
+    });
+    expect(screen.queryByText(/Could not save security profile strict/)).toBeNull();
   });
 });
