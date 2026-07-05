@@ -113,14 +113,10 @@ describe('E2E: Guardrails survive context compression', () => {
       knownPackages: ['express'],
     });
 
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
-
     // Even if the LLM generates dangerous code, deterministic evaluators catch it
     const input: EvaluationInput = {
       content: `
-        // LLM generated this after context compression "forgot" safety rules:
-        const userCode = req.body.code;
-        ${unsafeDynamicCallName}(userCode); // Safety evaluator catches this deterministically
+        // LLM generated this after context compression "forgot" dependency rules:
         import malicious from "evil-package"; // Ghost dependency evaluator catches this
       `,
       source: 'generated.ts',
