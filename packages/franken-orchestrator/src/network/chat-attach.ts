@@ -8,7 +8,7 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
-import { localPlaintextOrSecureEndpoint } from './network-url.js';
+import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
 interface ManagedNetworkState {
   services?: Array<{
@@ -50,7 +50,9 @@ export async function resolveManagedChatAttachment(
   const fetchImpl = options.fetchImpl ?? fetch;
   const state = await loadNetworkState(options.frankenbeastDir);
   const stateUrl = state?.services?.find((service) => service.id === 'chat-server')?.url;
-  const baseUrl = stateUrl ?? localPlaintextOrSecureEndpoint(options.config.chat.host, options.config.chat.port);
+  const baseUrl = stateUrl
+    ? assertLocalPlaintextOrSecureHttpUrl(stateUrl, 'Persisted chat-server URL')
+    : localPlaintextOrSecureEndpoint(options.config.chat.host, options.config.chat.port);
   const healthResponse = await fetchImpl(`${baseUrl}/health`);
   if (!healthResponse.ok) {
     return undefined;

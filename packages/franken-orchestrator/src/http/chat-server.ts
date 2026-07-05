@@ -23,6 +23,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } from '../network/network-url.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
@@ -184,8 +185,6 @@ function createCommsRuntimeAdapter(
   });
 }
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
-
 function enabledSignedExternalWebhookChannels(commsConfig: CommsConfig | undefined): string[] {
   if (!commsConfig) {
     return [];
@@ -215,6 +214,9 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
   const path = options.path ?? DEFAULT_WS_PATH;
+  if (!isLoopbackHost(host)) {
+    throw new Error(`Refusing to start chat-server on non-loopback host ${host}; terminate TLS in a separate reverse proxy for non-local deployments.`);
+  }
 
   // Fail closed: refuse to expose /v1/chat/* without an operator token when
   // the server is exposed (managed-network mode OR non-loopback host).
@@ -242,7 +244,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   }
   const effectiveOperatorToken = configuredTokens[0];
   const isManaged = process.env['FRANKENBEAST_NETWORK_MANAGED'] === '1';
-  const isExposed = isManaged || !LOOPBACK_HOSTS.has(host);
+  const isExposed = isManaged || !isLoopbackHost(host);
   if (isExposed && !effectiveOperatorToken && !options.allowUnauthenticatedChatForTests) {
     throw new Error(
       `Refusing to start chat-server on ${host} without an operator token: `

@@ -113,6 +113,10 @@ describe('network-registry', () => {
     })).toThrow(/wss:\/\//);
 
     expect(() => NetworkConfigSchema.parse({
+      comms: { slack: { enabled: true }, orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+    })).toThrow(/wss:\/\//);
+
+    expect(() => NetworkConfigSchema.parse({
       dashboard: { apiUrl: 'http://127.attacker.example:3737' },
     })).toThrow(/https:\/\//);
 
@@ -129,6 +133,10 @@ describe('network-registry', () => {
 
     expect(() => NetworkConfigSchema.parse({
       beastsDaemon: { host: '0.0.0.0' },
+    })).toThrow(/loopback-only/);
+
+    expect(() => NetworkConfigSchema.parse({
+      chat: { host: '0.0.0.0' },
     })).toThrow(/loopback-only/);
   });
 

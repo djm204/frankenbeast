@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
 import { createBeastServices, type BeastServiceBundle, type BeastServicePaths } from '../beasts/create-beast-services.js';
+import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { createBeastDaemonApp } from './beast-daemon-app.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
@@ -36,6 +37,9 @@ export function defaultBeastDaemonPidFile(root: string): string {
 export async function startBeastDaemon(options: StartBeastDaemonOptions): Promise<BeastDaemonHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
+  if (!isLoopbackHost(host)) {
+    throw new Error(`Refusing to start beast daemon on non-loopback host ${host}; terminate TLS in a separate reverse proxy for non-local deployments.`);
+  }
   const pidFile = options.pidFile ?? defaultBeastDaemonPidFile(options.root);
   await claimPidFile(pidFile);
 

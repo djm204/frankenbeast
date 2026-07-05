@@ -282,7 +282,7 @@ describe('chat server bootstrap', () => {
     beastServices.dispose();
   });
 
-  it('refuses to start on a non-loopback host without an operator token', async () => {
+  it('refuses to start on a non-loopback host before binding', async () => {
     mkdirSync(TMP, { recursive: true });
     await expect(startChatServer({
       host: '0.0.0.0',
@@ -290,7 +290,8 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: TMP,
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-    })).rejects.toThrow(/operator token/i);
+      operatorToken: 'shared-token',
+    })).rejects.toThrow(/non-loopback host/);
   });
 
   it('starts on loopback without a token (dev mode)', async () => {

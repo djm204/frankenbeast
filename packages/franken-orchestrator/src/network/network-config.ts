@@ -157,13 +157,64 @@ export const CommsServiceConfigSchema = z.object({
   );
 });
 
-export const NetworkConfigSchema = z.object({
+function hasEnabledCommsChannel(comms: z.infer<typeof CommsServiceConfigSchema>): boolean {
+  return comms.slack.enabled
+    || comms.discord.enabled
+    || comms.telegram.enabled
+    || comms.whatsapp.enabled;
+}
+
+const loopbackOnlyMessage = 'Managed service hosts must be loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.';
+
+export const NetworkConfigFieldsSchema = z.object({
   network: NetworkOperatorConfigSchema.default({}),
   beastsDaemon: BeastDaemonServiceConfigSchema.default({}),
   chat: ChatServiceConfigSchema.default({}),
   dashboard: DashboardServiceConfigSchema.default({}),
   comms: CommsServiceConfigSchema.default({}),
 });
+
+export function validateNetworkConfig(value: z.infer<typeof NetworkConfigFieldsSchema>, ctx: z.RefinementCtx): void {
+  const commsActive = value.comms.enabled || hasEnabledCommsChannel(value.comms);
+  const dashboardActive = value.dashboard.enabled;
+  const chatActive = value.chat.enabled || dashboardActive || commsActive;
+  const beastsDaemonActive = value.beastsDaemon.enabled || chatActive;
+
+  if (beastsDaemonActive && !isLoopbackHost(value.beastsDaemon.host)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['beastsDaemon', 'host'], message: loopbackOnlyMessage });
+  }
+  if (chatActive && !isLoopbackHost(value.chat.host)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['chat', 'host'], message: loopbackOnlyMessage });
+  }
+  if (dashboardActive) {
+    if (!isLoopbackHost(value.dashboard.host)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dashboard', 'host'], message: loopbackOnlyMessage });
+    }
+    requireLocalPlaintextOrSecureUrl(
+      ctx,
+      'dashboard.apiUrl',
+      value.dashboard.apiUrl,
+      ['https:'],
+      ['http:'],
+      'Must use https:// unless the URL targets a loopback-only development host.',
+    );
+  }
+  if (commsActive) {
+    if (!isLoopbackHost(value.comms.host)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['comms', 'host'], message: loopbackOnlyMessage });
+    }
+    requireLocalPlaintextOrSecureUrl(
+      ctx,
+      'comms.orchestratorWsUrl',
+      value.comms.orchestratorWsUrl,
+      ['wss:'],
+      ['ws:'],
+      'Must use wss:// unless the URL targets a loopback-only development host.',
+    );
+  }
+}
+
+export const NetworkConfigSchema = NetworkConfigFieldsSchema.superRefine(validateNetworkConfig);
 
 export type NetworkConfig = z.infer<typeof NetworkConfigSchema>;
 export type NetworkMode = z.infer<typeof NetworkModeSchema>;

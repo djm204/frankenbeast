@@ -218,4 +218,17 @@ describe('beast daemon', () => {
 
     expect(existsSync(paths.pidFile)).toBe(false);
   });
+
+  it('rejects non-loopback hosts before claiming the pid file', async () => {
+    const paths = await makePaths();
+
+    await expect(startBeastDaemon({
+      ...paths,
+      host: '0.0.0.0',
+      operatorToken,
+      port: 0,
+    })).rejects.toThrow(/non-loopback host/);
+
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
 });

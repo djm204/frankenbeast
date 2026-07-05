@@ -1,5 +1,13 @@
 import { isLoopbackHost } from './network-config.js';
 
+export function assertLocalPlaintextOrSecureHttpUrl(url: string, source: string): string {
+  const parsed = new URL(url);
+  if (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname))) {
+    return url;
+  }
+  throw new Error(`${source} must use https:// unless it targets a loopback-only development host.`);
+}
+
 export function localPlaintextOrSecureEndpoint(host: string, port: number): string {
   if (!isLoopbackHost(host)) {
     throw new Error(`Managed service host ${host} is not loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.`);
