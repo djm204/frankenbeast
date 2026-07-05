@@ -307,7 +307,7 @@ describe('bridgeToBeastConfig()', () => {
 
     it('passes webhook policy and custom rules through config.security', () => {
       const customRules = [
-        { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+        { name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' },
       ];
       const orchestratorConfig = {
         security: {
@@ -335,12 +335,12 @@ describe('bridgeToBeastConfig()', () => {
     it('uses config.consolidatedProviders when provided', () => {
       const orchestratorConfig = {
         consolidatedProviders: [
-          { name: 'my-claude', type: 'anthropic-api', apiKey: 'sk-123' },
+          { name: 'my-claude', type: 'anthropic-api', apiKey: 'test-api-key-fixture' },
         ],
       } as any;
       const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
       expect(config.providers).toEqual([
-        { name: 'my-claude', type: 'anthropic-api', apiKey: 'sk-123' },
+        { name: 'my-claude', type: 'anthropic-api', apiKey: 'test-api-key-fixture' },
       ]);
     });
 

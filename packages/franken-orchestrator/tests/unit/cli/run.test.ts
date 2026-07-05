@@ -1176,7 +1176,7 @@ describe('main() execution', () => {
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',
-        customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+        customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
       },
       network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
@@ -1256,7 +1256,7 @@ describe('main() execution', () => {
     expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({
       profile: 'permissive',
       webhookSignaturePolicy: 'local-dev-unsigned',
-      customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+      customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
     }));
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));

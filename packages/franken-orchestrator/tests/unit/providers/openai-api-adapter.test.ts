@@ -11,14 +11,14 @@ async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<L
 describe('OpenAiApiAdapter', () => {
   describe('properties', () => {
     it('has correct name and type', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(adapter.name).toBe('openai-api');
       expect(adapter.type).toBe('openai-api');
       expect(adapter.authMethod).toBe('api-key');
     });
 
     it('has correct capabilities', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(adapter.capabilities.maxContextTokens).toBe(128_000);
       expect(adapter.capabilities.mcpSupport).toBe(false);
     });
@@ -26,12 +26,12 @@ describe('OpenAiApiAdapter', () => {
 
   describe('isAvailable()', () => {
     it('returns true when API key is set', async () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(await adapter.isAvailable()).toBe(true);
     });
 
     it('returns true when OPENAI_API_KEY env var is set', async () => {
-      process.env['OPENAI_API_KEY'] = 'sk-env';
+      process.env['OPENAI_API_KEY'] = 'test-env-value';
       const adapter = new OpenAiApiAdapter();
       expect(await adapter.isAvailable()).toBe(true);
       delete process.env['OPENAI_API_KEY'];
@@ -48,7 +48,7 @@ describe('OpenAiApiAdapter', () => {
 
   describe('translateMessages()', () => {
     it('prepends system message', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const request: LlmRequest = {
         systemPrompt: 'Be helpful',
         messages: [{ role: 'user', content: 'Hi' }],
@@ -59,7 +59,7 @@ describe('OpenAiApiAdapter', () => {
     });
 
     it('maps user and assistant messages', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const request: LlmRequest = {
         systemPrompt: 'sys',
         messages: [
@@ -72,7 +72,7 @@ describe('OpenAiApiAdapter', () => {
     });
 
     it('translates image blocks to image_url format', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const request: LlmRequest = {
         systemPrompt: 'sys',
         messages: [
@@ -98,7 +98,7 @@ describe('OpenAiApiAdapter', () => {
     });
 
     it('translates tool_result blocks as labeled text', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const request: LlmRequest = {
         systemPrompt: 'sys',
         messages: [
@@ -120,7 +120,7 @@ describe('OpenAiApiAdapter', () => {
 
   describe('execute()', () => {
     it('translates text stream chunks and emits done with usage', async () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       // Mock the internal client
       const mockChunks = [
         { choices: [{ delta: { content: 'Hello' }, finish_reason: null }], usage: null },
@@ -148,7 +148,7 @@ describe('OpenAiApiAdapter', () => {
     });
 
     it('emits retryable error on rate limit', async () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const OpenAI = (await import('openai')).default;
       const headers = new Headers({ 'x-request-id': 'test' });
       (adapter as any).client = {
@@ -171,7 +171,7 @@ describe('OpenAiApiAdapter', () => {
 
   describe('translateTools()', () => {
     it('wraps in function type', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const tools: ToolDefinition[] = [
         { name: 'read', description: 'Read file', inputSchema: { type: 'object' } },
       ];
@@ -191,7 +191,7 @@ describe('OpenAiApiAdapter', () => {
 
   describe('formatHandoff()', () => {
     it('returns handoff text', () => {
-      const adapter = new OpenAiApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
       const snapshot: BrainSnapshot = {
         version: 1,
         timestamp: '2026-03-22T00:00:00.000Z',

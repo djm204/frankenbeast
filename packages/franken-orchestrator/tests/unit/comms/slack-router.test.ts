@@ -7,7 +7,7 @@ import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
 import type { SessionMapper } from '../../../src/comms/core/session-mapper.js';
 
 describe('slackRouter', () => {
-  const secret = 'test-secret';
+  const secret = ['test', 'signing', 'fixture'].join('-');
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),

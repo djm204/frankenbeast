@@ -809,22 +809,25 @@ describe('ProcessBeastExecutor', () => {
       const [, callbacks] = supervisor.spawn.mock.calls[0];
       const cb = callbacks as ProcessCallbacks;
 
-      const standaloneOpenAiKey = `sk-${'standaloneproviderkey1234567890'}`;
-      const githubToken = `ghp_${'abcdefghijklmnopqrstuvwxyz123456'}`;
+      const providerKeyFixture = ['sk', 'proj', 'fixturevalue1234567890'].join('-');
+      const standaloneOpenAiKey = ['sk', 'standaloneproviderkey1234567890'].join('-');
+      const githubToken = ['ghp', 'abcdefghijklmnopqrstuvwxyz123456'].join('_');
       const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
-      const geminiToken = `AIza${'abcdefghijklmnopqrstuvwxyz123456789'}`;
-      const passwordValue = ['hun', 'ter2'].join('');
+      const geminiToken = ['AI', 'za', 'abcdefghijklmnopqrstuvwxyz123456789'].join('');
+      const discordBotToken = ['discord', 'bot', 'token', 'value'].join('-');
+      const passwordValue = ['credential', 'fixture'].join('-');
+      const clientSecret = ['client', 'fixture', 'value'].join('-');
       const jsonPassword = ['json', 'password'].join('-');
       const escapedPassword = ['abc', '\\"', 'def'].join('');
       const cachePassword = ['cache', 'pass'].join('');
-      const jsonSecret = ['json', 'secret'].join('-');
+      const jsonSecret = ['json', 'fixture'].join('-');
       const camelToken = ['camel', 'token'].join('-');
       const camelAccessToken = ['camel', 'access', 'token'].join('-');
       const basicToken = ['basic', 'token', 'value'].join('-');
 
-      cb.onStderr(`api_key=«redacted:sk-…» password=${passwordValue}`);
-      cb.onStderr('OPENAI_API_KEY=«redacted:sk-…» CLIENT_SECRET=client-secret-value');
-      cb.onStderr('Authorization: Bot discor...alue');
+      cb.onStderr(`api_key=${providerKeyFixture} password=${passwordValue}`);
+      cb.onStderr(`OPENAI_API_KEY=${providerKeyFixture} CLIENT_SECRET=${clientSecret}`);
+      cb.onStderr(`Authorization: Bot ${discordBotToken}`);
       cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
       cb.onStderr(`Slack token ${slackToken}`);
       cb.onStderr(`Google token ${geminiToken}`);
@@ -835,7 +838,7 @@ describe('ProcessBeastExecutor', () => {
       cb.onStderr(JSON.stringify(Object.fromEntries([['Authorization', basicAuthValue]])));
       cb.onStderr("headers: {'Authorization': 'Bot object-token-value'}");
       cb.onStderr('jwt eyJhbG...cret');
-      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
+      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/fixture-webhook-token');
       cb.onExit(1, null);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -873,10 +876,10 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedLogLines).toContain('api_key=[REDACTED] password=[REDACTED]');
       expect(publishedLogLines).toContain('{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}');
       const serializedPersistedEvent = JSON.stringify(failEvent);
-      expect(serializedPersistedEvent).not.toContain('«redacted:sk-…»');
+      expect(serializedPersistedEvent).not.toContain(providerKeyFixture);
       expect(serializedPersistedEvent).not.toContain(passwordValue);
-      expect(serializedPersistedEvent).not.toContain('client-secret-value');
-      expect(serializedPersistedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPersistedEvent).not.toContain(clientSecret);
+      expect(serializedPersistedEvent).not.toContain(discordBotToken);
       expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPersistedEvent).not.toContain(githubToken);
       expect(serializedPersistedEvent).not.toContain(slackToken);
@@ -889,8 +892,8 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPersistedEvent).not.toContain(cachePassword);
       expect(serializedPersistedEvent).not.toContain(basicToken);
       expect(serializedPersistedEvent).not.toContain('object-token-value');
-      expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
-      expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
+      expect(serializedPersistedEvent).not.toContain('abc1234567890fixture');
+      expect(serializedPersistedEvent).not.toContain('fixture-webhook-token');
 
       const publishedFailure = publishSpy.mock.calls
         .map(([event]) => event)
@@ -901,10 +904,10 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedFailure).toBeDefined();
       expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
       const serializedPublishedEvent = JSON.stringify(publishedFailure);
-      expect(serializedPublishedEvent).not.toContain('«redacted:sk-…»');
+      expect(serializedPublishedEvent).not.toContain(providerKeyFixture);
       expect(serializedPublishedEvent).not.toContain(passwordValue);
-      expect(serializedPublishedEvent).not.toContain('client-secret-value');
-      expect(serializedPublishedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPublishedEvent).not.toContain(clientSecret);
+      expect(serializedPublishedEvent).not.toContain(discordBotToken);
       expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPublishedEvent).not.toContain(githubToken);
       expect(serializedPublishedEvent).not.toContain(slackToken);
@@ -917,8 +920,8 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPublishedEvent).not.toContain(cachePassword);
       expect(serializedPublishedEvent).not.toContain(basicToken);
       expect(serializedPublishedEvent).not.toContain('object-token-value');
-      expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
-      expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
+      expect(serializedPublishedEvent).not.toContain('abc1234567890fixture');
+      expect(serializedPublishedEvent).not.toContain('fixture-webhook-token');
     });
 
     it('marks attempt as failed on signal kill', async () => {

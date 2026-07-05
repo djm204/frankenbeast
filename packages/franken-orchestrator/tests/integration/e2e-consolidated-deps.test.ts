@@ -141,7 +141,7 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
       {
         providers: [
           { name: 'primary', type: 'claude-cli' },
-          { name: 'fallback', type: 'anthropic-api', apiKey: 'sk-test' },
+          { name: 'fallback', type: 'anthropic-api', apiKey: 'test-api-key-fixture' },
         ],
       },
       mockExistingDeps(),

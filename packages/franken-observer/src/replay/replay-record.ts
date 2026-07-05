@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hashContent } from '../utils/crypto.js';
 
 export type ReplayRecordKind =
   | 'llm.request'
@@ -18,6 +18,4 @@ export interface ReplayRecord {
   readonly contentRef: string;
 }
 
-export function hashContent(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
-}
+export { hashContent };

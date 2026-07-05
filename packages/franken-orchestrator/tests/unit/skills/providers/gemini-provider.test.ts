@@ -76,9 +76,9 @@ describe('GeminiProvider', () => {
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {
-    const env = { PATH: '/usr/bin', GEMINI_KEY: 'secret' };
+    const env = { PATH: '/usr/bin', GEMINI_KEY: 'test-env-value' };
     const filtered = provider.filterEnv(env);
-    expect(env).toHaveProperty('GEMINI_KEY', 'secret');
+    expect(env).toHaveProperty('GEMINI_KEY', 'test-env-value');
     expect(env).not.toHaveProperty('FRANKENBEAST_SPAWNED');
     expect(filtered).not.toBe(env);
     expect(filtered).toHaveProperty('FRANKENBEAST_SPAWNED', '1');

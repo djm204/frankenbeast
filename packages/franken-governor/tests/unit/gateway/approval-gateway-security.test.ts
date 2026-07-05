@@ -49,10 +49,12 @@ function makeFakeAuditRecorder() {
 }
 
 describe('ApprovalGateway — security integration', () => {
+  const signingFixture = ['test', 'signing', 'fixture'].join('-')
+
   it('throws SignatureVerificationError when requireSignedApprovals is true and signature is invalid', async () => {
-    const verifier = new SignatureVerifier('secret');
+    const verifier = new SignatureVerifier(signingFixture);
     const channel = makeFakeChannel({ signature: 'invalid-sig' });
-    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
       auditRecorder: makeFakeAuditRecorder(),
@@ -64,14 +66,14 @@ describe('ApprovalGateway — security integration', () => {
   });
 
   it('passes when requireSignedApprovals is true and signature is valid', async () => {
-    const verifier = new SignatureVerifier('secret');
+    const verifier = new SignatureVerifier(signingFixture);
     const responsePayload = formatApprovalResponseSignaturePayload({
       requestId: 'req-001',
       decision: 'APPROVE',
     });
     const validSig = verifier.sign(responsePayload);
     const channel = makeFakeChannel({ signature: validSig });
-    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
       auditRecorder: makeFakeAuditRecorder(),
@@ -84,14 +86,14 @@ describe('ApprovalGateway — security integration', () => {
   });
 
   it('uses a deterministic signature payload that is independent of JSON key order', async () => {
-    const verifier = new SignatureVerifier('secret');
+    const verifier = new SignatureVerifier(signingFixture);
     const jsonPayloadWithDifferentOrder = JSON.stringify({ decision: 'APPROVE', requestId: 'req-001' });
     const deterministicPayload = formatApprovalResponseSignaturePayload({
       requestId: 'req-001',
       decision: 'APPROVE',
     });
     const channel = makeFakeChannel({ signature: verifier.sign(deterministicPayload) });
-    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
       auditRecorder: makeFakeAuditRecorder(),
@@ -187,12 +189,12 @@ describe('ApprovalGateway — security integration', () => {
 
   it('rejects a validly-signed response whose requestId does not match the active request', async () => {
     // Attacker replays a genuinely-signed approval for request A against active request B.
-    const verifier = new SignatureVerifier('secret');
+    const verifier = new SignatureVerifier(signingFixture);
     const signedForOther = verifier.sign(
       formatApprovalResponseSignaturePayload({ requestId: 'req-OTHER', decision: 'APPROVE' }),
     );
     const channel = makeFakeChannel({ requestId: 'req-OTHER', signature: signedForOther });
-    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
       auditRecorder: makeFakeAuditRecorder(),

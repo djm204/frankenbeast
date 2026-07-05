@@ -45,6 +45,8 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/approval/respond', () => {
+    const signingFixture = ['test', 'signing', 'fixture'].join('-')
+
     function governorSignature(rawBody: string, secret: string): string {
       return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
     }
@@ -137,7 +139,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('verifies HMAC signature when signing secret configured', async () => {
-      const secret = 'test-secret';
+      const secret = signingFixture;
       const app = createGovernorApp({ signingSecret: secret });
 
       // Create approval
@@ -167,7 +169,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('verifies approval HMAC over raw body bytes including whitespace', async () => {
-      const secret = 'test-secret';
+      const secret = signingFixture;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-raw-spacing');
 
@@ -188,7 +190,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('requires signatures to match the exact raw body instead of parsed key ordering', async () => {
-      const secret = 'test-secret';
+      const secret = signingFixture;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-key-order');
 
@@ -210,7 +212,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('accepts normalized sha256 hex signatures through the timing-safe compare path', async () => {
-      const secret = 'test-secret';
+      const secret = signingFixture;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-upper-hex');
 
@@ -230,7 +232,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('rejects invalid signature using timing-safe hex comparison', async () => {
-      const app = createGovernorApp({ signingSecret: 'secret' });
+      const app = createGovernorApp({ signingSecret: signingFixture });
 
       await app.request('/v1/approval/request', {
         method: 'POST',
@@ -257,7 +259,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('returns a clear 401 for a malformed signature', async () => {
-      const app = createGovernorApp({ signingSecret: 'secret' });
+      const app = createGovernorApp({ signingSecret: signingFixture });
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
         headers: {
@@ -282,7 +284,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('rejects missing signature when secret configured', async () => {
-      const app = createGovernorApp({ signingSecret: 'secret' });
+      const app = createGovernorApp({ signingSecret: signingFixture });
 
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
@@ -297,7 +299,7 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/webhook/slack', () => {
-    const SLACK_SECRET = 'slack-signing-secret';
+    const SLACK_SECRET = ['slack', 'signing', 'fixture'].join('-');
 
     function slackHeaders(rawBody: string, secret = SLACK_SECRET, timestamp?: string) {
       const ts = timestamp ?? Math.floor(Date.now() / 1000).toString();

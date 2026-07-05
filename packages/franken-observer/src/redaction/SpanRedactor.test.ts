@@ -29,7 +29,7 @@ describe('SpanRedactor — metadata rules', () => {
       adapter: inner,
       rules: [{ key: 'api_key', action: 'remove' }],
     })
-    const span = makeSpan({ metadata: { api_key: 'sk-secret', model: 'gpt-4' } })
+    const span = makeSpan({ metadata: { api_key: 'test-api-key-value', model: 'gpt-4' } })
     await redactor.flush(makeTrace([span]))
     const stored = await inner.queryByTraceId('trace-1')
     expect(stored!.spans[0].metadata).not.toHaveProperty('api_key')
@@ -63,9 +63,9 @@ describe('SpanRedactor — metadata rules', () => {
     const inner = new InMemoryAdapter()
     const redactor = new SpanRedactor({
       adapter: inner,
-      rules: [{ key: 'secret', action: 'remove' }],
+      rules: [{ key: 'credential', action: 'remove' }],
     })
-    await redactor.flush(makeTrace([makeSpan({ metadata: { secret: 'x', safe: 'visible' } })]))
+    await redactor.flush(makeTrace([makeSpan({ metadata: { credential: 'x', safe: 'visible' } })]))
     const stored = await inner.queryByTraceId('trace-1')
     expect(stored!.spans[0].metadata['safe']).toBe('visible')
   })
@@ -89,16 +89,16 @@ describe('SpanRedactor — metadata rules', () => {
     const inner = new InMemoryAdapter()
     const redactor = new SpanRedactor({
       adapter: inner,
-      rules: [{ key: 'secret', action: 'remove' }],
+      rules: [{ key: 'credential', action: 'remove' }],
     })
     const spans = [
-      makeSpan({ id: 's1', metadata: { secret: 'a', keep: 1 } }),
-      makeSpan({ id: 's2', metadata: { secret: 'b', keep: 2 } }),
+      makeSpan({ id: 's1', metadata: { credential: 'a', keep: 1 } }),
+      makeSpan({ id: 's2', metadata: { credential: 'b', keep: 2 } }),
     ]
     await redactor.flush(makeTrace(spans))
     const stored = await inner.queryByTraceId('trace-1')
     for (const span of stored!.spans) {
-      expect(span.metadata).not.toHaveProperty('secret')
+      expect(span.metadata).not.toHaveProperty('credential')
     }
   })
 
@@ -181,12 +181,12 @@ describe('SpanRedactor — immutability', () => {
     const inner = new InMemoryAdapter()
     const redactor = new SpanRedactor({
       adapter: inner,
-      rules: [{ key: 'secret', action: 'remove' }],
+      rules: [{ key: 'credential', action: 'remove' }],
     })
-    const span = makeSpan({ metadata: { secret: 'keep-me', other: 'ok' } })
+    const span = makeSpan({ metadata: { credential: 'keep-me', other: 'ok' } })
     const trace = makeTrace([span])
     await redactor.flush(trace)
-    expect(trace.spans[0].metadata['secret']).toBe('keep-me')
+    expect(trace.spans[0].metadata['credential']).toBe('keep-me')
   })
 
   it('does not mutate original thoughtBlocks', async () => {
