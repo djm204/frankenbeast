@@ -61,7 +61,7 @@ export const SELECT_TRACE_SUMMARIES = `
     traces.goal,
     traces.status,
     traces.startedAt,
-    COUNT(spans.id) AS spanCount
+    COUNT(spans.traceId) AS spanCount
   FROM traces
   LEFT JOIN spans ON spans.traceId = traces.id
   GROUP BY traces.id
