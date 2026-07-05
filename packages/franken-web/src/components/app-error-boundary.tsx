@@ -134,7 +134,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
     return (
       <div className="dashboard-shell app-shell-error" role="alert" aria-live="assertive">
-        <aside className="sidebar app-shell-error__sidebar" aria-label="Frankenbeast recovery shell">
+        <aside className="sidebar app-shell-error__sidebar sidebar--open" aria-label="Frankenbeast recovery shell">
           <div className="sidebar__brand">
             <span className="eyebrow">Frankenbeast dashboard</span>
             <h1>Control plane recovery</h1>
