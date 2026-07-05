@@ -385,6 +385,98 @@ describe('useChatSession', () => {
     }));
   });
 
+  it('preserves duplicate local messages by consuming snapshot matches by count', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let firstSend!: Promise<void>;
+    act(() => {
+      firstSend = result.current.send('repeatable prompt');
+    });
+    const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+    });
+    await act(async () => {
+      await firstSend;
+    });
+
+    let secondSend!: Promise<void>;
+    act(() => {
+      secondSend = result.current.send('repeatable prompt');
+    });
+    const secondId = (JSON.parse(socket.sent[1] ?? '{}') as { clientMessageId: string }).clientMessageId;
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId: secondId, timestamp: '2026-03-09T00:00:02Z' });
+    });
+    await act(async () => {
+      await secondSend;
+    });
+
+    act(() => {
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [{ id: 'server-first', role: 'user', content: 'repeatable prompt', timestamp: '2026-03-09T00:00:03Z' }],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages.filter((message) => message.content === 'repeatable prompt')).toHaveLength(2);
+    expect(result.current.messages).toContainEqual(expect.objectContaining({ id: 'server-first' }));
+    expect(result.current.messages).toContainEqual(expect.objectContaining({ id: secondId }));
+  });
+
+  it('drops failed placeholders when reconnect snapshots include the prompt', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let failedSend!: Promise<void>;
+    act(() => {
+      failedSend = result.current.send('server already handled this');
+    });
+    const failedId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.shutdown();
+    });
+    await expect(failedSend).rejects.toThrow('Connection closed');
+
+    const reconnect = MockWebSocket.instances[1]!;
+    act(() => {
+      reconnect.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [{ id: 'server-copy', role: 'user', content: 'server already handled this', timestamp: '2026-03-09T00:00:03Z' }],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages.filter((message) => message.content === 'server already handled this')).toHaveLength(1);
+    expect(result.current.messages).toContainEqual(expect.objectContaining({ id: 'server-copy' }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ id: failedId }));
+  });
+
   it('surfaces pending approvals and sends approval responses over the socket', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 

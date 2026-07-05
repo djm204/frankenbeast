@@ -91,17 +91,26 @@ describe('Composer failed-send recovery', () => {
     });
   });
 
-  it('keeps newer composer text when a transcript retry clears an older failure', async () => {
-    const failedAttempt = deferred<void>();
-    const onSend = vi.fn().mockReturnValueOnce(failedAttempt.promise);
+  it('keeps newer composer failures visible when a transcript retry clears an older failure', async () => {
+    const oldFailedAttempt = deferred<void>();
+    const newFailedAttempt = deferred<void>();
+    const onSend = vi.fn()
+      .mockReturnValueOnce(oldFailedAttempt.promise)
+      .mockReturnValueOnce(newFailedAttempt.promise);
     const { rerender } = render(<Composer connectionStatus="connected" disabled={false} onSend={onSend} status="idle" />);
 
     const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'old failed draft' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
-    failedAttempt.reject(new Error('Socket ack timed out'));
+    oldFailedAttempt.reject(new Error('Old socket ack timed out'));
     await screen.findByRole('alert');
+
     fireEvent.change(input, { target: { value: 'new unrelated draft' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+    newFailedAttempt.reject(new Error('New socket ack timed out'));
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('New socket ack timed out');
+    });
 
     rerender(
       <Composer
@@ -114,7 +123,7 @@ describe('Composer failed-send recovery', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('alert').textContent).toContain('New socket ack timed out');
       expect(input.value).toBe('new unrelated draft');
     });
   });

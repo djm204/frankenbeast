@@ -269,18 +269,30 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
 function preserveLocalRecoveryMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
   const snapshot = normalizeTranscript(transcript);
   const snapshotIds = new Set(snapshot.map((message) => message.id));
-  const snapshotContentKeys = new Set(snapshot.map((message) => `${message.role}\u0000${message.content}`));
+  const unmatchedSnapshotContentCounts = new Map<string, number>();
+
+  for (const message of snapshot) {
+    const key = `${message.role}\u0000${message.content}`;
+    unmatchedSnapshotContentCounts.set(key, (unmatchedSnapshotContentCounts.get(key) ?? 0) + 1);
+  }
+
   const localRecoveryMessages = current.filter((message) => {
     if (snapshotIds.has(message.id)) {
       return false;
     }
-    if (message.receipt === 'failed') {
-      return true;
+
+    const key = `${message.role}\u0000${message.content}`;
+    const snapshotMatchCount = unmatchedSnapshotContentCounts.get(key) ?? 0;
+    if (snapshotMatchCount > 0) {
+      if (snapshotMatchCount === 1) {
+        unmatchedSnapshotContentCounts.delete(key);
+      } else {
+        unmatchedSnapshotContentCounts.set(key, snapshotMatchCount - 1);
+      }
+      return false;
     }
-    if (message.role === 'user' && message.receipt) {
-      return !snapshotContentKeys.has(`${message.role}\u0000${message.content}`);
-    }
-    return false;
+
+    return message.role === 'user' && Boolean(message.receipt);
   });
 
   return [...snapshot, ...localRecoveryMessages];

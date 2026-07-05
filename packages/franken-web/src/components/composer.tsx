@@ -77,7 +77,7 @@ function canRetryConnection(connectionStatus: ConnectionStatus): boolean {
 }
 
 export function Composer({ connectionStatus, clearedFailedDraft, disabled, onReconnect, onSend, status }: ComposerProps) {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ content: string; message: string } | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
   const lastClearedFailedDraftNonceRef = useRef<number | null>(null);
@@ -93,7 +93,11 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, onRec
     }
 
     lastClearedFailedDraftNonceRef.current = clearedFailedDraft.nonce;
-    setError(null);
+    setError((current) => (
+      current && current.content.trim() !== clearedFailedDraft.content.trim()
+        ? current
+        : null
+    ));
     setValue((current) => (
       current.trim() === clearedFailedDraft.content.trim()
         ? ''
@@ -117,7 +121,10 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, onRec
       await onSend(trimmed);
       setValue((current) => (current === value ? '' : current));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.');
+      setError({
+        content: trimmed,
+        message: err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.',
+      });
     } finally {
       setIsSending(false);
     }
@@ -154,7 +161,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, onRec
       </label>
       {error && (
         <div className="composer__error" role="alert">
-          <span>{error}</span>
+          <span>{error.message}</span>
           <button className="button button--secondary button--small" type="button" onClick={() => void submitCurrentValue()} disabled={disabled || isSending}>
             Retry send
           </button>
