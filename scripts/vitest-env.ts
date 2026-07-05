@@ -20,10 +20,11 @@ export function readVitestFlag(env: VitestEnv, name: VitestFlagName): boolean {
   throw new Error(`${name} must be one of ${ALLOWED_VALUES}.`);
 }
 
-export function readVitestFlags(env: VitestEnv = process.env): Record<VitestFlagName, boolean> {
-  return {
-    INTEGRATION: readVitestFlag(env, 'INTEGRATION'),
-    EVAL: readVitestFlag(env, 'EVAL'),
-    E2E: readVitestFlag(env, 'E2E'),
-  };
+export function readVitestFlags<const Names extends readonly VitestFlagName[]>(
+  names: Names,
+  env: VitestEnv = process.env,
+): Record<Names[number], boolean> {
+  return Object.fromEntries(
+    names.map((name) => [name, readVitestFlag(env, name)]),
+  ) as Record<Names[number], boolean>;
 }

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { readVitestFlags } from '../../scripts/vitest-env.js'
 
-const vitestFlags = readVitestFlags()
+const vitestFlags = readVitestFlags(['INTEGRATION', 'EVAL'])
 const isIntegration = vitestFlags.INTEGRATION
 const isEval = vitestFlags.EVAL
 

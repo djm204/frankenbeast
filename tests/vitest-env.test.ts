@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readVitestFlag } from '../scripts/vitest-env.js';
+import { readVitestFlag, readVitestFlags } from '../scripts/vitest-env.js';
 
 describe('Vitest environment flag helper', () => {
   it('treats missing and explicit false-like values as disabled', () => {
@@ -25,5 +25,11 @@ describe('Vitest environment flag helper', () => {
     expect(() => readVitestFlag({ E2E: 'secret-token-value' }, 'E2E')).not.toThrow(
       /secret-token-value/u,
     );
+  });
+
+  it('validates only the flags requested by a config', () => {
+    expect(readVitestFlags(['INTEGRATION'], { INTEGRATION: 'true', E2E: 'secret-token-value' })).toEqual({
+      INTEGRATION: true,
+    });
   });
 });
