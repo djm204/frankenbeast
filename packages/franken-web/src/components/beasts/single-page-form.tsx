@@ -53,7 +53,7 @@ export function SinglePageForm({ onLaunch }: SinglePageFormProps) {
                 </Accordion.Trigger>
               </Accordion.Header>
               <Accordion.Content className="data-[state=open]:animate-slideDown data-[state=closed]:animate-slideUp overflow-hidden">
-                {section.Component ? <section.Component /> : <StepReview onLaunch={handleLaunch} />}
+                {section.Component ? <section.Component /> : <StepReview />}
               </Accordion.Content>
             </Accordion.Item>
           ))}
