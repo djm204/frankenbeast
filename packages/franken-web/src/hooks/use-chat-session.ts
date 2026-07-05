@@ -58,7 +58,7 @@ export interface UseChatSessionResult {
   messages: ChatMessage[];
   pendingApproval: PendingApproval | null;
   projectId: string;
-  retryError: (id: string) => void;
+  retryError: (id: string) => Promise<string | undefined>;
   retryMessage: (messageId: string) => Promise<void>;
   send: (content: string) => Promise<void>;
   sessionId: string | null;
@@ -276,7 +276,7 @@ function preserveLocalRecoveryMessages(current: ChatMessage[], transcript: Trans
     if (message.receipt === 'failed') {
       return true;
     }
-    if (message.receipt === 'accepted') {
+    if (message.role === 'user' && message.receipt) {
       return !snapshotContentKeys.has(`${message.role}\u0000${message.content}`);
     }
     return false;
@@ -345,14 +345,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
   }
 
-  function rejectAllPendingSends(error: Error) {
-    for (const [, pending] of pendingSendsRef.current.entries()) {
-      clearTimeout(pending.timeoutId);
-      pending.reject(error);
-    }
-    pendingSendsRef.current.clear();
-  }
-
   function updateApprovalResolving(value: boolean): void {
     approvalResolvingRef.current = value;
     setApprovalResolving(value);
@@ -367,7 +359,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     void clientRef.current.getSession(sessionId)
       .then((refreshed) => {
         setSocketToken(refreshed.socketToken);
-        setMessages(applySessionSnapshot(refreshed));
+        setMessages((current) => preserveLocalRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
@@ -387,16 +379,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       });
   }
 
-  function retryError(id: string) {
+  async function retryError(id: string): Promise<string | undefined> {
     const action = errorActionRef.current.get(id);
     dismissError(id);
     if (action === 'retry-session' || action === 'reconnect') {
       refreshSession();
-    } else if (action === 'retry-message' && lastMessageRef.current) {
+      return undefined;
+    }
+    if (action === 'retry-message' && lastMessageRef.current) {
       const { clientMessageId, content } = lastMessageRef.current;
       setMessages((current) => current.filter((message) => message.id !== clientMessageId));
-      void send(content).catch(() => undefined);
+      await send(content);
+      return content;
     }
+    return undefined;
   }
 
   useEffect(() => {
@@ -671,7 +667,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     return () => {
       shouldReconnect = false;
-      rejectAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
+      failAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
       socket.close();
       socketRef.current = null;
     };

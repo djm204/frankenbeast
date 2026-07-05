@@ -130,8 +130,21 @@ describe('useChatSession error banners', () => {
     });
 
     const retryBanner = result.current.errorBanners[0]!;
+    let retryPromise: Promise<string | undefined>;
+    act(() => {
+      retryPromise = result.current.retryError(retryBanner.id);
+    });
+    await waitFor(() => {
+      expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
+    });
+    const retriedMessageId = result.current.messages.find((message) => message.role === 'user')!.id;
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({ type: 'message.accepted', clientMessageId: retriedMessageId }),
+      });
+    });
     await act(async () => {
-      result.current.retryError(retryBanner.id);
+      await retryPromise;
     });
 
     expect(result.current.messages.filter((message) => message.role === 'user')).toHaveLength(1);
@@ -284,6 +297,104 @@ describe('useChatSession error banners', () => {
     expect(result.current.errorBanners[0]).toMatchObject({
       code: 'NOT_FOUND',
       actionLabel: 'Dismiss',
+    });
+  });
+
+  it('keeps locally delivered user messages when a session-ready snapshot is missing them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    act(() => {
+      void result.current.send('preserve delivered prompt').catch(() => undefined);
+    });
+    const userMessageId = result.current.messages.find((message) => message.role === 'user')!.id;
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({ type: 'message.accepted', clientMessageId: userMessageId }),
+      });
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({ type: 'message.delivered', clientMessageId: userMessageId }),
+      });
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'session.ready',
+          transcript: [],
+          pendingApproval: null,
+          projectId: 'project-1',
+        }),
+      });
+    });
+
+    expect(result.current.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: userMessageId, content: 'preserve delivered prompt', receipt: 'delivered' }),
+    ]));
+  });
+
+  it('keeps failed local messages when a manual refresh returns a stale snapshot', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse()))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'fresh-token', transcript: [] })));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    act(() => {
+      void result.current.send('failed refresh prompt').catch(() => undefined);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+    });
+
+    const reconnectBanner = result.current.errorBanners[0]!;
+    await act(async () => {
+      await result.current.retryError(reconnectBanner.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ content: 'failed refresh prompt', receipt: 'failed' }),
+      ]));
+    });
+  });
+
+  it('marks pending sends failed when reconnect cleanup races the server ack', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    act(() => {
+      void result.current.send('pending reconnect prompt').catch(() => undefined);
+    });
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ content: 'pending reconnect prompt', receipt: 'failed' }),
+      ]));
     });
   });
 

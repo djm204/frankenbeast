@@ -68,7 +68,7 @@ function ChatErrorBanners({
 }: {
   banners?: ChatErrorBanner[];
   onDismiss?: (id: string) => void;
-  onRetry?: (id: string) => void;
+  onRetry?: (id: string) => void | Promise<unknown>;
 }) {
   if (banners.length === 0) {
     return null;
@@ -701,7 +701,20 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 </div>
               </section>
 
-              <ChatErrorBanners banners={errorBanners} onDismiss={dismissError} onRetry={retryError} />
+              <ChatErrorBanners
+                banners={errorBanners}
+                onDismiss={dismissError}
+                onRetry={(bannerId) => {
+                  void retryError(bannerId).then((retriedContent) => {
+                    if (retriedContent) {
+                      setClearedFailedDraft((current) => ({
+                        content: retriedContent,
+                        nonce: (current?.nonce ?? 0) + 1,
+                      }));
+                    }
+                  }).catch(() => undefined);
+                }}
+              />
               <TranscriptPane
                 messages={messages}
                 onRetryMessage={(messageId) => {
