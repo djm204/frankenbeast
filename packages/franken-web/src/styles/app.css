@@ -780,6 +780,76 @@ button {
   font-size: 1.05rem;
 }
 
+.network-config-editor {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.network-config-editor__field {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.network-config-editor__field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+}
+
+.network-config-editor__pending {
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.network-config-editor__pending h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.95rem;
+}
+
+.network-config-editor__pending ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.network-config-editor__pending p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.network-config-editor__pending code {
+  color: var(--accent-strong);
+}
+
+.network-config-editor__alert,
+.network-config-editor__success {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.9rem;
+}
+
+.network-config-editor__alert {
+  border: 1px solid rgba(255, 126, 126, 0.32);
+  background: rgba(255, 126, 126, 0.1);
+  color: var(--danger);
+}
+
+.network-config-editor__success {
+  border: 1px solid rgba(134, 228, 95, 0.28);
+  background: rgba(134, 228, 95, 0.12);
+  color: var(--accent-strong);
+}
+
+.field-control[aria-invalid='true'] {
+  border-color: rgba(255, 126, 126, 0.58);
+}
+
 .network-logs__header,
 .network-logs__toolbar,
 .network-logs__line,

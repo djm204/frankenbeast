@@ -36,7 +36,7 @@ describe('NetworkPage', () => {
       />,
     );
 
-    expect(screen.getByText('secure')).toBeDefined();
+    expect(screen.getAllByText('secure').length).toBeGreaterThan(0);
     expect(screen.getByText('chat-server')).toBeDefined();
     expect(screen.getByText('/tmp/chat-server.log')).toBeDefined();
     expect(screen.getByDisplayValue('claude-sonnet-4-6')).toBeDefined();
@@ -80,7 +80,7 @@ describe('NetworkPage', () => {
     await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat-server' }));
     await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
-    fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'hybrid' } });
+    fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'insecure' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
     fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
     fireEvent.change(screen.getByLabelText('Dashboard port'), { target: { value: '5173' } });
@@ -91,12 +91,100 @@ describe('NetworkPage', () => {
     expect(onStop).toHaveBeenCalledWith('chat-server');
     expect(onRestart).toHaveBeenCalledWith('chat-server');
     expect(onSaveConfig).toHaveBeenCalledWith([
-      'network.mode=hybrid',
+      'network.mode=insecure',
       'chat.model=gpt-5',
       'chat.host=0.0.0.0',
       'dashboard.port=5173',
       'comms.enabled=true',
     ]);
+  });
+
+  it('keeps Save disabled until valid config changes are pending and previews assignments', () => {
+    const onSaveConfig = vi.fn();
+
+    render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    const saveButton = screen.getByRole('button', { name: 'Save config' });
+    expect(saveButton).toHaveProperty('disabled', true);
+    expect(screen.getByText('No pending config changes.')).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText('Dashboard port'), { target: { value: '70000' } });
+
+    expect(saveButton).toHaveProperty('disabled', true);
+    expect(screen.getByRole('alert').textContent).toContain('Dashboard port must be between 1 and 65535.');
+    fireEvent.click(saveButton);
+    expect(onSaveConfig).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Dashboard port'), { target: { value: '5173' } });
+    fireEvent.change(screen.getByLabelText('Dashboard API URL'), { target: { value: '' } });
+
+    expect(saveButton).toHaveProperty('disabled', true);
+    expect(screen.getByRole('alert').textContent).toContain('Dashboard API URL is required.');
+
+    fireEvent.change(screen.getByLabelText('Dashboard API URL'), { target: { value: 'http://localhost:3737' } });
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
+
+    expect(screen.getByText('Pending config changes')).toBeDefined();
+    expect(screen.getByText('chat.model=gpt-5')).toBeDefined();
+    expect(saveButton).toHaveProperty('disabled', false);
+  });
+
+  it('shows success feedback after network config changes save and the refreshed config arrives', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined);
+
+    const { rerender } = render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Dashboard API URL'), { target: { value: 'http://localhost:3737' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Saved network config changes.'));
+    expect(onSaveConfig).toHaveBeenCalledWith(['dashboard.apiUrl=http://localhost:3737']);
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          dashboard: { ...baseConfig.dashboard!, apiUrl: 'http://localhost:3737' },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByRole('status').textContent).toContain('Saved network config changes.');
   });
 
   it('updates editor values when fetched config props change', () => {
@@ -123,7 +211,7 @@ describe('NetworkPage', () => {
     rerender(
       <NetworkPage
         config={{
-          network: { mode: 'hybrid', secureBackend: 'remote-vault' },
+          network: { mode: 'insecure', secureBackend: 'os-keychain' },
           chat: { model: 'fetched-model', enabled: false, host: '0.0.0.0', port: 4747 },
           dashboard: { enabled: true, host: 'localhost', port: 5173, apiUrl: 'http://localhost:4747' },
           comms: { enabled: true },
@@ -141,8 +229,8 @@ describe('NetworkPage', () => {
     );
 
     expect(screen.getByDisplayValue('fetched-model')).toBeDefined();
-    expect(screen.getByDisplayValue('hybrid')).toBeDefined();
-    expect(screen.getByDisplayValue('remote-vault')).toBeDefined();
+    expect(screen.getByDisplayValue('insecure')).toBeDefined();
+    expect(screen.getByDisplayValue('os-keychain')).toBeDefined();
     expect((screen.getByLabelText('Chat enabled') as HTMLInputElement).checked).toBe(false);
     expect((screen.getByLabelText('Comms enabled') as HTMLInputElement).checked).toBe(true);
   });
