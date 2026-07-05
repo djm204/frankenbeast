@@ -19,6 +19,8 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
 export interface ProviderOverrideConfig {
   readonly command?: string | undefined;
+  readonly trustCommandOverride?: boolean | undefined;
+  readonly trustedCommandPaths?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly extraArgs?: readonly string[] | undefined;
 }
@@ -28,6 +30,8 @@ export interface ProviderConfig {
   readonly type: ProviderType;
   readonly apiKey?: string | undefined;
   readonly cliPath?: string | undefined;
+  readonly trustCommandOverride?: boolean | undefined;
+  readonly trustedCommandPaths?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly extraArgs?: readonly string[] | undefined;
 }

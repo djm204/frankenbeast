@@ -132,6 +132,7 @@ describe('network-registry', () => {
       url: 'http://127.0.0.1:5173',
       process: {
         env: {
+          FRANKENBEAST_CONFIG_FILE: '',
           VITE_API_URL: '',
           VITE_API_PROXY_TARGET: 'http://127.0.0.1:4242',
           VITE_BEAST_API_PROXY_TARGET: 'http://127.0.0.1:4050',
@@ -146,11 +147,15 @@ describe('network-registry', () => {
       configFile: '/tmp/custom-frankenbeast.json',
     });
     const chatServer = services.find((service) => service.id === 'chat-server');
+    const dashboard = services.find((service) => service.id === 'dashboard-web');
 
     expect(chatServer?.runtimeConfig.process?.args).toEqual(expect.arrayContaining([
       '--config',
       '/tmp/custom-frankenbeast.json',
     ]));
+    expect(dashboard?.runtimeConfig.process?.env).toMatchObject({
+      FRANKENBEAST_CONFIG_FILE: '/tmp/custom-frankenbeast.json',
+    });
   });
 
   it('provides explanation strings for help and status', () => {

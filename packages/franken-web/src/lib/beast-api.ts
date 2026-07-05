@@ -46,10 +46,7 @@ export type {
 } from '@franken/types';
 
 export class BeastApiClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly operatorToken: string,
-  ) {}
+  constructor(private readonly baseUrl: string) {}
 
   async getCatalog(): Promise<BeastCatalogEntry[]> {
     return this.request<BeastCatalogEntry[]>('/v1/beasts/catalog', { method: 'GET' });
@@ -269,7 +266,6 @@ export class BeastApiClient {
 
   private async requestRaw<T>(path: string, init: RequestInit): Promise<T> {
     const headers = normalizeHeaders(init.headers);
-    headers.authorization = `Bearer ${this.operatorToken}`;
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
@@ -283,7 +279,6 @@ export class BeastApiClient {
 
   private async requestVoid(path: string, init: RequestInit): Promise<void> {
     const headers = normalizeHeaders(init.headers);
-    headers.authorization = `Bearer ${this.operatorToken}`;
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,

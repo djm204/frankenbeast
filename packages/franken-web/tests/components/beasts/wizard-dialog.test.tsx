@@ -37,6 +37,8 @@ describe('WizardDialog', () => {
     useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
 
     render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={onLaunch} />);
+    expect(screen.getAllByRole('button', { name: /launch/i })).toHaveLength(1);
+
     fireEvent.click(screen.getByText('Launch Agent'));
 
     expect(onLaunch).toHaveBeenCalledWith({

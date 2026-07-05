@@ -25,7 +25,6 @@ import { AnalyticsPage } from '../pages/analytics-page';
 
 export interface ChatShellProps {
   baseUrl: string;
-  beastOperatorToken?: string;
   projectId: string;
   sessionId?: string;
   version: string;
@@ -150,7 +149,7 @@ function buildInitAction(
   };
 }
 
-export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, version }: ChatShellProps) {
+export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
@@ -208,16 +207,16 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     [baseUrl],
   );
   const analyticsClient = useMemo(
-    () => new AnalyticsApiClient(baseUrl, beastOperatorToken),
-    [baseUrl, beastOperatorToken],
+    () => new AnalyticsApiClient(baseUrl),
+    [baseUrl],
   );
   const beastClient = useMemo(
-    () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),
-    [baseUrl, beastOperatorToken],
+    () => new BeastApiClient(baseUrl),
+    [baseUrl],
   );
 
   useEffect(() => {
-    const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+    const client = new NetworkApiClient(baseUrl);
     void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
       if (statusResult.status === 'fulfilled') {
         setNetworkStatus(statusResult.value);
@@ -226,7 +225,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
         setNetworkConfig(configResult.value);
       }
     });
-  }, [baseUrl, beastOperatorToken]);
+  }, [baseUrl]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -268,15 +267,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
 
   useEffect(() => {
     if (route !== 'beasts') {
-      return;
-    }
-    if (!beastClient) {
-      setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
-      setBeastCatalog([]);
-      setBeastAgents([]);
-      setBeastRuns([]);
-      setBeastContainerRuntime(undefined);
-      setBeastAgentDetail(null);
       return;
     }
     const client = beastClient;
@@ -338,7 +328,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
   }, [route, beastClient, selectedBeastAgentId, beastRefreshNonce]);
 
   useEffect(() => {
-    if (route !== 'beasts' || !beastClient) {
+    if (route !== 'beasts') {
       return;
     }
 
@@ -701,7 +691,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             catalog={beastCatalog}
             runs={beastRuns}
             containerRuntime={beastContainerRuntime}
-            disabled={!beastClient}
+            disabled={false}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
             selectedAgentId={selectedBeastAgentId}
@@ -712,7 +702,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               setBeastAgentDetail(null);
             }}
             onLaunch={async (config) => {
-              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
@@ -754,7 +743,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               });
             }}
             onSaveAgentConfig={async (agentId, values) => {
-              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               setBeastError(null);
               await beastClient.patchAgentConfig(agentId, values);
               const detail = await beastClient.getAgent(agentId);
@@ -792,7 +780,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
             logsError={networkLogsError}
             logsLoading={networkLogsLoading}
             onRefresh={() => {
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               const logServiceId = selectedNetworkLogServiceId;
               const requestId = ++networkLogsRequestIdRef.current;
               if (logServiceId) {
@@ -822,11 +810,11 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 });
             }}
             onRestart={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               void client.restart(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             onSaveConfig={(assignments) => {
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               return client.updateConfig(assignments).then((nextConfig) => {
                 setNetworkConfig(nextConfig);
               });
@@ -841,7 +829,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 setNetworkLogsLoading(false);
                 return;
               }
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               setNetworkLogsLoading(true);
               void client.getLogs(nextServiceId)
                 .then(({ logs }) => {
@@ -865,11 +853,11 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
                 });
             }}
             onStart={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               void client.start(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             onStop={(serviceId) => {
-              const client = new NetworkApiClient(baseUrl, beastOperatorToken);
+              const client = new NetworkApiClient(baseUrl);
               void client.stop(serviceId).then(() => client.getStatus()).then(setNetworkStatus).catch(() => undefined);
             }}
             selectedLogServiceId={selectedNetworkLogServiceId}

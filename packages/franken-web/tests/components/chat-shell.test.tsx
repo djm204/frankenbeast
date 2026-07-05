@@ -250,11 +250,6 @@ vi.mock('../../src/lib/beast-api.js', () => ({
 }));
 
 vi.mock('../../src/lib/network-api.js', () => ({
-  // AnalyticsApiClient (loaded transitively by ChatShell) imports
-  // withOperatorAuth from this module, so the mock must expose it or the
-  // analytics client throws when it builds an authenticated request.
-  withOperatorAuth: (init: RequestInit, token: string | undefined) =>
-    token ? { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } } : init,
   NetworkApiClient: vi.fn(function (this: { getStatus: ReturnType<typeof vi.fn>; getConfig: ReturnType<typeof vi.fn>; getLogs: ReturnType<typeof vi.fn> }) {
     this.getStatus = mockNetworkGetStatus;
     this.getConfig = mockNetworkGetConfig;
@@ -408,7 +403,7 @@ describe('ChatShell', () => {
 
   it('fetches network logs when a service is selected on the Network page', async () => {
     window.location.hash = '#/network';
-    render(<ChatShell baseUrl="http://localhost:3000" beastOperatorToken="operator-token" projectId="test-project" version="0.9.0" />);
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Service logs')).toBeDefined();
@@ -441,7 +436,7 @@ describe('ChatShell', () => {
       ],
     });
 
-    render(<ChatShell baseUrl="http://localhost:3000" beastOperatorToken="operator-token" projectId="test-project" version="0.9.0" />);
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Service logs')).toBeDefined();
@@ -465,7 +460,7 @@ describe('ChatShell', () => {
   it('clears stale network logs and reports refresh failures', async () => {
     window.location.hash = '#/network';
     mockNetworkGetLogs.mockResolvedValueOnce({ logs: ['current log line'] });
-    render(<ChatShell baseUrl="http://localhost:3000" beastOperatorToken="operator-token" projectId="test-project" version="0.9.0" />);
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Service logs')).toBeDefined();
@@ -517,7 +512,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -536,7 +530,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -585,7 +578,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -616,7 +608,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -654,7 +645,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -739,7 +729,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -854,7 +843,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,
@@ -910,7 +898,6 @@ describe('ChatShell', () => {
     render(
       <ChatShell
         baseUrl="http://localhost:3000"
-        beastOperatorToken="operator-token"
         projectId="test-project"
         version="0.9.0"
       />,

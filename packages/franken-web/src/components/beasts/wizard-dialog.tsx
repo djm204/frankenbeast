@@ -52,7 +52,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
       case 4: return <StepSkills />;
       case 5: return <StepPrompts />;
       case 6: return <StepGit />;
-      case 7: return <StepReview onLaunch={onLaunch} />;
+      case 7: return <StepReview />;
       default: return null;
     }
   }

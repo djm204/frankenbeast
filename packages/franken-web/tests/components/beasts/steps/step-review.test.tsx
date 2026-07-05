@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 
 afterEach(cleanup);
@@ -13,13 +13,13 @@ describe('StepReview', () => {
   });
 
   it('renders summary sections from Zustand state', () => {
-    render(<StepReview onLaunch={vi.fn()} />);
+    render(<StepReview />);
     expect(screen.getByText('Test Agent')).toBeTruthy();
     expect(screen.getByText(/design-interview/i)).toBeTruthy();
   });
 
   it('has edit links that call setWizardStep', () => {
-    render(<StepReview onLaunch={vi.fn()} />);
+    render(<StepReview />);
     const editLinks = screen.getAllByText('Edit');
     expect(editLinks.length).toBeGreaterThan(0);
     fireEvent.click(editLinks[0]!);
@@ -27,20 +27,13 @@ describe('StepReview', () => {
     expect(useBeastStore.getState().wizardStep).toBe(0);
   });
 
-  it('launches with the shared wizard config shape for non-default workflows', () => {
-    const onLaunch = vi.fn();
+  it('does not render a launch action inside the review step', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' });
     useBeastStore.getState().setStepValues(2, { defaultProvider: 'codex', defaultModel: 'gpt-5.1' });
-    render(<StepReview onLaunch={onLaunch} />);
-    fireEvent.click(screen.getByText('Launch'));
-    expect(onLaunch).toHaveBeenCalledWith({
-      identity: { name: 'Test Agent', description: 'A test agent' },
-      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
-      executionMode: 'process',
-      designDocPath: 'docs/design.md',
-      outputDir: 'tasks/chunks',
-      llm: { defaultProvider: 'codex', defaultModel: 'gpt-5.1' },
-    });
-    expect(onLaunch.mock.calls[0]?.[0]).not.toHaveProperty('workflow_type');
+    render(<StepReview />);
+
+    expect(screen.queryByRole('button', { name: /launch/i })).toBeNull();
+    expect(screen.getByText('chunk-plan')).toBeTruthy();
+    expect(screen.getByText('codex / gpt-5.1')).toBeTruthy();
   });
 });
