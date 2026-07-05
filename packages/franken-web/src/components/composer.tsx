@@ -4,12 +4,84 @@ import type { ConnectionStatus, SessionStatus } from '../hooks/use-chat-session'
 export interface ComposerProps {
   connectionStatus: ConnectionStatus;
   disabled: boolean;
+  onReconnect?: () => void;
   onSend: (content: string) => void;
   status: SessionStatus;
 }
 
-export function Composer({ connectionStatus, disabled, onSend, status }: ComposerProps) {
+function connectionStatusLabel(connectionStatus: ConnectionStatus): string {
+  switch (connectionStatus) {
+    case 'connected':
+      return 'Connected';
+    case 'connecting':
+      return 'Connecting to chat';
+    case 'reconnecting':
+      return 'Reconnecting to chat';
+    case 'disconnected':
+      return 'Chat disconnected';
+    case 'offline':
+      return 'Browser offline';
+    case 'error':
+      return 'Connection error';
+  }
+}
+
+function sessionStatusLabel(status: SessionStatus): string {
+  switch (status) {
+    case 'idle':
+      return 'Ready to dispatch';
+    case 'connecting':
+      return 'Preparing chat session';
+    case 'sending':
+      return 'Sending message';
+    case 'streaming':
+      return 'Assistant is responding';
+    case 'error':
+      return 'Chat needs attention';
+  }
+}
+
+function disabledReason(status: SessionStatus): string | null {
+  switch (status) {
+    case 'connecting':
+      return 'Dispatch is disabled while the chat session connects.';
+    case 'sending':
+      return 'Dispatch is disabled while your previous message is being sent.';
+    case 'streaming':
+      return 'Dispatch is disabled while Frankenbeast is responding.';
+    default:
+      return null;
+  }
+}
+
+function connectionHelp(connectionStatus: ConnectionStatus): string | null {
+  switch (connectionStatus) {
+    case 'connecting':
+      return 'Connecting to live chat. Dispatch will unlock when the session is ready.';
+    case 'reconnecting':
+      return 'Reconnecting to live chat. Messages may use the HTTP fallback if needed.';
+    case 'disconnected':
+      return 'Live chat is disconnected. Try reconnecting before sending time-sensitive work.';
+    case 'offline':
+      return 'Your browser is offline. Reconnect to the network, then try reconnecting chat.';
+    case 'error':
+      return 'The live chat connection hit an error. Try reconnecting.';
+    default:
+      return null;
+  }
+}
+
+function canRetryConnection(connectionStatus: ConnectionStatus): boolean {
+  return connectionStatus === 'disconnected' || connectionStatus === 'offline' || connectionStatus === 'error';
+}
+
+export function Composer({ connectionStatus, disabled, onReconnect, onSend, status }: ComposerProps) {
   const [value, setValue] = useState('');
+  const helpText = disabledReason(status)
+    ?? connectionHelp(connectionStatus)
+    ?? 'Type a message, then press Dispatch or Ctrl+Enter to send.';
+  const liveStatus = `${connectionStatusLabel(connectionStatus)}. ${sessionStatusLabel(status)}.`;
+  const showReconnect = canRetryConnection(connectionStatus);
 
   function submitCurrentValue() {
     if (disabled) {
@@ -35,6 +107,8 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
       <label className="composer__field">
         <span className="eyebrow">Dispatch Input</span>
         <textarea
+          aria-describedby="composer-help composer-live-status"
+          aria-disabled={disabled ? 'true' : undefined}
           className="field-control composer__textarea"
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -48,15 +122,26 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
           aria-label="Message input"
           rows={3}
         />
+        <span className="composer__help" id="composer-help">
+          {helpText}
+        </span>
       </label>
       <div className="composer__footer">
-        <p className="composer__status">
-          <span>{connectionStatus}</span>
-          <span>{status}</span>
+        <p className="composer__status" id="composer-live-status" role="status" aria-live="polite" aria-atomic="true">
+          <span>{connectionStatusLabel(connectionStatus)}</span>
+          <span>{sessionStatusLabel(status)}</span>
+          <span className="composer__status-message">{liveStatus}</span>
         </p>
-        <button className="button button--primary" type="submit" disabled={disabled}>
-          Dispatch
-        </button>
+        <div className="composer__actions">
+          {showReconnect ? (
+            <button className="button button--secondary" type="button" onClick={onReconnect}>
+              Try reconnecting
+            </button>
+          ) : null}
+          <button className="button button--primary" type="submit" disabled={disabled}>
+            Dispatch
+          </button>
+        </div>
       </div>
     </form>
   );
