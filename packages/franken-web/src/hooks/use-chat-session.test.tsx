@@ -163,4 +163,63 @@ describe('useChatSession error banners', () => {
       actionLabel: 'Refresh chat',
     });
   });
+
+  it('does not offer retry for invalid socket payload errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    await act(async () => {
+      await result.current.send('x'.repeat(20_000));
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.error',
+          code: 'INVALID_EVENT',
+          message: 'Message content is too long.',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.errorBanners[0]).toMatchObject({
+      code: 'INVALID_EVENT',
+      actionLabel: 'Dismiss',
+    });
+  });
+
+  it('resets status after a successful reconnect refresh', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse()))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'fresh-token' })));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+    });
+
+    const retryBanner = result.current.errorBanners[0]!;
+    await act(async () => {
+      result.current.retryError(retryBanner.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('idle');
+    });
+    expect(result.current.connectionStatus).toBe('connecting');
+  });
 });

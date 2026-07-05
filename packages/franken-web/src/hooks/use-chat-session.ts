@@ -306,6 +306,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setPendingApproval(refreshed.pendingApproval ?? null);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
+        setStatus('idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
       })
@@ -393,6 +394,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
   useEffect(() => {
     if (!sessionId || !socketToken) {
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setConnectionStatus('offline');
       return;
     }
 
@@ -509,11 +515,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
               timestamp: payload.timestamp,
             },
           ]);
+          const canRetryMessage = Boolean(lastMessageRef.current) && payload.code !== 'INVALID_EVENT';
           addErrorBanner(makeBanner(
             'Turn failed',
             payload.message,
-            lastMessageRef.current ? 'retry-message' : 'dismiss',
-            lastMessageRef.current ? 'Retry last message' : 'Dismiss',
+            canRetryMessage ? 'retry-message' : 'dismiss',
+            canRetryMessage ? 'Retry last message' : 'Dismiss',
             payload.code,
           ));
           setStatus('error');
@@ -546,7 +553,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
       }
       if (shouldReconnect) {
-        setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'reconnecting');
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setConnectionStatus('offline');
+          return;
+        }
+        setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
       } else {
         setConnectionStatus('disconnected');
