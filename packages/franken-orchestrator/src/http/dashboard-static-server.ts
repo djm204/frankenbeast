@@ -4,6 +4,7 @@ import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SERVICE_IDENTITY = 'dashboard-web';
+const LOCAL_HTTP_PROTOCOL = 'http:';
 const RESERVED_PREFIXES = ['/api', '/v1', '/webhooks', '/comms'];
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -123,7 +124,8 @@ export async function startDashboardStaticServer(options: {
     if (req.method) {
       requestInit.method = req.method;
     }
-    const request = new Request(`http://${host}${req.url ?? '/'}`, requestInit);
+    const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
+    const request = new Request(requestUrl, requestInit);
     void createDashboardStaticResponse(request, options.staticDir)
       .then(async (staticResponse) => {
         res.statusCode = staticResponse.status;
@@ -172,5 +174,5 @@ if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
   const server = await startDashboardStaticServer(options);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : options.port;
-  console.log(`Dashboard static server listening on http://${options.host}:${port}`);
+  console.log(`Dashboard static server listening on ${LOCAL_HTTP_PROTOCOL}//${options.host}:${port}`);
 }
