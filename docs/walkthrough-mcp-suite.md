@@ -6,7 +6,7 @@ fbeast works with any MCP-compatible AI assistant client. Currently supported:
 |--------|-----------|-------|
 | Claude Code | `.claude/` | ✅ PreToolUse / PostToolUse (generated shell scripts) |
 | Gemini CLI | `.gemini/` | ✅ BeforeTool / AfterTool (shell scripts) |
-| Codex CLI | `codex mcp add` | ✅ PreToolUse / PostToolUse (shell scripts) |
+| Codex CLI | `.codex/config.toml` | ✅ PreToolUse / PostToolUse (generated shell scripts + `.codex/hooks.json`) |
 
 Beast mode (`fbeast mcp beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
 
@@ -16,6 +16,7 @@ Beast mode (`fbeast mcp beast`) is provider-agnostic: `anthropic-api`, `codex-cl
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26` for package tasks and orchestrator/dashboard runtime workflows
 - npm workspaces (installed at repo root)
+- Python 3 (`python3`) for generated hook scripts
 - At least one of: Claude Code CLI, Gemini CLI, or Codex CLI
 - Codex CLI (`codex --version`) — required for full-cycle integration tests
 
@@ -90,7 +91,7 @@ no mocked dependencies:
 1. Verifies `codex --version` exits 0
 2. `runInit()` → creates `.fbeast/beast.db`, `settings.json`, `fbeast-instructions.md`
 3. Pre-tool hook (safe action) → real governor writes `approved` to `governor_log`, exit 0
-4. Pre-tool hook (`rm -rf`) → real governor writes `denied` to `governor_log`, exit 1
+4. Pre-tool hook (`rm -rf`) → real governor rejects the action, writes the current non-approved decision to `governor_log`, exit 1
 5. Post-tool hook → real observer writes entry to `audit_trail`, verified by `session_id`
 6. Brain adapter stores working memory; new adapter instance rehydrates it (cross-process persistence)
 7. Observer hash chain: `parent_hash` of row N verified against `hash` of row N-1 via raw SQL
@@ -186,7 +187,7 @@ fbeast mcp init --client=codex --hooks       # Codex CLI
 
 The scripts read JSON from stdin, extract `tool_name`, call `fbeast-hook`, and deny with the correct Gemini format (exit 2 + `{"decision":"deny",...}`).
 
-**Codex CLI** — shell scripts written to `.codex/hooks/`, registered in `.codex/hooks.json`:
+**Codex CLI** — project-scoped MCP server entries are written directly to `.codex/config.toml`. Hook shell scripts are written to `.codex/hooks/` and registered in `.codex/hooks.json`:
 
 ```json
 {
@@ -227,7 +228,7 @@ After init, restart your AI client so it picks up the new MCP registration.
 
 ### What it is
 
-Proxy mode registers a single MCP server that exposes 2 meta-tools (`search_tools` and `execute_tool`) instead of 7 individual servers with 20+ full tool schemas upfront.
+Proxy mode registers a single MCP server that exposes 2 meta-tools (`search_tools` and `execute_tool`) instead of 7 individual servers with the full fbeast tool schemas upfront.
 
 ### When to use it
 
@@ -249,7 +250,7 @@ Only two tools in its tool list:
 ### Usage pattern
 
 1. Agent calls `search_tools` to find a tool by name (e.g., "tools for memory")
-2. Returns matching lightweight tool metadata (name and short description)
+2. Returns matching tool metadata, including each tool's input schema so the agent can call it without loading all schemas upfront
 3. Agent calls `execute_tool` with the tool name and arguments
 4. Proxy server dispatches to the appropriate handler and returns the result
 
@@ -261,22 +262,26 @@ By default, `fbeast mcp init` installs 7 individual servers with all tools visib
 
 ## MCP Tools Reference
 
-Once installed, Claude Code has access to these tools:
+Once installed, your MCP-compatible client has access to these tools:
 
 | Tool | Server | Description |
 |------|--------|-------------|
 | `fbeast_memory_frontload` | memory | Load all working + episodic memory from this database as context |
-| `fbeast_memory_store` | memory | Store a key/value entry (working or episodic) |
+| `fbeast_memory_store` | memory | Store a key/value entry; working/recovery entries update by key, episodic entries append events |
 | `fbeast_memory_query` | memory | Search memory by keyword |
 | `fbeast_memory_forget` | memory | Delete a working memory entry |
 | `fbeast_plan_decompose` | planner | Break a task into a DAG of steps |
 | `fbeast_plan_status` | planner | Get current plan status |
+| `fbeast_plan_validate` | planner | Validate a plan DAG for cycles and missing dependencies |
 | `fbeast_critique_evaluate` | critique | Score output quality (0–1), suggest improvements |
+| `fbeast_critique_compare` | critique | Compare original and revised content with score deltas |
 | `fbeast_firewall_scan` | firewall | Scan input for prompt injection |
+| `fbeast_firewall_scan_file` | firewall | Read a file and scan its contents for prompt injection patterns |
 | `fbeast_observer_log` | observer | Log a tool call event to the audit trail |
 | `fbeast_observer_log_cost` | observer | Record LLM token usage and cost for a call |
 | `fbeast_observer_cost` | observer | Get cost summary by model |
 | `fbeast_observer_trail` | observer | Retrieve audit trail for a session |
+| `fbeast_observer_verify` | observer | Verify the full audit hash chain for a session |
 | `fbeast_governor_check` | governor | Check whether an action should proceed |
 | `fbeast_governor_budget` | governor | Get current spend against budget |
 | `fbeast_skills_list` | skills | List available skills |
@@ -340,7 +345,6 @@ All MCP servers, hooks, and beast runs share `.fbeast/beast.db` (WAL mode,
 | `governor_log` | governor adapter (`fbeast-governor`), pre-tool hook |
 | `firewall_log` | firewall adapter (`fbeast-firewall`) |
 | `plans` | planner adapter (`fbeast-planner`) |
-| `skill_state` | skills adapter (`fbeast-skills`) |
 | `beast_runs` | `SQLiteBeastRepository` (beast mode) |
 | `beast_run_attempts` | `SQLiteBeastRepository` |
 | `beast_run_events` | `SQLiteBeastRepository` |

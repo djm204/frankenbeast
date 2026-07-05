@@ -43,7 +43,7 @@ export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpSer
     },
     {
       name: 'fbeast_memory_store',
-      description: 'Store a memory entry. Upserts by key.',
+      description: 'Store a memory entry. Working/recovery memory updates by key; episodic memory appends an event.',
       inputSchema: {
         type: 'object',
         properties: {
