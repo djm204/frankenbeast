@@ -6,7 +6,12 @@ import {
   type ICliProvider,
   type ProviderRegistry,
 } from '../skills/providers/cli-provider.js';
-import { classifyCommandFailure, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
+import {
+  classifyCommandFailure,
+  commandFailureFromExecError,
+  parseResetTimeText,
+  type CommandFailure,
+} from '../errors/command-failure.js';
 
 type CliCacheSessionHint = {
   key: string;
@@ -165,18 +170,54 @@ export class CliLlmAdapter implements IAdapter {
           content: prompt,
         });
       }
-      const result = await this.spawnSingle({
-        cmd: this.resolveCommand(activeProvider),
-        args: provider.buildArgs({
-          maxTurns,
-          model: activeModel,
-          chatMode,
-          sessionContinue,
-          extraArgs: this.resolveExtraArgs(activeProvider),
-        }),
-        env: provider.filterEnv(this.captureEnv()),
-        prompt,
-      });
+      const activeCommand = this.resolveCommand(activeProvider);
+      let result: { stdout: string; stderr: string; exitCode: number };
+      try {
+        result = await this.spawnSingle({
+          cmd: activeCommand,
+          args: provider.buildArgs({
+            maxTurns,
+            model: activeModel,
+            chatMode,
+            sessionContinue,
+            extraArgs: this.resolveExtraArgs(activeProvider),
+          }),
+          env: provider.filterEnv(this.captureEnv()),
+          prompt,
+        });
+      } catch (error) {
+        if (requestId) {
+          this.responseSessions.delete(requestId);
+        }
+
+        const failure = commandFailureFromExecError({
+          tool: 'llm',
+          provider: activeProvider,
+          command: activeCommand,
+          error,
+          detectRateLimit: (text) => provider.isRateLimited(text),
+          parseRetryAfterMs: (text) => {
+            const providerMs = provider.parseRetryAfter(text);
+            if (providerMs !== undefined) {
+              return providerMs;
+            }
+            const parsed = parseResetTimeText(text);
+            return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+          },
+        });
+
+        if (failure.kind === 'spawn_error') {
+          exhaustedProviders.set(activeProvider, failure);
+          const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
+          if (nextProvider) {
+            activeProvider = nextProvider;
+            continue;
+          }
+          throw new Error(buildNoCliProvidersAvailableSummary(exhaustedProviders), { cause: failure });
+        }
+
+        throw new Error(failure.summary, { cause: failure });
+      }
 
       if (result.exitCode === 0) {
         if (requestId) {
@@ -208,7 +249,7 @@ export class CliLlmAdapter implements IAdapter {
       const failure = classifyCommandFailure({
         tool: 'llm',
         provider: activeProvider,
-        command: this.resolveCommand(activeProvider),
+        command: activeCommand,
         exitCode: result.exitCode,
         stdout: result.stdout,
         stderr: result.stderr,
@@ -424,6 +465,20 @@ function normalizeProviderChain(
 ): string[] {
   const ordered = [selectedProvider, ...(providers ?? [])];
   return [...new Set(ordered.filter((name) => name.length > 0))];
+}
+
+function buildNoCliProvidersAvailableSummary(exhaustedProviders: Map<string, CommandFailure>): string {
+  const attempted = [...exhaustedProviders.entries()]
+    .map(([provider, failure]) => {
+      const code = typeof failure.details?.code === 'string' ? ` (${failure.details.code})` : '';
+      return `${provider}: ${failure.command}${code}`;
+    })
+    .join(', ');
+  return [
+    'No configured LLM provider CLI is available.',
+    attempted ? `Tried: ${attempted}.` : '',
+    'Install one of: claude, codex, gemini, aider; or configure a provider command override.',
+  ].filter(Boolean).join(' ');
 }
 
 function defaultSleep(durationMs: number): Promise<void> {

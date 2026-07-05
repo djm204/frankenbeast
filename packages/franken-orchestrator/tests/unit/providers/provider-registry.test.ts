@@ -323,6 +323,20 @@ describe('ProviderRegistry', () => {
       }).rejects.toThrow('connection timeout');
     });
 
+    it('throws an actionable error when every provider reports unavailable', async () => {
+      const p1 = mockProvider('claude', { available: false });
+      const p2 = mockProvider('codex', { available: false });
+      const brain = mockBrain();
+
+      const registry = new ProviderRegistry([p1, p2], brain);
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('No providers available. Checked: claude, codex');
+      expect(p1.execute).not.toHaveBeenCalled();
+      expect(p2.execute).not.toHaveBeenCalled();
+    });
+
     it('applies exponential backoff between retries', async () => {
       const timestamps: number[] = [];
       const p1: ILlmProvider = {

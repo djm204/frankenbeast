@@ -308,6 +308,58 @@ function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): str
   return args.providerSpecified ? args.provider : config.providers.default;
 }
 
+export interface ProviderCliAvailability {
+  readonly provider: string;
+  readonly command: string;
+  readonly available: boolean;
+}
+
+export function checkProviderCliAvailability(
+  selectedProvider: string,
+  fallbackChain: readonly string[],
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+): ProviderCliAvailability[] {
+  const registry = createDefaultRegistry();
+  const providerNames = [...new Set([selectedProvider, ...fallbackChain].filter(Boolean))];
+  return providerNames.map((provider) => {
+    const command = overrides?.[provider]?.command ?? registry.get(provider).command;
+    return {
+      provider,
+      command,
+      available: isCommandAvailable(command),
+    };
+  });
+}
+
+export function assertAnyProviderCliAvailable(
+  selectedProvider: string,
+  fallbackChain: readonly string[],
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+): void {
+  const report = checkProviderCliAvailability(selectedProvider, fallbackChain, overrides);
+  if (report.some((entry) => entry.available)) {
+    return;
+  }
+
+  const attempted = report
+    .map((entry) => `${entry.provider} (${entry.command})`)
+    .join(', ');
+  throw new Error(
+    'No configured LLM provider CLI is available. '
+      + `Checked: ${attempted || 'none'}. `
+      + 'Install one of: claude, codex, gemini, aider; or configure providers.overrides.<provider>.command.',
+  );
+}
+
+function isCommandAvailable(command: string): boolean {
+  try {
+    execFileSync('/bin/sh', ['-c', 'command -v "$1"', 'sh', command], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveBeastOperatorToken(
   root: string,
   options?: { secretStore?: ISecretStore | undefined; config?: OrchestratorConfig | undefined } | undefined,
@@ -860,6 +912,11 @@ export async function main(): Promise<void> {
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
   const provider = resolveSelectedProvider(args, config);
+  assertAnyProviderCliAvailable(
+    provider,
+    args.providers ?? config.providers.fallbackChain,
+    config.providers.overrides,
+  );
 
   // Create and run session
   // Precedence: CLI args > config file > defaults

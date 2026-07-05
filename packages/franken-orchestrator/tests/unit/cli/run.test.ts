@@ -208,7 +208,7 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     enableHeartbeat: false,
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
-    providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+    providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
     network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
     beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
     chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -295,6 +295,27 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('provider CLI availability preflight', () => {
+  it('reports provider commands and honors command overrides', () => {
+    const report = checkProviderCliAvailability('claude', ['codex'], {
+      claude: { command: 'sh' },
+      codex: { command: 'definitely-missing-frankenbeast-provider-cli' },
+    });
+
+    expect(report).toEqual([
+      { provider: 'claude', command: 'sh', available: true },
+      { provider: 'codex', command: 'definitely-missing-frankenbeast-provider-cli', available: false },
+    ]);
+  });
+
+  it('throws an actionable error when no configured provider CLI is available', () => {
+    expect(() => assertAnyProviderCliAvailable('claude', ['codex'], {
+      claude: { command: 'definitely-missing-frankenbeast-claude' },
+      codex: { command: 'definitely-missing-frankenbeast-codex' },
+    })).toThrow('Install one of: claude, codex, gemini, aider');
   });
 });
 
@@ -1008,7 +1029,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',
@@ -1109,7 +1130,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       network: { mode: 'insecure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
@@ -1299,7 +1320,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },

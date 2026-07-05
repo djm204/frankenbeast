@@ -75,13 +75,19 @@ export class ProviderRegistry {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     let lastError: Error | undefined;
+    const unavailableProviders: string[] = [];
+    let attemptedProviders = 0;
 
     for (let i = 0; i < this.providers.length; i++) {
       const providerIndex =
         (this.currentProviderIndex + i) % this.providers.length;
       const provider = this.providers[providerIndex]!;
 
-      if (!(await provider.isAvailable())) continue;
+      if (!(await provider.isAvailable())) {
+        unavailableProviders.push(provider.name);
+        continue;
+      }
+      attemptedProviders++;
 
       let effectiveRequest = request;
       if (i > 0) {
@@ -176,9 +182,13 @@ export class ProviderRegistry {
       timestamp: new Date().toISOString(),
     });
 
+    const exhaustionReason = attemptedProviders === 0
+      ? `No providers available. Checked: ${unavailableProviders.join(', ')}. `
+        + 'Install or authenticate at least one configured provider CLI, or configure provider overrides.'
+      : `All providers exhausted. Last error: ${lastError?.message ?? 'unknown'}. `;
+
     throw new Error(
-      `All providers exhausted. Last error: ${lastError?.message ?? 'unknown'}. ` +
-        `Brain state checkpointed for recovery.`,
+      exhaustionReason + 'Brain state checkpointed for recovery.',
     );
   }
 
