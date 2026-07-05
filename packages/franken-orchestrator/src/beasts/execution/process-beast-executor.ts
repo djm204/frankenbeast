@@ -11,7 +11,7 @@ import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, Beas
 const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 
-function redactFailureStderrLine(line: string): string {
+function redactBeastLogLine(line: string): string {
   return line
     .replace(/((?:"|')?authorization(?:"|')?\s*:\s*(?:"|')?(?:bearer|basic|bot)\s+)[^\s"',;}]+/gi, `$1${REDACTED_SECRET}`)
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
@@ -33,7 +33,7 @@ function redactFailureStderrLine(line: string): string {
 }
 
 function redactFailureStderrTail(stderrTail: readonly string[]): string[] {
-  return stderrTail.map(redactFailureStderrLine);
+  return stderrTail.map(redactBeastLogLine);
 }
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
@@ -184,19 +184,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
     try {
       handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
+          const redactedLine = redactBeastLogLine(line);
           if (attemptId) {
             const createdAt = new Date().toISOString();
-            void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
+            void this.logs.append(run.id, attemptId, 'stdout', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
+              data: { runId: run.id, attemptId, stream: 'stdout', line: redactedLine, createdAt },
             });
           } else {
-            earlyStdoutLines.push(line);
+            earlyStdoutLines.push(redactedLine);
           }
         },
         onStderr: (line) => {
-          const redactedLine = redactFailureStderrLine(line);
+          const redactedLine = redactBeastLogLine(line);
           stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
