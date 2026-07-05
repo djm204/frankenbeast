@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -111,5 +111,12 @@ describe('resolveManagedChatAttachment', () => {
         throw new Error('healthcheck should not run for rejected persisted URL');
       },
     })).rejects.toThrow(/https:\/\//);
+  });
+
+  it('keeps chat attachment output routed through the package print helper', async () => {
+    const source = await readFile(join(process.cwd(), 'src/network/chat-attach.ts'), 'utf-8');
+    const directConsoleCall = ['console', 'log'].join('.');
+
+    expect(source).not.toContain(directConsoleCall);
   });
 });
