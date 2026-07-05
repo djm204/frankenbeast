@@ -25,7 +25,9 @@ describe('BeastApiClient', () => {
     expect(catalog[0]?.id).toBe('martin-loop');
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:3000/v1/beasts/catalog',
-      expect.objectContaining({ method: 'GET' }),
+      expect.objectContaining({
+        method: 'GET',
+      }),
     );
     const init = mockFetch.mock.calls[0]![1] as RequestInit;
     expect(new Headers(init.headers).has('authorization')).toBe(false);
@@ -258,7 +260,9 @@ describe('BeastApiClient', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/v1/beasts/events/ticket',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({
+          method: 'POST',
+        }),
       );
       const init = mockFetch.mock.calls[0]![1] as RequestInit;
       expect(new Headers(init.headers).has('authorization')).toBe(false);

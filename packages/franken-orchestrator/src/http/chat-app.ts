@@ -213,10 +213,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
-    app.route('/', networkRoutes({
-      ...opts.networkControl,
-      ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
-    }));
+    app.route('/', networkRoutes(opts.networkControl));
   }
   if (opts.commsConfig && opts.commsRuntime) {
     const commsRoutesOpts: Parameters<typeof commsRoutes>[0] = {

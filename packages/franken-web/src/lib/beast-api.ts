@@ -46,9 +46,7 @@ export type {
 } from '@franken/types';
 
 export class BeastApiClient {
-  constructor(
-    private readonly baseUrl: string,
-  ) {}
+  constructor(private readonly baseUrl: string) {}
 
   async getCatalog(): Promise<BeastCatalogEntry[]> {
     return this.request<BeastCatalogEntry[]>('/v1/beasts/catalog', { method: 'GET' });
@@ -267,8 +265,11 @@ export class BeastApiClient {
   }
 
   private async requestRaw<T>(path: string, init: RequestInit): Promise<T> {
+    const headers = normalizeHeaders(init.headers);
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      headers,
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -277,13 +278,29 @@ export class BeastApiClient {
   }
 
   private async requestVoid(path: string, init: RequestInit): Promise<void> {
+    const headers = normalizeHeaders(init.headers);
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      headers,
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
   }
+}
+
+function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return { ...headers };
 }
 
 function toError(error: unknown): Error {

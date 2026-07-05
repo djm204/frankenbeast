@@ -32,8 +32,50 @@ export function toSocketUrl(baseUrl: string, sessionId: string, token: string): 
   return url.toString();
 }
 
+export function resolveChatRequestBaseUrl(
+  baseUrl: string,
+  locationOrigin: string | undefined = typeof window !== 'undefined' ? window.location.origin : undefined,
+  useSameOriginProxy: boolean = import.meta.env.DEV || import.meta.env.VITE_CHAT_SAME_ORIGIN === 'true',
+): string {
+  if (!useSameOriginProxy || !locationOrigin) {
+    return baseUrl;
+  }
+
+  try {
+    const configured = new URL(baseUrl, locationOrigin);
+    const configuredPath = configured.pathname.replace(/\/$/, '');
+    if (configured.origin === locationOrigin) {
+      return `${configured.origin}${configuredPath}`;
+    }
+    return `${locationOrigin}${configuredPath}`;
+  } catch {
+    return locationOrigin;
+  }
+}
+
+export function resolveChatRequestCredentials(
+  requestBaseUrl: string,
+  locationOrigin: string | undefined = typeof window !== 'undefined' ? window.location.origin : undefined,
+): RequestCredentials {
+  if (!locationOrigin) {
+    return 'same-origin';
+  }
+
+  try {
+    return new URL(requestBaseUrl, locationOrigin).origin === locationOrigin ? 'same-origin' : 'include';
+  } catch {
+    return 'same-origin';
+  }
+}
+
 export class ChatApiClient {
-  constructor(private readonly baseUrl: string) {}
+  private readonly requestBaseUrl: string;
+  private readonly requestCredentials: RequestCredentials;
+
+  constructor(private readonly baseUrl: string) {
+    this.requestBaseUrl = resolveChatRequestBaseUrl(baseUrl);
+    this.requestCredentials = resolveChatRequestCredentials(this.requestBaseUrl);
+  }
 
   async createSession(projectId: string): Promise<ChatSession> {
     return this.request<ChatSession>('/v1/chat/sessions', {
@@ -50,7 +92,7 @@ export class ChatApiClient {
   }
 
   async listSessions(projectId?: string): Promise<ChatSessionSummary[]> {
-    const url = new URL('/v1/chat/sessions', this.baseUrl);
+    const url = new URL('/v1/chat/sessions', this.requestBaseUrl);
     if (projectId) {
       url.searchParams.set('projectId', projectId);
     }
@@ -84,11 +126,18 @@ export class ChatApiClient {
   }
 
   socketUrl(sessionId: string, token: string): string {
-    return toSocketUrl(this.baseUrl, sessionId, token);
+    return toSocketUrl(this.requestBaseUrl, sessionId, token);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, init);
+    // Browser chat requests authenticate through the same-origin server/BFF
+    // layer (or HttpOnly/SameSite cookies), never by accepting an operator
+    // bearer token in bundled client code.
+    const effectiveInit: RequestInit = {
+      ...init,
+      credentials: init.credentials ?? this.requestCredentials,
+    };
+    const res = await fetch(`${this.requestBaseUrl}${path}`, effectiveInit);
 
     if (!res.ok) {
       let message = `HTTP ${res.status}`;

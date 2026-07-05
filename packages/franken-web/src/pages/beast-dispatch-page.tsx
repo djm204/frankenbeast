@@ -40,8 +40,12 @@ function buildInitialFormState(catalog: BeastCatalogEntry[]): FormState {
   ]));
 }
 
-function buildPromptId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
-  return `${definition.label} ${prompt.key}`;
+function buildPromptControlId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
+  return `${definition.id}-${prompt.key}-field`;
+}
+
+function buildPromptErrorId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
+  return `${definition.id}-${prompt.key}-error`;
 }
 
 function isBrowserFakePath(value: string): boolean {
@@ -102,6 +106,7 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
   const [executionModes, setExecutionModes] = useState<ExecutionModeState>({});
   const [errors, setErrors] = useState<FormErrors>({});
   const pickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({});
 
   useEffect(() => {
     setForms((current) => {
@@ -158,6 +163,10 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
       [definition.id]: nextErrors,
     }));
     if (Object.keys(nextErrors).length > 0) {
+      const firstInvalidPrompt = definition.interviewPrompts.find((prompt) => nextErrors[prompt.key]);
+      if (firstInvalidPrompt) {
+        fieldRefs.current[`${definition.id}:${firstInvalidPrompt.key}`]?.focus();
+      }
       return;
     }
     const toggles = moduleToggles[definition.id];
@@ -226,19 +235,25 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
               </fieldset>
               <div className="beast-card__form">
                 {definition.interviewPrompts.map((prompt) => {
-                  const inputId = buildPromptId(definition, prompt);
+                  const inputId = buildPromptControlId(definition, prompt);
+                  const errorId = buildPromptErrorId(definition, prompt);
                   const inputValue = forms[definition.id]?.[prompt.key] ?? '';
                   const error = errors[definition.id]?.[prompt.key];
 
                   return (
-                    <label className="field-stack" key={prompt.key}>
+                    <label className="field-stack" htmlFor={inputId} key={prompt.key}>
                       <span>{prompt.prompt}</span>
                       {prompt.options && prompt.options.length > 0 ? (
                         <select
-                          aria-label={inputId}
+                          aria-describedby={error ? errorId : undefined}
+                          aria-invalid={error ? true : undefined}
                           className="field-control"
                           disabled={props.disabled}
+                          id={inputId}
                           onChange={(event) => updateField(definition.id, prompt, event.target.value)}
+                          ref={(element) => {
+                            fieldRefs.current[`${definition.id}:${prompt.key}`] = element;
+                          }}
                           value={inputValue}
                         >
                           <option value="">Select</option>
@@ -249,11 +264,16 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                       ) : prompt.kind === 'directory' ? (
                         <div className="beast-path-picker">
                           <input
-                            aria-label={inputId}
+                            aria-describedby={error ? errorId : undefined}
+                            aria-invalid={error ? true : undefined}
                             className="field-control"
                             disabled={props.disabled}
+                            id={inputId}
                             onChange={(event) => updateField(definition.id, prompt, event.target.value)}
                             placeholder="path/to/chunks"
+                            ref={(element) => {
+                              fieldRefs.current[`${definition.id}:${prompt.key}`] = element;
+                            }}
                             type="text"
                             value={inputValue}
                           />
@@ -283,16 +303,21 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                         </div>
                       ) : (
                         <input
-                          aria-label={inputId}
+                          aria-describedby={error ? errorId : undefined}
+                          aria-invalid={error ? true : undefined}
                           className="field-control"
                           disabled={props.disabled}
+                          id={inputId}
                           onChange={(event) => updateField(definition.id, prompt, event.target.value)}
                           placeholder={prompt.kind === 'file' ? 'path/to/design.md' : undefined}
+                          ref={(element) => {
+                            fieldRefs.current[`${definition.id}:${prompt.key}`] = element;
+                          }}
                           type="text"
                           value={inputValue}
                         />
                       )}
-                      {error && <small className="field-error">{error}</small>}
+                      {error && <small className="field-error" id={errorId}>{error}</small>}
                     </label>
                   );
                 })}

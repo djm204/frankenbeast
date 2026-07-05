@@ -120,12 +120,23 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
 
           {/* Footer */}
           <div className="flex flex-col gap-3 px-8 py-5 border-t border-beast-border shrink-0">
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {launching ? 'Launching agent. Please wait.' : ''}
+            </div>
             {launchError && (
-              <div className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">
+              <div
+                role="alert"
+                className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm"
+              >
                 {launchError}
               </div>
             )}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between" aria-busy={launching || undefined}>
               {wizardMode === 'wizard' ? (
                 <>
                   <button

@@ -49,7 +49,7 @@ describe('AnalyticsApiClient', () => {
     await expect(client.fetchSummary({})).rejects.toThrow('HTTP 500');
   });
 
-  it('does not attach browser operator-token headers', async () => {
+  it('does not add Authorization from the browser client', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ totalEvents: 0 }) });
     globalThis.fetch = fetchMock;
 

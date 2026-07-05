@@ -3,9 +3,7 @@ import type { ApiDataEnvelope, NetworkConfigResponse, NetworkStatusResponse } fr
 export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
 export class NetworkApiClient {
-  constructor(
-    private readonly baseUrl: string,
-  ) {}
+  constructor(private readonly baseUrl: string) {}
 
   async getStatus(): Promise<NetworkStatusResponse> {
     return this.request('/v1/network/status', { method: 'GET' });
