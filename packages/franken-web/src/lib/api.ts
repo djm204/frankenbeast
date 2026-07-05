@@ -43,7 +43,11 @@ export function resolveChatRequestBaseUrl(
 
   try {
     const configured = new URL(baseUrl, locationOrigin);
-    return configured.origin === locationOrigin ? configured.origin : locationOrigin;
+    const configuredPath = configured.pathname.replace(/\/$/, '');
+    if (configured.origin === locationOrigin) {
+      return `${configured.origin}${configuredPath}`;
+    }
+    return `${locationOrigin}${configuredPath}`;
   } catch {
     return locationOrigin;
   }

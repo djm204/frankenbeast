@@ -54,8 +54,12 @@ describe('ChatApiClient', () => {
   describe('resolveChatRequestBaseUrl', () => {
     it('preserves same-origin explicit base URLs', () => {
       expect(resolveChatRequestBaseUrl('http://dashboard.local/api-root', 'http://dashboard.local')).toBe(
-        'http://dashboard.local',
+        'http://dashboard.local/api-root',
       );
+    });
+
+    it('preserves same-origin proxy prefixes for relative API URLs', () => {
+      expect(resolveChatRequestBaseUrl('/franken', 'http://dashboard.local')).toBe('http://dashboard.local/franken');
     });
 
     it('rewrites cross-origin explicit base URLs to the dashboard origin when same-origin proxying is active', () => {
