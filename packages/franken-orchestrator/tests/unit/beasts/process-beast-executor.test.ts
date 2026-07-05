@@ -547,6 +547,85 @@ describe('ProcessBeastExecutor', () => {
       );
     });
 
+    it('redacts configured secret values from stdout, stderr, persisted logs, and streamed log events', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const appendSpy = vi.spyOn(logs, 'append');
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const envSecret = 'configured-env-secret-12345';
+      const configSecret = 'configured-webhook-secret-67890';
+      const visibleValue = 'visible-nonsecret-value';
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = repo.createRun({
+        definitionId: 'test-beast',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: {
+          webhookUrl: configSecret,
+          normalOutput: visibleValue,
+        },
+        dispatchedBy: 'cli',
+        dispatchedByUser: 'pfk',
+        createdAt: '2026-03-10T00:00:00.000Z',
+      });
+      const definition: BeastDefinition = {
+        ...createDefinitionWithCwd(workDir),
+        buildProcessSpec: () => ({
+          command: 'node',
+          args: ['agent.js'],
+          cwd: workDir,
+          env: { SERVICE_TOKEN: envSecret, NORMAL_OUTPUT: visibleValue },
+        }),
+      };
+
+      const attempt = await executor.start(run, definition);
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+
+      cb.onStdout(`stdout ${envSecret} ${visibleValue}`);
+      cb.onStderr(`stderr ${configSecret} ${visibleValue}`);
+      cb.onExit(1, null);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        attempt.id,
+        'stdout',
+        `stdout [REDACTED] ${visibleValue}`,
+        expect.any(String),
+      );
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        attempt.id,
+        'stderr',
+        `stderr [REDACTED] ${visibleValue}`,
+        expect.any(String),
+      );
+      const failEvent = repo.listEvents(run.id).find((e) => e.type === 'attempt.failed');
+      expect(failEvent!.payload).toMatchObject({
+        lastStderrLines: [`stderr [REDACTED] ${visibleValue}`],
+      });
+      const publishedLogLines = publishSpy.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type === 'run.log')
+        .map((event) => event.data.line);
+      expect(publishedLogLines).toContain(`stdout [REDACTED] ${visibleValue}`);
+      expect(publishedLogLines).toContain(`stderr [REDACTED] ${visibleValue}`);
+      const persistedLogLines = (await logs.read(run.id, attempt.id)).join('\n');
+      expect(persistedLogLines).toContain(`stdout [REDACTED] ${visibleValue}`);
+      expect(persistedLogLines).toContain(`stderr [REDACTED] ${visibleValue}`);
+      expect(persistedLogLines).not.toContain(envSecret);
+      expect(persistedLogLines).not.toContain(configSecret);
+
+      const serializedPersistedEvents = JSON.stringify(repo.listEvents(run.id));
+      expect(serializedPersistedEvents).not.toContain(envSecret);
+      expect(serializedPersistedEvents).not.toContain(configSecret);
+      expect(serializedPersistedEvents).toContain(visibleValue);
+    });
+
     it('publishes early buffered lines to eventBus after attempt creation', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
