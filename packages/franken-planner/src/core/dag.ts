@@ -164,6 +164,34 @@ export class PlanGraph {
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
   }
 
+  /**
+   * @deprecated Use recovery/insertFixItTask instead. This compatibility shim
+   * preserves the existing public API while recovery code owns the domain logic.
+   */
+  insertFixItTask(failedTaskId: TaskId, fixTask: Task): PlanGraph {
+    if (!this._nodes.has(failedTaskId)) {
+      throw new TaskNotFoundError(failedTaskId);
+    }
+    if (this._nodes.has(fixTask.id)) {
+      throw new DuplicateTaskError(fixTask.id);
+    }
+
+    const tasks = this.getTasks().map((task) => {
+      if (task.id === failedTaskId) {
+        return { ...task, dependsOn: [fixTask.id] };
+      }
+      return { ...task, dependsOn: this.getDependencies(task.id) };
+    });
+
+    return PlanGraph.fromTasks(
+      [...tasks, { ...fixTask, dependsOn: this.getDependencies(failedTaskId) }],
+      {
+        version: this.version + 1,
+        reason: `recovery: fix-it injected before '${failedTaskId}'`,
+      }
+    );
+  }
+
   clone(): PlanGraph {
     const nodes = new Map(this._nodes);
     const edges = new Map<TaskId, Set<TaskId>>();
