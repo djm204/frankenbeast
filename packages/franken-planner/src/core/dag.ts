@@ -10,6 +10,11 @@ export interface PlanVersion {
   timestamp: Date;
 }
 
+export interface PlanGraphFromTasksOptions {
+  version?: number;
+  reason?: string;
+}
+
 export class PlanGraph {
   private constructor(
     private readonly _nodes: ReadonlyMap<TaskId, Task>,
@@ -22,6 +27,59 @@ export class PlanGraph {
 
   static empty(): PlanGraph {
     return new PlanGraph(new Map(), new Map(), 0, 'initial');
+  }
+
+  /**
+   * Builds a graph from tasks in any order, using each task's dependsOn field.
+   * Dependencies are validated before topological sorting so callers can hand
+   * unsorted task arrays to the graph without duplicating DAG logic.
+   */
+  static fromTasks(tasks: Task[], options: PlanGraphFromTasksOptions = {}): PlanGraph {
+    const nodes = new Map<TaskId, Task>();
+    const edges = new Map<TaskId, Set<TaskId>>();
+
+    for (const task of tasks) {
+      if (nodes.has(task.id)) {
+        throw new DuplicateTaskError(task.id);
+      }
+      nodes.set(task.id, task);
+    }
+
+    for (const task of tasks) {
+      for (const depId of task.dependsOn) {
+        if (!nodes.has(depId)) {
+          throw new Error(`Dependency '${depId}' not found in graph`);
+        }
+      }
+      edges.set(task.id, new Set(task.dependsOn));
+    }
+
+    const graph = new PlanGraph(nodes, edges, options.version ?? 0, options.reason ?? 'from tasks');
+    const { sorted } = graph._kahn();
+    if (sorted.length !== nodes.size) {
+      const sortedIds = new Set(sorted);
+      const stuck = Array.from(nodes.keys())
+        .filter((id) => !sortedIds.has(id))
+        .join(', ');
+      throw new CyclicDependencyError(
+        `Cannot build graph — ${nodes.size - sorted.length} task(s) have unresolvable dependencies (cycle): ${stuck}`
+      );
+    }
+
+    const sortedNodes = new Map<TaskId, Task>();
+    const sortedEdges = new Map<TaskId, Set<TaskId>>();
+
+    for (const id of sorted) {
+      sortedNodes.set(id, nodes.get(id) as Task);
+      sortedEdges.set(id, new Set(edges.get(id) ?? []));
+    }
+
+    return new PlanGraph(
+      sortedNodes,
+      sortedEdges,
+      options.version ?? 0,
+      options.reason ?? 'from tasks'
+    );
   }
 
   /** Escape hatch for testing — builds a graph without validation (e.g. to force a cycle). */
@@ -104,39 +162,6 @@ export class PlanGraph {
       newEdges.set(id, cleaned);
     }
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
-  }
-
-  /**
-   * Inserts `fixTask` as a prerequisite for `failedTaskId`:
-   *   - fixTask inherits failedTask's current dependencies
-   *   - failedTask's dependencies become {fixTask.id}
-   * Increments version and sets a recovery reason.
-   */
-  insertFixItTask(failedTaskId: TaskId, fixTask: Task): PlanGraph {
-    if (!this._nodes.has(failedTaskId)) {
-      throw new TaskNotFoundError(failedTaskId);
-    }
-    if (this._nodes.has(fixTask.id)) {
-      throw new DuplicateTaskError(fixTask.id);
-    }
-    const failedDeps = this._edges.get(failedTaskId) ?? new Set<TaskId>();
-
-    const newNodes = new Map(this._nodes);
-    newNodes.set(fixTask.id, fixTask);
-
-    const newEdges = new Map<TaskId, Set<TaskId>>();
-    for (const [id, deps] of this._edges) {
-      newEdges.set(id, new Set(deps));
-    }
-    newEdges.set(fixTask.id, new Set(failedDeps));
-    newEdges.set(failedTaskId, new Set([fixTask.id]));
-
-    return new PlanGraph(
-      newNodes,
-      newEdges,
-      this.version + 1,
-      `recovery: fix-it injected before '${failedTaskId}'`
-    );
   }
 
   clone(): PlanGraph {
