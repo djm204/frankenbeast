@@ -134,6 +134,48 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('mounts comms health and generic inbound routes on the live chat server', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const llm = { complete: vi.fn().mockResolvedValue('Comms reply') };
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm,
+      projectName: 'test-project',
+      commsConfig: {
+        orchestrator: {},
+        channels: {},
+      },
+    });
+
+    try {
+      const health = await fetch(`${server.url}/comms/health`);
+      expect(health.status).toBe(200);
+      await expect(health.json()).resolves.toEqual({ status: 'ok' });
+
+      const inbound = await fetch(`${server.url}/v1/comms/inbound`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelType: 'slack',
+          externalUserId: 'U123',
+          externalChannelId: 'C456',
+          externalThreadId: 'T789',
+          externalMessageId: 'M001',
+          text: 'run status',
+          rawEvent: {},
+          receivedAt: new Date().toISOString(),
+        }),
+      });
+
+      expect(inbound.status).toBe(200);
+      await expect(inbound.json()).resolves.toEqual({ accepted: true });
+    } finally {
+      await server.close();
+    }
+  });
+
   it('refuses to start when chat is exposed (managed mode) without an operator token', async () => {
     mkdirSync(TMP, { recursive: true });
     const prev = process.env['FRANKENBEAST_NETWORK_MANAGED'];

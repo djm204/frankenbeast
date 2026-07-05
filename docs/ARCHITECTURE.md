@@ -454,7 +454,7 @@ The shipped HTTP server is integrated in `franken-orchestrator`:
 | Surface | Location | Notes |
 |---------|----------|-------|
 | Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
-| Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. Comms (`/api/comms`) and security (`/api/security`) mount only when `commsConfig`/`commsRuntime` and `securityConfig` are passed — the `chat-server` CLI path does not pass them. |
+| Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. When comms channels are enabled, the `chat-server` CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/*`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) mounts when `securityConfig` is passed. |
 | Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @frankenbeast/web run dev:chat`. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
