@@ -24,7 +24,7 @@ function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiCl
     fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
     toggleSkill: vi.fn().mockResolvedValue(undefined),
     updateSecurityProfile: vi.fn().mockResolvedValue(undefined),
-    subscribeToDashboard: vi.fn().mockReturnValue(() => undefined),
+    subscribeToDashboard: vi.fn().mockResolvedValue(() => undefined),
     ...overrides,
   } as unknown as DashboardApiClient;
 }
@@ -160,7 +160,7 @@ describe('DashboardPage', () => {
       fetchSnapshot: vi.fn().mockReturnValue(initialFetch.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
         onSnapshot(snapshot);
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -333,7 +333,7 @@ describe('DashboardPage', () => {
       toggleSkill: vi.fn().mockReturnValue(successfulEnable.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -354,7 +354,7 @@ describe('DashboardPage', () => {
       updateSecurityProfile: vi.fn().mockReturnValue(successfulStrictSave.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -441,7 +441,7 @@ describe('DashboardPage', () => {
       toggleSkill: vi.fn().mockReturnValue(failedShellToggle.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -512,7 +512,7 @@ describe('DashboardPage', () => {
       toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -537,7 +537,7 @@ describe('DashboardPage', () => {
       updateSecurityProfile: vi.fn().mockReturnValue(failedStrictSave.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -587,7 +587,7 @@ describe('DashboardPage', () => {
       toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -611,7 +611,7 @@ describe('DashboardPage', () => {
       toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
 
@@ -780,7 +780,7 @@ describe('DashboardPage', () => {
     const firstClient = mockClient({
       subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
         pushStaleSnapshot = onSnapshot;
-        return () => undefined;
+        return Promise.resolve(() => undefined);
       }),
     });
     const nextClient = mockClient();
