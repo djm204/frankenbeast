@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.4...franken-brain-v0.6.5) (2026-07-05)
+
+
+### Bug Fixes
+
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+
 ## [0.6.4](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.3...franken-brain-v0.6.4) (2026-07-04)
 
 
