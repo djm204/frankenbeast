@@ -1,3 +1,13 @@
 /// <reference types="vite/client" />
 
-declare const __FRANKENBEAST_VERSION__: string;
+import 'react';
+
+declare module 'react' {
+  interface HTMLAttributes<T> {
+    inert?: '' | boolean | undefined;
+  }
+}
+
+declare global {
+  const __FRANKENBEAST_VERSION__: string;
+}

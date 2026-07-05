@@ -241,9 +241,17 @@ button {
 .sidebar__header,
 .sidebar__brand,
 .sidebar__nav,
-.sidebar__footer {
+.sidebar__footer,
+.sidebar__focus-guard {
   position: relative;
   z-index: 1;
+}
+
+.sidebar__focus-guard {
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 .sidebar__header {

@@ -84,6 +84,12 @@ function shortenSessionId(id: string): string {
   return `${id.slice(0, 8)}…${id.slice(-4)}`;
 }
 
+function getSidebarFocusableElements(sidebar: HTMLElement): HTMLElement[] {
+  return Array.from(
+    sidebar.querySelectorAll<HTMLElement>('a[href]:not(.sidebar__focus-guard), button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not(.sidebar__focus-guard)'),
+  );
+}
+
 function formatSessionOptionLabel(session: ChatSessionSummary): string {
   const preview = session.preview.trim();
   const details = [
@@ -241,6 +247,10 @@ function buildInitAction(
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobileSidebar, setIsMobileSidebar] = useState(() => window.matchMedia?.('(max-width: 920px)').matches ?? false);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement | null>(null);
+  const wasSidebarOpenRef = useRef(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
@@ -610,17 +620,66 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia?.('(max-width: 920px)');
+    if (!mediaQuery) return;
+
+    const updateMobileSidebarState = () => setIsMobileSidebar(mediaQuery.matches);
+    updateMobileSidebarState();
+    mediaQuery.addEventListener('change', updateMobileSidebarState);
+    return () => mediaQuery.removeEventListener('change', updateMobileSidebarState);
+  }, []);
+
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setIsSidebarOpen(false);
+        closeSidebar();
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!isMobileSidebar || !isSidebarOpen || !sidebar) {
+      if (wasSidebarOpenRef.current && !isSidebarOpen) {
+        sidebarToggleRef.current?.focus();
+      }
+      wasSidebarOpenRef.current = isSidebarOpen;
+      return;
+    }
+
+    const focusableElements = getSidebarFocusableElements(sidebar);
+    const firstFocusableElement = focusableElements[0];
+
+    firstFocusableElement?.focus();
+    wasSidebarOpenRef.current = true;
+  }, [isMobileSidebar, isSidebarOpen]);
 
   const activeRoute = ROUTES.find((item) => item.id === route) ?? ROUTES[0]!;
+  const isSidebarHidden = isMobileSidebar && !isSidebarOpen;
+  const sidebarHiddenAttributes: Record<string, string> = isSidebarHidden ? { 'aria-hidden': 'true', inert: '' } : {};
+  const focusGuardTabIndex = isMobileSidebar && isSidebarOpen ? 0 : -1;
+
+  function closeSidebar() {
+    setIsSidebarOpen(false);
+    window.setTimeout(() => sidebarToggleRef.current?.focus(), 0);
+  }
+
+  function focusFirstSidebarControl() {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    getSidebarFocusableElements(sidebar)[0]?.focus();
+  }
+
+  function focusLastSidebarControl() {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    getSidebarFocusableElements(sidebar).at(-1)?.focus();
+  }
 
   return (
     <div className={`dashboard-shell ${isSidebarOpen ? 'dashboard-shell--nav-open' : ''}`}>
@@ -628,16 +687,19 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         aria-hidden={!isSidebarOpen}
         aria-label="Close navigation overlay"
         className={`sidebar-backdrop ${isSidebarOpen ? 'sidebar-backdrop--visible' : ''}`}
-        onClick={() => setIsSidebarOpen(false)}
+        onClick={closeSidebar}
         tabIndex={isSidebarOpen ? 0 : -1}
         type="button"
       />
 
       <aside
+        {...sidebarHiddenAttributes}
         aria-label="Primary"
         className={`sidebar ${isSidebarOpen ? 'sidebar--open' : ''}`}
         id="dashboard-sidebar"
+        ref={sidebarRef}
       >
+        <span className="sidebar__focus-guard" onFocus={focusLastSidebarControl} tabIndex={focusGuardTabIndex} />
         <div className="sidebar__header">
           <div className="sidebar__brand">
             <img src={brandMark} alt="Frankenbeast" />
@@ -649,7 +711,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           <button
             aria-label="Close navigation menu"
             className="button button--secondary button--compact sidebar__close"
-            onClick={() => setIsSidebarOpen(false)}
+            onClick={closeSidebar}
             type="button"
           >
             Close
@@ -678,6 +740,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             <span className="version-chip">v{version}</span>
           </div>
         </div>
+        <span className="sidebar__focus-guard" onFocus={focusFirstSidebarControl} tabIndex={focusGuardTabIndex} />
       </aside>
 
       <div className="workspace-shell">
@@ -689,6 +752,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               aria-label="Open navigation menu"
               className="button button--secondary button--compact sidebar__toggle"
               onClick={() => setIsSidebarOpen(true)}
+              ref={sidebarToggleRef}
               type="button"
             >
               Menu
