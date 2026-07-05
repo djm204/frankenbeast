@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, hasRunnablePlanChunks } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, planDirectoryExists } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -301,32 +301,22 @@ describe('resolvePhases', () => {
 describe('missing run plan guidance', () => {
   it('formats an actionable first-run message for an empty plan directory', () => {
     expect(formatMissingRunPlanGuidance('/project/.fbeast/plans/plan-2026-03-08')).toBe(
-      'No runnable plan chunks found under /project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+      'No default run plan directory found under /project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
     );
   });
 
-  it('preserves selected plan context in the remedy', () => {
-    expect(formatMissingRunPlanGuidance('/project/custom-chunks', {
-      planName: 'release-fix',
-      planDirOverride: '/project/custom-chunks',
-    })).toBe(
-      'No runnable plan chunks found under /project/custom-chunks. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file> --plan-name release-fix` first. If you intended to use this custom chunk directory, generate or copy numbered chunk files into it before rerunning.',
-    );
-  });
-
-  it('detects runnable chunks while ignoring plan metadata files', () => {
+  it('checks whether the selected plan directory exists', () => {
     const root = join(tmpdir(), `frankenbeast-empty-plan-${Date.now()}`);
+    expect(planDirectoryExists(root)).toBe(false);
+
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, '00_PLAN.md'), '# plan metadata');
-    expect(hasRunnablePlanChunks(root)).toBe(false);
-
-    writeFileSync(join(root, '01_IMPLEMENT.md'), '# implementation chunk');
-    expect(hasRunnablePlanChunks(root)).toBe(true);
+    expect(planDirectoryExists(root)).toBe(true);
 
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('shows guidance only for run when no runnable chunks exist', () => {
+  it('shows guidance only for default run when the plan directory is absent', () => {
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run' },
       false,
@@ -344,6 +334,16 @@ describe('missing run plan guidance', () => {
 
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run', resume: true },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run', planDir: '/typo/custom-dir' },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run', planName: 'existing-empty-plan' },
       false,
     )).toBe(false);
   });
@@ -868,7 +868,7 @@ describe('main() execution', () => {
     await main();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'No runnable plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+      'No default run plan directory found under /mock/project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
     );
     expect(MockSession).not.toHaveBeenCalled();
     expect(mockSessionStart).not.toHaveBeenCalled();

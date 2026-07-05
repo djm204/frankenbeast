@@ -108,13 +108,9 @@ export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'design
   return { entryPhase: 'interview' };
 }
 
-export function hasRunnablePlanChunks(planDir: string): boolean {
+export function planDirectoryExists(planDir: string): boolean {
   try {
-    return readdirSync(planDir).some((entry) => (
-      entry.endsWith('.md')
-        && !entry.startsWith('00_')
-        && /^\d{2}/.test(entry)
-    ));
+    return statSync(planDir).isDirectory();
   } catch {
     return false;
   }
@@ -122,24 +118,22 @@ export function hasRunnablePlanChunks(planDir: string): boolean {
 
 export function formatMissingRunPlanGuidance(
   planDir: string,
-  options: { planName?: string | undefined; planDirOverride?: string | undefined } = {},
 ): string {
-  const planCommand = options.planName
-    ? `frankenbeast plan --design-doc <file> --plan-name ${options.planName}`
-    : 'frankenbeast plan --design-doc <file>';
-  const customPlanDirHint = options.planDirOverride
-    ? ' If you intended to use this custom chunk directory, generate or copy numbered chunk files into it before rerunning.'
-    : '';
-  return 'No runnable plan chunks found under ' + planDir + '. '
-    + `Run \`frankenbeast interview\` or \`${planCommand}\` first.`
-    + customPlanDirHint;
+  const planName = basename(planDir);
+  return 'No default run plan directory found under ' + planDir + '. '
+    + `Create it with \`frankenbeast plan --design-doc <file> --plan-name ${planName}\`, `
+    + 'or run `frankenbeast interview` first and then plan the generated design before running.';
 }
 
 export function shouldShowMissingRunPlanGuidance(
-  args: Partial<Pick<CliArgs, 'subcommand' | 'resume'>>,
-  hasChunks: boolean,
+  args: Partial<Pick<CliArgs, 'subcommand' | 'resume' | 'planDir' | 'planName'>>,
+  planDirExists: boolean,
 ): boolean {
-  return args.subcommand === 'run' && !args.resume && !hasChunks;
+  return args.subcommand === 'run'
+    && !args.resume
+    && !args.planDir
+    && !args.planName
+    && !planDirExists;
 }
 
 export interface ResumeTarget {
@@ -980,11 +974,8 @@ export async function main(): Promise<void> {
   const runConfig = loadRunConfigFromEnv();
   const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig);
   const runPlanDir = planDirOverride ?? paths.plansDir;
-  if (shouldShowMissingRunPlanGuidance(args, hasRunnablePlanChunks(runPlanDir))) {
-    console.log(formatMissingRunPlanGuidance(runPlanDir, {
-      planName: args.planName,
-      planDirOverride,
-    }));
+  if (shouldShowMissingRunPlanGuidance(args, planDirectoryExists(runPlanDir))) {
+    console.log(formatMissingRunPlanGuidance(runPlanDir));
     return;
   }
   assertAnyProviderCliAvailable(
