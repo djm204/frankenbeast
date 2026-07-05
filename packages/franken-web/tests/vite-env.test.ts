@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { assertNoBundledOperatorTokenEnv } from '../vite-env';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  assertNoBundledOperatorTokenEnv,
+  loadServerSideOperatorToken,
+  type EnvLoader,
+} from '../vite-env';
+
+const ROOT = '/repo';
+const PKG = '/repo/packages/franken-web';
+
+function loaderFor(byDir: Record<string, Record<string, string>>): EnvLoader {
+  return vi.fn((_mode: string, dir: string) => byDir[dir] ?? {});
+}
 
 describe('assertNoBundledOperatorTokenEnv', () => {
   it('allows non-browser operator token env because it is not VITE-prefixed', () => {
@@ -18,5 +29,31 @@ describe('assertNoBundledOperatorTokenEnv', () => {
     expect(() => assertNoBundledOperatorTokenEnv({
       VITE_BEAST_OPERATOR_TOKEN: '   ',
     })).not.toThrow();
+  });
+});
+
+describe('loadServerSideOperatorToken', () => {
+  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file', () => {
+    const load = loaderFor({
+      [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
+      [PKG]: {},
+    });
+    expect(loadServerSideOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+  });
+
+  it('allows package-level server-side overrides without accepting VITE tokens', () => {
+    const load = loaderFor({
+      [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
+      [PKG]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'package-token' },
+    });
+    expect(loadServerSideOperatorToken(load, 'production', ROOT, PKG)).toBe('package-token');
+  });
+
+  it('does not use VITE_BEAST_OPERATOR_TOKEN as a fallback source', () => {
+    const load = loaderFor({
+      [ROOT]: {},
+      [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'browser-token' },
+    });
+    expect(loadServerSideOperatorToken(load, 'production', ROOT, PKG)).toBe('');
   });
 });

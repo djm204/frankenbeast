@@ -91,6 +91,9 @@ VITE_PROJECT_ID=my-project
 
 1. The web app makes same-origin requests without a bundled long-lived operator token.
 2. The orchestrator keeps the operator token server-side, resolving it from the configured secret backend or server env.
+   During Vite local development, the dev proxy may read server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN`
+   from the repo root/package env and inject the `Authorization` header on proxied requests;
+   that value is never exposed through `import.meta.env` or bundled client code.
 3. The orchestrator's `requireBeastOperatorAuth` middleware continues to validate protected Beast control requests.
 4. If `VITE_BEAST_OPERATOR_TOKEN` is set, Vite startup/build fails before the secret can be bundled.
 

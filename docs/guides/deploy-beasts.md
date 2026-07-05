@@ -31,6 +31,11 @@ export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 
 `beasts-daemon` and `chat-server` discover the token from the configured secret store, the repo `.env`, or server-side env using `FRANKENBEAST_BEAST_OPERATOR_TOKEN`. Do not set `VITE_BEAST_OPERATOR_TOKEN`; franken-web refuses to start when that browser-bundled variable is present.
 
+When serving the dashboard through Vite in local development, keep requests
+same-origin through the Vite dev proxy. The proxy can read the same server-side
+`FRANKENBEAST_BEAST_OPERATOR_TOKEN` and inject `Authorization` on proxied API
+requests without exposing the token to browser JavaScript.
+
 ## 1. Start the backend
 
 From the repo root:

@@ -565,7 +565,7 @@ Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is
 
 1. Run `frankenbeast init` — it prints the token once after generation.
 2. Do not copy the token into `packages/franken-web/.env.local` as a `VITE_*` variable; Vite bundles those values into browser code and franken-web now fails startup/build if `VITE_BEAST_OPERATOR_TOKEN` is set.
-3. The orchestrator resolves the token from the secret store or server-side env on startup.
+3. The orchestrator resolves the token from the secret store or server-side env on startup. For Vite local development, keep dashboard calls on the same-origin dev proxy; it injects the server-side token on proxied API requests without bundling it into browser code.
 
 ### Non-interactive / CI usage
 

@@ -1,9 +1,11 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
-import { assertNoBundledOperatorTokenEnv } from './vite-env';
+import { fileURLToPath } from 'node:url';
+import { assertNoBundledOperatorTokenEnv, loadServerSideOperatorToken } from './vite-env';
 
+const repoRootDir = fileURLToPath(new URL('../../', import.meta.url));
 const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
@@ -13,6 +15,26 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
   assertNoBundledOperatorTokenEnv(env);
+  const serverSideOperatorToken = loadServerSideOperatorToken(
+    loadEnv,
+    mode,
+    repoRootDir,
+    process.cwd(),
+  );
+  const proxyWithServerAuth = (target: string, extra: ProxyOptions = {}): ProxyOptions => ({
+    ...extra,
+    target,
+    changeOrigin: true,
+    configure(proxy) {
+      extra.configure?.(proxy);
+      if (!serverSideOperatorToken) return;
+      const setAuthHeader = (proxyReq: { setHeader(name: string, value: string): void }) => {
+        proxyReq.setHeader('authorization', `Bearer ${serverSideOperatorToken}`);
+      };
+      proxy.on('proxyReq', setAuthHeader);
+      proxy.on('proxyReqWs', setAuthHeader);
+    },
+  });
 
   return {
     plugins: [tailwindcss(), react()],
@@ -21,19 +43,11 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/v1/beasts': {
-          target: beastProxyTarget,
-          changeOrigin: true,
-        },
-        '/v1': {
-          target: proxyTarget,
-          changeOrigin: true,
+        '/v1/beasts': proxyWithServerAuth(beastProxyTarget),
+        '/v1': proxyWithServerAuth(proxyTarget, {
           ws: true,
-        },
-        '/api': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
+        }),
+        '/api': proxyWithServerAuth(proxyTarget),
       },
     },
     build: {
