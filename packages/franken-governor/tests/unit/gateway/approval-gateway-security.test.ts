@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi } from 'vitest';
 import { ApprovalGateway } from '../../../src/gateway/approval-gateway.js';
 import type { ApprovalChannel } from '../../../src/gateway/approval-channel.js';
@@ -50,6 +52,16 @@ function makeFakeAuditRecorder() {
 
 describe('ApprovalGateway — security integration', () => {
   const signingFixture = ['test', 'signing', 'fixture'].join('-')
+
+  it('avoids non-null assertions when using optional security dependencies', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../src/gateway/approval-gateway.ts', import.meta.url)),
+      'utf8',
+    );
+
+    expect(source).not.toContain('signatureVerifier!.');
+    expect(source).not.toContain('sessionTokenStore!.');
+  });
 
   it('throws SignatureVerificationError when requireSignedApprovals is true and signature is invalid', async () => {
     const verifier = new SignatureVerifier(signingFixture);
