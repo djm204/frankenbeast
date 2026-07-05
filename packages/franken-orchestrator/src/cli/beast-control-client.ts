@@ -1,8 +1,10 @@
 import { createBeastServices } from '../beasts/create-beast-services.js';
+import type { BeastServiceBundle } from '../beasts/create-beast-services.js';
 import type { ProjectPaths } from './project-root.js';
 
-export function createBeastControlClient(paths: ProjectPaths) {
-  const services = createBeastServices(paths);
+export function createBeastControlClient(paths: ProjectPaths, serviceBundle?: BeastServiceBundle) {
+  const services = serviceBundle ?? createBeastServices(paths);
+  const ownsServices = !serviceBundle;
   return {
     listRuns: () => services.runs.listRuns(),
     getRun: (runId: string) => services.runs.getRun(runId),
@@ -34,6 +36,10 @@ export function createBeastControlClient(paths: ProjectPaths) {
     },
     createRun: (input: Parameters<typeof services.dispatch.createRun>[0]) =>
       services.dispatch.createRun(input),
-    dispose: () => services.dispose(),
+    dispose: () => {
+      if (ownsServices) {
+        services.dispose();
+      }
+    },
   };
 }

@@ -32,8 +32,16 @@ vi.mock('../../../src/beasts/create-beast-services.js', () => ({
   createBeastServices: () => mockServices,
 }));
 
+const mockControlClient = vi.hoisted(() => ({
+  createBeastControlClient: vi.fn(() => ({
+    deleteAgent: vi.fn().mockResolvedValue({ id: 'agent-1' }),
+    dispose: vi.fn(),
+    resumeAgent: vi.fn().mockResolvedValue({ id: 'run-42', status: 'failed' }),
+  })),
+}));
+
 vi.mock('../../../src/cli/beast-control-client.js', () => ({
-  createBeastControlClient: () => ({}),
+  createBeastControlClient: mockControlClient.createBeastControlClient,
 }));
 
 function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> = {}) {
@@ -305,6 +313,18 @@ describe('handleBeastCommand() resume', () => {
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses the command service bundle when creating the default control client', async () => {
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'resume', beastTarget: 'agent-1' } as CliArgs,
+      control: undefined,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(mockControlClient.createBeastControlClient).toHaveBeenCalledWith(deps.paths, mockServices);
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('throws if no beastTarget provided and still disposes services', async () => {
     const deps = makeDeps({
       args: { subcommand: 'beasts', beastAction: 'resume' } as CliArgs,
@@ -325,6 +345,18 @@ describe('handleBeastCommand() delete', () => {
 
     expect(deps.control.deleteAgent).toHaveBeenCalledWith('agent-1');
     expect(deps.print).toHaveBeenCalledWith('Deleted agent-1');
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the command service bundle when creating the default control client', async () => {
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'delete', beastTarget: 'agent-1' } as CliArgs,
+      control: undefined,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(mockControlClient.createBeastControlClient).toHaveBeenCalledWith(deps.paths, mockServices);
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
 
