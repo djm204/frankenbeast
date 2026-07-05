@@ -355,7 +355,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             pendingSendsRef.current.delete(payload.clientMessageId);
             pending.resolve();
           }
-          setStatus('idle');
           setMessages((current) => updateReceipt(current, payload.clientMessageId, 'accepted'));
           return;
         }
@@ -499,7 +498,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
+        if (socket.readyState !== 1) {
+          failPendingSend(clientMessageId, new Error('Connection closed before the server acknowledged the message. Your draft was kept.'));
+        }
       }, SOCKET_SEND_ACK_TIMEOUT_MS);
       pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
       try {
