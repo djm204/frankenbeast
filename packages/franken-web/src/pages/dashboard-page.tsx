@@ -38,7 +38,9 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const mountedRef = useRef(false);
   const clientGenerationRef = useRef(0);
   const loadSequenceRef = useRef(0);
+  const issuedSkillMutationSequenceRef = useRef<Record<string, number>>({});
   const skillMutationSequenceRef = useRef<Record<string, number>>({});
+  const issuedSecurityMutationSequenceRef = useRef(0);
   const securityMutationSequenceRef = useRef(0);
   const confirmedSnapshotRef = useRef<DashboardSnapshot | null>(null);
   const serverSnapshotVersionRef = useRef(0);
@@ -48,14 +50,14 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const [skillErrors, setSkillErrors] = useState<Record<string, SkillMutationError>>({});
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
 
-  const setConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot, applyToStore = true) => {
+  const setConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
     confirmedSnapshotRef.current = snapshot;
-    if (applyToStore) setSnapshot(snapshot);
-  }, [setSnapshot]);
+  }, []);
 
   const applyServerSnapshot = useCallback((snapshot: DashboardSnapshot) => {
     serverSnapshotVersionRef.current += 1;
     setConfirmedSnapshot(snapshot);
+    setSnapshot(snapshot);
     setSkillErrors((currentErrors) => Object.fromEntries(
       Object.entries(currentErrors).filter(([name, error]) => {
         const skill = snapshot.skills.find((candidate) => candidate.name === name);
@@ -70,22 +72,24 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const confirmSkillState = useCallback((name: string, enabled: boolean, applyToStore = true) => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
     if (!confirmedSnapshot) return;
-    setConfirmedSnapshot({
+    confirmedSnapshotRef.current = {
       ...confirmedSnapshot,
       skills: confirmedSnapshot.skills.map((skill) => (
         skill.name === name ? { ...skill, enabled } : skill
       )),
-    }, applyToStore);
-  }, [setConfirmedSnapshot]);
+    };
+    if (applyToStore) setSkillEnabled(name, enabled);
+  }, [setSkillEnabled]);
 
   const confirmSecurityProfile = useCallback((profile: string, applyToStore = true) => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
     if (!confirmedSnapshot) return;
-    setConfirmedSnapshot({
+    confirmedSnapshotRef.current = {
       ...confirmedSnapshot,
       security: { ...confirmedSnapshot.security, profile },
-    }, applyToStore);
-  }, [setConfirmedSnapshot]);
+    };
+    if (applyToStore) setSecurityProfile(profile);
+  }, [setSecurityProfile]);
 
   const restoreSkillState = useCallback((name: string) => {
     const confirmedSnapshot = confirmedSnapshotRef.current;
@@ -158,7 +162,8 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [applyServerSnapshot, client, loadSnapshot, setConfirmedSnapshot]);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
-    const sequence = (skillMutationSequenceRef.current[name] ?? 0) + 1;
+    const sequence = (issuedSkillMutationSequenceRef.current[name] ?? 0) + 1;
+    issuedSkillMutationSequenceRef.current[name] = sequence;
     const serverSnapshotVersion = serverSnapshotVersionRef.current;
     const clientGeneration = clientGenerationRef.current;
     skillMutationSequenceRef.current[name] = sequence;
@@ -174,11 +179,28 @@ export function DashboardPage({ client }: DashboardPageProps) {
         if (serverSnapshotVersionRef.current !== serverSnapshotVersion) return;
         if (sequence < (confirmedSkillMutationSequenceRef.current[name] ?? 0)) return;
         confirmedSkillMutationSequenceRef.current[name] = sequence;
-        const isLatestSkillRequest = skillMutationSequenceRef.current[name] === sequence;
+        const latestSkillRequest = skillMutationSequenceRef.current[name];
+        const isLatestSkillRequest = latestSkillRequest === undefined || latestSkillRequest === sequence;
         confirmSkillState(name, enabled, isLatestSkillRequest);
+        if (isLatestSkillRequest) {
+          delete skillMutationSequenceRef.current[name];
+          setSkillErrors((currentErrors) => {
+            const { [name]: _cleared, ...remainingErrors } = currentErrors;
+            return remainingErrors;
+          });
+        }
       })
       .catch((error) => {
         if (!mountedRef.current || clientGenerationRef.current !== clientGeneration || skillMutationSequenceRef.current[name] !== sequence) return;
+        delete skillMutationSequenceRef.current[name];
+        const confirmedSkill = confirmedSnapshotRef.current?.skills.find((skill) => skill.name === name);
+        if (confirmedSkill?.enabled === enabled) {
+          setSkillErrors((currentErrors) => {
+            const { [name]: _cleared, ...remainingErrors } = currentErrors;
+            return remainingErrors;
+          });
+          return;
+        }
         restoreSkillState(name);
         setSkillErrors((currentErrors) => ({
           ...currentErrors,
@@ -192,7 +214,8 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [client, confirmSkillState, restoreSkillState, setSkillEnabled]);
 
   const handleSecurityProfileChange = useCallback((profile: string) => {
-    const sequence = securityMutationSequenceRef.current + 1;
+    const sequence = issuedSecurityMutationSequenceRef.current + 1;
+    issuedSecurityMutationSequenceRef.current = sequence;
     const serverSnapshotVersion = serverSnapshotVersionRef.current;
     const clientGeneration = clientGenerationRef.current;
     securityMutationSequenceRef.current = sequence;
@@ -205,11 +228,21 @@ export function DashboardPage({ client }: DashboardPageProps) {
         if (serverSnapshotVersionRef.current !== serverSnapshotVersion) return;
         if (sequence < confirmedSecurityMutationSequenceRef.current) return;
         confirmedSecurityMutationSequenceRef.current = sequence;
-        const isLatestSecurityRequest = securityMutationSequenceRef.current === sequence;
+        const latestSecurityRequest = securityMutationSequenceRef.current;
+        const isLatestSecurityRequest = latestSecurityRequest === 0 || latestSecurityRequest === sequence;
         confirmSecurityProfile(profile, isLatestSecurityRequest);
+        if (isLatestSecurityRequest) {
+          securityMutationSequenceRef.current = 0;
+          setSecurityError(null);
+        }
       })
       .catch((error) => {
         if (!mountedRef.current || clientGenerationRef.current !== clientGeneration || securityMutationSequenceRef.current !== sequence) return;
+        securityMutationSequenceRef.current = 0;
+        if (confirmedSnapshotRef.current?.security.profile === profile) {
+          setSecurityError(null);
+          return;
+        }
         restoreSecurityProfile();
         setSecurityError({
           profile,

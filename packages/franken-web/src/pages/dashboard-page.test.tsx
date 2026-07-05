@@ -463,6 +463,123 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('applies an earlier successful skill toggle after a newer overlapping toggle fails first', async () => {
+    const successfulEnable = deferred<void>();
+    const failedDisable = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(successfulEnable.promise)
+        .mockReturnValueOnce(failedDisable.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+
+    failedDisable.reject(new Error('HTTP 500'));
+    successfulEnable.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  it('applies an earlier successful security profile save after a newer overlapping save fails first', async () => {
+    const successfulStrictSave = deferred<void>();
+    const failedPermissiveSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(successfulStrictSave.promise)
+        .mockReturnValueOnce(failedPermissiveSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+
+    failedPermissiveSave.reject(new Error('HTTP 409'));
+    successfulStrictSave.resolve(undefined);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+    });
+  });
+
+  it('does not show a failed skill mutation alert after a snapshot confirms the requested state', async () => {
+    const failedEnable = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    pushSnapshot({
+      ...snapshot,
+      skills: [{ name: 'shell', enabled: true, hasContext: false, mcpServerCount: 0 }],
+    });
+    failedEnable.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+    });
+  });
+
+  it('does not show a failed security save alert after a snapshot confirms the requested profile', async () => {
+    const failedStrictSave = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      updateSecurityProfile: vi.fn().mockReturnValue(failedStrictSave.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    pushSnapshot({ ...snapshot, security: { ...snapshot.security, profile: 'strict' } });
+    failedStrictSave.reject(new Error('HTTP 409'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+      expect(screen.queryByText(/Could not save security profile/)).toBeNull();
+    });
+  });
+
+  it('preserves unrelated optimistic skill updates when confirming one skill', async () => {
+    const successfulShellToggle = deferred<void>();
+    const pendingGithubToggle = deferred<void>();
+    const multiSkillSnapshot: DashboardSnapshot = {
+      ...snapshot,
+      skills: [
+        { name: 'shell', enabled: false, hasContext: false, mcpServerCount: 0 },
+        { name: 'github', enabled: false, hasContext: false, mcpServerCount: 0 },
+      ],
+    };
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(multiSkillSnapshot),
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(successfulShellToggle.promise)
+        .mockReturnValueOnce(pendingGithubToggle.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable github' }));
+    successfulShellToggle.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByRole('switch', { name: 'Disable github' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
   it('ignores snapshots from a superseded dashboard client subscription', async () => {
     let pushStaleSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
     const firstClient = mockClient({
