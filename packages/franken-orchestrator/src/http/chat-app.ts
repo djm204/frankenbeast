@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
@@ -69,6 +69,26 @@ export interface ChatAppOptions {
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
+const CORS_ALLOW_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+const CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-frankenbeast-operator-token'];
+
+// Hono's CORS middleware emits Access-Control-Allow-Credentials whenever the
+// option is true, even if the request origin is not allowed. Instantiate it per
+// request so credentialed CORS headers are only emitted for allowlisted origins.
+function credentialedCorsForAllowedOrigins(allowedOrigins: Set<string>): MiddlewareHandler {
+  return async (c, next) => {
+    const origin = c.req.header('origin') ?? '';
+    const originAllowed = allowedOrigins.has(origin);
+    const middleware = cors({
+      origin: originAllowed ? origin : () => null,
+      allowMethods: CORS_ALLOW_METHODS,
+      allowHeaders: CORS_ALLOW_HEADERS,
+      credentials: originAllowed,
+      maxAge: 600,
+    });
+    return middleware(c, next);
+  };
+}
 
 export function createChatApp(opts: ChatAppOptions): Hono {
   const sessionStore = opts.sessionStore
@@ -106,13 +126,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
     const allowedOrigins = new Set(opts.allowedOrigins.filter((origin) => origin !== '*'));
     if (allowedOrigins.size > 0) {
-      app.use('*', cors({
-        origin: (origin) => (allowedOrigins.has(origin) ? origin : null),
-        allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['authorization', 'content-type', 'x-frankenbeast-operator-token'],
-        credentials: true,
-        maxAge: 600,
-      }));
+      app.use('*', credentialedCorsForAllowedOrigins(allowedOrigins));
     }
   }
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
