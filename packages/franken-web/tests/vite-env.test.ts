@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertNoBundledOperatorTokenEnv,
   loadServerSideOperatorToken,
+  shouldAttachOperatorAuth,
   type EnvLoader,
 } from '../vite-env';
 
@@ -55,5 +56,27 @@ describe('loadServerSideOperatorToken', () => {
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'browser-token' },
     });
     expect(loadServerSideOperatorToken(load, 'production', ROOT, PKG)).toBe('');
+  });
+});
+
+describe('shouldAttachOperatorAuth', () => {
+  it('allows same-origin browser requests', () => {
+    expect(shouldAttachOperatorAuth({
+      host: '127.0.0.1:5173',
+      origin: 'http://127.0.0.1:5173',
+      'sec-fetch-site': 'same-origin',
+    })).toBe(true);
+  });
+
+  it('rejects cross-site browser requests before injecting auth', () => {
+    expect(shouldAttachOperatorAuth({
+      host: '127.0.0.1:5173',
+      origin: 'https://evil.example',
+      'sec-fetch-site': 'cross-site',
+    })).toBe(false);
+  });
+
+  it('allows non-browser proxy traffic without an Origin header', () => {
+    expect(shouldAttachOperatorAuth({ host: '127.0.0.1:5173' })).toBe(true);
   });
 });

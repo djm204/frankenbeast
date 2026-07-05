@@ -5,11 +5,12 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { OrchestratorConfigSchema, type OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../../network/network-config-paths.js';
-import { filterNetworkServices, resolveNetworkServices } from '../../network/network-registry.js';
+import { filterNetworkServices, resolveNetworkServices, type NetworkRegistryContext } from '../../network/network-registry.js';
 import { NetworkLogStore } from '../../network/network-logs.js';
 import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
 import { NetworkSupervisor } from '../../network/network-supervisor.js';
+import { createSecretStore, SecretResolver } from '../../network/secret-store.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import type { ApiDataEnvelope, NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 import {
@@ -52,6 +53,32 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
   });
 }
 
+async function resolveOperatorToken(config: OrchestratorConfig, root: string): Promise<string | undefined> {
+  try {
+    const secretStore = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
+      projectRoot: root,
+      passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+    });
+    const token = await new SecretResolver(secretStore)
+      .resolveAll(config)
+      .then((secrets) => secrets.operatorToken);
+    if (token?.trim()) return token.trim();
+  } catch {
+    // If the configured store is unavailable, fall back to server-side env only.
+  }
+
+  const envToken = process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim();
+  return envToken || undefined;
+}
+
+async function resolveNetworkContext(config: OrchestratorConfig, root: string): Promise<NetworkRegistryContext> {
+  const operatorToken = await resolveOperatorToken(config, root);
+  return {
+    repoRoot: root,
+    ...(operatorToken ? { operatorToken } : {}),
+  };
+}
+
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   const app = new Hono();
 
@@ -75,12 +102,13 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/up', async (c) => {
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const services = resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root });
+    const config = deps.getConfig();
+    const services = resolveNetworkServices(config, await resolveNetworkContext(config, deps.root));
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
@@ -94,15 +122,16 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/start', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
+    const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+      resolveNetworkServices(config, await resolveNetworkContext(config, deps.root)),
       body.target,
     );
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
@@ -118,15 +147,16 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
     await supervisor.stop(body.target);
+    const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+      resolveNetworkServices(config, await resolveNetworkContext(config, deps.root)),
       body.target,
     );
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
