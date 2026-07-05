@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { TelegramUpdateSchema } from './telegram-schemas.js';
 import { decodeTelegramCallbackData } from './telegram-adapter.js';
@@ -9,22 +10,21 @@ export interface TelegramRouterOptions {
   gateway: ChatGateway;
   sessionMapper: SessionMapper;
   botToken: string;
+  webhookSecretToken: string;
 }
+
+const TELEGRAM_SECRET_TOKEN_HEADER = 'x-telegram-bot-api-secret-token';
 
 /**
  * Router for Telegram webhook updates.
- * Security is handled by having the botToken as part of the path (standard Telegram practice).
+ * Security is handled by Telegram's secret_token webhook header.
  */
 export function telegramRouter(options: TelegramRouterOptions) {
-  const { gateway, sessionMapper, botToken } = options;
+  const { gateway, sessionMapper, botToken, webhookSecretToken } = options;
   const app = new Hono();
 
-  // Telegram recommends using the bot token in the webhook URL for security.
-  // Compare the token as route data instead of interpolating it into the route
-  // template because Telegram tokens contain ':' and Hono treats ':' as a
-  // parameter marker in literal route strings.
-  app.post('/:token', async (c) => {
-    if (c.req.param('token') !== botToken) {
+  app.post('/', async (c) => {
+    if (!isTelegramSecretTokenValid(c.req.header(TELEGRAM_SECRET_TOKEN_HEADER), webhookSecretToken)) {
       return c.json({ error: 'Not found' }, 404);
     }
     const body = await c.req.json();
@@ -102,4 +102,16 @@ export function telegramRouter(options: TelegramRouterOptions) {
   });
 
   return app;
+}
+
+function isTelegramSecretTokenValid(received: string | undefined, expected: string): boolean {
+  if (!received) {
+    return false;
+  }
+  const receivedBuffer = Buffer.from(received);
+  const expectedBuffer = Buffer.from(expected);
+  if (receivedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(receivedBuffer, expectedBuffer);
 }

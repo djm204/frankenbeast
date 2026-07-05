@@ -31,6 +31,7 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'comms.discord.publicKeyRef': { type: 'string' },
   'comms.telegram.enabled': { type: 'boolean' },
   'comms.telegram.botTokenRef': { type: 'string', sensitive: true },
+  'comms.telegram.webhookSecretTokenRef': { type: 'string', sensitive: true },
   'comms.whatsapp.enabled': { type: 'boolean' },
   'comms.whatsapp.accessTokenRef': { type: 'string', sensitive: true },
   'comms.whatsapp.phoneNumberIdRef': { type: 'string' },

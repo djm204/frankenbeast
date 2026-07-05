@@ -13,13 +13,16 @@ describe('telegramRouter', () => {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
   } as unknown as SessionMapper;
 
+  const webhookSecretToken = 'telegram-webhook-secret';
   const app = telegramRouter({
     gateway,
     sessionMapper,
     botToken,
+    webhookSecretToken,
   });
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
@@ -36,8 +39,11 @@ describe('telegramRouter', () => {
       },
     });
 
-    const res = await app.request(`/${botToken}`, {
+    const res = await app.request('/', {
       method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
       body,
     });
 
@@ -62,8 +68,11 @@ describe('telegramRouter', () => {
       },
     });
 
-    const res = await app.request(`/${botToken}`, {
+    const res = await app.request('/', {
       method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
       body,
     });
 
@@ -92,8 +101,11 @@ describe('telegramRouter', () => {
       },
     });
 
-    const res = await app.request(`/${botToken}`, {
+    const res = await app.request('/', {
       method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
       body,
     });
 
@@ -110,6 +122,7 @@ describe('telegramRouter', () => {
       gateway,
       sessionMapper,
       botToken: token,
+      webhookSecretToken,
     });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({
@@ -130,8 +143,11 @@ describe('telegramRouter', () => {
       },
     });
 
-    const res = await appWithRealisticToken.request(`/${token}`, {
+    const res = await appWithRealisticToken.request('/', {
       method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
       body,
     });
 
@@ -144,5 +160,42 @@ describe('telegramRouter', () => {
       expect.stringContaining('https://api.telegram.org/bot[REDACTED]/answerCallbackQuery'),
     );
     expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining(token));
+  });
+
+  it('rejects Telegram webhooks without the configured secret_token header', async () => {
+    const body = JSON.stringify({
+      update_id: 5,
+      message: {
+        message_id: 100,
+        from: { id: 123, first_name: 'User' },
+        chat: { id: 456, type: 'private' },
+        date: Math.floor(Date.now() / 1000),
+        text: 'hello franken',
+      },
+    });
+
+    const missingHeader = await app.request('/', {
+      method: 'POST',
+      body,
+    });
+    const wrongHeader = await app.request('/', {
+      method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': 'wrong-secret',
+      },
+      body,
+    });
+    const tokenPath = await app.request(`/${botToken}`, {
+      method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
+      body,
+    });
+
+    expect(missingHeader.status).toBe(404);
+    expect(wrongHeader.status).toBe(404);
+    expect(tokenPath.status).toBe(404);
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
   });
 });

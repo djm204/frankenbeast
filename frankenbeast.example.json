@@ -63,6 +63,11 @@
       "applicationId": "123456789012345678",
       "botTokenRef": "frankenbeast/discord-bot-token",
       "publicKeyRef": "frankenbeast/discord-public-key"
+    },
+    "telegram": {
+      "enabled": false,
+      "botTokenRef": "frankenbeast/telegram-bot-token",
+      "webhookSecretTokenRef": "frankenbeast/telegram-webhook-secret-token"
     }
   }
 }

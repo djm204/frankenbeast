@@ -75,13 +75,14 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   const telegram = config.channels.telegram;
-  if (telegram?.enabled && telegram.botToken) {
+  if (telegram?.enabled && telegram.botToken && telegram.webhookSecretToken) {
     const adapter = new TelegramAdapter({ token: telegram.botToken });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/telegram', telegramRouter({
       gateway,
       sessionMapper,
       botToken: telegram.botToken,
+      webhookSecretToken: telegram.webhookSecretToken,
     }));
   }
 

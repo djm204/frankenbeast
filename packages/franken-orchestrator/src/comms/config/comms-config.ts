@@ -20,6 +20,7 @@ export const CommsConfigSchema = z.object({
     telegram: z.object({
       enabled: z.boolean().default(false),
       botToken: z.string().optional(),
+      webhookSecretToken: z.string().optional(),
     }).optional(),
     whatsapp: z.object({
       enabled: z.boolean().default(false),

@@ -115,6 +115,7 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
         ...baseConfig.comms.telegram,
         enabled: state.selectedCommsTransports.includes('telegram'),
         botTokenRef: stateValue<string>(state, 'comms.telegram.botTokenRef') ?? baseConfig.comms.telegram.botTokenRef,
+        webhookSecretTokenRef: stateValue<string>(state, 'comms.telegram.webhookSecretTokenRef') ?? baseConfig.comms.telegram.webhookSecretTokenRef,
       },
       whatsapp: {
         ...baseConfig.comms.whatsapp,
@@ -323,6 +324,11 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
             await options.secretStore.store('comms.telegram.botTokenRef', rawBotToken);
             answers['comms.telegram.botTokenRef'] = 'comms.telegram.botTokenRef';
           }
+          const rawWebhookSecretToken = await askText(options.io, 'Enter your Telegram webhook secret token:', '');
+          if (rawWebhookSecretToken.length > 0) {
+            await options.secretStore.store('comms.telegram.webhookSecretTokenRef', rawWebhookSecretToken);
+            answers['comms.telegram.webhookSecretTokenRef'] = 'comms.telegram.webhookSecretTokenRef';
+          }
         } else {
           const currentBotTokenRef = String(
             stateValue(options.initialState, 'comms.telegram.botTokenRef')
@@ -333,6 +339,16 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
             answers['comms.telegram.botTokenRef'] = await askText(options.io, 'Telegram bot token ref', currentBotTokenRef);
           } else {
             answers['comms.telegram.botTokenRef'] = currentBotTokenRef;
+          }
+          const currentWebhookSecretTokenRef = String(
+            stateValue(options.initialState, 'comms.telegram.webhookSecretTokenRef')
+              ?? config.comms.telegram.webhookSecretTokenRef
+              ?? '',
+          );
+          if (!scope.has('telegram') || currentWebhookSecretTokenRef.length === 0) {
+            answers['comms.telegram.webhookSecretTokenRef'] = await askText(options.io, 'Telegram webhook secret token ref', currentWebhookSecretTokenRef);
+          } else {
+            answers['comms.telegram.webhookSecretTokenRef'] = currentWebhookSecretTokenRef;
           }
         }
       }

@@ -124,6 +124,7 @@ export const DiscordChannelConfigSchema = z.object({
 export const TelegramChannelConfigSchema = z.object({
   enabled: z.boolean().default(false),
   botTokenRef: z.string().min(1).optional(),
+  webhookSecretTokenRef: z.string().min(1).optional(),
 });
 
 export const WhatsAppChannelConfigSchema = z.object({
