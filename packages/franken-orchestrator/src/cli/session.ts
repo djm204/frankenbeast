@@ -187,6 +187,7 @@ export class Session {
         repo,
         issueRuntime,
         checkpoint,
+        enableTracing: this.config.orchestratorConfig?.enableTracing,
       });
 
       this.displayIssueSummary(outcomes);

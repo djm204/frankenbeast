@@ -16,6 +16,7 @@ describe('Config loader', () => {
     // Clean env vars
     delete process.env['FRANKEN_MAX_TOTAL_TOKENS'];
     delete process.env['FRANKEN_ENABLE_HEARTBEAT'];
+    delete process.env['FRANKEN_ENABLE_TRACING'];
     delete process.env['FRANKEN_MIN_CRITIQUE_SCORE'];
   });
 
@@ -42,8 +43,8 @@ describe('Config loader', () => {
     const config = await loadConfig(makeArgs());
     expect(config.maxCritiqueIterations).toBe(3);
     expect(config.maxTotalTokens).toBe(100_000);
-    expect(config.enableHeartbeat).toBe(true);
-    expect(config.enableTracing).toBe(true);
+    expect(config.enableHeartbeat).toBe(false);
+    expect(config.enableTracing).toBe(false);
     expect(config.minCritiqueScore).toBe(0.7);
   });
 

@@ -82,8 +82,8 @@ describe('E2E: Happy path', () => {
     }
   });
 
-  it('observer spans are created for each task', async () => {
-    const { loop, ports } = createTestOrchestrator();
+  it('observer spans are created for each task when tracing is enabled', async () => {
+    const { loop, ports } = createTestOrchestrator({ config: { enableTracing: true } });
     await loop.run(input);
 
     const taskSpans = ports.observer.spans.filter(s => s.name.startsWith('task:'));
@@ -91,8 +91,8 @@ describe('E2E: Happy path', () => {
     expect(taskSpans.every(s => s.endedAt !== undefined)).toBe(true);
   });
 
-  it('heartbeat pulse runs during closure', async () => {
-    const { loop, ports } = createTestOrchestrator();
+  it('heartbeat pulse runs during closure when enabled', async () => {
+    const { loop, ports } = createTestOrchestrator({ config: { enableHeartbeat: true } });
     await loop.run(input);
 
     expect(ports.heartbeat.pulseCalled).toBe(true);

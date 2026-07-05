@@ -237,12 +237,14 @@ describe('BeastApiClient', () => {
   it('opens the ticket-authenticated Beast event stream', async () => {
     const close = vi.fn();
     const listeners: Record<string, (event: { data: string }) => void> = {};
-    const MockEventSource = vi.fn().mockImplementation(() => ({
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      Object.assign(this, {
       addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
         listeners[type] = handler;
       }),
       close,
-    }));
+      });
+    });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).EventSource = MockEventSource;
@@ -286,12 +288,14 @@ describe('BeastApiClient', () => {
   it('attaches the EventSource id to parsed run log events', async () => {
     const close = vi.fn();
     const listeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
-    const MockEventSource = vi.fn().mockImplementation(() => ({
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      Object.assign(this, {
       addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
         listeners[type] = handler;
       }),
       close,
-    }));
+      });
+    });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).EventSource = MockEventSource;
@@ -332,15 +336,15 @@ describe('BeastApiClient', () => {
     const closeFirst = vi.fn();
     const closeSecond = vi.fn();
     const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
-    const MockEventSource = vi.fn().mockImplementation(() => {
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
       const instanceListeners: Record<string, (event: { data: string }) => void> = {};
       listeners.push(instanceListeners);
-      return {
+      Object.assign(this, {
         addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
           instanceListeners[type] = handler;
         }),
         close: listeners.length === 1 ? closeFirst : closeSecond,
-      };
+      });
     });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -382,15 +386,15 @@ describe('BeastApiClient', () => {
   it('passes the last received SSE event id when reconnecting with a fresh ticket', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
-    const MockEventSource = vi.fn().mockImplementation(() => {
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
       const instanceListeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
       listeners.push(instanceListeners);
-      return {
+      Object.assign(this, {
         addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
           instanceListeners[type] = handler;
         }),
         close: vi.fn(),
-      };
+      });
     });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -430,15 +434,15 @@ describe('BeastApiClient', () => {
   it('keeps retrying when a reconnect ticket request fails once', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
-    const MockEventSource = vi.fn().mockImplementation(() => {
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
       const instanceListeners: Record<string, (event: { data: string }) => void> = {};
       listeners.push(instanceListeners);
-      return {
+      Object.assign(this, {
         addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
           instanceListeners[type] = handler;
         }),
         close: vi.fn(),
-      };
+      });
     });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -478,10 +482,12 @@ describe('BeastApiClient', () => {
 
   it('keeps retrying when the initial ticket request fails', async () => {
     vi.useFakeTimers();
-    const MockEventSource = vi.fn().mockImplementation(() => ({
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      Object.assign(this, {
       addEventListener: vi.fn(),
       close: vi.fn(),
-    }));
+      });
+    });
     const originalEventSource = globalThis.EventSource;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).EventSource = MockEventSource;

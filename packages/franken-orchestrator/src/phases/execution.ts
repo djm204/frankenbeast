@@ -14,6 +14,7 @@ import type {
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
+import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { NullLogger } from '../logger.js';
 
 export class HitlRejectedError extends Error {
@@ -42,6 +43,7 @@ export async function runExecution(
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
   refreshPlanTasks?: () => Promise<readonly PlanTask[]>,
+  config?: Pick<OrchestratorConfig, 'enableTracing'>,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.checkpointPath = checkpoint?.checkpointPath;
@@ -132,6 +134,7 @@ export async function runExecution(
       logger,
       cliExecutor,
       checkpoint,
+      config,
     );
     outcomes.push(outcome);
 
@@ -233,10 +236,11 @@ async function executeTask(
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
+  config?: Pick<OrchestratorConfig, 'enableTracing'>,
 ): Promise<TaskOutcome> {
   ctx.retryCount = (ctx.retryCount ?? 0) + 1;
   const startTime = Date.now();
-  const span = observer.startSpan(`task:${task.id}`);
+  const span = config?.enableTracing ? observer.startSpan(`task:${task.id}`) : undefined;
   logger.info('Execution: task start', {
     taskId: task.id,
     skillIds: task.requiredSkills,
@@ -408,7 +412,7 @@ async function executeTask(
     });
     return { taskId: task.id, status: 'failure', error: errorMsg };
   } finally {
-    span.end({ taskId: task.id });
+    span?.end({ taskId: task.id });
   }
 }
 

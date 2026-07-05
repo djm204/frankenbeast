@@ -6,7 +6,7 @@ import type { NetworkConfigResponse } from '../../src/lib/network-api';
 const baseConfig: NetworkConfigResponse = {
   network: { mode: 'secure', secureBackend: 'local-encrypted' },
   chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
-  dashboard: { enabled: true, host: '127.0.0.1', port: 4173, apiUrl: 'http://127.0.0.1:3737' },
+  dashboard: { enabled: true, host: '127.0.0.1', port: 4173, apiUrl: 'https://127.0.0.1:3737' },
   comms: { enabled: false },
 };
 

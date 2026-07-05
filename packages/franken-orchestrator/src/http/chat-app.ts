@@ -104,14 +104,16 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const app = new Hono();
   app.use('*', requestId);
   if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
-    const allowedOrigins = new Set(opts.allowedOrigins);
-    app.use('*', cors({
-      origin: (origin) => (allowedOrigins.has(origin) ? origin : null),
-      allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['authorization', 'content-type', 'x-frankenbeast-operator-token'],
-      credentials: true,
-      maxAge: 600,
-    }));
+    const allowedOrigins = new Set(opts.allowedOrigins.filter((origin) => origin !== '*'));
+    if (allowedOrigins.size > 0) {
+      app.use('*', cors({
+        origin: (origin) => (allowedOrigins.has(origin) ? origin : null),
+        allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['authorization', 'content-type', 'x-frankenbeast-operator-token'],
+        credentials: true,
+        maxAge: 600,
+      }));
+    }
   }
   app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   // Chat /v1/chat/* is gated by an operator token whenever one is configured.

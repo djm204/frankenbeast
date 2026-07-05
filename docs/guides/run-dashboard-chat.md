@@ -52,7 +52,7 @@ In a second terminal:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-That proxies same-origin browser requests to `http://127.0.0.1:3737`.
+That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
 If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target:
 

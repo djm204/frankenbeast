@@ -150,12 +150,15 @@ describe('DashboardApiClient', () => {
       const closeFn = vi.fn();
       const listeners: Record<string, (event: { data: string }) => void> = {};
 
-      const MockEventSource = vi.fn().mockImplementation(() => ({
-        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data: string }) => void) => void;
+        close?: typeof closeFn;
+      }) {
+        this.addEventListener = vi.fn((type: string, handler: (event: { data: string }) => void) => {
           listeners[type] = handler;
-        }),
-        close: closeFn,
-      }));
+        });
+        this.close = closeFn;
+      });
 
       const originalEventSource = globalThis.EventSource;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

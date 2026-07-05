@@ -67,11 +67,11 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Maximum execution time in milliseconds. */
   maxDurationMs: z.number().int().min(1000).default(300_000),
 
-  /** Whether to run a heartbeat pulse after execution. */
-  enableHeartbeat: z.boolean().default(true),
+  /** Whether to run a heartbeat pulse after execution. Defaults off so production deployments must opt in. */
+  enableHeartbeat: z.boolean().default(false),
 
-  /** Whether to emit observability spans. */
-  enableTracing: z.boolean().default(true),
+  /** Whether to emit observability spans. Defaults off so production deployments must opt in. */
+  enableTracing: z.boolean().default(false),
 
   /** Whether to run LLM-based reflection at phase boundaries. */
   enableReflection: z.boolean().default(false),

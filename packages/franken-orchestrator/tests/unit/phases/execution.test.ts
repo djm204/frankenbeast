@@ -45,10 +45,22 @@ describe('runExecution', () => {
     );
   });
 
-  it('emits spans for each task', async () => {
+  it('emits spans for each task when tracing is enabled', async () => {
     const observer = makeObserver();
     const c = ctx();
-    await runExecution(c, makeSkills(), makeGovernor(), makeMemory(), observer);
+    await runExecution(
+      c,
+      makeSkills(),
+      makeGovernor(),
+      makeMemory(),
+      observer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { enableTracing: true },
+    );
 
     expect(observer.startSpan).toHaveBeenCalledWith('task:t1');
   });

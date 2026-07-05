@@ -45,6 +45,7 @@ export interface IssueRunnerConfig {
   readonly issueRuntime?: IssueRuntimeSupport | undefined;
   readonly checkpoint?: ICheckpointStore | undefined;
   readonly timeoutMs?: number | undefined;
+  readonly enableTracing?: boolean | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -330,6 +331,7 @@ export class IssueRunner {
 
     const loop = new BeastLoop(issueDeps, {
       maxDurationMs: config.timeoutMs ?? 3_600_000,
+      ...(config.enableTracing !== undefined ? { enableTracing: config.enableTracing } : {}),
     });
 
     try {

@@ -8,8 +8,8 @@ describe('OrchestratorConfig', () => {
       expect(config.maxCritiqueIterations).toBe(3);
       expect(config.maxTotalTokens).toBe(100_000);
       expect(config.maxDurationMs).toBe(300_000);
-      expect(config.enableHeartbeat).toBe(true);
-      expect(config.enableTracing).toBe(true);
+      expect(config.enableHeartbeat).toBe(false);
+      expect(config.enableTracing).toBe(false);
       expect(config.minCritiqueScore).toBe(0.7);
     });
   });
@@ -22,7 +22,7 @@ describe('OrchestratorConfig', () => {
       });
       expect(result.maxCritiqueIterations).toBe(5);
       expect(result.maxTotalTokens).toBe(50_000);
-      expect(result.enableHeartbeat).toBe(true); // default preserved
+      expect(result.enableHeartbeat).toBe(false); // secure default preserved
     });
 
     it('rejects out-of-range critique iterations', () => {

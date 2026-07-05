@@ -35,8 +35,8 @@ describe('E2E: Budget exceeded', () => {
     expect(result.tokenSpend.estimatedCostUsd).toBe(0.12);
   });
 
-  it('heartbeat still runs even with high token spend', async () => {
-    const { loop, ports } = createTestOrchestrator();
+  it('heartbeat still runs with high token spend when enabled', async () => {
+    const { loop, ports } = createTestOrchestrator({ config: { enableHeartbeat: true } });
     ports.observer.setTokenSpend({
       inputTokens: 40000,
       outputTokens: 40000,

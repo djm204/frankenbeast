@@ -110,7 +110,7 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
       clock: () => new Date('2025-01-15T10:00:00Z'),
     };
 
-    const loop = new BeastLoop(deps);
+    const loop = new BeastLoop(deps, { enableTracing: true });
     const result = await loop.run(input);
 
     // Pipeline completed successfully
