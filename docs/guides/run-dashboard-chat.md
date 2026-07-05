@@ -52,7 +52,7 @@ In a second terminal:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-That points the frontend at `http://127.0.0.1:3737`.
+That points the frontend at the same-origin API paths; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
 If your backend is on a different port, set `VITE_API_URL` explicitly:
 

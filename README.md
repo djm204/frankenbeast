@@ -378,7 +378,7 @@ In a second terminal, start the web UI:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-Open the Vite URL, usually `http://127.0.0.1:5173/`. The dashboard talks to the chat server on `http://127.0.0.1:3737` and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
+Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
 If you run the backend on a different port:
 

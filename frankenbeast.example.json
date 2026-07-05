@@ -2,8 +2,8 @@
   "maxCritiqueIterations": 3,
   "maxTotalTokens": 100000,
   "maxDurationMs": 300000,
-  "enableHeartbeat": true,
-  "enableTracing": true,
+  "enableHeartbeat": false,
+  "enableTracing": false,
   "minCritiqueScore": 0.7,
 
   "providers": {

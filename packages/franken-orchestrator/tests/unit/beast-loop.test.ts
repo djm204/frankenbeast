@@ -110,7 +110,7 @@ describe('BeastLoop', () => {
     );
     expect(logger.debug).toHaveBeenCalledWith(
       'BeastLoop: config',
-      expect.objectContaining({ enableTracing: true }),
+      expect.objectContaining({ enableTracing: false }),
     );
   });
 

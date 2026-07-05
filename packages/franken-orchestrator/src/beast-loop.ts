@@ -98,6 +98,7 @@ export class BeastLoop {
         this.deps.cliExecutor,
         this.deps.checkpoint,
         this.deps.refreshPlanTasks,
+        this.config,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
       recordPhase('execution');

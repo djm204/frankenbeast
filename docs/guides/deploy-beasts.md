@@ -72,7 +72,7 @@ VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
   npm --workspace @frankenbeast/web run dev:chat
 ```
 
-If the backend is not on `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests.
+If the backend is not on the local dev default `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests. Production deployments should use TLS-terminated `https://`/`wss://` endpoints; plain HTTP is only appropriate for isolated local development.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \

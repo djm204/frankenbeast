@@ -105,6 +105,27 @@ describe('Chat HTTP Routes', () => {
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 
+  it('does not treat wildcard CORS origins as credentialed allowlists', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      operatorToken: 'operator-token',
+      allowedOrigins: ['*'],
+    });
+
+    const response = await app.request('/v1/chat/sessions', {
+      headers: {
+        origin: 'https://dashboard.example',
+        authorization: 'Bearer operator-token',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+
   // --- Create session ---
 
   it('POST /v1/chat/sessions creates a session', async () => {

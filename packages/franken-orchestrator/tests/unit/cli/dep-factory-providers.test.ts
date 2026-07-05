@@ -34,6 +34,10 @@ const optionalModuleMocks = vi.hoisted(() => {
 const traceViewerMocks = vi.hoisted(() => ({
   stop: vi.fn(async () => {}),
 }));
+const observerDepsMocks = vi.hoisted(() => ({
+  enabled: { kind: 'enabled-observer-deps' },
+  disabled: { kind: 'disabled-observer-deps' },
+}));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
@@ -60,7 +64,8 @@ vi.mock('../../../src/adapters/cli-observer-bridge.js', () => ({
     this.getActiveSessionId = vi.fn(() => undefined);
     this.recordReplay = vi.fn();
     this.getReplayManifest = vi.fn(() => [...mockBridgeReplayManifest]);
-    this.observerDeps = {};
+    this.observerDeps = observerDepsMocks.enabled;
+    this.disabledObserverDeps = observerDepsMocks.disabled;
   }),
 }));
 
@@ -84,12 +89,13 @@ vi.mock('../../../src/adapters/adapter-llm-client.js', () => ({
   AdapterLlmClient: vi.fn(function () {}),
 }));
 
+const MockCachedCliLlmClient = vi.fn(function () {
+  return {
+    complete: vi.fn(async () => 'cached response'),
+  };
+});
 vi.mock('../../../src/cache/cached-cli-llm-client.js', () => ({
-  CachedCliLlmClient: vi.fn(function () {
-    return {
-      complete: vi.fn(async () => 'cached response'),
-    };
-  }),
+  CachedCliLlmClient: MockCachedCliLlmClient,
   completeWithCacheHint: vi.fn(async (_llm: unknown, prompt: string) => prompt),
 }));
 
@@ -374,6 +380,24 @@ describe('dep-factory provider wiring', () => {
     expect(CliSkillExecutor).toHaveBeenCalled();
     expect(result.deps.cliExecutor).toBeDefined();
   }, 10_000);
+
+  it('wires disabled observer deps to cached LLM when tracing is disabled', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    await createCliDeps(makeOpts({ orchestratorConfig: { enableTracing: false } as never }));
+
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ observer: observerDepsMocks.disabled }),
+    );
+  });
+
+  it('wires full observer deps to cached LLM when tracing is enabled', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    await createCliDeps(makeOpts({ orchestratorConfig: { enableTracing: true } as never }));
+
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ observer: observerDepsMocks.enabled }),
+    );
+  });
 
   it('passes selected provider defaults to CliSkillExecutor', { timeout: 10_000 }, async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');

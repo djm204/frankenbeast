@@ -5,7 +5,7 @@ import { makeDeps } from '../helpers/stubs.js';
 describe('BeastLoop reflection trigger', () => {
   it('does not call heartbeat when enableReflection is false', async () => {
     const deps = makeDeps();
-    const loop = new BeastLoop(deps, { enableReflection: false });
+    const loop = new BeastLoop(deps, { enableHeartbeat: true, enableReflection: false });
 
     await loop.run({ projectId: 'proj', userInput: 'test' });
 
@@ -17,7 +17,7 @@ describe('BeastLoop reflection trigger', () => {
 
   it('calls heartbeat after planning and execution when enableReflection is true', async () => {
     const deps = makeDeps();
-    const loop = new BeastLoop(deps, { enableReflection: true });
+    const loop = new BeastLoop(deps, { enableHeartbeat: true, enableReflection: true });
 
     await loop.run({ projectId: 'proj', userInput: 'test' });
 
@@ -36,7 +36,7 @@ describe('BeastLoop reflection trigger', () => {
       return { improvements: [], techDebt: [], summary: 'ok' };
     });
 
-    const loop = new BeastLoop(deps, { enableReflection: true });
+    const loop = new BeastLoop(deps, { enableHeartbeat: true, enableReflection: true });
     const result = await loop.run({ projectId: 'proj', userInput: 'test' });
 
     // Run should complete despite reflection failures
@@ -50,7 +50,7 @@ describe('BeastLoop reflection trigger', () => {
       logCalls.push({ msg, data });
     });
 
-    const loop = new BeastLoop(deps, { enableReflection: true });
+    const loop = new BeastLoop(deps, { enableHeartbeat: true, enableReflection: true });
     await loop.run({ projectId: 'proj', userInput: 'test' });
 
     const reflectionLogs = logCalls.filter((l) =>

@@ -61,7 +61,7 @@ describe('runClosure', () => {
 
   it('runs heartbeat pulse when enabled', async () => {
     const heartbeat = makeHeartbeat();
-    await runClosure(ctx(), makeObserver(), heartbeat, defaultConfig(), successOutcomes);
+    await runClosure(ctx(), makeObserver(), heartbeat, { ...defaultConfig(), enableHeartbeat: true }, successOutcomes);
 
     expect(heartbeat.pulse).toHaveBeenCalledTimes(1);
   });
@@ -79,7 +79,7 @@ describe('runClosure', () => {
       pulse: vi.fn(async () => { throw new Error('heartbeat down'); }),
     });
 
-    const result = await runClosure(ctx(), makeObserver(), heartbeat, defaultConfig(), successOutcomes);
+    const result = await runClosure(ctx(), makeObserver(), heartbeat, { ...defaultConfig(), enableHeartbeat: true }, successOutcomes);
 
     expect(result.status).toBe('completed'); // Non-fatal
     const failAudit = result.sessionId; // just ensure it didn't throw
@@ -154,7 +154,7 @@ describe('runClosure', () => {
 
   it('adds audit entries', async () => {
     const c = ctx();
-    await runClosure(c, makeObserver(), makeHeartbeat(), defaultConfig(), successOutcomes);
+    await runClosure(c, makeObserver(), makeHeartbeat(), { ...defaultConfig(), enableHeartbeat: true }, successOutcomes);
 
     expect(c.audit.some(a => a.action === 'tokenSpend:collected')).toBe(true);
     expect(c.audit.some(a => a.action === 'pulse:complete')).toBe(true);
@@ -172,7 +172,7 @@ describe('runClosure', () => {
     });
     const heartbeat = makeHeartbeat();
 
-    await runClosure(ctx(), observer, heartbeat, defaultConfig(), successOutcomes, logger);
+    await runClosure(ctx(), observer, heartbeat, { ...defaultConfig(), enableHeartbeat: true }, successOutcomes, logger);
 
     expect(logger.info).toHaveBeenCalledWith(
       'Closure: token spend',
