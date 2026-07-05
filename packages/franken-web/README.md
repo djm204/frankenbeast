@@ -69,10 +69,6 @@ FRANKENBEAST_BEAST_OPERATOR_TOKEN=<your-operator-token>
 For web-only development overrides, you can still create a `.env.local` file in this package directory (never committed), but keep credentials server-side:
 
 ```env
-# Required — Base URL of the franken-orchestrator HTTP server.
-# Defaults to window.location.origin if omitted (works when served by the orchestrator).
-VITE_API_URL=http://localhost:3737
-
 # Optional — Backend target for the same-origin Vite dev proxy.
 VITE_API_PROXY_TARGET=http://127.0.0.1:3737
 

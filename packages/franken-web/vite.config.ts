@@ -2,6 +2,7 @@ import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { loadProxyOperatorToken } from './vite-env';
 
@@ -10,11 +11,53 @@ const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 
+function isSameOriginProxyRequest(req: IncomingMessage): boolean {
+  const fetchSite = req.headers['sec-fetch-site'];
+  const fetchSiteValue = Array.isArray(fetchSite) ? fetchSite[0] : fetchSite;
+  if (fetchSiteValue && !['none', 'same-origin'].includes(fetchSiteValue)) {
+    return false;
+  }
+
+  const origin = req.headers.origin;
+  const originValue = Array.isArray(origin) ? origin[0] : origin;
+  if (!originValue) {
+    return true;
+  }
+
+  const host = req.headers.host;
+  if (!host) {
+    return false;
+  }
+
+  try {
+    const originUrl = new URL(originValue);
+    const protocol = req.socket.encrypted ? 'https:' : 'http:';
+    return originUrl.protocol === protocol && originUrl.host === host;
+  } catch {
+    return false;
+  }
+}
+
 function withServerSideOperatorAuth(target: string, operatorToken: string, extra: ProxyOptions = {}): ProxyOptions {
   return {
     target,
     changeOrigin: true,
-    ...(operatorToken ? { headers: { authorization: `Bearer ${operatorToken}` } } : {}),
+    bypass(req, res) {
+      if (operatorToken && !isSameOriginProxyRequest(req)) {
+        res.statusCode = 403;
+        res.end('Forbidden');
+        return false;
+      }
+      return undefined;
+    },
+    configure(proxy) {
+      if (!operatorToken) {
+        return;
+      }
+      proxy.on('proxyReq', (proxyReq) => {
+        proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+      });
+    },
     ...extra,
   };
 }

@@ -70,7 +70,7 @@ In a second terminal:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-If the backend is not on `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests.
+If the backend is not on `http://127.0.0.1:3737` while you are serving the dashboard with Vite, point the Vite dev proxy at the backend. Browser REST calls stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
@@ -216,5 +216,5 @@ frankenbeast beasts delete <agent-id>
 
 `The UI loads but does not connect to the backend`
 
-- In Vite dev mode, leave `VITE_API_URL` unset and confirm `VITE_API_PROXY_TARGET` matches the backend URL.
+- In Vite dev mode, confirm `VITE_API_PROXY_TARGET` matches the backend URL.
 - If the chat WebSocket uses a non-default frontend origin, start the backend with `--allow-origin <frontend-url>`.

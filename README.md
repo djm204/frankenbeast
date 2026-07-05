@@ -380,14 +380,14 @@ npm --workspace @frankenbeast/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The dashboard talks to the chat server on `http://127.0.0.1:3737` and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
-If you run the backend on a different port:
+If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
-For Beast controls, set the operator token once in the repo root `.env` so both the server and dashboard see it:
+For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
 
 ```env
 FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>

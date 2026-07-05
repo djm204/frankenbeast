@@ -18,20 +18,20 @@ describe('loadProxyOperatorToken', () => {
     expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
   });
 
-  it('does not treat browser-exposed VITE_BEAST_OPERATOR_TOKEN as a credential source', () => {
+  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set', () => {
     const load = loaderFor({
       [ROOT]: {},
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('');
+    expect(() => loadProxyOperatorToken(load, 'production', ROOT, PKG)).toThrow(/must not be set/);
   });
 
-  it('prefers the root server-side token over package env values', () => {
+  it('rejects stale VITE tokens even when the server-side token is present', () => {
     const load = loaderFor({
       [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+    expect(() => loadProxyOperatorToken(load, 'production', ROOT, PKG)).toThrow(/must not be set/);
   });
 
   it('returns an empty string when no server-side token is configured', () => {
