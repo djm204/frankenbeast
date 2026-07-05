@@ -64,6 +64,31 @@ describe('startChatServer comms pass-through', () => {
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
   });
 
+  it('closes analytics dependencies when the chat server shuts down', async () => {
+    const analyticsClose = vi.fn();
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-analytics-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      analyticsDeps: {
+        analytics: {
+          getSummary: vi.fn(),
+          listSessions: vi.fn(),
+          listEvents: vi.fn(),
+          getEvent: vi.fn(),
+          close: analyticsClose,
+        },
+      },
+    });
+
+    await handle.close();
+    handle = undefined;
+
+    expect(analyticsClose).toHaveBeenCalledOnce();
+  });
+
   it('passes network security config to createChatApp so comms can read webhook policy', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'chat-server-security-config-'));
     tempDirs.push(dir);

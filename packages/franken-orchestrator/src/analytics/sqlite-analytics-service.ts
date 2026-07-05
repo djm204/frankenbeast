@@ -88,7 +88,18 @@ export function createSqliteAnalyticsService(options: SqliteAnalyticsServiceOpti
 }
 
 class SqliteAnalyticsService implements AnalyticsService {
-  constructor(private readonly options: SqliteAnalyticsServiceOptions) {}
+  private db: Database.Database | null;
+
+  constructor(private readonly options: SqliteAnalyticsServiceOptions) {
+    this.db = existsSync(options.dbPath)
+      ? new Database(options.dbPath, { readonly: true, fileMustExist: true })
+      : null;
+  }
+
+  close(): void {
+    this.db?.close();
+    this.db = null;
+  }
 
   async getSummary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
     const events = this.filteredEvents(filters);
@@ -212,32 +223,22 @@ class SqliteAnalyticsService implements AnalyticsService {
   }
 
   private readRows<T>(table: string, sql: string): T[] {
-    if (!existsSync(this.options.dbPath)) {
+    if (!this.db) {
       return [];
     }
 
-    const db = new Database(this.options.dbPath, { readonly: true, fileMustExist: true });
-    try {
-      if (!hasTable(db, table)) {
-        return [];
-      }
-      return db.prepare(sql).all() as T[];
-    } finally {
-      db.close();
+    if (!hasTable(this.db, table)) {
+      return [];
     }
+    return this.db.prepare(sql).all() as T[];
   }
 
   private hasColumn(table: string, column: string): boolean {
-    if (!existsSync(this.options.dbPath)) {
+    if (!this.db) {
       return false;
     }
 
-    const db = new Database(this.options.dbPath, { readonly: true, fileMustExist: true });
-    try {
-      return hasColumn(db, table, column);
-    } finally {
-      db.close();
-    }
+    return hasColumn(this.db, table, column);
   }
 
   private readBeastEvents(): AnalyticsEvent[] {
