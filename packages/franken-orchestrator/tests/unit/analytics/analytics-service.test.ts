@@ -193,6 +193,20 @@ describe('createSqliteAnalyticsService', () => {
     closeSpy.mockRestore();
   });
 
+  it('opens the shared SQLite handle when the database appears after service construction', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const service = createSqliteAnalyticsService({ dbPath });
+
+    await expect(service.listEvents({ timeWindow: 'all' })).resolves.toMatchObject({ total: 0 });
+
+    seedFbeastDb(dbPath);
+    const result = await service.listEvents({ timeWindow: 'all' });
+
+    expect(result.total).toBe(5);
+    service.close?.();
+  });
+
   it('sorts mixed SQLite and ISO event timestamps by chronological time', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
     const dbPath = join(workDir, 'beast.db');

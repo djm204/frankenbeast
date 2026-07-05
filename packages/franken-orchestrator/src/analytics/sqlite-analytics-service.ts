@@ -101,6 +101,13 @@ class SqliteAnalyticsService implements AnalyticsService {
     this.db = null;
   }
 
+  private getDb(): Database.Database | null {
+    if (!this.db && existsSync(this.options.dbPath)) {
+      this.db = new Database(this.options.dbPath, { readonly: true, fileMustExist: true });
+    }
+    return this.db;
+  }
+
   async getSummary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
     const events = this.filteredEvents(filters);
     const costRows = this.readCostRows().filter((row) => matchesFilters(costRowToEvent(row), filters));
@@ -223,22 +230,24 @@ class SqliteAnalyticsService implements AnalyticsService {
   }
 
   private readRows<T>(table: string, sql: string): T[] {
-    if (!this.db) {
+    const db = this.getDb();
+    if (!db) {
       return [];
     }
 
-    if (!hasTable(this.db, table)) {
+    if (!hasTable(db, table)) {
       return [];
     }
-    return this.db.prepare(sql).all() as T[];
+    return db.prepare(sql).all() as T[];
   }
 
   private hasColumn(table: string, column: string): boolean {
-    if (!this.db) {
+    const db = this.getDb();
+    if (!db) {
       return false;
     }
 
-    return hasColumn(this.db, table, column);
+    return hasColumn(db, table, column);
   }
 
   private readBeastEvents(): AnalyticsEvent[] {
