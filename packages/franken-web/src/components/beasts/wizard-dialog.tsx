@@ -64,6 +64,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
         <Dialog.Content
           className="fixed top-[10vh] left-[12vw] w-[76vw] h-[80vh] bg-beast-panel border border-beast-border
             rounded-2xl z-[70] flex flex-col shadow-2xl shadow-black/40"
+          aria-busy={launching || undefined}
           aria-describedby={undefined}
         >
           {/* Header */}
@@ -120,12 +121,25 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
 
           {/* Footer */}
           <div className="flex flex-col gap-3 px-8 py-5 border-t border-beast-border shrink-0">
+            {launching && !launchError && (
+              <div
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="sr-only"
+              >
+                Launching agent. Please wait.
+              </div>
+            )}
             {launchError && (
-              <div className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm">
+              <div
+                role="alert"
+                className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm"
+              >
                 {launchError}
               </div>
             )}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between" aria-busy={launching || undefined}>
               {wizardMode === 'wizard' ? (
                 <>
                   <button
