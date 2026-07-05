@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -295,6 +295,65 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('missing run plan guidance', () => {
+  it('formats an actionable first-run message for an empty plan directory', () => {
+    expect(formatMissingRunPlanGuidance('/project/.fbeast/plans/plan-2026-03-08')).toBe(
+      'No runnable default run plan chunks found under /project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
+    );
+  });
+
+  it('detects an absent or empty default run plan directory', () => {
+    const root = join(tmpdir(), `frankenbeast-empty-plan-${Date.now()}`);
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    mkdirSync(root, { recursive: true });
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    writeFileSync(join(root, '00_PLAN.md'), '# plan metadata');
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    writeFileSync(join(root, 'design.md'), '# design');
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    writeFileSync(join(root, '01_IMPLEMENT.md'), '# implementation chunk');
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('shows guidance only for default run when the plan directory is absent', () => {
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run' },
+      true,
+    )).toBe(true);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run' },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'plan' },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run', resume: true },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run', planDir: '/typo/custom-dir' },
+      false,
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run', planName: 'existing-empty-plan' },
+      false,
+    )).toBe(false);
   });
 });
 
@@ -778,6 +837,50 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('prints actionable guidance before provider preflight when no plan chunks exist', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockParseArgs.mockReturnValue({
+      subcommand: 'run',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'No runnable default run plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
+    );
+    expect(MockSession).not.toHaveBeenCalled();
+    expect(mockSessionStart).not.toHaveBeenCalled();
+    logSpy.mockRestore();
   });
 
   it('passes the run --resume flag into Session config', async () => {
