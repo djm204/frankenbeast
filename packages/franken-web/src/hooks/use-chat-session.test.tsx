@@ -21,7 +21,7 @@ class MockWebSocket {
   }
 }
 
-function sessionResponse() {
+function sessionResponse(overrides: Record<string, unknown> = {}) {
   return {
     data: {
       id: 'session-1',
@@ -31,8 +31,13 @@ function sessionResponse() {
       pendingApproval: null,
       tokenTotals,
       costUsd: 0,
+      ...overrides,
     },
   };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status });
 }
 
 describe('useChatSession error banners', () => {
@@ -62,7 +67,7 @@ describe('useChatSession error banners', () => {
   });
 
   it('turns socket turn errors into visible retry banners', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(sessionResponse()), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
     vi.stubGlobal('WebSocket', MockWebSocket);
 
     const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
@@ -94,6 +99,68 @@ describe('useChatSession error banners', () => {
       message: 'Approval denied by policy.',
       code: 'TOOL_DENIED',
       actionLabel: 'Retry last message',
+    });
+  });
+
+  it('replaces the failed optimistic message when retrying the last message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    await act(async () => {
+      await result.current.send('launch beast');
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.error',
+          code: 'TOOL_DENIED',
+          message: 'Approval denied by policy.',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    const retryBanner = result.current.errorBanners[0]!;
+    await act(async () => {
+      result.current.retryError(retryBanner.id);
+    });
+
+    expect(result.current.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not offer message retry when delivery succeeded but transcript refresh failed', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse()))
+      .mockResolvedValueOnce(jsonResponse({ data: { tier: 'cheap' } }))
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    MockWebSocket.instances[0]!.readyState = 0;
+
+    await act(async () => {
+      await result.current.send('launch beast');
+    });
+
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Message sent; refresh failed',
+      code: 'session_refresh_failed',
+      actionLabel: 'Refresh chat',
     });
   });
 });

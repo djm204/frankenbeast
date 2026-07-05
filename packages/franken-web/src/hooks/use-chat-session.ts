@@ -265,7 +265,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   }, [opts.baseUrl]);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
-  const lastMessageContentRef = useRef<string | null>(null);
+  const lastMessageRef = useRef<{ clientMessageId: string; content: string } | null>(null);
   const errorActionRef = useRef(new Map<string, ChatErrorAction>());
 
   function addErrorBanner(banner: ChatErrorBanner) {
@@ -278,16 +278,43 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setErrorBanners((current) => current.filter((item) => item.id !== id));
   }
 
+  function refreshSession() {
+    if (!sessionId) {
+      setSessionRetrySeed((current) => current + 1);
+      return;
+    }
+
+    void clientRef.current.getSession(sessionId)
+      .then((refreshed) => {
+        setSocketToken(refreshed.socketToken);
+        setMessages(applySessionSnapshot(refreshed));
+        setPendingApproval(refreshed.pendingApproval ?? null);
+        setTokenTotals(refreshed.tokenTotals);
+        setCostUsd(refreshed.costUsd);
+        setConnectionStatus('reconnecting');
+        setSocketGeneration((current) => current + 1);
+      })
+      .catch((error) => {
+        setStatus('error');
+        addErrorBanner(makeBanner(
+          'Unable to refresh chat session',
+          errorMessage(error, 'The chat API did not return a refreshed session.'),
+          'retry-session',
+          'Retry session',
+          'session_refresh_failed',
+        ));
+      });
+  }
+
   function retryError(id: string) {
     const action = errorActionRef.current.get(id);
     dismissError(id);
-    if (action === 'retry-session') {
-      setSessionRetrySeed((current) => current + 1);
-    } else if (action === 'reconnect') {
-      setConnectionStatus('reconnecting');
-      setSocketGeneration((current) => current + 1);
-    } else if (action === 'retry-message' && lastMessageContentRef.current) {
-      void send(lastMessageContentRef.current);
+    if (action === 'retry-session' || action === 'reconnect') {
+      refreshSession();
+    } else if (action === 'retry-message' && lastMessageRef.current) {
+      const { clientMessageId, content } = lastMessageRef.current;
+      setMessages((current) => current.filter((message) => message.id !== clientMessageId));
+      void send(content);
     }
   }
 
@@ -457,8 +484,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           addErrorBanner(makeBanner(
             'Turn failed',
             payload.message,
-            lastMessageContentRef.current ? 'retry-message' : 'dismiss',
-            lastMessageContentRef.current ? 'Retry last message' : 'Dismiss',
+            lastMessageRef.current ? 'retry-message' : 'dismiss',
+            lastMessageRef.current ? 'Retry last message' : 'Dismiss',
             payload.code,
           ));
           setStatus('error');
@@ -504,7 +531,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     const clientMessageId = makeId('user');
-    lastMessageContentRef.current = content;
+    lastMessageRef.current = { clientMessageId, content };
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
     setMessages((current) => [
       ...current,
@@ -521,13 +548,24 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     if (!socket || socket.readyState !== 1) {
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
-        const refreshed = await clientRef.current.getSession(sessionId);
-        setMessages(applySessionSnapshot(refreshed));
-        setPendingApproval(refreshed.pendingApproval ?? null);
-        setTokenTotals(refreshed.tokenTotals);
-        setCostUsd(refreshed.costUsd);
         setTier(result.tier);
-        setStatus('idle');
+        try {
+          const refreshed = await clientRef.current.getSession(sessionId);
+          setMessages(applySessionSnapshot(refreshed));
+          setPendingApproval(refreshed.pendingApproval ?? null);
+          setTokenTotals(refreshed.tokenTotals);
+          setCostUsd(refreshed.costUsd);
+          setStatus('idle');
+        } catch (error) {
+          addErrorBanner(makeBanner(
+            'Message sent; refresh failed',
+            errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
+            'retry-session',
+            'Refresh chat',
+            'session_refresh_failed',
+          ));
+          setStatus('error');
+        }
       } catch (error) {
         addErrorBanner(makeBanner(
           'Message was not sent',
