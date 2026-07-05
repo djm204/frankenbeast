@@ -6,11 +6,11 @@ describe('resolveBaseUrl', () => {
     expect(resolveBaseUrl('http://localhost:5173', '')).toBe('http://localhost:5173');
   });
 
-  it('uses the configured production API URL when building static dashboard assets', () => {
-    expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737')).toBe('http://127.0.0.1:3737');
+  it('ignores configured production API URLs so static builds use the same-origin proxy', () => {
+    expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737')).toBe('http://localhost:5173');
   });
 
-  it('strips trailing slashes from configured API URLs before clients append paths', () => {
-    expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737/')).toBe('http://127.0.0.1:3737');
+  it('keeps same-origin behavior even when configured API URLs have trailing slashes', () => {
+    expect(resolveBaseUrl('http://localhost:5173', 'http://127.0.0.1:3737/')).toBe('http://localhost:5173');
   });
 });

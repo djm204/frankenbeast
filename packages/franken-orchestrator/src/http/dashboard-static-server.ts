@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process';
-import { createServer, type IncomingHttpHeaders, type Server as HttpServer } from 'node:http';
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize, relative, resolve, sep } from 'node:path';
+import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { createSecretStore } from '../network/secret-store.js';
 
 const SERVICE_IDENTITY = 'dashboard-web';
 const LOCAL_HTTP_PROTOCOL = 'http:';
@@ -58,7 +61,7 @@ function isSameOriginProxyRequest(request: Request): boolean {
 
   const origin = request.headers.get('origin');
   if (!origin && !fetchSite) {
-    return true;
+    return false;
   }
   if (!origin) {
     return fetchSite === 'same-origin';
@@ -192,6 +195,93 @@ function headersFromIncoming(headers: IncomingHttpHeaders): Headers {
   return result;
 }
 
+async function readIncomingBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return undefined;
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+}
+
+async function writeWebResponse(staticResponse: Response, method: string | undefined, res: ServerResponse): Promise<void> {
+  res.statusCode = staticResponse.status;
+  staticResponse.headers.forEach((value, key) => res.setHeader(key, value));
+  if (method === 'HEAD' || !staticResponse.body) {
+    res.end();
+    return;
+  }
+
+  const reader = staticResponse.body.getReader();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value && !res.write(Buffer.from(value))) {
+      await new Promise<void>((resolveDrain) => res.once('drain', resolveDrain));
+    }
+  }
+  res.end();
+}
+
+function sendUpgradeFailure(socket: NodeJS.WritableStream, statusCode: number, message: string): void {
+  socket.write(`HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  socket.end();
+}
+
+function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticServerOptions): void {
+  server.on('upgrade', (req, socket, head) => {
+    const apiTarget = normalizeBaseUrl(options.apiTarget);
+    const host = req.headers.host ?? `${options.host}:${options.port}`;
+    const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
+    if (!apiTarget || !isReservedBackendPath(requestUrl.pathname)) {
+      sendUpgradeFailure(socket, 404, 'Not Found');
+      return;
+    }
+
+    const sameOriginProbe = new Request(requestUrl, { headers: headersFromIncoming(req.headers), method: 'GET' });
+    if (options.operatorToken && !isSameOriginProxyRequest(sameOriginProbe)) {
+      sendUpgradeFailure(socket, 403, 'Forbidden');
+      return;
+    }
+
+    const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${apiTarget}/`);
+    const headers = { ...req.headers, host: targetUrl.host };
+    if (options.operatorToken) {
+      headers.authorization = `Bearer ${options.operatorToken}`;
+    }
+    const proxyRequest = (targetUrl.protocol === 'https:' ? httpsRequest : httpRequest)({
+      protocol: targetUrl.protocol,
+      hostname: targetUrl.hostname,
+      port: targetUrl.port,
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      method: req.method,
+      headers,
+    });
+    proxyRequest.once('upgrade', (proxyResponse, proxySocket, proxyHead) => {
+      socket.write(`HTTP/1.1 ${proxyResponse.statusCode ?? 101} ${proxyResponse.statusMessage ?? 'Switching Protocols'}\r\n`);
+      for (const [key, value] of Object.entries(proxyResponse.headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) socket.write(`${key}: ${item}\r\n`);
+        } else if (value !== undefined) {
+          socket.write(`${key}: ${value}\r\n`);
+        }
+      }
+      socket.write('\r\n');
+      if (proxyHead.length > 0) socket.write(proxyHead);
+      if (head.length > 0) proxySocket.write(head);
+      proxySocket.pipe(socket).pipe(proxySocket);
+    });
+    proxyRequest.once('response', (proxyResponse) => {
+      sendUpgradeFailure(socket, proxyResponse.statusCode ?? 502, proxyResponse.statusMessage ?? 'Bad Gateway');
+      proxyResponse.resume();
+    });
+    proxyRequest.once('error', () => sendUpgradeFailure(socket, 502, 'Bad Gateway'));
+    proxyRequest.end();
+  });
+}
+
 function startOptionalBuild(options: DashboardStaticServerOptions): void {
   if (!options.buildCommand) {
     return;
@@ -211,29 +301,31 @@ function startOptionalBuild(options: DashboardStaticServerOptions): void {
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
-    const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
-    if (req.method) {
-      requestInit.method = req.method;
-    }
-    const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
-    const request = new Request(requestUrl, requestInit);
-    void createDashboardStaticResponse(request, options.staticDir, options)
-      .then(async (staticResponse) => {
-        res.statusCode = staticResponse.status;
-        staticResponse.headers.forEach((value, key) => res.setHeader(key, value));
-        if (req.method === 'HEAD') {
-          res.end();
-          return;
+    void readIncomingBody(req)
+      .then(async (body) => {
+        const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
+        if (body) {
+          requestInit.body = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as BodyInit;
         }
-        const body = staticResponse.body ? Buffer.from(await staticResponse.arrayBuffer()) : undefined;
-        res.end(body);
+        if (req.method) {
+          requestInit.method = req.method;
+        }
+        const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
+        const request = new Request(requestUrl, requestInit);
+        const staticResponse = await createDashboardStaticResponse(request, options.staticDir, options);
+        await writeWebResponse(staticResponse, req.method, res);
       })
       .catch((error) => {
+        if (res.headersSent) {
+          res.destroy(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
         res.statusCode = 500;
         res.setHeader('content-type', 'text/plain; charset=utf-8');
         res.end(error instanceof Error ? error.message : String(error));
       });
   });
+  attachBackendUpgradeProxy(server, options);
 
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
@@ -246,7 +338,30 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
   return server;
 }
 
-function parseCliArgs(argv: string[]): DashboardStaticServerOptions {
+async function resolveDashboardOperatorToken(): Promise<string | undefined> {
+  const configPath = process.env.FRANKENBEAST_CONFIG_FILE || process.env.FRANKENBEAST_CONFIG_PATH;
+  if (configPath) {
+    try {
+      const resolvedConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
+      const config = OrchestratorConfigSchema.parse(JSON.parse(await readFile(resolvedConfigPath, 'utf8')));
+      const tokenRef = config.network.operatorTokenRef?.trim();
+      if (tokenRef) {
+        const store = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
+          projectRoot: process.cwd(),
+          passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+        });
+        const token = await store.resolve(tokenRef);
+        if (token?.trim()) return token.trim();
+      }
+    } catch {
+      // Secret-store resolution is best-effort here; fall back to direct env wiring below.
+    }
+  }
+
+  return process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim() || undefined;
+}
+
+async function parseCliArgs(argv: string[]): Promise<DashboardStaticServerOptions> {
   const readValue = (flag: string): string | undefined => {
     const index = argv.indexOf(flag);
     return index >= 0 ? argv[index + 1] : undefined;
@@ -263,7 +378,7 @@ function parseCliArgs(argv: string[]): DashboardStaticServerOptions {
     port,
     staticDir,
     apiTarget: readValue('--api-target') ?? process.env.FRANKENBEAST_DASHBOARD_API_URL,
-    operatorToken: process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN,
+    operatorToken: await resolveDashboardOperatorToken(),
     buildCommand: readValue('--build-command'),
     buildArgs: buildArgStart >= 0 ? argv.slice(buildArgStart + 1) : undefined,
   };
@@ -271,7 +386,7 @@ function parseCliArgs(argv: string[]): DashboardStaticServerOptions {
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : undefined;
 if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
-  const options = parseCliArgs(process.argv.slice(2));
+  const options = await parseCliArgs(process.argv.slice(2));
   const server = await startDashboardStaticServer(options);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : options.port;

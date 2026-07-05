@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createDashboardStaticResponse } from '../../../src/http/dashboard-static-server.js';
+import { createDashboardStaticResponse, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
 
 async function createDashboardDist(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-dashboard-dist-'));
@@ -86,5 +87,96 @@ describe('dashboard static server', () => {
 
     expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects headerless proxy requests when an operator token is configured', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    const response = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/api/dashboard'),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards non-GET request bodies through the HTTP static proxy', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    let receivedBody = '';
+    const backend = createServer((req, res) => {
+      req.on('data', (chunk) => {
+        receivedBody += chunk.toString();
+      });
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolveListen) => backend.listen(0, '127.0.0.1', resolveListen));
+    const backendAddress = backend.address();
+    if (!backendAddress || typeof backendAddress === 'string') throw new Error('backend listen failed');
+
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: `http://127.0.0.1:${backendAddress.port}`,
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${dashboardAddress.port}/api/skills/example`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+        body: JSON.stringify({ enabled: true }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(receivedBody).toBe('{"enabled":true}');
+    } finally {
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));
+    }
+  });
+
+  it('streams proxied event responses without buffering until the backend closes', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const backend = createServer((_req, res) => {
+      res.setHeader('content-type', 'text/event-stream');
+      res.write('data: ready\\n\\n');
+      setTimeout(() => res.end(), 25);
+    });
+    await new Promise<void>((resolveListen) => backend.listen(0, '127.0.0.1', resolveListen));
+    const backendAddress = backend.address();
+    if (!backendAddress || typeof backendAddress === 'string') throw new Error('backend listen failed');
+
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: `http://127.0.0.1:${backendAddress.port}`,
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${dashboardAddress.port}/api/dashboard/events`, {
+        headers: { origin: `http://127.0.0.1:${dashboardAddress.port}` },
+      });
+      const body = await response.text();
+
+      expect(body).toContain('data: ready');
+    } finally {
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));
+    }
   });
 });
