@@ -26,6 +26,7 @@ type CliTransformed = {
 type ProviderOverride = {
   command?: string | undefined;
   model?: string | undefined;
+  extraArgs?: readonly string[] | undefined;
 };
 
 type LlmReplayRecorder = (record: {
@@ -171,6 +172,7 @@ export class CliLlmAdapter implements IAdapter {
           model: activeModel,
           chatMode,
           sessionContinue,
+          extraArgs: this.resolveExtraArgs(activeProvider),
         }),
         env: provider.filterEnv(this.captureEnv()),
         prompt,
@@ -293,6 +295,10 @@ export class CliLlmAdapter implements IAdapter {
       return this.opts.model ?? requestModel;
     }
     return undefined;
+  }
+
+  private resolveExtraArgs(name: string): readonly string[] | undefined {
+    return this.opts.providerOverrides?.[name]?.extraArgs;
   }
 
   private captureEnv(): Record<string, string> {
