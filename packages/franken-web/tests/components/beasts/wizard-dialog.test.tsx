@@ -49,4 +49,25 @@ describe('WizardDialog', () => {
       outputDir: 'tasks/chunks',
     });
   });
+
+  it('keeps the launch progress status region mounted before launching', () => {
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} />);
+
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it('announces launch progress and marks launch controls busy while launching', () => {
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} launching={true} />);
+
+    const launchButton = screen.getByRole('button', { name: /launching/i });
+    expect(launchButton.closest('[aria-busy="true"]')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('Launching agent');
+  });
+
+  it('announces launch errors as alerts', () => {
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={vi.fn()} launchError="Agent launch failed" />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Agent launch failed');
+  });
 });
