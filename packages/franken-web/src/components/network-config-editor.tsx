@@ -20,10 +20,13 @@ interface NetworkConfigFormState {
   commsEnabled: boolean;
 }
 
+const NETWORK_MODES = ['secure', 'insecure'] as const;
+const SECURE_BACKENDS = ['local-encrypted', 'os-keychain', '1password', 'bitwarden'] as const;
+
 function formStateFromConfig(config: NetworkConfigResponse): NetworkConfigFormState {
   return {
     networkMode: config.network.mode,
-    secureBackend: config.network.secureBackend ?? '',
+    secureBackend: config.network.secureBackend ?? 'local-encrypted',
     chatEnabled: config.chat.enabled,
     chatModel: config.chat.model,
     chatHost: config.chat.host ?? '',
@@ -64,33 +67,107 @@ function buildAssignments(current: NetworkConfigFormState, initial: NetworkConfi
     .map(([key, value]) => assignment(key, value));
 }
 
+function validatePort(label: string, value: string): string | null {
+  const trimmed = value.trim();
+  const parsed = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    return `${label} must be between 1 and 65535.`;
+  }
+  return null;
+}
+
+function validateUrl(label: string, value: string): string | null {
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `${label} must be an HTTP or HTTPS URL.`;
+    }
+  } catch {
+    return `${label} must be a valid URL.`;
+  }
+  return null;
+}
+
+function validateForm(state: NetworkConfigFormState): string[] {
+  const errors: string[] = [];
+  if (!NETWORK_MODES.includes(state.networkMode as (typeof NETWORK_MODES)[number])) {
+    errors.push('Network mode must be secure or insecure.');
+  }
+  if (!SECURE_BACKENDS.includes(state.secureBackend as (typeof SECURE_BACKENDS)[number])) {
+    errors.push('Secure backend must be local-encrypted, os-keychain, 1password, or bitwarden.');
+  }
+  if (!state.chatModel.trim()) {
+    errors.push('Chat model is required.');
+  }
+  if (!state.chatHost.trim()) {
+    errors.push('Chat host is required.');
+  }
+  const chatPortError = validatePort('Chat port', state.chatPort);
+  if (chatPortError) {
+    errors.push(chatPortError);
+  }
+  const shouldValidateDashboard = state.dashboardEnabled
+    || Boolean(state.dashboardHost.trim())
+    || Boolean(state.dashboardPort.trim())
+    || Boolean(state.dashboardApiUrl.trim());
+  if (shouldValidateDashboard) {
+    if (!state.dashboardHost.trim()) {
+      errors.push('Dashboard host is required.');
+    }
+    const dashboardPortError = validatePort('Dashboard port', state.dashboardPort);
+    if (dashboardPortError) {
+      errors.push(dashboardPortError);
+    }
+    if (state.dashboardApiUrl.trim()) {
+      const apiUrlError = validateUrl('Dashboard API URL', state.dashboardApiUrl);
+      if (apiUrlError) {
+        errors.push(apiUrlError);
+      }
+    }
+  }
+  return errors;
+}
+
 export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps) {
   const initialState = useMemo(() => formStateFromConfig(config), [config]);
   const [formState, setFormState] = useState<NetworkConfigFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const assignments = buildAssignments(formState, initialState);
+  const validationErrors = validateForm(formState);
+  const canSave = assignments.length > 0 && validationErrors.length === 0 && !isSaving;
 
   useEffect(() => {
     setFormState(initialState);
     setError(null);
+    setSuccess(null);
   }, [initialState]);
 
   function update<K extends keyof NetworkConfigFormState>(key: K, value: NetworkConfigFormState[K]) {
     setFormState((current) => ({ ...current, [key]: value }));
+    setError(null);
+    setSuccess(null);
   }
 
   async function save() {
+    if (!canSave) {
+      return;
+    }
     setIsSaving(true);
     setError(null);
+    setSuccess(null);
     try {
       await onSave(assignments);
+      setSuccess('Saved network config changes.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save network config.');
     } finally {
       setIsSaving(false);
     }
   }
+
+  const alertMessage = error ?? (assignments.length > 0 ? validationErrors[0] : null);
 
   return (
     <section className="rail-card network-config-editor">
@@ -100,24 +177,26 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
 
       <label className="network-config-editor__field">
         <span>Network mode</span>
-        <input
+        <select
           aria-label="Network mode"
           className="field-control"
-          type="text"
           value={formState.networkMode}
           onChange={(event) => update('networkMode', event.target.value)}
-        />
+        >
+          {NETWORK_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+        </select>
       </label>
 
       <label className="network-config-editor__field">
         <span>Secure backend</span>
-        <input
+        <select
           aria-label="Secure backend"
           className="field-control"
-          type="text"
           value={formState.secureBackend}
           onChange={(event) => update('secureBackend', event.target.value)}
-        />
+        >
+          {SECURE_BACKENDS.map((backend) => <option key={backend} value={backend}>{backend}</option>)}
+        </select>
       </label>
 
       <label className="network-config-editor__field network-config-editor__field--checkbox">
@@ -156,6 +235,7 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
         <span>Chat port</span>
         <input
           aria-label="Chat port"
+          aria-invalid={validationErrors.some((message) => message.startsWith('Chat port')) ? true : undefined}
           className="field-control"
           inputMode="numeric"
           type="number"
@@ -189,6 +269,7 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
         <span>Dashboard port</span>
         <input
           aria-label="Dashboard port"
+          aria-invalid={validationErrors.some((message) => message.startsWith('Dashboard port')) ? true : undefined}
           className="field-control"
           inputMode="numeric"
           type="number"
@@ -201,8 +282,9 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
         <span>Dashboard API URL</span>
         <input
           aria-label="Dashboard API URL"
+          aria-invalid={validationErrors.some((message) => message.startsWith('Dashboard API URL')) ? true : undefined}
           className="field-control"
-          type="text"
+          type="url"
           value={formState.dashboardApiUrl}
           onChange={(event) => update('dashboardApiUrl', event.target.value)}
         />
@@ -218,9 +300,21 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
         <span>Comms enabled</span>
       </label>
 
-      {error && <p role="alert">{error}</p>}
+      <div className="network-config-editor__pending" aria-live="polite">
+        <h3>Pending config changes</h3>
+        {assignments.length > 0 ? (
+          <ul>
+            {assignments.map((item) => <li key={item}><code>{item}</code></li>)}
+          </ul>
+        ) : (
+          <p>No pending config changes.</p>
+        )}
+      </div>
 
-      <button className="button button--primary" type="button" disabled={isSaving} onClick={() => { void save(); }}>
+      {alertMessage && <p className="network-config-editor__alert" role="alert">{alertMessage}</p>}
+      {success && <p className="network-config-editor__success" role="status">{success}</p>}
+
+      <button className="button button--primary" type="button" disabled={!canSave} onClick={() => { void save(); }}>
         {isSaving ? 'Saving…' : 'Save config'}
       </button>
     </section>
