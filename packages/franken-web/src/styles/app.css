@@ -980,6 +980,44 @@ button {
   gap: 0.6rem;
 }
 
+.beast-confirm-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.beast-confirm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 61;
+  width: min(92vw, 28rem);
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+  border: 1px solid rgba(255, 122, 107, 0.36);
+  border-radius: 1rem;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.beast-confirm-dialog__title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.beast-confirm-dialog__description {
+  color: var(--text-muted);
+}
+
+.beast-confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .beast-detail {
   display: grid;
   gap: 1rem;

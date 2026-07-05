@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import type {
   BeastCatalogEntry,
   BeastExecutionMode,
@@ -98,6 +99,55 @@ function canStartAgent(agent: TrackedAgentSummary): boolean {
 
 function canRestartAgent(agent: TrackedAgentSummary): boolean {
   return agent.status === 'running' || canStartAgent(agent);
+}
+
+function ConfirmedAgentActionButton({
+  action,
+  confirmLabel,
+  consequence,
+  objectName,
+  onConfirm,
+}: {
+  action: 'Stop' | 'Delete' | 'Kill';
+  confirmLabel: string;
+  consequence: string;
+  objectName: string;
+  onConfirm(): void;
+}) {
+  return (
+    <AlertDialog.Root>
+      <AlertDialog.Trigger asChild>
+        <button
+          aria-label={`${action} ${objectName} with confirmation`}
+          className="button button--secondary button--compact"
+          type="button"
+        >
+          {action} {objectName}
+        </button>
+      </AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="beast-confirm-dialog__overlay" />
+        <AlertDialog.Content className="beast-confirm-dialog">
+          <AlertDialog.Title className="beast-confirm-dialog__title">
+            {confirmLabel}
+          </AlertDialog.Title>
+          <AlertDialog.Description className="beast-confirm-dialog__description">
+            {consequence}
+          </AlertDialog.Description>
+          <div className="beast-confirm-dialog__actions">
+            <AlertDialog.Cancel asChild>
+              <button autoFocus className="button button--secondary" type="button">Cancel</button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action asChild>
+              <button className="button button--primary" onClick={onConfirm} type="button">
+                {confirmLabel}
+              </button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
 }
 
 export function BeastDispatchPage(props: BeastDispatchPageProps) {
@@ -382,7 +432,13 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                 </div>
                 <div className="beast-run-row__actions">
                   {canStopAgent(agent) && (
-                    <button className="button button--secondary button--compact" onClick={() => props.onStop(agent.id)} type="button">Stop {agent.id}</button>
+                    <ConfirmedAgentActionButton
+                      action="Stop"
+                      confirmLabel={`Stop ${agent.id}`}
+                      consequence={`This interrupts ${agent.id} and may leave its current work incomplete until you start or resume it.`}
+                      objectName={agent.id}
+                      onConfirm={() => props.onStop(agent.id)}
+                    />
                   )}
                   {canStartAgent(agent) && (
                     <button className="button button--secondary button--compact" onClick={() => props.onStart(agent.id)} type="button">Start {agent.id}</button>
@@ -394,10 +450,22 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                     <button className="button button--secondary button--compact" onClick={() => props.onResume(agent.id)} type="button">Resume {agent.id}</button>
                   )}
                   {agent.status === 'stopped' && (
-                    <button className="button button--secondary button--compact" onClick={() => props.onDelete(agent.id)} type="button">Delete {agent.id}</button>
+                    <ConfirmedAgentActionButton
+                      action="Delete"
+                      confirmLabel={`Delete ${agent.id}`}
+                      consequence={`This removes ${agent.id} from tracked agents. Its saved metadata and row will no longer be available from this list.`}
+                      objectName={agent.id}
+                      onConfirm={() => props.onDelete(agent.id)}
+                    />
                   )}
                   {agent.status === 'running' && linkedRunId && (
-                    <button className="button button--secondary button--compact" onClick={() => props.onKill(linkedRunId)} type="button">Kill {linkedRunId}</button>
+                    <ConfirmedAgentActionButton
+                      action="Kill"
+                      confirmLabel={`Kill run ${linkedRunId}`}
+                      consequence={`This force-terminates linked run ${linkedRunId} for ${agent.id}. Logs or in-progress output may be lost.`}
+                      objectName={linkedRunId}
+                      onConfirm={() => props.onKill(linkedRunId)}
+                    />
                   )}
                 </div>
               </article>
