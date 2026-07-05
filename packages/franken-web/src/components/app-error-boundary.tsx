@@ -44,13 +44,55 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     return 'Unknown app-shell error';
   }
 
+  private safelySerializeThrownValue(value: unknown): unknown {
+    if (value instanceof Error) {
+      return undefined;
+    }
+
+    if (value === undefined) {
+      return null;
+    }
+
+    const seen = new WeakSet<object>();
+
+    try {
+      const serialized = JSON.stringify(value, (_key, nestedValue: unknown) => {
+        if (typeof nestedValue === 'bigint') {
+          return `${nestedValue.toString()}n`;
+        }
+
+        if (typeof nestedValue === 'symbol' || typeof nestedValue === 'function') {
+          return String(nestedValue);
+        }
+
+        if (nestedValue && typeof nestedValue === 'object') {
+          if (seen.has(nestedValue)) {
+            return '[Circular]';
+          }
+
+          seen.add(nestedValue);
+        }
+
+        return nestedValue;
+      });
+
+      return serialized === undefined ? String(value) : JSON.parse(serialized);
+    } catch {
+      try {
+        return String(value);
+      } catch {
+        return Object.prototype.toString.call(value);
+      }
+    }
+  }
+
   private buildDiagnostics(): string {
     const { error, errorInfo } = this.state;
     return JSON.stringify(
       {
         message: this.getErrorMessage(),
         stack: error instanceof Error ? error.stack ?? null : null,
-        thrownValue: error instanceof Error ? undefined : error ?? null,
+        thrownValue: this.safelySerializeThrownValue(error),
         componentStack: errorInfo?.componentStack ?? null,
         version: this.props.version,
         location: typeof window !== 'undefined' ? window.location.href : null,

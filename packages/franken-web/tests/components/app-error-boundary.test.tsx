@@ -11,6 +11,10 @@ function ThrowsNull(): ReactElement {
   throw null;
 }
 
+function ThrowsBigInt(): ReactElement {
+  throw 1n;
+}
+
 describe('AppErrorBoundary', () => {
   afterEach(() => {
     cleanup();
@@ -87,5 +91,18 @@ describe('AppErrorBoundary', () => {
 
     expect(screen.getByRole('alert')).toBeTruthy();
     expect(screen.getByText('Unknown app-shell error')).toBeTruthy();
+  });
+
+  it('keeps diagnostics renderable when the thrown value is not JSON-serializable by default', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <AppErrorBoundary version="0.1.0-test">
+        <ThrowsBigInt />
+      </AppErrorBoundary>,
+    );
+
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getByText(/"thrownValue": "1n"/)).toBeTruthy();
   });
 });
