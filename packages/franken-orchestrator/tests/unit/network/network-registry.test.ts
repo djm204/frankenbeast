@@ -12,6 +12,26 @@ describe('network-registry', () => {
     expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server', 'dashboard-web']);
   });
 
+  it('serves dashboard-web from a production build instead of the Vite dev server', () => {
+    const services = resolveNetworkServices(defaultConfig(), context);
+    const dashboard = services.find((service) => service.id === 'dashboard-web');
+
+    expect(dashboard?.runtimeConfig).toMatchObject({
+      host: '127.0.0.1',
+      port: 5173,
+      url: 'http://127.0.0.1:5173',
+      healthUrl: 'http://127.0.0.1:5173/health',
+      serviceIdentity: 'dashboard-web',
+    });
+    expect(dashboard?.runtimeConfig.process?.command).toBe('node');
+    const dashboardCommand = dashboard?.runtimeConfig.process?.args.join(' ') ?? '';
+    expect(dashboardCommand).toContain('packages/franken-orchestrator/dist/http/dashboard-static-server.js');
+    expect(dashboardCommand).toContain('--api-target http://127.0.0.1:3737');
+    expect(dashboardCommand).toContain('--build-command npm');
+    expect(dashboardCommand).toContain('--workspace @frankenbeast/web run build');
+    expect(dashboardCommand).not.toContain('run dev');
+  });
+
   it('orders dependencies before dependents', () => {
     const config = defaultConfig();
     config.comms.enabled = true;
@@ -186,9 +206,9 @@ describe('network-registry', () => {
       process: {
         env: {
           FRANKENBEAST_CONFIG_FILE: '',
-          VITE_API_URL: '',
-          VITE_API_PROXY_TARGET: 'http://127.0.0.1:4242',
-          VITE_BEAST_API_PROXY_TARGET: 'http://127.0.0.1:4050',
+          FRANKENBEAST_DASHBOARD_API_URL: 'http://127.0.0.1:4242',
+          FRANKENBEAST_DASHBOARD_HOST: '127.0.0.1',
+          FRANKENBEAST_DASHBOARD_PORT: '5173',
         },
       },
     });

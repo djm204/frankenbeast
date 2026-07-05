@@ -1,5 +1,5 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
-import { localPlaintextOrSecureEndpoint } from '../network-url.js';
+import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureHealthUrl } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 export const dashboardWebService: NetworkServiceDefinition = {
@@ -10,35 +10,40 @@ export const dashboardWebService: NetworkServiceDefinition = {
   configPaths: ['dashboard.enabled', 'dashboard.host', 'dashboard.port', 'dashboard.apiUrl'],
   enabled: (config: OrchestratorConfig) => config.dashboard.enabled,
   describe: (config: OrchestratorConfig) =>
-    `Enabled when dashboard.enabled=true; serves the dashboard on ${config.dashboard.host}:${config.dashboard.port}.`,
+    `Enabled when dashboard.enabled=true; builds franken-web and serves the static dashboard on ${config.dashboard.host}:${config.dashboard.port}.`,
   buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.dashboard.host,
     port: config.dashboard.port,
     url: localPlaintextOrSecureEndpoint(config.dashboard.host, config.dashboard.port),
+    healthUrl: localPlaintextOrSecureHealthUrl(config.dashboard.host, config.dashboard.port),
     serviceIdentity: 'dashboard-web',
     apiUrl: config.dashboard.apiUrl,
     process: {
-      command: 'npm',
+      command: 'node',
       args: [
-        '--workspace',
-        '@frankenbeast/web',
-        'run',
-        'dev',
-        '--',
+        'packages/franken-orchestrator/dist/http/dashboard-static-server.js',
         '--host',
         config.dashboard.host,
         '--port',
         String(config.dashboard.port),
+        '--static-dir',
+        'packages/franken-web/dist',
+        '--api-target',
+        config.dashboard.apiUrl,
+        '--build-command',
+        'npm',
+        '--build-args',
+        '--workspace',
+        '@frankenbeast/web',
+        'run',
+        'build',
       ],
       cwd: context.repoRoot,
       env: {
         FRANKENBEAST_CONFIG_FILE: context.configFile ?? '',
-        VITE_API_URL: '',
-        VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
-        VITE_BEAST_API_PROXY_TARGET: localPlaintextOrSecureEndpoint(
-          config.beastsDaemon.host,
-          config.beastsDaemon.port,
-        ),
+        FRANKENBEAST_DASHBOARD_API_URL: config.dashboard.apiUrl,
+        FRANKENBEAST_DASHBOARD_HOST: config.dashboard.host,
+        FRANKENBEAST_DASHBOARD_PORT: String(config.dashboard.port),
       },
     },
   }),
