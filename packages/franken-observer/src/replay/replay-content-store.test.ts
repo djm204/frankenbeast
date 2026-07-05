@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ReplayContentStore } from './replay-content-store.js';
@@ -13,6 +13,8 @@ describe('ReplayContentStore', () => {
 
     expect(ref).toBe(hashContent('hello world'));
     expect(ref).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(existsSync(join(root, 'blobs', ref.replace(/^sha256:/, '')))).toBe(true);
+    expect(existsSync(join(root, 'blobs', ref))).toBe(false);
     expect(store.get(ref)).toBe('hello world');
   });
 

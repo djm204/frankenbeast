@@ -15,7 +15,7 @@ export class ReplayContentStore {
 
   put(content: string): string {
     const ref = hashContent(content);
-    const path = join(this.dir, ref);
+    const path = this.blobPath(ref);
     if (!existsSync(path)) {
       writeFileSync(path, content, 'utf8');
     }
@@ -23,7 +23,7 @@ export class ReplayContentStore {
   }
 
   get(ref: string): string {
-    const content = readFileSync(join(this.dir, ref), 'utf8');
+    const content = readFileSync(this.blobPath(ref), 'utf8');
     if (!contentHashMatches(content, ref)) {
       throw new Error(`Replay blob hash mismatch for ${ref}`);
     }
@@ -31,6 +31,10 @@ export class ReplayContentStore {
   }
 
   __corruptForTest(ref: string, replacement: string): void {
-    writeFileSync(join(this.dir, ref), replacement, 'utf8');
+    writeFileSync(this.blobPath(ref), replacement, 'utf8');
+  }
+
+  private blobPath(ref: string): string {
+    return join(this.dir, ref.replace(/^sha256:/, ''));
   }
 }
