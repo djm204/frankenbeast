@@ -37,15 +37,25 @@ describe('ConcisenessEvaluator', () => {
     ];
     const result = await evaluator.evaluate(createInput(lines.join('\n')));
 
-    expect(result.findings.some((f) => f.message.includes('comment'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('comment'))).toBe(
+      true,
+    );
   });
 
-  it('flags TODO/FIXME/HACK comments', async () => {
+  it('flags unresolved marker comments', async () => {
     const evaluator = new ConcisenessEvaluator();
-    const content = `// TODO: fix this later\n// HACK: temporary workaround\nconst x = 1;`;
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = `// TODO: fix this later\n// ${trackedMarker}: tracked follow-up\n// HACK: temporary workaround\nconst x = 1;`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes('TODO') || f.message.includes('HACK'))).toBe(true);
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('TODO') &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes('HACK'),
+      ),
+    ).toBe(true);
   });
 
   it('passes empty content', async () => {
