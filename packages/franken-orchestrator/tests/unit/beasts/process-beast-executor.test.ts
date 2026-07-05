@@ -717,7 +717,15 @@ describe('ProcessBeastExecutor', () => {
       const [, callbacks] = supervisor.spawn.mock.calls[0];
       const cb = callbacks as ProcessCallbacks;
 
+      const standaloneOpenAiKey = `sk-${'standaloneproviderkey1234567890'}`;
+      const githubToken = `ghp_${'abcdefghijklmnopqrstuvwxyz123456'}`;
+      const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
+
       cb.onStderr('api_key=sk-live-secret-value password=hunter2');
+      cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-secret-value');
+      cb.onStderr('Authorization: Bot discord-bot-token-value');
+      cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
+      cb.onStderr(`Slack token ${slackToken}`);
       cb.onStderr('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.abc1234567890secret');
       cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
       cb.onExit(1, null);
@@ -728,6 +736,10 @@ describe('ProcessBeastExecutor', () => {
         exitCode: 1,
         lastStderrLines: [
           'api_key=[REDACTED] password=[REDACTED]',
+          'OPENAI_API_KEY=[REDACTED] CLIENT_SECRET=[REDACTED]',
+          'Authorization: Bot [REDACTED]',
+          'Invalid API key: [REDACTED] and [REDACTED]',
+          'Slack token [REDACTED]',
           'jwt [REDACTED]',
           'posting to [REDACTED]',
         ],
@@ -735,17 +747,30 @@ describe('ProcessBeastExecutor', () => {
       const serializedPersistedEvent = JSON.stringify(failEvent);
       expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
       expect(serializedPersistedEvent).not.toContain('hunter2');
+      expect(serializedPersistedEvent).not.toContain('client-secret-value');
+      expect(serializedPersistedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
+      expect(serializedPersistedEvent).not.toContain(githubToken);
+      expect(serializedPersistedEvent).not.toContain(slackToken);
       expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
       expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
 
       const publishedFailure = publishSpy.mock.calls
         .map(([event]) => event)
-        .find((event) => event.type === 'run.event' && event.data.event.type === 'attempt.failed');
+        .filter((event) => event.type === 'run.event')
+        .find((event) => ((event.data as { event?: { type?: string } }).event?.type === 'attempt.failed')) as
+        | { data: { event: { payload: unknown } } }
+        | undefined;
       expect(publishedFailure).toBeDefined();
       expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
       const serializedPublishedEvent = JSON.stringify(publishedFailure);
       expect(serializedPublishedEvent).not.toContain('sk-live-secret-value');
       expect(serializedPublishedEvent).not.toContain('hunter2');
+      expect(serializedPublishedEvent).not.toContain('client-secret-value');
+      expect(serializedPublishedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
+      expect(serializedPublishedEvent).not.toContain(githubToken);
+      expect(serializedPublishedEvent).not.toContain(slackToken);
       expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
       expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
     });

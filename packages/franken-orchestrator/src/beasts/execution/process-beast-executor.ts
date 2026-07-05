@@ -13,11 +13,15 @@ const REDACTED_SECRET = '[REDACTED]';
 
 function redactFailureStderrLine(line: string): string {
   return line
-    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, `$1${REDACTED_SECRET}`)
+    .replace(/(authorization\s*:\s*(?:bearer|basic|bot)\s+)\S+/gi, `$1${REDACTED_SECRET}`)
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, REDACTED_SECRET)
+    .replace(/\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}\b/gi, REDACTED_SECRET)
+    .replace(/\b(?:gh[opusr])_[A-Za-z0-9_.-]{20,}\b/gi, REDACTED_SECRET)
+    .replace(/\bsk-[A-Za-z0-9_-]{15,}[A-Za-z0-9_-]\b/g, REDACTED_SECRET)
+    .replace(/\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]\b/gi, REDACTED_SECRET)
     .replace(
-      /(\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url)\b\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      /(\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url)\b\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
       `$1${REDACTED_SECRET}`,
     )
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
