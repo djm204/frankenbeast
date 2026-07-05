@@ -115,6 +115,38 @@ describe('runExecution', () => {
     expect(c.circuitBreakerTripped).toBe(true);
   });
 
+  it('surfaces the non-interactive approval escape hatch when a HITL task is rejected', async () => {
+    const logger = makeLogger();
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => [
+        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+      ]),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => ({
+        decision: 'rejected' as const,
+        reason: 'defaultDecision',
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'deploy', requiredSkills: ['deploy'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, makeMemory(), makeObserver(), undefined, logger);
+
+    expect(outcomes[0]).toEqual(expect.objectContaining({
+      status: 'skipped',
+      error: expect.stringContaining('FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1'),
+    }));
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Execution: task rejected',
+      expect.objectContaining({
+        taskId: 't1',
+        reason: expect.stringContaining('FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1'),
+      }),
+    );
+  });
+
   it('tracks retry count and checkpoint path for execution recovery', async () => {
     const c = ctx([
       { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },

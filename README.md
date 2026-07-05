@@ -576,6 +576,8 @@ frankenbeast run
 
 With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrator decrypts the vault from `.fbeast/config.json` without prompting. If you run with `--config <path>`, keep that file in sync with the backend and token refs written by `frankenbeast init`.
 
+Required HITL approvals fail closed when a run has no interactive TTY. In trusted CI/headless automation that intentionally allows required HITL-gated skills, set `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1`; otherwise rerun in an interactive TTY and approve the prompt.
+
 ### References
 
 - [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale

@@ -149,6 +149,11 @@ Options:
   --non-interactive       Disable interactive prompts for init
   --help                  Show this help message
 
+Non-interactive HITL:
+  Required HITL gates fail closed in non-TTY runs. In trusted CI/headless
+  automation, set FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1 to explicitly
+  allow those required approvals; otherwise rerun in an interactive TTY.
+
 Issue Flags (for 'issues' subcommand):
   --label <labels>        Comma-separated labels (e.g. critical,high)
   --milestone <name>      Filter by milestone
