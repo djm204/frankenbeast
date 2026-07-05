@@ -394,6 +394,11 @@ export class CliSkillExecutor {
       },
       onSpawnError: (provider: string, error: string) => {
         this.logger?.error('MartinLoop: provider spawn error', { chunkId, provider, error }, 'martin');
+        const currentCost = this.computeCurrentCost();
+        const budgetResult = this.observer.breaker.check(currentCost);
+        if (budgetResult.tripped) {
+          abortForBudget(budgetResult);
+        }
         config.martin?.onSpawnError?.(provider, error);
       },
       onProviderTimeout: (provider: string, timeoutMs: number) => {

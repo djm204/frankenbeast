@@ -482,6 +482,9 @@ export class MartinLoop {
         });
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
+        if (config.abortSignal?.aborted) {
+          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        }
         if (failure.kind === 'spawn_error') {
           iteration--;
           exhaustedProviders.set(activeProvider, failure);
