@@ -129,6 +129,12 @@ describe('NetworkPage', () => {
     expect(onSaveConfig).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('Dashboard port'), { target: { value: '5173' } });
+    fireEvent.change(screen.getByLabelText('Dashboard API URL'), { target: { value: '' } });
+
+    expect(saveButton).toHaveProperty('disabled', true);
+    expect(screen.getByRole('alert').textContent).toContain('Dashboard API URL is required.');
+
+    fireEvent.change(screen.getByLabelText('Dashboard API URL'), { target: { value: 'http://localhost:3737' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
 
     expect(screen.getByText('Pending config changes')).toBeDefined();
@@ -136,10 +142,10 @@ describe('NetworkPage', () => {
     expect(saveButton).toHaveProperty('disabled', false);
   });
 
-  it('shows success feedback after network config changes save', async () => {
+  it('shows success feedback after network config changes save and the refreshed config arrives', async () => {
     const onSaveConfig = vi.fn().mockResolvedValue(undefined);
 
-    render(
+    const { rerender } = render(
       <NetworkPage
         config={baseConfig}
         logs={[]}
@@ -159,6 +165,26 @@ describe('NetworkPage', () => {
 
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Saved network config changes.'));
     expect(onSaveConfig).toHaveBeenCalledWith(['dashboard.apiUrl=http://localhost:3737']);
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          dashboard: { ...baseConfig.dashboard!, apiUrl: 'http://localhost:3737' },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByRole('status').textContent).toContain('Saved network config changes.');
   });
 
   it('updates editor values when fetched config props change', () => {

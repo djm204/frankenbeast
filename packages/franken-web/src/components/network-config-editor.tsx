@@ -118,7 +118,9 @@ function validateForm(state: NetworkConfigFormState): string[] {
     if (dashboardPortError) {
       errors.push(dashboardPortError);
     }
-    if (state.dashboardApiUrl.trim()) {
+    if (!state.dashboardApiUrl.trim()) {
+      errors.push('Dashboard API URL is required.');
+    } else {
       const apiUrlError = validateUrl('Dashboard API URL', state.dashboardApiUrl);
       if (apiUrlError) {
         errors.push(apiUrlError);
@@ -141,7 +143,6 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
   useEffect(() => {
     setFormState(initialState);
     setError(null);
-    setSuccess(null);
   }, [initialState]);
 
   function update<K extends keyof NetworkConfigFormState>(key: K, value: NetworkConfigFormState[K]) {
