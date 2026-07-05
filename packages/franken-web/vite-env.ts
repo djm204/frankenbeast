@@ -30,15 +30,17 @@ export function shouldAttachOperatorAuth(headers: Record<string, string | string
     ? headers['sec-fetch-site'][0]
     : headers['sec-fetch-site'];
   if (secFetchSite === 'cross-site') return false;
-  if (secFetchSite === 'same-origin' || secFetchSite === 'same-site') return true;
+  if (secFetchSite === 'same-site') return false;
 
   const origin = Array.isArray(headers.origin) ? headers.origin[0] : headers.origin;
   const host = Array.isArray(headers.host) ? headers.host[0] : headers.host;
   if (!origin || !host) return false;
 
   try {
-    return new URL(origin).host === host;
+    if (new URL(origin).host !== host) return false;
   } catch {
     return false;
   }
+
+  return secFetchSite === undefined || secFetchSite === 'same-origin';
 }

@@ -79,4 +79,19 @@ describe('shouldAttachOperatorAuth', () => {
   it('rejects unverifiable non-browser proxy traffic without Origin or Fetch Metadata', () => {
     expect(shouldAttachOperatorAuth({ host: '127.0.0.1:5173' })).toBe(false);
   });
+
+  it('rejects same-site requests that are not same-origin', () => {
+    expect(shouldAttachOperatorAuth({
+      host: '127.0.0.1:5173',
+      origin: 'http://127.0.0.1:4173',
+      'sec-fetch-site': 'same-site',
+    })).toBe(false);
+  });
+
+  it('requires an origin match before trusting same-origin fetch metadata', () => {
+    expect(shouldAttachOperatorAuth({
+      host: '127.0.0.1:5173',
+      'sec-fetch-site': 'same-origin',
+    })).toBe(false);
+  });
 });
