@@ -403,7 +403,7 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 - **Chunk F** (#267): Added `SkillConfigStore` for persistent skill toggle state.
 - **One-Shots**: Deleted standalone comms server files, added HITL integration test, fixed checkpoint flush.
 
-**Test counts**: ~2,100 orchestrator tests passing. Typecheck clean across all 8 packages.
+**Test counts**: ~2,100 orchestrator tests passing. Typecheck clean across the current 10-package workspace.
 
 ---
 

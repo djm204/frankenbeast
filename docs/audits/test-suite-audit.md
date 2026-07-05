@@ -208,7 +208,7 @@ The root-level suite has the highest uselessness rate (31.3%).
 **Brittle hard-coded values** (2 tests):
 | File | Tests | Action |
 |------|-------|--------|
-| `verify-everything.test.ts` | `turbo run build succeeds for all 8 packages` | Fix: don't hard-code count |
+| `verify-everything.test.ts` | `turbo run build succeeds for all workspace packages` | Fixed: derives the package count from the workspace instead of hard-coding it |
 | `verify-everything.test.ts` | `total test count is at least 1572` | Delete (CI already runs all tests) |
 
 **Redundant with package-level tests** (6 tests):
