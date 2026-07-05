@@ -114,6 +114,7 @@ describe('useChatSession', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     MockWebSocket.instances = [];
   });
 
@@ -492,6 +493,90 @@ describe('useChatSession', () => {
       canRetry: true,
     }));
     expect(result.current.clearedFailedDraft).toBeUndefined();
+  });
+
+  it('does not mark acknowledged slash commands failed when snapshots omit them', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let slashSend!: Promise<void>;
+    act(() => {
+      slashSend = result.current.send('/run deployment');
+    });
+    const slashId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId: slashId, timestamp: '2026-03-09T00:00:01Z' });
+    });
+    await act(async () => {
+      await slashSend;
+    });
+
+    act(() => {
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({
+      id: slashId,
+      receipt: 'failed',
+    }));
+    expect(result.current.clearedFailedDraft).toBeUndefined();
+  });
+
+  it('clears timed-out drafts after a late acknowledgement arrives', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('eventually accepted draft');
+    });
+    const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+    const rejectedSend = expect(sendPromise).rejects.toThrow('Server did not acknowledge the message. Your draft was kept.');
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    await rejectedSend;
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      content: 'eventually accepted draft',
+      receipt: 'failed',
+      canRetry: true,
+    }));
+
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:02Z' });
+    });
+
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      receipt: 'accepted',
+    }));
+    expect(result.current.clearedFailedDraft).toMatchObject({ content: 'eventually accepted draft' });
   });
 
   it('drops failed placeholders when reconnect snapshots include the prompt', async () => {

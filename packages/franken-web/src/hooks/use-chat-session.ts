@@ -317,6 +317,10 @@ function preserveLocalRecoveryMessages(
       return [message];
     }
 
+    if (message.content.trim().startsWith('/')) {
+      return [];
+    }
+
     return [{
       ...message,
       receipt: 'failed',
@@ -573,7 +577,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             pendingSendsRef.current.delete(payload.clientMessageId);
             pending.resolve();
           }
-          setMessages((current) => updateReceipt(current, payload.clientMessageId, 'accepted'));
+          setMessages((current) => {
+            const timedOutDraft = current.find(
+              (message) => message.id === payload.clientMessageId
+                && message.role === 'user'
+                && message.receipt === 'failed',
+            );
+            if (timedOutDraft) {
+              setClearedFailedDraft((cleared) => ({
+                content: timedOutDraft.content,
+                nonce: (cleared?.nonce ?? 0) + 1,
+              }));
+            }
+            return updateReceipt(current, payload.clientMessageId, 'accepted');
+          });
           return;
         }
         case 'message.delivered':
