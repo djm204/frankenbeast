@@ -37,7 +37,7 @@ npm --workspace @frankenbeast/web run dev:chat
 The frontend automatically resolves the API URL at runtime:
 
 - If `VITE_API_URL` is set, requests target that absolute URL.
-- Chat requests are the exception: they always use same-origin `/v1/chat/*` paths so the browser never needs an operator bearer token. In local Vite development, the `/v1/chat` proxy forwards to `VITE_API_URL`, `VITE_CHAT_API_PROXY_TARGET`, or the default local chat server and injects operator auth server-side. In production, serve the dashboard behind the orchestrator or another same-origin BFF/proxy that performs this server-side forwarding.
+- Chat requests never accept a browser operator bearer token. In local Vite development, they use same-origin `/v1/chat/*` paths and the `/v1/chat` proxy forwards to `VITE_API_URL`, `VITE_CHAT_API_PROXY_TARGET`, or the default local chat server while injecting operator auth server-side. In production, serve the dashboard behind the orchestrator or another same-origin BFF/proxy and set `VITE_CHAT_SAME_ORIGIN=true`; otherwise explicit cross-origin `VITE_API_URL` chat calls are honored but must be authenticated by a server-side/session mechanism other than a browser-exposed operator token.
 - Otherwise requests use same-origin `/v1/*` and `/api/*` paths when `VITE_API_URL` is omitted, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
 - Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
 
@@ -84,6 +84,10 @@ VITE_API_URL=http://localhost:3737
 # Optional — chat-specific local Vite proxy target. Browser chat requests still use
 # same-origin /v1/chat/* so operator auth can be injected outside bundled code.
 VITE_CHAT_API_PROXY_TARGET=http://localhost:3737
+
+# Optional — force production chat traffic to same-origin /v1/chat/* when the
+# dashboard is deployed behind an orchestrator/BFF/proxy that injects auth.
+VITE_CHAT_SAME_ORIGIN=true
 
 # Fallback for Beast control when root .env does not define FRANKENBEAST_BEAST_OPERATOR_TOKEN.
 # Must match the operatorToken configured on the orchestrator server.

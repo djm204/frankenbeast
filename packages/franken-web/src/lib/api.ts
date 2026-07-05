@@ -35,8 +35,9 @@ export function toSocketUrl(baseUrl: string, sessionId: string, token: string): 
 export function resolveChatRequestBaseUrl(
   baseUrl: string,
   locationOrigin: string | undefined = typeof window !== 'undefined' ? window.location.origin : undefined,
+  useSameOriginProxy: boolean = import.meta.env.DEV || import.meta.env.VITE_CHAT_SAME_ORIGIN === 'true',
 ): string {
-  if (!locationOrigin) {
+  if (!useSameOriginProxy || !locationOrigin) {
     return baseUrl;
   }
 
