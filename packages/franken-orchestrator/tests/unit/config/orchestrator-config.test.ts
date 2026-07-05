@@ -64,7 +64,7 @@ describe('OrchestratorConfig', () => {
     it('rejects malformed security custom rules', () => {
       const result = OrchestratorConfigSchema.safeParse({
         security: {
-          customRules: [{ name: '', pattern: 'secret', action: 'block', target: 'request' }],
+          customRules: [{ name: 'bad-regex', pattern: '[', action: 'block', target: 'request' }],
         },
       });
 

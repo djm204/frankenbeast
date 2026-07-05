@@ -28,6 +28,15 @@ export interface SecurityConfig {
   customRules?: SecurityRule[];
 }
 
+const RegexPatternSchema = z.string().min(1).refine((pattern) => {
+  try {
+    new RegExp(pattern, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'pattern must be a valid regular expression' });
+
 export const SecurityConfigSchema = z.object({
   profile: z.enum(['strict', 'standard', 'permissive']),
   injectionDetection: z.boolean(),
@@ -41,7 +50,7 @@ export const SecurityConfigSchema = z.object({
     .array(
       z.object({
         name: z.string().min(1),
-        pattern: z.string().min(1),
+        pattern: RegexPatternSchema,
         action: z.enum(['block', 'warn', 'log']),
         target: z.enum(['request', 'response', 'both']),
       }),

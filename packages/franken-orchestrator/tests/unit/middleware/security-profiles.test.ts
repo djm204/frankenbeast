@@ -149,5 +149,18 @@ describe('SecurityProfiles', () => {
       };
       expect(SecurityConfigSchema.parse(config)).toEqual(config);
     });
+
+    it('rejects invalid custom rule regex patterns', () => {
+      const config: SecurityConfig = {
+        profile: 'standard',
+        injectionDetection: true,
+        piiMasking: true,
+        outputValidation: true,
+        webhookSignaturePolicy: 'required',
+        requireApproval: 'destructive',
+        customRules: [{ name: 'bad-regex', pattern: '[', action: 'block', target: 'request' }],
+      };
+      expect(() => SecurityConfigSchema.parse(config)).toThrow('pattern must be a valid regular expression');
+    });
   });
 });

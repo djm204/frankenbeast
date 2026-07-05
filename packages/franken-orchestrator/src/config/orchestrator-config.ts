@@ -22,9 +22,18 @@ export const ProviderConfigSchema = z.object({
   extraArgs: z.array(z.string()).optional(),
 });
 
+const RegexPatternSchema = z.string().min(1).refine((pattern) => {
+  try {
+    new RegExp(pattern, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'pattern must be a valid regular expression' });
+
 export const SecurityRuleInputSchema = z.object({
   name: z.string().min(1),
-  pattern: z.string().min(1),
+  pattern: RegexPatternSchema,
   action: z.enum(['block', 'warn', 'log']),
   target: z.enum(['request', 'response', 'both']),
 });
