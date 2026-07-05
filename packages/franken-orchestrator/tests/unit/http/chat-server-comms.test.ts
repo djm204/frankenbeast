@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import process from 'node:process';
 
 vi.mock('../../../src/http/chat-app.js', () => {
   const { Hono } = require('hono') as typeof import('hono');
@@ -113,6 +114,88 @@ describe('startChatServer comms pass-through', () => {
     const writtenConfig = await readFile(configFile, 'utf-8');
     expect(writtenConfig).toContain('"webhookSignaturePolicy": "required"');
     expect(writtenConfig).toContain('"customRules"');
+  });
+
+  it('fails closed when managed mode exposes unsigned external webhooks', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-server-unsigned-webhooks-'));
+    tempDirs.push(dir);
+    const previous = process.env['FRANKENBEAST_NETWORK_MANAGED'];
+    process.env['FRANKENBEAST_NETWORK_MANAGED'] = '1';
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir: '/tmp/chat-server-comms-test',
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: 'operator-token',
+        commsConfig: {
+          orchestrator: {},
+          channels: {
+            slack: {
+              enabled: true,
+              token: 'slack-token',
+              signingSecret: 'slack-signing-secret',
+            },
+          },
+        },
+        networkControl: {
+          root: '/tmp/project',
+          frankenbeastDir: '/tmp/project/.frankenbeast',
+          configFile: join(dir, 'config.json'),
+          getConfig: () => ({
+            security: {
+              profile: 'permissive',
+              webhookSignaturePolicy: 'local-dev-unsigned',
+            },
+          }) as never,
+          setConfig: vi.fn(),
+        },
+      })).rejects.toThrow(/unsigned external webhooks/i);
+    } finally {
+      if (previous === undefined) {
+        delete process.env['FRANKENBEAST_NETWORK_MANAGED'];
+      } else {
+        process.env['FRANKENBEAST_NETWORK_MANAGED'] = previous;
+      }
+    }
+  });
+
+  it('allows unsigned external webhooks on loopback-only local development', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-server-local-webhooks-'));
+    tempDirs.push(dir);
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-comms-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig: {
+        orchestrator: {},
+        channels: {
+          slack: {
+            enabled: true,
+            token: 'slack-token',
+            signingSecret: 'slack-signing-secret',
+          },
+        },
+      },
+      networkControl: {
+        root: '/tmp/project',
+        frankenbeastDir: '/tmp/project/.frankenbeast',
+        configFile: join(dir, 'config.json'),
+        getConfig: () => ({
+          security: {
+            profile: 'permissive',
+            webhookSignaturePolicy: 'local-dev-unsigned',
+          },
+        }) as never,
+        setConfig: vi.fn(),
+      },
+    });
+
+    expect(mockedCreateChatApp).toHaveBeenCalledOnce();
   });
 
   it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {

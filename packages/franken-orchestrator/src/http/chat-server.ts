@@ -185,6 +185,31 @@ function createCommsRuntimeAdapter(
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
+function enabledSignedExternalWebhookChannels(commsConfig: CommsConfig | undefined): string[] {
+  if (!commsConfig) {
+    return [];
+  }
+
+  const channels = commsConfig.channels;
+  const enabledChannels: string[] = [];
+  if (channels.slack?.enabled && channels.slack.token && channels.slack.signingSecret) {
+    enabledChannels.push('slack');
+  }
+  if (channels.discord?.enabled && channels.discord.token && channels.discord.publicKey) {
+    enabledChannels.push('discord');
+  }
+  if (
+    channels.whatsapp?.enabled
+    && channels.whatsapp.accessToken
+    && channels.whatsapp.phoneNumberId
+    && channels.whatsapp.appSecret
+    && channels.whatsapp.verifyToken
+  ) {
+    enabledChannels.push('whatsapp');
+  }
+  return enabledChannels;
+}
+
 export async function startChatServer(options: StartChatServerOptions): Promise<ChatServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
@@ -224,6 +249,20 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       + 'or bind to a loopback host. Pass allowUnauthenticatedChatForTests in tests.',
     );
   }
+  const securityConfig = options.networkControl
+    ? createNetworkSecurityConfigAdapter(options.networkControl)
+    : undefined;
+  const webhookSignaturePolicy = securityConfig?.getSecurityConfig().webhookSignaturePolicy ?? 'required';
+  const unsignedExternalWebhookChannels = webhookSignaturePolicy === 'local-dev-unsigned'
+    ? enabledSignedExternalWebhookChannels(options.commsConfig)
+    : [];
+  if (isExposed && unsignedExternalWebhookChannels.length > 0) {
+    throw new Error(
+      `Refusing to start chat-server on ${host} with unsigned external webhooks enabled: `
+      + `${unsignedExternalWebhookChannels.join(', ')} webhooks require signature verification when the listener is exposed. `
+      + 'Set security.webhookSignaturePolicy to "required" or bind to a loopback-only local-dev host.',
+    );
+  }
   const tokenSecret = createSessionTokenSecret();
   const sessionStore = resolveChatServerSessionStore(options);
   const runtime = createChatRuntime({
@@ -253,9 +292,6 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
       : undefined);
-  const securityConfig = options.networkControl
-    ? createNetworkSecurityConfigAdapter(options.networkControl)
-    : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
