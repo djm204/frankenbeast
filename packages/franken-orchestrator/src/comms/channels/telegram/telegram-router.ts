@@ -80,15 +80,21 @@ export function telegramRouter(options: TelegramRouterOptions) {
 
       // Acknowledge callback query
       const targetUrl = `https://api.telegram.org/bot${botToken}/answerCallbackQuery`;
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: query.id }),
-      });
-      if (!response.ok) {
-        const error = redactTelegramBotTokenUrls(await response.text());
+      try {
+        const response = await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: query.id }),
+        });
+        if (!response.ok) {
+          const error = redactTelegramBotTokenUrls(await response.text());
+          const redactedUrl = redactTelegramBotTokenUrls(targetUrl);
+          console.warn(`Telegram API error: ${response.status} ${redactedUrl} ${error}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         const redactedUrl = redactTelegramBotTokenUrls(targetUrl);
-        throw new Error(`Telegram API error: ${response.status} ${redactedUrl} ${error}`);
+        console.warn(`Telegram API error: ${redactedUrl} ${redactTelegramBotTokenUrls(message)}`);
       }
     }
 

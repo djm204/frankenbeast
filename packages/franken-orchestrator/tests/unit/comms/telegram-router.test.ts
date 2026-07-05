@@ -21,6 +21,7 @@ describe('telegramRouter', () => {
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
   it('routes incoming message to gateway', async () => {
@@ -101,5 +102,47 @@ describe('telegramRouter', () => {
       chatId: '456',
       externalChannelId: '456',
     });
+  });
+
+  it('does not fail callback webhooks when Telegram acknowledgement fails', async () => {
+    const token = '123456789:AAExampleTelegramBotTokenSecretValue';
+    const appWithRealisticToken = telegramRouter({
+      gateway,
+      sessionMapper,
+      botToken: token,
+    });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => `upstream failed for https://api.telegram.org/bot${token}/answerCallbackQuery`,
+    } as Response);
+    const body = JSON.stringify({
+      update_id: 4,
+      callback_query: {
+        id: 'q3',
+        from: { id: 123 },
+        message: {
+          message_id: 100,
+          chat: { id: 456 },
+        },
+        data: 'approve',
+      },
+    });
+
+    const res = await appWithRealisticToken.request(`/${token}`, {
+      method: 'POST',
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    expect(gateway.handleAction).toHaveBeenCalledWith('telegram', 'session-123', 'approve', {
+      chatId: '456',
+      externalChannelId: '456',
+    });
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('https://api.telegram.org/bot[REDACTED]/answerCallbackQuery'),
+    );
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining(token));
   });
 });
