@@ -49,19 +49,7 @@ describe('AnalyticsApiClient', () => {
     await expect(client.fetchSummary({})).rejects.toThrow('HTTP 500');
   });
 
-  it('attaches the operator token as a bearer header when configured', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ totalEvents: 0 }) });
-    globalThis.fetch = fetchMock;
-
-    const client = new AnalyticsApiClient(BASE_URL, 'op-token');
-    await client.fetchSummary({});
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${BASE_URL}/api/analytics/summary`);
-    expect(new Headers(init.headers).get('authorization')).toBe('Bearer op-token');
-  });
-
-  it('omits the authorization header when no token is configured', async () => {
+  it('does not add Authorization from the browser client', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ totalEvents: 0 }) });
     globalThis.fetch = fetchMock;
 

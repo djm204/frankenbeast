@@ -11,20 +11,8 @@ describe('ChatApiClient', () => {
     vi.clearAllMocks();
   });
 
-  describe('operator token plumbing', () => {
-    it('sends Authorization: Bearer when constructed with an operator token', async () => {
-      const tokened = new ChatApiClient('http://localhost:3000', 'op-secret');
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ data: { id: 'x', projectId: 'p', transcript: [], state: 'active', socketToken: 't', tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 }, costUsd: 0, createdAt: '2026-03-09T00:00:00Z', updatedAt: '2026-03-09T00:00:00Z' } }),
-      });
-      await tokened.createSession('p');
-      const init = mockFetch.mock.calls[0]![1] as RequestInit;
-      const headers = init.headers as Headers;
-      expect(headers.get('authorization')).toBe('Bearer op-secret');
-    });
-
-    it('does not add Authorization when constructed without a token', async () => {
+  describe('browser credential handling', () => {
+    it('does not add Authorization from the browser client', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: { id: 'x', projectId: 'p', transcript: [], state: 'active', socketToken: 't', tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 }, costUsd: 0, createdAt: '2026-03-09T00:00:00Z', updatedAt: '2026-03-09T00:00:00Z' } }),

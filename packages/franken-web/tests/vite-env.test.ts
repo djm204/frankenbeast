@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadBeastOperatorToken, type EnvLoader } from '../vite-env';
+import { loadProxyOperatorToken, type EnvLoader } from '../vite-env';
 
 const ROOT = '/repo';
 const PKG = '/repo/packages/franken-web';
@@ -9,34 +9,33 @@ function loaderFor(byDir: Record<string, Record<string, string>>): EnvLoader {
   return vi.fn((_mode: string, dir: string) => byDir[dir] ?? {});
 }
 
-describe('loadBeastOperatorToken', () => {
-  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file', () => {
-    // Regression: the package-dir-only load missed the documented root .env.
+describe('loadProxyOperatorToken', () => {
+  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file for the server proxy', () => {
     const load = loaderFor({
       [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
       [PKG]: {},
     });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
   });
 
-  it('falls back to a package-level VITE_BEAST_OPERATOR_TOKEN override', () => {
+  it('does not treat browser-exposed VITE_BEAST_OPERATOR_TOKEN as a credential source', () => {
     const load = loaderFor({
       [ROOT]: {},
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('web-token');
+    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('');
   });
 
-  it('prefers the root FRANKENBEAST token when both are present', () => {
+  it('prefers the root server-side token over package env values', () => {
     const load = loaderFor({
       [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
   });
 
-  it('returns an empty string when no token is configured anywhere', () => {
+  it('returns an empty string when no server-side token is configured', () => {
     const load = loaderFor({ [ROOT]: {}, [PKG]: {} });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('');
+    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('');
   });
 });
