@@ -27,9 +27,10 @@
   },
   "packageManager": "npm@11.5.1",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <22 || >=22.12.0"
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "vite": "^8.1.3"
   }
 }
