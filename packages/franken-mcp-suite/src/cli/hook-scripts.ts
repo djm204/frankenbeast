@@ -107,7 +107,7 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify("tool_response" in d?d.tool_response:{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
@@ -196,7 +196,7 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify("tool_response" in d?d.tool_response:{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true
@@ -286,7 +286,7 @@ HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(String(d.tool_name??""))' 2>/dev/null || echo "")
-TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(d.tool_response??{}))' 2>/dev/null || echo "{}")
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | node --input-type=commonjs -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(JSON.stringify("tool_response" in d?d.tool_response:{}))' 2>/dev/null || echo "{}")
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" "$TOOL_NAME" "$TOOL_RESPONSE" >/dev/null 2>&1 || true

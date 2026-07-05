@@ -638,6 +638,20 @@ describe('generated script runtime dependencies', () => {
       }
     }
   });
+
+  it('preserves an explicit null tool_response instead of defaulting it to {}', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+
+    for (const client of ['claude', 'gemini', 'codex'] as const) {
+      const { postTool } = writeHookScripts(root, client);
+      const body = readFileSync(postTool, 'utf8');
+      // A key-presence check keeps `tool_response: null` as `null` in audit
+      // metadata; `?? {}` would silently rewrite it to an empty object.
+      expect(body, `${client} ${postTool}`).toContain('"tool_response" in d');
+      expect(body, `${client} ${postTool}`).not.toContain('d.tool_response??{}');
+    }
+  });
 });
 
 describe('Claude Code hook scripts', () => {
