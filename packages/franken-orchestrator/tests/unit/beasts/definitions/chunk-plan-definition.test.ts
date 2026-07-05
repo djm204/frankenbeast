@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { chunkPlanDefinition } from '../../../../src/beasts/definitions/chunk-plan-definition.js';
 import { parseArgs } from '../../../../src/cli/args.js';
 
 describe('chunkPlanDefinition', () => {
   const validConfig = {
-    designDocPath: '/tmp/design.md',
+    designDocPath: 'docs/design.md',
     outputDir: '/tmp/chunks-out',
   };
 
@@ -28,7 +31,7 @@ describe('chunkPlanDefinition', () => {
       const spec = chunkPlanDefinition.buildProcessSpec(validConfig);
       const idx = spec.args.indexOf('--design-doc');
       expect(idx).toBeGreaterThan(-1);
-      expect(spec.args[idx + 1]).toBe('/tmp/design.md');
+      expect(spec.args[idx + 1]).toBe(resolve(process.cwd(), 'docs/design.md'));
     });
 
     it('passes --output-dir flag with value', () => {
@@ -47,6 +50,41 @@ describe('chunkPlanDefinition', () => {
       const config = { ...validConfig, projectRoot: '/home/user/project' };
       const spec = chunkPlanDefinition.buildProcessSpec(config);
       expect(spec.cwd).toBe('/home/user/project');
+    });
+
+    it('rejects designDocPath values that escape projectRoot', () => {
+      const config = {
+        ...validConfig,
+        projectRoot: '/home/user/project',
+        designDocPath: '../secret.md',
+      };
+
+      expect(() => chunkPlanDefinition.buildProcessSpec(config)).toThrow(
+        /designDocPath.*outside project root/,
+      );
+    });
+
+    it('allows designDocPath values inside a symlinked projectRoot', () => {
+      const testDir = mkdtempSync(resolve(tmpdir(), 'fb-chunk-plan-'));
+      const realRoot = resolve(testDir, 'project');
+      const linkRoot = resolve(testDir, 'project-link');
+      const designPath = resolve(realRoot, 'docs', 'design.md');
+
+      try {
+        mkdirSync(resolve(realRoot, 'docs'), { recursive: true });
+        writeFileSync(designPath, '# Design');
+        symlinkSync(realRoot, linkRoot, 'dir');
+
+        const spec = chunkPlanDefinition.buildProcessSpec({
+          ...validConfig,
+          projectRoot: linkRoot,
+          designDocPath: designPath,
+        });
+
+        expect(spec.args[spec.args.indexOf('--design-doc') + 1]).toBe(designPath);
+      } finally {
+        rmSync(testDir, { recursive: true, force: true });
+      }
     });
 
     it('falls back to process.cwd() when projectRoot is not provided', () => {
