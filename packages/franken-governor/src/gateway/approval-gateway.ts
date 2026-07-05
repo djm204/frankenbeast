@@ -71,12 +71,13 @@ export class ApprovalGateway {
   }
 
   private verifySignature(response: ApprovalResponse): void {
+    const signatureVerifier = this.signatureVerifier;
     const payload = formatApprovalResponseSignaturePayload({
       requestId: response.requestId,
       decision: response.decision,
     });
 
-    if (!response.signature || !this.signatureVerifier!.verify(payload, response.signature)) {
+    if (!signatureVerifier || !response.signature || !signatureVerifier.verify(payload, response.signature)) {
       throw new SignatureVerificationError(response.requestId);
     }
   }
@@ -110,7 +111,7 @@ export class ApprovalGateway {
     switch (response.decision) {
       case 'APPROVE': {
         const token = this.sessionTokenStore
-          ? this.createAndStoreToken(request, response)
+          ? this.createAndStoreToken(request, response, this.sessionTokenStore)
           : undefined;
         return token !== undefined
           ? { decision: 'APPROVE', token }
@@ -129,14 +130,18 @@ export class ApprovalGateway {
     }
   }
 
-  private createAndStoreToken(request: ApprovalRequest, response: ApprovalResponse) {
+  private createAndStoreToken(
+    request: ApprovalRequest,
+    response: ApprovalResponse,
+    sessionTokenStore: SessionTokenStore,
+  ) {
     const token = createSessionToken({
       approvalId: request.requestId,
       scope: request.skillId ?? request.taskId,
       grantedBy: response.respondedBy,
       ttlMs: this.config.sessionTokenTtlMs,
     });
-    this.sessionTokenStore!.store(token);
+    sessionTokenStore.store(token);
     return token;
   }
 }

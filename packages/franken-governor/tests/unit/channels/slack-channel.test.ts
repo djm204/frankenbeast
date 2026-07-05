@@ -59,9 +59,10 @@ describe('SlackChannel', () => {
     expect((body as { text: string }).text).toContain('Deploy v2.0');
   });
 
-  it('throws ChannelUnavailableError when webhook POST fails', async () => {
+  it('throws ChannelUnavailableError with the original network error as cause when webhook POST fails', async () => {
+    const networkError = new Error('Network error');
     const httpClient: HttpClient = {
-      post: vi.fn().mockRejectedValue(new Error('Network error')),
+      post: vi.fn().mockRejectedValue(networkError),
     };
     const channel = new SlackChannel({
       webhookUrl: 'https://hooks.slack.com/test',
@@ -69,7 +70,17 @@ describe('SlackChannel', () => {
       callbackServer: makeFakeCallbackServer(),
     });
 
-    await expect(channel.requestApproval(makeRequest())).rejects.toThrow(ChannelUnavailableError);
+    let thrown: unknown;
+    try {
+      await channel.requestApproval(makeRequest());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ChannelUnavailableError);
+    expect(thrown).toMatchObject({
+      cause: networkError,
+    });
   });
 
   it('maps callback response to ApprovalResponse', async () => {

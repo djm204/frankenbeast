@@ -64,8 +64,8 @@ export class SlackChannel implements ApprovalChannel {
 
     try {
       await this.httpClient.post(this.webhookUrl, payload);
-    } catch {
-      throw new ChannelUnavailableError('slack', `Failed to send webhook to ${this.webhookUrl}`);
+    } catch (cause) {
+      throw new ChannelUnavailableError('slack', `Failed to send webhook to ${this.webhookUrl}`, { cause });
     }
   }
 
