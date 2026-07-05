@@ -22,6 +22,7 @@ Each channel integration MUST implement platform-native request verification at 
 - **Slack**: HMAC-SHA256 signature verification with a 5-minute replay protection window.
 - **Generic**: Timing-safe equality checks for all signature comparisons.
 - **Validation**: Strict Zod schema enforcement for all inbound payloads before they reach the gateway logic.
+- **Exposed listeners**: Slack, Discord, and WhatsApp signature verification MUST remain enabled whenever webhook routes are exposed beyond loopback. Any unsigned override is limited to loopback-only local development, and startup must fail closed if an exposed listener would serve those routes unsigned.
 
 ## Consequences
 - **Positive**: Low-latency, streaming feedback on Slack/Discord; shared business logic in `ConversationEngine`; horizontal scalability of the gateway.

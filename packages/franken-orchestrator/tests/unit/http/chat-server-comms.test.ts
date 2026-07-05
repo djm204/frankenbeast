@@ -161,6 +161,56 @@ describe('startChatServer comms pass-through', () => {
     }
   });
 
+  it('fails closed on exposed hosts before disabling Slack, Discord, or WhatsApp signatures', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-server-exposed-webhooks-'));
+    tempDirs.push(dir);
+
+    await expect(startChatServer({
+      host: '0.0.0.0',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-comms-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: 'operator-token',
+      commsConfig: {
+        orchestrator: {},
+        channels: {
+          slack: {
+            enabled: true,
+            token: 'slack-token',
+            signingSecret: 'slack-signing-secret',
+          },
+          discord: {
+            enabled: true,
+            token: 'discord-token',
+            publicKey: 'discord-public-key',
+          },
+          whatsapp: {
+            enabled: true,
+            accessToken: 'whatsapp-token',
+            phoneNumberId: 'phone-number-id',
+            appSecret: 'whatsapp-app-secret',
+            verifyToken: 'whatsapp-verify-token',
+          },
+        },
+      },
+      networkControl: {
+        root: '/tmp/project',
+        frankenbeastDir: '/tmp/project/.frankenbeast',
+        configFile: join(dir, 'config.json'),
+        getConfig: () => ({
+          security: {
+            profile: 'permissive',
+            webhookSignaturePolicy: 'local-dev-unsigned',
+          },
+        }) as never,
+        setConfig: vi.fn(),
+      },
+    })).rejects.toThrow(/slack, discord, whatsapp webhooks require signature verification/i);
+
+    expect(mockedCreateChatApp).not.toHaveBeenCalled();
+  });
+
   it('allows unsigned external webhooks on loopback-only local development', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'chat-server-local-webhooks-'));
     tempDirs.push(dir);
