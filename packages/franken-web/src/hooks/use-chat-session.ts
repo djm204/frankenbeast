@@ -463,6 +463,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onerror = () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
       failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
         updateApprovalResolving(false);
@@ -473,6 +476,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onclose = () => {
+      if (!shouldReconnect || socketRef.current !== socket) {
+        return;
+      }
       socketRef.current = null;
       failAllPendingSends(new Error('Connection closed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
@@ -514,12 +520,19 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     if (!socket || socket.readyState !== 1) {
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
-        const refreshed = await clientRef.current.getSession(sessionId);
-        readyRef.current = true;
-        setMessages((current) => mergeSessionSnapshot(current, refreshed));
-        setPendingApproval(refreshed.pendingApproval ?? null);
-        setTokenTotals(refreshed.tokenTotals);
-        setCostUsd(refreshed.costUsd);
+        try {
+          const refreshed = await clientRef.current.getSession(sessionId);
+          readyRef.current = true;
+          setMessages((current) => mergeSessionSnapshot(
+            current.filter((message) => message.id !== clientMessageId),
+            refreshed,
+          ));
+          setPendingApproval(refreshed.pendingApproval ?? null);
+          setTokenTotals(refreshed.tokenTotals);
+          setCostUsd(refreshed.costUsd);
+        } catch {
+          setMessages((current) => updateReceipt(current, clientMessageId, 'accepted'));
+        }
         setTier(result.tier);
         setStatus('idle');
       } catch (err) {
@@ -533,9 +546,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        if (socket.readyState !== 1) {
-          failPendingSend(clientMessageId, new Error('Connection closed before the server acknowledged the message. Your draft was kept.'));
-        }
+        failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
       }, SOCKET_SEND_ACK_TIMEOUT_MS);
       pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
       try {

@@ -27,7 +27,7 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
     setIsSending(true);
     try {
       await onSend(trimmed);
-      setValue('');
+      setValue((current) => (current === value ? '' : current));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.');
     } finally {

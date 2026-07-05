@@ -47,6 +47,23 @@ describe('Composer failed-send recovery', () => {
     });
   });
 
+  it('preserves edits made while a send is pending', async () => {
+    const firstAttempt = deferred<void>();
+    const onSend = vi.fn().mockReturnValueOnce(firstAttempt.promise);
+    render(<Composer connectionStatus="connected" disabled={false} onSend={onSend} status="idle" />);
+
+    const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'first prompt' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+    fireEvent.change(input, { target: { value: 'next prompt draft' } });
+
+    firstAttempt.resolve(undefined);
+
+    await waitFor(() => {
+      expect(input.value).toBe('next prompt draft');
+    });
+  });
+
   it('shows resend controls for failed user messages', () => {
     const onRetryMessage = vi.fn();
     render(

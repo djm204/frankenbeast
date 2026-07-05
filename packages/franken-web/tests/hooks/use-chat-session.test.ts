@@ -246,6 +246,55 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('does not offer a retry when HTTP send succeeds but refresh fails', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
+
+    await act(async () => {
+      await result.current.send('Already ran on the server');
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'Already ran on the server',
+      receipt: 'accepted',
+    }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
+  });
+
+  it('drops unmatched optimistic HTTP sends after the server snapshot refreshes', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await result.current.send('/status');
+    });
+
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.status).toBe('idle');
+  });
+
   it('surfaces pending approvals and sends approval responses over the socket', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
