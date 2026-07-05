@@ -26,11 +26,14 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).not.toContain('operatorProxy(');
   });
 
-  it('allows browser-proven same-origin requests and requires loopback for unmarked requests', () => {
+  it('requires same-origin browser requests to carry a trusted origin', () => {
     expect(CONFIG_SOURCE).toContain('isLoopbackRemoteAddress(req.socket.remoteAddress)');
     expect(CONFIG_SOURCE).toContain('if (!isLoopbackRemoteAddress(req.socket.remoteAddress))');
-    expect(CONFIG_SOURCE).toContain('if (!originValue && !fetchSiteValue)');
-    expect(CONFIG_SOURCE).toContain("fetchSiteValue === 'same-origin'");
+    expect(CONFIG_SOURCE).toContain("if (fetchSiteValue && !['none', 'same-origin'].includes(fetchSiteValue))");
+    expect(CONFIG_SOURCE).toContain('if (!originValue)');
+    expect(CONFIG_SOURCE).toContain('return false');
+    expect(CONFIG_SOURCE).not.toContain('if (!originValue && !fetchSiteValue)');
+    expect(CONFIG_SOURCE).not.toContain("fetchSiteValue === 'same-origin'");
   });
 
   it('uses the same server-side proxy for dev and preview serving', () => {
