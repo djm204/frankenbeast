@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Approach A ([ADR-007](007-cli-skill-execution-type.md)) provided CLI skill primitives (`CliSkillExecutor`, the historical `RalphLoop` now implemented as `MartinLoop`, and `GitBranchIsolator`) that absorb the CLI repeat-until-promise loop into the orchestrator. However, the build-runner still reimplements plan decomposition, checkpoint tracking, and PR creation outside the orchestrator. There is no path from "I have an idea" to "here's a PR" without the human writing all intermediate artifacts (chunk files, build-runner scripts).
+Approach A ([ADR-007](007-cli-skill-execution-type.md)) provided CLI skill primitives (`CliSkillExecutor`, the historical `MartinLoop` (né `RalphLoop`) (since renamed `MartinLoop`, `src/skills/martin-loop.ts`) now implemented as `MartinLoop`, and `GitBranchIsolator`) that absorb the CLI repeat-until-promise loop into the orchestrator. However, the build-runner still reimplements plan decomposition, checkpoint tracking, and PR creation outside the orchestrator. There is no path from "I have an idea" to "here's a PR" without the human writing all intermediate artifacts (chunk files, build-runner scripts).
 
 We needed the orchestrator to own the full pipeline: accept an idea in any form, decompose it into executable chunks, run them through the existing CLI skill pipeline, checkpoint progress for crash recovery, and create a PR at the end.
 

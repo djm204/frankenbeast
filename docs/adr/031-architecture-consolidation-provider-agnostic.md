@@ -1,7 +1,7 @@
 # ADR-031: Architecture Consolidation — Provider-Agnostic Agent Framework
 
 - **Date:** 2026-03-18
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-07-04: after consolidation the workspace grew back to 10 packages — `@fbeast/mcp-suite` now provides the MCP surface listed below as removed, and `@fbeast/live-bench` was added)
 - **Deciders:** pfk
 - **Supersedes:** Portions of ADR-011 (monorepo structure)
 

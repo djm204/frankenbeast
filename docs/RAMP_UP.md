@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **8 packages** live under `packages/`. Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md). Architecture consolidation (ADR-031) reduced from 13 to 8 packages — firewall, skills, heartbeat, MCP deleted; comms absorbed into orchestrator.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. All **10 packages** live under `packages/`. Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-real-monorepo-migration.md). Architecture consolidation (ADR-031) reduced 13 packages to 8 — firewall, skills, heartbeat, and the old franken-mcp were deleted and comms absorbed into the orchestrator; `@fbeast/mcp-suite` and `@fbeast/live-bench` were added afterwards.
 
 ## Modules
 
@@ -18,6 +18,8 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
 | `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics |
 | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, comms gateway (Slack/Discord/Telegram/WhatsApp), beast control APIs, phases, circuit breakers, skill execution, crash recovery |
+| `packages/franken-mcp-suite/` | `fbeast` CLI, MCP servers/proxy, generated governance hooks, shared `.fbeast/beast.db` adapters |
+| `packages/live-bench/` | Live CLI benchmark tooling |
 
 ## The Beast Loop (4 Phases)
 
@@ -112,7 +114,7 @@ packages/franken-orchestrator/src/
   - `--target-upstream` derive the canonical target repository from the checkout's GitHub `upstream` remote; mutually exclusive with `--repo`
   - `--dry-run` preview triage without executing
 - Build artifacts are plan-scoped under `.fbeast/.build/`: `<plan-name>.checkpoint` for execution state, `<plan-name>-<datetime>-build.log` for session logs (written incrementally, crash-safe), `chunk-sessions/<plan>/<chunk>.json` for canonical chunk execution state, and `chunk-session-snapshots/<plan>/<chunk>/...json` for pre-compaction rollback points. Different plans have independent checkpoints and log histories.
-- `dep-factory.ts` calls `createBeastDeps()` which wires real consolidated adapters for all module ports: `MiddlewareChainFirewallAdapter` (firewall), `SqliteBrainMemoryAdapter` (memory), `SkillManagerAdapter` (skills), `ReflectionHeartbeatAdapter` (heartbeat), `AuditTrailObserverAdapter` (observer). Falls back to passthrough stubs only when `createBeastDeps()` throws (e.g., no providers configured).
+- `dep-factory.ts` calls `createBeastDeps()` which wires real consolidated adapters for all module ports: `MiddlewareChainFirewallAdapter` (firewall), `SqliteBrainMemoryAdapter` (memory), `SkillManagerAdapter` (skills), `ReflectionHeartbeatAdapter` (heartbeat), `AuditTrailObserverAdapter` (observer). If `createBeastDeps()` throws (e.g., no providers configured), dep assembly fails closed and the error propagates (ADR-033/ADR-036) — there is no stub fallback; explicit all-pass stubs require `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`.
 - `ProviderRegistryIAdapter` bridges `ProviderRegistry.execute()` (async generator) to `IAdapter` (Promise), with `MiddlewareChain` applied on request/response. Active in the heartbeat/reflection LLM path.
 - `SkillConfigStore` persists enabled-skill state to `.fbeast/config.json`.
 - `OrchestratorConfigSchema` accepts `security`, `brain`, and `consolidatedProviders` fields from config files, threaded through `dep-bridge.ts` → `createBeastDeps()`.
@@ -150,10 +152,10 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 ## Known Limitations
 
 1. **ProviderRegistry only active in reflection path**: Task execution flows through `CliLlmAdapter → MartinLoop → spawn()`. Multi-provider failover applies to heartbeat/reflection calls only. By design — middleware applies to in-process prompt text, not subprocess stdio.
-2. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
+2. **McpSdkAdapter.callTool() is fail-closed, not functional**: it throws until an MCP transport is configured, so CLI-side MCP tool dispatch is unreachable (tracked in #21). `SkillManagerAdapter` is a real adapter over `SkillManager`; it throws for non-`cli:` skills rather than returning fake output.
 3. **No `--non-interactive` flag**: Headless usage relies on starting at `plan` or `run` with existing inputs.
 4. **No top-level `provider` or `dashboard` CLI subcommands**: Current subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `beasts-daemon`, `network`, `skill`, and `security` (see `packages/franken-orchestrator/src/cli/args.ts`). Provider/dashboard capabilities are exposed through provider config, `chat-server`, the HTTP dashboard routes, and `franken-web`.
-5. **`--resume` parsed but not a distinct control path**: Checkpoint-based task skipping works from existing checkpoint files.
+5. **`--resume` is a distinct control path (ADR-033)**: cold runs clear stale checkpoints; `--resume` fails fast when no checkpoint exists and otherwise skips checkpointed tasks.
 
 ## Key Documentation
 
