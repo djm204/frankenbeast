@@ -227,7 +227,11 @@ export class ChatSocketController {
     session.transcript = result.transcript;
     session.state = result.state;
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
-      ? { description: result.pendingApprovalDescription, requestedAt: nowIso() }
+      ? {
+          description: result.pendingApprovalDescription,
+          requestedAt: nowIso(),
+          ...result.pendingApprovalContext,
+        }
       : null;
     session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
@@ -242,6 +246,11 @@ export class ChatSocketController {
         type: 'turn.approval.requested',
         description: session.pendingApproval.description,
         timestamp: session.pendingApproval.requestedAt,
+        ...(session.pendingApproval.tool ? { tool: session.pendingApproval.tool } : {}),
+        ...(session.pendingApproval.command ? { command: session.pendingApproval.command } : {}),
+        ...(session.pendingApproval.risk ? { risk: session.pendingApproval.risk } : {}),
+        ...(session.pendingApproval.affectedFiles ? { affectedFiles: session.pendingApproval.affectedFiles } : {}),
+        ...(session.pendingApproval.sessionId ? { sessionId: session.pendingApproval.sessionId } : {}),
       });
     }
 

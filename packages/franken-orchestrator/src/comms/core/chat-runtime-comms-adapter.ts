@@ -70,7 +70,11 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
     const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session.routingMetadata);
     const pendingApproval = result.pendingApproval
       ? result.pendingApprovalDescription
-        ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+        ? {
+            description: result.pendingApprovalDescription,
+            requestedAt: new Date().toISOString(),
+            ...result.pendingApprovalContext,
+          }
         : session.state === 'pending_approval' ? session.pendingApproval ?? null : null
       : null;
 
