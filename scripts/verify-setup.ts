@@ -33,8 +33,10 @@ async function main(): Promise<void> {
   console.log('Verifying Frankenbeast local setup...\n');
 
   // Node version
-  const [major] = process.versions.node.split('.').map(Number);
-  check('Node.js >= 22', major! >= 22, `v${process.versions.node}`);
+  const [major, minor, patch] = process.versions.node.split('.').map(Number);
+  const meetsMinimumNode =
+    major! > 22 || (major === 22 && (minor! > 12 || (minor === 12 && patch! >= 0)));
+  check('Node.js >= 22.12.0', meetsMinimumNode, `v${process.versions.node}`);
 
   // Environment file
   const { existsSync } = await import('node:fs');

@@ -52,5 +52,8 @@
     "@vitest/coverage-v8": "^4.1.9",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

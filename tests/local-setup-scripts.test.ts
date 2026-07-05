@@ -1,11 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
 
 describe('local setup scripts', () => {
+  it('enforces a coherent Node.js minimum across workspace packages and local tooling', () => {
+    const packagePaths = [
+      'package.json',
+      ...readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `packages/${entry.name}/package.json`)
+        .filter((rel) => existsSync(join(ROOT, rel))),
+    ];
+
+    expect(read('.nvmrc').trim()).toBe('22.12.0');
+    expect(read('.npmrc')).toContain('engine-strict=true');
+
+    for (const packagePath of packagePaths) {
+      const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
+      expect(manifest.engines?.node).toBe('>=22.12.0');
+    }
+
+    expect(read('scripts/verify-setup.ts')).toContain("check('Node.js >= 22.12.0'");
+  });
+
   it('verify-setup checks the live Chroma v2 heartbeat and no removed firewall service', () => {
     const source = read('scripts/verify-setup.ts');
 

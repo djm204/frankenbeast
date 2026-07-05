@@ -4,7 +4,7 @@ Get Frankenbeast running locally.
 
 ## Prerequisites
 
-- Node.js >= 20 for root workspace tasks; Node.js >= 22 for orchestrator/dashboard runtime workflows
+- Node.js >= 22.12.0 (see `.nvmrc`; npm enforces this with `engine-strict=true`)
 - npm >= 10 (the repo is an npm workspaces monorepo; root `packageManager` is npm)
 - Docker only if you want the optional ChromaDB/Grafana/Tempo stack
 

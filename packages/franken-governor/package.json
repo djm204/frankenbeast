@@ -28,7 +28,7 @@
   ],
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@franken/types": "0.7.4",

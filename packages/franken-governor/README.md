@@ -26,7 +26,7 @@ The Governor is the safety valve of the Frankenbeast system. It evaluates whethe
 npm install @franken/governor
 ```
 
-Requires Node.js >= 20.
+Requires Node.js >= 22.12.0.
 
 ## Quick Start
 

@@ -8,7 +8,7 @@ Captures every trace and span your agent executes, monitors token burn in real-t
 npm install @frankenbeast/observer
 ```
 
-**Requirements:** Node.js 20+. The only runtime dependency is `better-sqlite3` (for `SQLiteAdapter`). All other adapters use Node's built-in `fetch`.
+**Requirements:** Node.js >= 22.12.0. The only runtime dependency is `better-sqlite3` (for `SQLiteAdapter`). All other adapters use Node's built-in `fetch`.
 
 ---
 
