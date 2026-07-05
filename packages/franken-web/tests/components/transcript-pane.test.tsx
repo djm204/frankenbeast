@@ -87,4 +87,21 @@ describe('TranscriptPane', () => {
     fireEvent.click(jumpButton);
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'end' });
   });
+
+  it('does not show a jump button when the user scrolls up before new messages arrive', () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    const { container } = render(
+      <TranscriptPane
+        messages={[{ id: 'u1', role: 'user' as const, content: 'Original', timestamp: new Date().toISOString() }]}
+        showTypingIndicator={false}
+      />,
+    );
+
+    const body = container.querySelector('.transcript-pane__body');
+    expect(body).toBeTruthy();
+    setScrollMetrics(body!, { scrollHeight: 1000, scrollTop: 100, clientHeight: 300 });
+    fireEvent.scroll(body!);
+
+    expect(screen.queryByRole('button', { name: /new messages/i })).toBeNull();
+  });
 });

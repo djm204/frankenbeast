@@ -60,4 +60,18 @@ describe('ActivityPane', () => {
     fireEvent.click(jumpButton);
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'end' });
   });
+
+  it('does not show a jump button when the user scrolls up before new activity arrives', () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    const { container } = render(
+      <ActivityPane events={[{ type: 'turn.started', data: { message: 'Started' }, timestamp: '2026-07-05T00:00:00.000Z' }]} />,
+    );
+
+    const list = container.querySelector('.activity-list');
+    expect(list).toBeTruthy();
+    setScrollMetrics(list!, { scrollHeight: 900, scrollTop: 120, clientHeight: 300 });
+    fireEvent.scroll(list!);
+
+    expect(screen.queryByRole('button', { name: /new activity/i })).toBeNull();
+  });
 });

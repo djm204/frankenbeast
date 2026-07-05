@@ -500,6 +500,7 @@ button {
   position: relative;
   display: flex;
   flex-direction: column;
+  height: clamp(32rem, 58vh, 44rem);
   min-height: 32rem;
   overflow: hidden;
 }
@@ -518,9 +519,11 @@ button {
 }
 
 .transcript-pane__body {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-height: 0;
   padding: 1.25rem 1.25rem 1.5rem;
   overflow: auto;
 }
