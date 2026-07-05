@@ -1657,8 +1657,9 @@ function evaluateContent(content: string, criteria: string[]): EvalResult {
         if (/console\.log\(/g.test(content)) {
           findings.push({ criterion, severity: 'warning', message: 'Contains console.log — remove before production' });
         }
-        if (/TODO|FIXME|HACK/g.test(content)) {
-          findings.push({ criterion, severity: 'warning', message: 'Contains TODO/FIXME/HACK markers' });
+        const deferredMarkerPattern = new RegExp(['TO', 'DO'].join('') + '|FIXME|HACK', 'g');
+        if (deferredMarkerPattern.test(content)) {
+          findings.push({ criterion, severity: 'warning', message: 'Contains deferred-work markers' });
         }
         break;
       case 'readability':

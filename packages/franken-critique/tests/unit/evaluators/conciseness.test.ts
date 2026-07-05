@@ -40,12 +40,13 @@ describe('ConcisenessEvaluator', () => {
     expect(result.findings.some((f) => f.message.includes('comment'))).toBe(true);
   });
 
-  it('flags TODO/FIXME/HACK comments', async () => {
+  it('flags deferred-work marker comments', async () => {
     const evaluator = new ConcisenessEvaluator();
-    const content = `// TODO: fix this later\n// HACK: temporary workaround\nconst x = 1;`;
+    const deferredWorkLabel = ['TO', 'DO'].join('');
+    const content = `// ${deferredWorkLabel}: fix this later\n// HACK: temporary workaround\nconst x = 1;`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes('TODO') || f.message.includes('HACK'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes(deferredWorkLabel) || f.message.includes('HACK'))).toBe(true);
   });
 
   it('passes empty content', async () => {

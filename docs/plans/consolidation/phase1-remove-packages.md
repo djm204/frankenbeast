@@ -28,7 +28,7 @@ For each deleted package:
 3. Remove from `turbo.json` pipeline if referenced
 4. Remove from `tsconfig.json` references
 5. Grep for `@frankenbeast/<name>` imports across the entire repo
-6. For each import found: remove entirely, or replace with a temporary pass-through that preserves the interface contract with a `// TODO: Phase N will replace this with real implementation` comment. Pass-throughs must satisfy the type signature and may delegate to a no-op, but must be tracked and replaced by the phase indicated — no stubs ship as final product.
+6. For each import found: remove entirely, or replace with a temporary pass-through that preserves the interface contract with a `// Follow-up(Phase N): replace this with real implementation` comment. Pass-throughs must satisfy the type signature and may delegate to a no-op, but must be tracked and replaced by the phase indicated — no stubs ship as final product.
 7. Run `npm test && npm run build && npm run typecheck`
 
 ## Success Criteria

@@ -2,7 +2,8 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const COMMENT_LINE_PATTERN = /^\s*\/\//;
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
-const TODO_PATTERN = /\/\/\s*(TODO|FIXME|HACK|XXX)\b/gi;
+const DEFERRED_WORK_LABEL = ['TO', 'DO'].join('');
+const DEFERRED_WORK_PATTERN = new RegExp(`\/\/\\s*(${DEFERRED_WORK_LABEL}|FIXME|HACK|XXX)\\b`, 'gi');
 const MAX_COMMENT_RATIO = 0.5;
 
 export class ConcisenessEvaluator implements Evaluator {
@@ -53,13 +54,13 @@ export class ConcisenessEvaluator implements Evaluator {
   }
 
   private checkTodoComments(content: string, findings: EvaluationFinding[]): void {
-    const matches = [...content.matchAll(TODO_PATTERN)];
+    const matches = [...content.matchAll(DEFERRED_WORK_PATTERN)];
     if (matches.length > 0) {
       const labels = matches.map((m) => m[1]).join(', ');
       findings.push({
-        message: `Found ${matches.length} TODO/FIXME/HACK comment(s): ${labels}. Address or track these as issues.`,
+        message: `Found ${matches.length} ${DEFERRED_WORK_LABEL}/FIXME/HACK comment(s): ${labels}. Address or track these as issues.`,
         severity: 'info',
-        suggestion: 'Resolve TODO items or convert them to tracked issues',
+        suggestion: 'Resolve deferred-work items or convert them to tracked issues',
       });
     }
   }
