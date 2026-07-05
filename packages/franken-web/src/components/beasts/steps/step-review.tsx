@@ -1,17 +1,8 @@
 import type { ReactNode } from 'react';
 import { useBeastStore } from '../../../stores/beast-store';
-import { buildWizardLaunchConfig } from '../wizard-launch-config';
 
-interface StepReviewProps {
-  onLaunch: (config: Record<string, unknown>) => void;
-}
-
-export function StepReview({ onLaunch }: StepReviewProps) {
+export function StepReview() {
   const { stepValues, setWizardStep } = useBeastStore();
-
-  function handleLaunch() {
-    onLaunch(buildWizardLaunchConfig(stepValues));
-  }
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
   const workflow = stepValues[1] as { workflowType?: string } | undefined;
@@ -79,15 +70,6 @@ export function StepReview({ onLaunch }: StepReviewProps) {
         )}
       </ReviewSection>
 
-      <div className="pt-4">
-        <button
-          type="button"
-          onClick={handleLaunch}
-          className="w-full px-4 py-3 rounded-lg bg-beast-accent text-beast-bg font-semibold text-sm hover:bg-beast-accent-strong transition-colors"
-        >
-          Launch
-        </button>
-      </div>
     </div>
   );
 }
