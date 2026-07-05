@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const readPkg = (rel: string) =>
+const readJson = (rel: string) =>
   JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
+const readPkg = readJson;
 
 const majorMinorPatch = (version: string) => {
   const match = version.match(/^(?:\^|~)?(\d+)\.(\d+)\.(\d+)$/);
@@ -39,6 +40,71 @@ describe('npm workspaces configuration', () => {
     it('pins ws to a security-fixed version for all workspace consumers', () => {
       expect(rootPkg.overrides?.ws).toBeDefined();
       expect(isAtLeast(rootPkg.overrides.ws, '8.21.0')).toBe(true);
+    });
+
+    it('pins Vite to a security-fixed version for Vitest consumers', () => {
+      expect(rootPkg.overrides?.vite).toBeDefined();
+      expect(isAtLeast(rootPkg.overrides.vite, '8.1.3')).toBe(true);
+    });
+  });
+
+  describe('Vitest toolchain security floor', () => {
+    const minimumVitest = '4.1.9';
+    const packageJsonPaths = [
+      'package.json',
+      ...readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `packages/${entry.name}/package.json`),
+    ];
+
+    it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        for (const dependencySection of [
+          'dependencies',
+          'devDependencies',
+          'optionalDependencies',
+          'peerDependencies',
+        ]) {
+          const dependencies = pkg[dependencySection] ?? {};
+
+          for (const dependencyName of ['vitest', '@vitest/coverage-v8']) {
+            const version = dependencies[dependencyName];
+            if (version === undefined) continue;
+
+            expect(
+              isAtLeast(version, minimumVitest),
+              `${dependencyName} in ${path} ${dependencySection} must stay >= ${minimumVitest}`,
+            ).toBe(true);
+          }
+        }
+      }
+    });
+
+    it('keeps every locked Vitest and Vite package on its security floor', () => {
+      const lockfile = readJson('package-lock.json');
+      const toolchainFloors = {
+        vitest: minimumVitest,
+        '@vitest/coverage-v8': minimumVitest,
+        vite: '8.1.3',
+      };
+
+      for (const [packageName, minimumVersion] of Object.entries(toolchainFloors)) {
+        const lockedEntries = Object.entries(lockfile.packages ?? {})
+          .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
+
+        expect(lockedEntries.length, `${packageName} missing from package-lock.json`).toBeGreaterThan(0);
+
+        for (const [path, packageDetails] of lockedEntries) {
+          const lockedVersion = (packageDetails as { version?: string }).version;
+
+          expect(lockedVersion, `${packageName} at ${path} is missing a locked version`).toBeDefined();
+          expect(
+            isAtLeast(lockedVersion ?? '0.0.0', minimumVersion),
+            `${packageName} at ${path} must stay >= ${minimumVersion}`,
+          ).toBe(true);
+        }
+      }
     });
   });
 

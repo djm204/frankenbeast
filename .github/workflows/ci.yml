@@ -19,4 +19,6 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run test:root -- tests/workspaces.test.ts
+
       - run: npx turbo run build test lint
