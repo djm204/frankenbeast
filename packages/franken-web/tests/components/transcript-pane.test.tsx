@@ -123,7 +123,7 @@ describe('TranscriptPane', () => {
       />,
     );
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'end' });
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' });
   });
 
   it('resets pinned scroll state when the conversation changes', () => {

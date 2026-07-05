@@ -215,7 +215,7 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
             </li>
           );
         })}
-        <li ref={endRef} className="activity-list__sentinel" aria-hidden="true" />
+        {events.length > 0 && <li ref={endRef} className="activity-list__sentinel" aria-hidden="true" />}
       </ol>
       {hasNewItems && (
         <button className="scroll-jump-button" type="button" onClick={() => scrollToLatest()}>

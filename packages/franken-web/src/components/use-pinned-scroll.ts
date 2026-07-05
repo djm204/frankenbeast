@@ -50,7 +50,7 @@ export function usePinnedScroll<ContainerElement extends HTMLElement = HTMLDivEl
     }
 
     if (isPinnedToBottom) {
-      scrollToLatest();
+      scrollToLatest('auto');
     } else if (tokenChanged) {
       setHasNewItems(true);
     }

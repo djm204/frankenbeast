@@ -115,4 +115,13 @@ describe('ActivityPane', () => {
 
     expect(screen.queryByRole('button', { name: /new activity/i })).toBeNull();
   });
+
+  it('does not auto-scroll an empty activity rail', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+
+    render(<ActivityPane events={[]} />);
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
 });
