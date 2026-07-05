@@ -1408,6 +1408,8 @@ describe('main() execution', () => {
       ok: true,
       service: 'beasts-daemon',
       startedAt: '2026-07-05T00:00:00.000Z',
+      root,
+      pid: process.pid,
     })));
     mockParseArgs.mockReturnValue({
       subcommand: 'chat-server',
@@ -1443,7 +1445,10 @@ describe('main() execution', () => {
 
     await main();
 
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:4050/health');
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4050/health',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(mockCreateBeastServices).not.toHaveBeenCalled();
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastDaemon: expect.objectContaining({
@@ -1496,7 +1501,10 @@ describe('main() execution', () => {
 
     await main();
 
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:4050/health');
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:4050/health',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({
       beastsDb: join(root, '.fbeast', 'beast.db'),
       beastLogsDir: join(root, '.fbeast', '.build', 'beasts', 'logs'),
@@ -1506,6 +1514,63 @@ describe('main() execution', () => {
       beastControl: expect.objectContaining({
         operatorToken: 'dashboard-operator-token',
       }),
+    }));
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
+      beastDaemon: expect.anything(),
+    }));
+  });
+
+  it('waits for the live daemon pidfile owner to become healthy before falling back', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-booting`);
+    tempDirs.push(root);
+    mkdirSync(join(root, '.frankenbeast'), { recursive: true });
+    writeFileSync(join(root, '.frankenbeast', 'beasts-daemon.pid'), `${process.pid}\n`);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, service: 'beasts-daemon' }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'beasts-daemon',
+        root,
+        pid: process.pid,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockParseArgs.mockReturnValue({
+      ...mockParseArgs(),
+      subcommand: 'chat-server',
+      baseDir: root,
+    });
+
+    await main();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockCreateBeastServices).not.toHaveBeenCalled();
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastDaemon: expect.objectContaining({ baseUrl: 'http://127.0.0.1:4050' }),
+    }));
+  });
+
+  it('keeps local beast services when health belongs to a different checkout or pid', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-other-root`);
+    tempDirs.push(root);
+    mkdirSync(join(root, '.frankenbeast'), { recursive: true });
+    writeFileSync(join(root, '.frankenbeast', 'beasts-daemon.pid'), `${process.pid}\n`);
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: true,
+      service: 'beasts-daemon',
+      root: join(tmpdir(), 'other-checkout'),
+      pid: process.pid,
+    })));
+    mockParseArgs.mockReturnValue({
+      ...mockParseArgs(),
+      subcommand: 'chat-server',
+      baseDir: root,
+    });
+
+    await main();
+
+    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ root }));
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
+      beastControl: expect.objectContaining({ operatorToken: 'dashboard-operator-token' }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
       beastDaemon: expect.anything(),

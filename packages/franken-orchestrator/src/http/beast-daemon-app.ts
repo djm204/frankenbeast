@@ -10,6 +10,8 @@ export interface BeastDaemonAppOptions {
   services: BeastServiceBundle;
   operatorToken: string;
   startedAt?: string;
+  root?: string;
+  pid?: number;
   rateLimit?: {
     windowMs: number;
     max: number;
@@ -31,6 +33,8 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
       ok: true,
       service: 'beasts-daemon',
       startedAt,
+      root: options.root,
+      pid: options.pid,
       agents: services.agents.listAgents().length,
       runs: services.runs.listRuns().length,
     });

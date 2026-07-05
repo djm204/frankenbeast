@@ -54,7 +54,12 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
     throw error;
   }
 
-  const app = createBeastDaemonApp({ services, operatorToken: options.operatorToken });
+  const app = createBeastDaemonApp({
+    services,
+    operatorToken: options.operatorToken,
+    root: options.root,
+    pid: process.pid,
+  });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
   });
