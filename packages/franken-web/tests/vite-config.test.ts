@@ -23,10 +23,10 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).not.toContain('headers: { authorization');
   });
 
-  it('requires browser metadata or a loopback peer before injecting the operator token', () => {
+  it('allows browser-proven same-origin requests and requires loopback for unmarked requests', () => {
     expect(CONFIG_SOURCE).toContain('isLoopbackRemoteAddress(req.socket.remoteAddress)');
     expect(CONFIG_SOURCE).toContain('if (!originValue && !fetchSiteValue)');
-    expect(CONFIG_SOURCE).toContain('if (!originValue)');
+    expect(CONFIG_SOURCE).toContain("fetchSiteValue === 'same-origin'");
   });
 
   it('uses the same server-side proxy for dev and preview serving', () => {

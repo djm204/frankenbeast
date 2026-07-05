@@ -33,7 +33,8 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
     return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
   if (!originValue) {
-    return isLoopbackRemoteAddress(req.socket.remoteAddress);
+    return fetchSiteValue === 'same-origin'
+      || isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
 
   const host = req.headers.host;
