@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, planDirectoryExists } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -305,13 +305,15 @@ describe('missing run plan guidance', () => {
     );
   });
 
-  it('checks whether the selected plan directory exists', () => {
+  it('detects an absent or empty default run plan directory', () => {
     const root = join(tmpdir(), `frankenbeast-empty-plan-${Date.now()}`);
-    expect(planDirectoryExists(root)).toBe(false);
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
 
     mkdirSync(root, { recursive: true });
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
     writeFileSync(join(root, '00_PLAN.md'), '# plan metadata');
-    expect(planDirectoryExists(root)).toBe(true);
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(false);
 
     rmSync(root, { recursive: true, force: true });
   });
@@ -319,12 +321,12 @@ describe('missing run plan guidance', () => {
   it('shows guidance only for default run when the plan directory is absent', () => {
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run' },
-      false,
+      true,
     )).toBe(true);
 
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run' },
-      true,
+      false,
     )).toBe(false);
 
     expect(shouldShowMissingRunPlanGuidance(

@@ -108,11 +108,13 @@ export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'design
   return { entryPhase: 'interview' };
 }
 
-export function planDirectoryExists(planDir: string): boolean {
+export function defaultRunPlanNeedsGuidance(planDir: string): boolean {
   try {
-    return statSync(planDir).isDirectory();
+    const stats = statSync(planDir);
+    if (!stats.isDirectory()) return false;
+    return readdirSync(planDir).length === 0;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -127,13 +129,13 @@ export function formatMissingRunPlanGuidance(
 
 export function shouldShowMissingRunPlanGuidance(
   args: Partial<Pick<CliArgs, 'subcommand' | 'resume' | 'planDir' | 'planName'>>,
-  planDirExists: boolean,
+  planNeedsGuidance: boolean,
 ): boolean {
   return args.subcommand === 'run'
     && !args.resume
     && !args.planDir
     && !args.planName
-    && !planDirExists;
+    && planNeedsGuidance;
 }
 
 export interface ResumeTarget {
@@ -706,6 +708,8 @@ export async function main(): Promise<void> {
       : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
+  const runPlanDir = planDirOverride ?? paths.plansDir;
+  const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
@@ -720,6 +724,11 @@ export async function main(): Promise<void> {
 
   if (resumeTarget) {
     logger.info(`Resuming ${resumeTarget.planName} from ${resumeTarget.checkpointFile}`, 'session');
+  }
+
+  if (shouldShowMissingRunPlanGuidance(args, runPlanNeedsGuidance)) {
+    console.log(formatMissingRunPlanGuidance(runPlanDir));
+    return;
   }
 
   scaffoldFrankenbeast(paths);
@@ -973,11 +982,6 @@ export async function main(): Promise<void> {
   const provider = resolveSelectedProvider(args, config);
   const runConfig = loadRunConfigFromEnv();
   const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig);
-  const runPlanDir = planDirOverride ?? paths.plansDir;
-  if (shouldShowMissingRunPlanGuidance(args, planDirectoryExists(runPlanDir))) {
-    console.log(formatMissingRunPlanGuidance(runPlanDir));
-    return;
-  }
   assertAnyProviderCliAvailable(
     preflightProvider,
     args.providers ?? config.providers.fallbackChain,
