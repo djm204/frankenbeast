@@ -659,7 +659,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 </div>
               </section>
 
-              <TranscriptPane messages={messages} onRetryMessage={(messageId) => { void retryMessage(messageId); }} showTypingIndicator={showTypingIndicator} />
+              <TranscriptPane
+                messages={messages}
+                onRetryMessage={(messageId) => {
+                  void retryMessage(messageId).catch(() => undefined);
+                }}
+                showTypingIndicator={showTypingIndicator}
+              />
               <Composer
                 connectionStatus={connectionStatus}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}

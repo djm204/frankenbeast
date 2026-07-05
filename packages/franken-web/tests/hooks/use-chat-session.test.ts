@@ -171,6 +171,10 @@ describe('useChatSession', () => {
         sessionId: 'chat-1',
         timestamp: '2026-03-09T00:00:01Z',
       });
+    });
+    expect(result.current.status).toBe('sending');
+
+    act(() => {
       socket.message({
         type: 'message.delivered',
         clientMessageId: outbound.clientMessageId,
