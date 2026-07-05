@@ -47,6 +47,30 @@ describe('OrchestratorConfig', () => {
       expect(result.success).toBe(false);
     });
 
+    it('accepts security custom rules in config', () => {
+      const result = OrchestratorConfigSchema.parse({
+        security: {
+          customRules: [
+            { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+          ],
+        },
+      });
+
+      expect(result.security?.customRules).toEqual([
+        { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+      ]);
+    });
+
+    it('rejects malformed security custom rules', () => {
+      const result = OrchestratorConfigSchema.safeParse({
+        security: {
+          customRules: [{ name: '', pattern: 'secret', action: 'block', target: 'request' }],
+        },
+      });
+
+      expect(result.success).toBe(false);
+    });
+
     it('rejects out-of-range critique iterations', () => {
       expect(() =>
         OrchestratorConfigSchema.parse({ maxCritiqueIterations: 0 }),

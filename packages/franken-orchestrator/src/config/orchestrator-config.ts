@@ -22,6 +22,13 @@ export const ProviderConfigSchema = z.object({
   extraArgs: z.array(z.string()).optional(),
 });
 
+export const SecurityRuleInputSchema = z.object({
+  name: z.string().min(1),
+  pattern: z.string().min(1),
+  action: z.enum(['block', 'warn', 'log']),
+  target: z.enum(['request', 'response', 'both']),
+});
+
 export const SecurityConfigInputSchema = z.object({
   profile: z.enum(['strict', 'standard', 'permissive']).optional(),
   injectionDetection: z.boolean().optional(),
@@ -31,6 +38,7 @@ export const SecurityConfigInputSchema = z.object({
   allowedDomains: z.array(z.string()).optional(),
   maxTokenBudget: z.number().positive().optional(),
   requireApproval: z.enum(['all', 'destructive', 'none']).optional(),
+  customRules: z.array(SecurityRuleInputSchema).optional(),
 });
 
 export const BrainConfigSchema = z.object({

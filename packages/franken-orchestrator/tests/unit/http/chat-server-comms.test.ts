@@ -71,6 +71,7 @@ describe('startChatServer comms pass-through', () => {
       security: {
         profile: 'strict' | 'standard' | 'permissive';
         webhookSignaturePolicy: 'required' | 'local-dev-unsigned';
+        customRules?: Array<{ name: string; pattern: string; action: 'block' | 'warn' | 'log'; target: 'request' | 'response' | 'both' }>;
       };
     } = {
       security: {
@@ -100,9 +101,18 @@ describe('startChatServer comms pass-through', () => {
     const opts = mockedCreateChatApp.mock.calls[0]![0];
     expect(opts.securityConfig?.getSecurityConfig().webhookSignaturePolicy).toBe('local-dev-unsigned');
 
-    opts.securityConfig?.setSecurityConfig({ webhookSignaturePolicy: 'required' });
+    opts.securityConfig?.setSecurityConfig({
+      webhookSignaturePolicy: 'required',
+      customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+    });
     expect(config.security.webhookSignaturePolicy).toBe('required');
-    await expect(readFile(configFile, 'utf-8')).resolves.toContain('"webhookSignaturePolicy": "required"');
+    expect(config.security.customRules).toEqual([{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }]);
+    expect(opts.securityConfig?.getSecurityConfig().customRules).toEqual([
+      { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+    ]);
+    const writtenConfig = await readFile(configFile, 'utf-8');
+    expect(writtenConfig).toContain('"webhookSignaturePolicy": "required"');
+    expect(writtenConfig).toContain('"customRules"');
   });
 
   it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {

@@ -126,8 +126,8 @@ describe('commsRoutes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
     });
-    expect(external.status).toBe(403);
-    expect(await external.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
+    expect(external.status).toBe(401);
+    expect(await external.json()).toEqual({ error: 'Missing security headers' });
 
     const trustedIpv6Loopback = await app.request('http://[::1]/webhooks/slack/events', {
       method: 'POST',
@@ -138,7 +138,7 @@ describe('commsRoutes', () => {
     expect(await trustedIpv6Loopback.json()).toEqual({ challenge: 'ipv6-ok' });
   });
 
-  it('uses the trusted remote address instead of the client-controlled host for unsigned webhooks', async () => {
+  it('requires signatures when trusted remote address or proxy headers show external traffic', async () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
@@ -157,8 +157,8 @@ describe('commsRoutes', () => {
       },
       body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
     });
-    expect(spoofedHost.status).toBe(403);
-    expect(await spoofedHost.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
+    expect(spoofedHost.status).toBe(401);
+    expect(await spoofedHost.json()).toEqual({ error: 'Missing security headers' });
 
     const proxiedExternal = await app.request('https://public.example/webhooks/slack/events', {
       method: 'POST',
@@ -169,8 +169,8 @@ describe('commsRoutes', () => {
       },
       body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
     });
-    expect(proxiedExternal.status).toBe(403);
-    expect(await proxiedExternal.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
+    expect(proxiedExternal.status).toBe(401);
+    expect(await proxiedExternal.json()).toEqual({ error: 'Missing security headers' });
   });
 
   it('re-evaluates webhook signature policy for each request', async () => {

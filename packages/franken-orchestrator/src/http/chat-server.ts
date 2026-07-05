@@ -339,6 +339,7 @@ function createNetworkSecurityConfigAdapter(networkControl: NonNullable<StartCha
       if (security?.allowedDomains !== undefined) overrides.allowedDomains = security.allowedDomains;
       if (security?.maxTokenBudget !== undefined) overrides.maxTokenBudget = security.maxTokenBudget;
       if (security?.requireApproval !== undefined) overrides.requireApproval = security.requireApproval;
+      if (security?.customRules !== undefined) overrides.customRules = security.customRules;
       return resolveSecurityConfig(security?.profile ?? 'standard', overrides);
     },
     setSecurityConfig: (config) => {

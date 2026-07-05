@@ -48,16 +48,6 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const app = new Hono();
 
-  app.use('/webhooks/*', async (c, next) => {
-    if (getWebhookSignaturePolicy() === 'local-dev-unsigned') {
-      if (isLoopbackWebhookRequest(c.req.raw)) {
-        return next();
-      }
-      return c.json({ error: 'Unsigned webhooks are only allowed on loopback hosts' }, 403);
-    }
-    return next();
-  });
-
   app.get('/comms/health', (c) => c.json({ status: 'ok' }));
 
   const slack = config.channels.slack;
