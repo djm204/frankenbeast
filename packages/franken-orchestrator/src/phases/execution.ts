@@ -265,11 +265,12 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
       toRecoveryGraph(ctx.plan.tasks),
       attempt,
     );
+    const previousTasks = ctx.plan.tasks;
     const recoveredTasks = fromRecoveryGraph(recoveredGraph, task);
     validateAcyclicPlan(recoveredTasks);
 
     ctx.plan = { tasks: recoveredTasks };
-    persistRecoveryTasks(checkpoint, recoveredTasks);
+    persistRecoveryTasks(checkpoint, previousTasks, recoveredTasks, task.id);
 
     for (const recoveredTask of recoveredTasks) {
       knownTaskIds.add(recoveredTask.id);
@@ -305,22 +306,34 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
       recoveryErrorObject instanceof UnknownErrorEscalatedError ||
       recoveryErrorObject instanceof MaxRecoveryAttemptsError;
     if (recoveryErrorObject instanceof UnknownErrorEscalatedError) {
-      const approval = await governor.requestApproval({
-        taskId: task.id,
-        summary: `Unknown execution error requires operator decision: ${error.message}`,
-        requiresHitl: true,
-      });
-      ctx.governorApproval = approval.decision === 'approved';
-      ctx.addAudit('governor', 'recovery:unknown-error-escalated', {
-        taskId: task.id,
-        decision: approval.decision,
-        reason: approval.reason,
-      });
-      logger.warn('Execution: unknown recovery error escalated to governor', {
-        taskId: task.id,
-        decision: approval.decision,
-        reason: approval.reason,
-      });
+      try {
+        const approval = await governor.requestApproval({
+          taskId: task.id,
+          summary: `Unknown execution error requires operator decision: ${error.message}`,
+          requiresHitl: true,
+        });
+        ctx.governorApproval = approval.decision === 'approved';
+        ctx.addAudit('governor', 'recovery:unknown-error-escalated', {
+          taskId: task.id,
+          decision: approval.decision,
+          reason: approval.reason,
+        });
+        logger.warn('Execution: unknown recovery error escalated to governor', {
+          taskId: task.id,
+          decision: approval.decision,
+          reason: approval.reason,
+        });
+      } catch (approvalError) {
+        const approvalErrorObject = approvalError instanceof Error ? approvalError : new Error(String(approvalError));
+        ctx.addAudit('governor', 'recovery:unknown-error-escalation-failed', {
+          taskId: task.id,
+          error: approvalErrorObject.message,
+        });
+        logger.warn('Execution: unknown recovery error escalation failed', {
+          taskId: task.id,
+          error: approvalErrorObject.message,
+        });
+      }
     }
     ctx.addAudit('orchestrator', 'recovery:failed', {
       failedTaskId: task.id,
@@ -458,6 +471,8 @@ function mergeDependencies(primary: readonly string[], secondary: readonly strin
 }
 
 const RECOVERY_TASK_CHECKPOINT_PREFIX = 'recovery-task:';
+const RECOVERY_TASK_CHECKPOINT_MARKER_PREFIX = 'recovery-task-v2:';
+const RECOVERY_TASK_OUTPUT_PREFIX = 'recovery-task-output:';
 
 function isRecoveryFixTaskId(taskId: string): boolean {
   return /^fix-.+-attempt-\d+$/u.test(taskId);
@@ -472,19 +487,39 @@ function rootRecoveryTaskId(taskId: string): string {
   }
 }
 
-function persistRecoveryTasks(checkpoint: ICheckpointStore | undefined, tasks: readonly PlanTask[]): void {
+function persistRecoveryTasks(
+  checkpoint: ICheckpointStore | undefined,
+  previousTasks: readonly PlanTask[],
+  tasks: readonly PlanTask[],
+  failedTaskId: string,
+): void {
   if (!checkpoint) return;
+  const previousById = new Map(previousTasks.map((task) => [task.id, task]));
   for (const task of tasks) {
-    checkpoint.write(`${RECOVERY_TASK_CHECKPOINT_PREFIX}${encodeRecoveryTask(task)}`);
+    if (!isRecoveryFixTaskId(task.id) && task.id !== failedTaskId) continue;
+    const previousTask = previousById.get(task.id);
+    if (!isRecoveryFixTaskId(task.id) && planTasksEqual(task, previousTask)) continue;
+    persistRecoveryTask(checkpoint, task);
   }
+}
+
+function persistRecoveryTask(checkpoint: ICheckpointStore, task: PlanTask): void {
+  if (checkpoint.writeTaskOutput) {
+    const outputKey = recoveryTaskOutputKey(task.id);
+    checkpoint.writeTaskOutput(outputKey, task);
+    checkpoint.write(`${RECOVERY_TASK_CHECKPOINT_MARKER_PREFIX}${encodeRecoveryTaskId(task.id)}`);
+    return;
+  }
+
+  const legacyEntry = `${RECOVERY_TASK_CHECKPOINT_PREFIX}${encodeRecoveryTask(task)}`;
+  checkpoint.write(legacyEntry);
 }
 
 function mergeCheckpointRecoveryTasks(tasks: readonly PlanTask[], checkpoint: ICheckpointStore | undefined): PlanTask[] {
   if (!checkpoint) return [...tasks];
   const byId = new Map(tasks.map((task) => [task.id, task]));
   for (const entry of checkpoint.readAll()) {
-    if (!entry.startsWith(RECOVERY_TASK_CHECKPOINT_PREFIX)) continue;
-    const recoveredTask = decodeRecoveryTask(entry.slice(RECOVERY_TASK_CHECKPOINT_PREFIX.length));
+    const recoveredTask = decodeCheckpointRecoveryTask(entry, checkpoint);
     if (recoveredTask) {
       byId.set(recoveredTask.id, recoveredTask);
     }
@@ -492,30 +527,78 @@ function mergeCheckpointRecoveryTasks(tasks: readonly PlanTask[], checkpoint: IC
   return [...byId.values()];
 }
 
+function decodeCheckpointRecoveryTask(entry: string, checkpoint: ICheckpointStore): PlanTask | undefined {
+  if (entry.startsWith(RECOVERY_TASK_CHECKPOINT_MARKER_PREFIX)) {
+    const taskId = decodeRecoveryTaskId(entry.slice(RECOVERY_TASK_CHECKPOINT_MARKER_PREFIX.length));
+    if (!taskId || !checkpoint.readTaskOutput) return undefined;
+    const output = checkpoint.readTaskOutput(recoveryTaskOutputKey(taskId));
+    return output.found ? parsePlanTask(output.output) : undefined;
+  }
+
+  if (entry.startsWith(RECOVERY_TASK_CHECKPOINT_PREFIX)) {
+    return decodeRecoveryTask(entry.slice(RECOVERY_TASK_CHECKPOINT_PREFIX.length));
+  }
+
+  return undefined;
+}
+
 function encodeRecoveryTask(task: PlanTask): string {
   return Buffer.from(JSON.stringify(task), 'utf8').toString('base64url');
 }
 
+function encodeRecoveryTaskId(taskId: string): string {
+  return Buffer.from(taskId, 'utf8').toString('base64url');
+}
+
+function decodeRecoveryTaskId(payload: string): string | undefined {
+  try {
+    return Buffer.from(payload, 'base64url').toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function recoveryTaskOutputKey(taskId: string): string {
+  return `${RECOVERY_TASK_OUTPUT_PREFIX}${taskId}`;
+}
+
+function planTasksEqual(left: PlanTask, right: PlanTask | undefined): boolean {
+  return !!right &&
+    left.id === right.id &&
+    left.objective === right.objective &&
+    sameStringArray(left.requiredSkills, right.requiredSkills) &&
+    sameStringArray(left.dependsOn, right.dependsOn);
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function decodeRecoveryTask(payload: string): PlanTask | undefined {
   try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Partial<PlanTask>;
-    if (
-      typeof parsed.id === 'string' &&
-      typeof parsed.objective === 'string' &&
-      Array.isArray(parsed.requiredSkills) &&
-      parsed.requiredSkills.every((skill): skill is string => typeof skill === 'string') &&
-      Array.isArray(parsed.dependsOn) &&
-      parsed.dependsOn.every((dep): dep is string => typeof dep === 'string')
-    ) {
-      return {
-        id: parsed.id,
-        objective: parsed.objective,
-        requiredSkills: parsed.requiredSkills,
-        dependsOn: parsed.dependsOn,
-      };
-    }
+    return parsePlanTask(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
   } catch {
     // Ignore corrupt checkpoint recovery entries; the base plan still executes.
+  }
+  return undefined;
+}
+
+function parsePlanTask(value: unknown): PlanTask | undefined {
+  const parsed = value as Partial<PlanTask>;
+  if (
+    typeof parsed.id === 'string' &&
+    typeof parsed.objective === 'string' &&
+    Array.isArray(parsed.requiredSkills) &&
+    parsed.requiredSkills.every((skill): skill is string => typeof skill === 'string') &&
+    Array.isArray(parsed.dependsOn) &&
+    parsed.dependsOn.every((dep): dep is string => typeof dep === 'string')
+  ) {
+    return {
+      id: parsed.id,
+      objective: parsed.objective,
+      requiredSkills: parsed.requiredSkills,
+      dependsOn: parsed.dependsOn,
+    };
   }
   return undefined;
 }
