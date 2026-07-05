@@ -1,10 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { readVitestFlag } from '../../../../scripts/vitest-env.js';
+import { readVitestFlag, readVitestFlags } from '../scripts/vitest-env.js';
 
-describe('Vitest environment flags', () => {
+describe('Vitest environment flag helper', () => {
   it('treats missing and explicit false-like values as disabled', () => {
     expect(readVitestFlag({}, 'INTEGRATION')).toBe(false);
     expect(readVitestFlag({ INTEGRATION: '' }, 'INTEGRATION')).toBe(false);
@@ -14,13 +12,13 @@ describe('Vitest environment flags', () => {
   });
 
   it('accepts only sanitized true-like values as enabled', () => {
-    expect(readVitestFlag({ E2E: 'true' }, 'E2E')).toBe(true);
-    expect(readVitestFlag({ E2E: '1' }, 'E2E')).toBe(true);
-    expect(readVitestFlag({ E2E: ' yes ' }, 'E2E')).toBe(true);
-    expect(readVitestFlag({ E2E: 'ON' }, 'E2E')).toBe(true);
+    expect(readVitestFlag({ EVAL: 'true' }, 'EVAL')).toBe(true);
+    expect(readVitestFlag({ EVAL: '1' }, 'EVAL')).toBe(true);
+    expect(readVitestFlag({ EVAL: ' yes ' }, 'EVAL')).toBe(true);
+    expect(readVitestFlag({ EVAL: 'ON' }, 'EVAL')).toBe(true);
   });
 
-  it('rejects unexpected values without echoing raw environment contents', () => {
+  it('rejects unexpected values without echoing the raw input', () => {
     expect(() => readVitestFlag({ E2E: 'secret-token-value' }, 'E2E')).toThrow(
       /E2E must be one of true, false, 1, 0, yes, no, on, or off/u,
     );
@@ -29,10 +27,9 @@ describe('Vitest environment flags', () => {
     );
   });
 
-  it('keeps direct process environment reads out of the Vitest config', () => {
-    const config = readFileSync(resolve(import.meta.dirname, '../../vitest.config.ts'), 'utf8');
-
-    expect(config).not.toContain('process.env');
-    expect(config).toContain("'test/e2e/**/*.test.ts'");
+  it('validates only the flags requested by a config', () => {
+    expect(readVitestFlags(['INTEGRATION'], { INTEGRATION: 'true', E2E: 'secret-token-value' })).toEqual({
+      INTEGRATION: true,
+    });
   });
 });

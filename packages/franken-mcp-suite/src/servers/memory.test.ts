@@ -19,6 +19,9 @@ describe('Memory Server', () => {
       'fbeast_memory_frontload',
       'fbeast_memory_forget',
     ]);
+    const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
+    expect(storeTool.description).toContain('Working/recovery memory updates by key');
+    expect(storeTool.description).toContain('episodic memory appends an event');
   });
 
   it('delegates memory store/query/frontload/forget to the brain adapter', async () => {

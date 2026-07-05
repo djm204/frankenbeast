@@ -1,11 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { defineConfig } from 'vitest/config';
-
-import { readVitestFlags } from './tests/helpers/vitest-env.js';
+import { readVitestFlags } from '../../scripts/vitest-env.js';
 
 const packageRoot = dirname(fileURLToPath(import.meta.url));
-const vitestFlags = readVitestFlags();
+const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E']);
 const isIntegration = vitestFlags.INTEGRATION;
 const isE2e = vitestFlags.E2E;
 const requestedPaths = process.argv
