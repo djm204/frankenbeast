@@ -3,6 +3,39 @@ import { z } from 'zod';
 const HostSchema = z.string().min(1).default('127.0.0.1');
 const PortSchema = z.number().int().min(1).max(65_535);
 
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '0:0:0:0:0:0:0:1'
+    || normalized === '0.0.0.0'
+    || normalized === '::'
+    || normalized === '127.0.0.1'
+    || normalized.startsWith('127.');
+}
+
+function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], localProtocols: string[]): boolean {
+  try {
+    const parsed = new URL(value);
+    if (secureProtocols.includes(parsed.protocol)) {
+      return true;
+    }
+    return localProtocols.includes(parsed.protocol) && isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+const LocalHttpOrHttpsUrlSchema = z.string().url().refine(
+  (value) => isLocalPlaintextOrSecureUrl(value, ['https:'], ['http:']),
+  { message: 'Must use https:// unless the URL targets a loopback-only development host.' },
+);
+
+const LocalWsOrWssUrlSchema = z.string().url().refine(
+  (value) => isLocalPlaintextOrSecureUrl(value, ['wss:'], ['ws:']),
+  { message: 'Must use wss:// unless the URL targets a loopback-only development host.' },
+);
+
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
 const LEGACY_BACKEND_MAP: Record<string, string> = {
@@ -39,7 +72,7 @@ export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: z.string().url().default('http://127.0.0.1:3737'),
+  apiUrl: LocalHttpOrHttpsUrlSchema.default('http://127.0.0.1:3737'),
 });
 
 export const SlackChannelConfigSchema = z.object({
@@ -73,7 +106,7 @@ export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
   host: HostSchema,
   port: PortSchema.default(3200),
-  orchestratorWsUrl: z.string().url().default('ws://127.0.0.1:3737/v1/chat/ws'),
+  orchestratorWsUrl: LocalWsOrWssUrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
   slack: SlackChannelConfigSchema.default({}),
   discord: DiscordChannelConfigSchema.default({}),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
+import { NetworkConfigSchema } from '../../../src/network/network-config.js';
 import { createNetworkRegistry, filterNetworkServices, resolveNetworkServices } from '../../../src/network/network-registry.js';
 
 describe('network-registry', () => {
@@ -102,6 +103,21 @@ describe('network-registry', () => {
     expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server', 'dashboard-web']);
   });
 
+  it('rejects non-loopback plaintext dashboard and comms endpoints', () => {
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'http://internal-service:3737' },
+    })).toThrow(/https:\/\//);
+
+    expect(() => NetworkConfigSchema.parse({
+      comms: { orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+    })).toThrow(/wss:\/\//);
+
+    expect(NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'https://internal-service:3737' },
+      comms: { orchestratorWsUrl: 'wss://internal-service:3737/v1/chat/ws' },
+    }).dashboard.apiUrl).toBe('https://internal-service:3737');
+  });
+
   it('projects runtime config for each service', () => {
     const config = defaultConfig();
     config.chat.port = 4242;
@@ -136,6 +152,26 @@ describe('network-registry', () => {
           VITE_API_URL: '',
           VITE_API_PROXY_TARGET: 'http://127.0.0.1:4242',
           VITE_BEAST_API_PROXY_TARGET: 'http://127.0.0.1:4050',
+        },
+      },
+    });
+  });
+
+  it('uses HTTPS for non-loopback dashboard and Beast proxy endpoints', () => {
+    const config = defaultConfig();
+    config.dashboard.host = 'dashboard.example.com';
+    config.dashboard.apiUrl = 'https://api.example.com';
+    config.beastsDaemon.host = 'beast.example.com';
+
+    const dashboard = resolveNetworkServices(config, context)
+      .find((service) => service.id === 'dashboard-web');
+
+    expect(dashboard?.runtimeConfig).toMatchObject({
+      url: 'https://dashboard.example.com:5173',
+      process: {
+        env: {
+          VITE_API_PROXY_TARGET: 'https://api.example.com',
+          VITE_BEAST_API_PROXY_TARGET: 'https://beast.example.com:4050',
         },
       },
     });

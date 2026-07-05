@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
+    "lint:security": "node scripts/check-plain-http.mjs",
     "test": "turbo run test",
     "test:root": "vitest run",
     "test:root:watch": "vitest",

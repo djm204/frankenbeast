@@ -52,6 +52,7 @@ import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
+import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -267,13 +268,12 @@ export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): stri
   }
 
   const { host, port } = config.dashboard;
-  const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  const origins = [`http://${originHost}:${port}`];
+  const origins = [localPlaintextOrSecureEndpoint(host, port)];
   if (host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0.0.0.0') {
-    origins.push(`http://localhost:${port}`);
+    origins.push(localPlaintextOrSecureEndpoint('localhost', port));
   }
   if (host === '0.0.0.0') {
-    origins.push(`http://127.0.0.1:${port}`);
+    origins.push(localPlaintextOrSecureEndpoint('127.0.0.1', port));
   }
   return origins;
 }

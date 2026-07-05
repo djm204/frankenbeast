@@ -1,4 +1,5 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
+import { localPlaintextOrSecureEndpoint } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 export const dashboardWebService: NetworkServiceDefinition = {
@@ -13,7 +14,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
   buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.dashboard.host,
     port: config.dashboard.port,
-    url: `http://${config.dashboard.host}:${config.dashboard.port}`,
+    url: localPlaintextOrSecureEndpoint(config.dashboard.host, config.dashboard.port),
     serviceIdentity: 'dashboard-web',
     apiUrl: config.dashboard.apiUrl,
     process: {
@@ -34,7 +35,10 @@ export const dashboardWebService: NetworkServiceDefinition = {
         FRANKENBEAST_CONFIG_FILE: context.configFile ?? '',
         VITE_API_URL: '',
         VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
-        VITE_BEAST_API_PROXY_TARGET: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
+        VITE_BEAST_API_PROXY_TARGET: localPlaintextOrSecureEndpoint(
+          config.beastsDaemon.host,
+          config.beastsDaemon.port,
+        ),
       },
     },
   }),

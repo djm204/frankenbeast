@@ -37,6 +37,38 @@ export function assertNoBrowserOperatorToken(env: Record<string, string>): void 
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '0:0:0:0:0:0:0:1'
+    || normalized === '0.0.0.0'
+    || normalized === '::'
+    || normalized === '127.0.0.1'
+    || normalized.startsWith('127.');
+}
+
+export function assertSecureProxyTarget(name: string, target: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(target);
+  } catch {
+    throw new Error(`${name} must be an absolute URL.`);
+  }
+
+  if (parsed.protocol === 'https:') {
+    return;
+  }
+
+  if (parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname)) {
+    return;
+  }
+
+  throw new Error(
+    `${name} must use https:// unless it targets a loopback-only development host. Refusing insecure proxy target: ${target}`,
+  );
+}
+
 export async function resolveSecretStoreOperatorToken(rootDir: string, configPath?: string): Promise<string> {
   try {
     const resolvedConfigPath = configPath

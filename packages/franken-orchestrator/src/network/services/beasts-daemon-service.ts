@@ -1,4 +1,5 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
+import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureHealthUrl } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 export const beastsDaemonService: NetworkServiceDefinition = {
@@ -13,8 +14,8 @@ export const beastsDaemonService: NetworkServiceDefinition = {
   buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.beastsDaemon.host,
     port: config.beastsDaemon.port,
-    url: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
-    healthUrl: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}/health`,
+    url: localPlaintextOrSecureEndpoint(config.beastsDaemon.host, config.beastsDaemon.port),
+    healthUrl: localPlaintextOrSecureHealthUrl(config.beastsDaemon.host, config.beastsDaemon.port),
     serviceIdentity: 'beasts-daemon',
     process: {
       command: 'npm',
@@ -33,7 +34,10 @@ export const beastsDaemonService: NetworkServiceDefinition = {
       cwd: context.repoRoot,
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
-        FRANKENBEAST_BEAST_DAEMON_URL: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
+        FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(
+          config.beastsDaemon.host,
+          config.beastsDaemon.port,
+        ),
       },
     },
   }),

@@ -577,7 +577,7 @@ describe('resolveDashboardAllowedOrigins', () => {
         port: 5173,
         apiUrl: 'http://127.0.0.1:3737',
       },
-    } as never)).toEqual(['http://dashboard.example.com:5173']);
+    } as never)).toEqual(['https://dashboard.example.com:5173']);
   });
 });
 

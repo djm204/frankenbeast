@@ -16,6 +16,8 @@ describe('vite dev proxy configuration', () => {
 
   it('injects the operator token only in the server-side dev proxy after an origin check', () => {
     expect(CONFIG_SOURCE).toContain("'/v1': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken, { ws: true })");
+    expect(CONFIG_SOURCE).toContain('assertSecureProxyTarget(\'VITE_API_PROXY_TARGET\', proxyTarget)');
+    expect(CONFIG_SOURCE).toContain('assertSecureProxyTarget(\'VITE_BEAST_API_PROXY_TARGET\', beastProxyTarget)');
     expect(CONFIG_SOURCE).toContain('command === \'serve\'');
     expect(CONFIG_SOURCE).toContain('assertNoBrowserOperatorToken(loadProxyEnv(loadEnv, mode, repoRootDir, process.cwd()))');
     expect(CONFIG_SOURCE).toContain('await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');

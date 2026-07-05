@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { assertNoBrowserOperatorToken, loadProxyEnv, loadProxyOperatorToken } from './vite-env';
+import { assertNoBrowserOperatorToken, assertSecureProxyTarget, loadProxyEnv, loadProxyOperatorToken } from './vite-env';
 
 type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
 
@@ -84,6 +84,8 @@ export default defineConfig(async ({ command, mode }) => {
   assertNoBrowserOperatorToken(loadProxyEnv(loadEnv, mode, repoRootDir, process.cwd()));
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
+  assertSecureProxyTarget('VITE_API_PROXY_TARGET', proxyTarget);
+  assertSecureProxyTarget('VITE_BEAST_API_PROXY_TARGET', beastProxyTarget);
   const proxyOperatorToken = command === 'serve'
     ? await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())
     : '';
