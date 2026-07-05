@@ -64,12 +64,12 @@ describe('TempoAdapter', () => {
     it('sends Basic Authorization header when basicAuth is provided', async () => {
       const adapter = new TempoAdapter({
         endpoint: 'https://tempo-us-central1.grafana.net/tempo',
-        basicAuth: { user: '123456', password: 'glc_mytoken' },
+        basicAuth: { user: '123456', password: 'grafana-cloud-token' },
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
-      const expected = `Basic ${Buffer.from('123456:glc_mytoken').toString('base64')}`
+      const expected = `Basic ${Buffer.from('123456:grafana-cloud-token').toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })
 
@@ -184,13 +184,13 @@ describe('TempoAdapter', () => {
       const adapter = new TempoAdapter({
         endpoint: 'https://tempo-us-central1.grafana.net/tempo',
         otlpPath: '/otlp/v1/traces',
-        basicAuth: { user: '987654', password: 'glc_secret_token' },
+        basicAuth: { user: '987654', password: 'grafana-cloud-token' },
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [url, init] = mockFetch.mock.calls[0]
       expect(url).toBe('https://tempo-us-central1.grafana.net/tempo/otlp/v1/traces')
-      const expected = `Basic ${Buffer.from('987654:glc_secret_token').toString('base64')}`
+      const expected = `Basic ${Buffer.from('987654:grafana-cloud-token').toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })
   })

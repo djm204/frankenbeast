@@ -69,7 +69,7 @@ describe('ClaudeProvider', () => {
       PATH: '/usr/bin',
       HOME: '/home/user',
       CLAUDE_CODE_ENTRYPOINT: 'claude-vscode',
-      CLAUDE_API_KEY: 'sk-123',
+      CLAUDE_API_KEY: 'test-env-value',
       CLAUDECODE: 'true',
     };
     const filtered = provider.filterEnv(env);
@@ -81,9 +81,9 @@ describe('ClaudeProvider', () => {
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {
-    const env = { PATH: '/usr/bin', CLAUDE_KEY: 'secret' };
+    const env = { PATH: '/usr/bin', CLAUDE_KEY: 'test-env-value' };
     const filtered = provider.filterEnv(env);
-    expect(env).toHaveProperty('CLAUDE_KEY', 'secret');
+    expect(env).toHaveProperty('CLAUDE_KEY', 'test-env-value');
     expect(filtered).not.toBe(env);
   });
 

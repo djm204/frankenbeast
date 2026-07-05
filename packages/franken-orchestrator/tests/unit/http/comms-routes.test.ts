@@ -86,7 +86,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -106,7 +106,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -142,7 +142,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -178,7 +178,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),

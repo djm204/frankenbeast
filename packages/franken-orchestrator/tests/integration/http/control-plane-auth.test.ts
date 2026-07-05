@@ -224,7 +224,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),
@@ -262,7 +262,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),

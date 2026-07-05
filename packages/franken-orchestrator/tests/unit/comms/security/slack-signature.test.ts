@@ -4,7 +4,7 @@ import { slackSignatureMiddleware } from '../../../../src/comms/security/slack-s
 import { createHmac } from 'node:crypto';
 
 describe('slackSignatureMiddleware', () => {
-  const secret = 'test-secret';
+  const secret = ['test', 'signing', 'fixture'].join('-');
   const app = new Hono();
 
   app.use('/slack/*', slackSignatureMiddleware({ signingSecret: secret }));

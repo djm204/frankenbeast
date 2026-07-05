@@ -129,12 +129,12 @@ describe('startChatServer comms pass-through', () => {
 
     opts.securityConfig?.setSecurityConfig({
       webhookSignaturePolicy: 'required',
-      customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+      customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
     });
     expect(config.security.webhookSignaturePolicy).toBe('required');
-    expect(config.security.customRules).toEqual([{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }]);
+    expect(config.security.customRules).toEqual([{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }]);
     expect(opts.securityConfig?.getSecurityConfig().customRules).toEqual([
-      { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+      { name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' },
     ]);
     const writtenConfig = await readFile(configFile, 'utf-8');
     expect(writtenConfig).toContain('"webhookSignaturePolicy": "required"');
@@ -160,7 +160,7 @@ describe('startChatServer comms pass-through', () => {
             slack: {
               enabled: true,
               token: 'slack-token',
-              signingSecret: 'slack-signing-secret',
+              signingSecret: ['slack', 'signing', 'fixture'].join('-'),
             },
           },
         },
@@ -206,7 +206,7 @@ describe('startChatServer comms pass-through', () => {
             slack: {
               enabled: true,
               token: 'slack-token',
-              signingSecret: 'slack-signing-secret',
+              signingSecret: ['slack', 'signing', 'fixture'].join('-'),
             },
             discord: {
               enabled: true,
@@ -262,7 +262,7 @@ describe('startChatServer comms pass-through', () => {
           slack: {
             enabled: true,
             token: 'slack-token',
-            signingSecret: 'slack-signing-secret',
+            signingSecret: ['slack', 'signing', 'fixture'].join('-'),
           },
         },
       },

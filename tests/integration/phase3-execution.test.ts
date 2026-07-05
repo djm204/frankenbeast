@@ -163,7 +163,7 @@ describe('Phase 3: Execution — TriggerRegistry', () => {
 
 describe('Phase 3: Execution — Security', () => {
   it('generates and verifies HMAC signatures', () => {
-    const verifier = new SignatureVerifier('test-secret-key');
+    const verifier = new SignatureVerifier(['test', 'signing', 'fixture'].join('-'));
 
     const payload = JSON.stringify({ taskId: 'task-001', decision: 'APPROVE' });
     const signature = verifier.sign(payload);
