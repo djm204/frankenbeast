@@ -165,11 +165,12 @@ describe('DashboardApiClient', () => {
       (globalThis as any).EventSource = MockEventSource;
 
       try {
-        const client = new DashboardApiClient(BASE_URL);
+        const sameOriginBaseUrl = globalThis.location.origin;
+        const client = new DashboardApiClient(sameOriginBaseUrl);
         const onSnapshot = vi.fn();
         const unsub = client.subscribeToDashboard(onSnapshot);
 
-        expect(MockEventSource).toHaveBeenCalledWith(`${BASE_URL}/api/dashboard/events`);
+        expect(MockEventSource).toHaveBeenCalledWith(`${sameOriginBaseUrl}/api/dashboard/events`);
 
         // Simulate a snapshot event
         const snapshot = makeMockSnapshot();
@@ -179,6 +180,29 @@ describe('DashboardApiClient', () => {
         // Unsubscribe
         unsub();
         expect(closeFn).toHaveBeenCalled();
+      } finally {
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
+    it('fails closed instead of opening cross-origin EventSource without bearer auth support', () => {
+      const MockEventSource = vi.fn();
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+
+      try {
+        const client = new DashboardApiClient('https://orchestrator.example.test');
+
+        expect(() => client.subscribeToDashboard(vi.fn())).toThrow(
+          'Refusing to open dashboard SSE across origins',
+        );
+        expect(MockEventSource).not.toHaveBeenCalled();
       } finally {
         if (originalEventSource) {
           globalThis.EventSource = originalEventSource;

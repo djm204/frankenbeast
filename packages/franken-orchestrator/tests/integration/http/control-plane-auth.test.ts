@@ -28,6 +28,7 @@ function mockCommsRuntime(): CommsRuntimePort {
 function mockSkillManager(): SkillManager {
   return {
     listInstalled: vi.fn().mockReturnValue([]),
+    getEnabledSkills: vi.fn().mockReturnValue([]),
   } as unknown as SkillManager;
 }
 
@@ -40,6 +41,7 @@ function mockProviderRegistry(): ProviderRegistry {
 function buildApp(extra: Partial<ChatAppOptions> = {}): Hono {
   let networkConfig = defaultConfig();
   let securityConfig = resolveSecurityConfig('standard');
+  const skillManager = mockSkillManager();
   return createChatApp({
     sessionStoreDir: join(TMP, 'chat'),
     llm: { complete: vi.fn().mockResolvedValue('hello') },
@@ -62,8 +64,13 @@ function buildApp(extra: Partial<ChatAppOptions> = {}): Hono {
         securityConfig = { ...securityConfig, ...update } as SecurityConfig;
       },
     },
-    skillManager: mockSkillManager(),
+    skillManager,
     providerRegistry: mockProviderRegistry(),
+    dashboardDeps: {
+      skillManager,
+      getSecurityConfig: () => securityConfig,
+      getProviders: () => [],
+    },
     ...extra,
   });
 }
@@ -85,6 +92,8 @@ describe('control-plane operator auth', () => {
       { name: 'network start', path: '/v1/network/start', method: 'POST', body: { target: 'x' } },
       { name: 'security config', path: '/api/security' },
       { name: 'skills list', path: '/api/skills' },
+      { name: 'dashboard snapshot', path: '/api/dashboard' },
+      { name: 'dashboard SSE', path: '/api/dashboard/events' },
       { name: 'comms inbound', path: '/v1/comms/inbound', method: 'POST', body: { channelType: 'slack' } },
       { name: 'comms action', path: '/v1/comms/action', method: 'POST', body: { channelType: 'slack', sessionId: 's', actionId: 'a' } },
     ];
@@ -118,6 +127,20 @@ describe('control-plane operator auth', () => {
       const app = buildApp();
       const res = await app.request('/api/skills', { headers: authHeader });
       expect(res.status).toBe(200);
+    });
+
+    it('dashboard snapshot -> 200 with operator token', async () => {
+      const app = buildApp();
+      const res = await app.request('/api/dashboard', { headers: authHeader });
+      expect(res.status).toBe(200);
+    });
+
+    it('dashboard SSE -> event stream with operator token', async () => {
+      const app = buildApp();
+      const res = await app.request('/api/dashboard/events', { headers: authHeader });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      await res.body?.cancel();
     });
 
     it('comms inbound -> accepted with operator token', async () => {

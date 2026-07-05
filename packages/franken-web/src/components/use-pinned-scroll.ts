@@ -6,9 +6,12 @@ function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX;
 }
 
-export function usePinnedScroll(updateToken: unknown, resetToken: unknown = undefined) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+export function usePinnedScroll<ContainerElement extends HTMLElement = HTMLDivElement, EndElement extends HTMLElement = HTMLDivElement>(
+  updateToken: unknown,
+  resetToken: unknown = undefined,
+) {
+  const containerRef = useRef<ContainerElement>(null);
+  const endRef = useRef<EndElement>(null);
   const previousUpdateTokenRef = useRef(updateToken);
   const previousResetTokenRef = useRef(resetToken);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);

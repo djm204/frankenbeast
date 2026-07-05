@@ -28,14 +28,55 @@ describe('ActivityPane', () => {
     );
 
     expect(screen.getByText('TOOL_DENIED: Approval denied by policy.')).toBeTruthy();
+    expect(screen.getByText('Error')).toBeTruthy();
+    expect(screen.getByText('Jul 5, 2026, 12:00 AM')).toBeTruthy();
     expect(screen.getByText('Raw event details')).toBeTruthy();
     expect(screen.getByText(/"traceId": "trace-1"/)).toBeTruthy();
+  });
+
+  it('renders runtime activity as a readable timeline with status chips and artifact links', () => {
+    render(
+      <ActivityPane
+        events={[
+          {
+            type: 'turn.execution.start',
+            data: { taskDescription: 'Deploy agent', runId: 'run-42', sessionId: 'session-7' },
+            timestamp: '2026-07-05T01:02:03.000Z',
+          },
+          {
+            type: 'turn.approval.requested',
+            data: { description: 'Run npm test', risk: 'medium', artifactPath: '/tmp/report.md' },
+            timestamp: '2026-07-05T01:03:04.000Z',
+          },
+          {
+            type: 'turn.execution.complete',
+            data: { status: 'failed', summary: 'Tests failed' },
+            timestamp: '2026-07-05T01:04:05.000Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('list')).toBeTruthy();
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getByText('Execution started')).toBeTruthy();
+    expect(screen.getByText('Deploy agent')).toBeTruthy();
+    expect(screen.getByText('Approval needed')).toBeTruthy();
+    expect(screen.getByText('Needs review')).toBeTruthy();
+    expect(screen.getByText('Medium risk')).toBeTruthy();
+    expect(screen.getByText('Execution complete')).toBeTruthy();
+    expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.getByText('Tests failed')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Session session-7' }).getAttribute('href')).toBe('#/sessions');
+    expect(screen.getByRole('link', { name: 'Run run-42' }).getAttribute('href')).toBe('#/beasts');
+    expect(screen.getByText('Artifact /tmp/report.md')).toBeTruthy();
+    expect(screen.queryByText('{"taskDescription":"Deploy agent"}')).toBeNull();
   });
 
   it('preserves scroll position and offers a jump button when new activity arrives while scrolled up', () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
-    const firstEvent = { type: 'turn.started', data: { message: 'Started' }, timestamp: '2026-07-05T00:00:00.000Z' };
+    const firstEvent = { type: 'turn.execution.start', data: { message: 'Started' }, timestamp: '2026-07-05T00:00:00.000Z' };
     const { container, rerender } = render(<ActivityPane events={[firstEvent]} />);
     scrollIntoView.mockClear();
 
@@ -48,7 +89,7 @@ describe('ActivityPane', () => {
       <ActivityPane
         events={[
           firstEvent,
-          { type: 'turn.completed', data: { message: 'Done' }, timestamp: '2026-07-05T00:00:01.000Z' },
+          { type: 'turn.execution.complete', data: { message: 'Done' }, timestamp: '2026-07-05T00:00:01.000Z' },
         ]}
       />,
     );
@@ -64,7 +105,7 @@ describe('ActivityPane', () => {
   it('does not show a jump button when the user scrolls up before new activity arrives', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     const { container } = render(
-      <ActivityPane events={[{ type: 'turn.started', data: { message: 'Started' }, timestamp: '2026-07-05T00:00:00.000Z' }]} />,
+      <ActivityPane events={[{ type: 'turn.execution.start', data: { message: 'Started' }, timestamp: '2026-07-05T00:00:00.000Z' }]} />,
     );
 
     const list = container.querySelector('.activity-list');

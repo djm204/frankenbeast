@@ -10,9 +10,64 @@ import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, Beas
 
 const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
+const MIN_CONFIGURED_SECRET_LENGTH = 6;
 
-function redactBeastLogLine(line: string): string {
-  return line
+const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhookurl)/i;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isConfiguredSecretKey(key: string): boolean {
+  return SENSITIVE_CONFIG_KEY_PATTERN.test(key.replace(/[_\-.]/g, ''));
+}
+
+function addConfiguredSecretValue(secrets: Set<string>, value: unknown): void {
+  if (typeof value !== 'string') return;
+  const fragments = value.split(/\r?\n/);
+  for (const fragment of fragments) {
+    const trimmed = fragment.trim();
+    if (trimmed.length >= MIN_CONFIGURED_SECRET_LENGTH) secrets.add(trimmed);
+  }
+}
+
+function collectConfiguredSecretsFromObject(
+  input: unknown,
+  secrets: Set<string>,
+  path: string[] = [],
+): void {
+  const currentPathIsSensitive = path.length > 0 && isConfiguredSecretKey(path.join('.'));
+  if (currentPathIsSensitive) addConfiguredSecretValue(secrets, input);
+  if (!input || typeof input !== 'object') return;
+  if (Array.isArray(input)) {
+    for (const item of input) collectConfiguredSecretsFromObject(item, secrets, path);
+    return;
+  }
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const nextPath = [...path, key];
+    if (isConfiguredSecretKey(nextPath.join('.'))) {
+      addConfiguredSecretValue(secrets, value);
+    }
+    collectConfiguredSecretsFromObject(value, secrets, nextPath);
+  }
+}
+
+function collectConfiguredSecretValues(...sources: readonly unknown[]): readonly string[] {
+  const secrets = new Set<string>();
+  for (const source of sources) collectConfiguredSecretsFromObject(source, secrets);
+  return [...secrets].sort((a, b) => b.length - a.length);
+}
+
+function redactConfiguredSecretValues(line: string, configuredSecrets: readonly string[]): string {
+  let redacted = line;
+  for (const secret of configuredSecrets) {
+    redacted = redacted.replace(new RegExp(escapeRegExp(secret), 'g'), REDACTED_SECRET);
+  }
+  return redacted;
+}
+
+function redactBeastLogLine(line: string, configuredSecrets: readonly string[] = []): string {
+  return redactConfiguredSecretValues(line, configuredSecrets)
     .replace(/((?:"|')?authorization(?:"|')?\s*:\s*(?:"|')?(?:bearer|basic|bot)\s+)[^\s"',;}]+/gi, `$1${REDACTED_SECRET}`)
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, REDACTED_SECRET)
@@ -32,8 +87,8 @@ function redactBeastLogLine(line: string): string {
     );
 }
 
-function redactFailureStderrTail(stderrTail: readonly string[]): string[] {
-  return stderrTail.map(redactBeastLogLine);
+function redactFailureStderrTail(stderrTail: readonly string[], configuredSecrets: readonly string[]): string[] {
+  return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
 }
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
@@ -172,6 +227,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
       },
     };
     const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
+    const configuredSecrets = collectConfiguredSecretValues(
+      run.configSnapshot,
+      processSpec.env,
+      isolatedSpec.env,
+      mergedSpec.env,
+      spawnedSpec.env,
+    );
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -184,7 +246,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     try {
       handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
-          const redactedLine = redactBeastLogLine(line);
+          const redactedLine = redactBeastLogLine(line, configuredSecrets);
           if (attemptId) {
             const createdAt = new Date().toISOString();
             void this.logs.append(run.id, attemptId, 'stdout', redactedLine, createdAt);
@@ -197,7 +259,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           }
         },
         onStderr: (line) => {
-          const redactedLine = redactBeastLogLine(line);
+          const redactedLine = redactBeastLogLine(line, configuredSecrets);
           stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
@@ -213,7 +275,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         },
         onExit: (code, signal) => {
           if (attemptId) {
-            this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail]);
+            this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail], configuredSecrets);
           } else {
             earlyExit = { code, signal };
           }
@@ -311,7 +373,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     // Flush early exit if process died before attemptId was set
     let flushedEarlyExit = false;
     if (earlyExit) {
-      this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail]);
+      this.handleProcessExit(run.id, attemptId, earlyExit.code, earlyExit.signal, [...stderrTail], configuredSecrets);
       flushedEarlyExit = true;
     }
 
@@ -393,6 +455,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     code: number | null,
     signal: string | null,
     stderrTail: string[],
+    configuredSecrets: readonly string[],
   ): void {
     // Skip if attempt is already in a terminal state (e.g., finishAttempt already ran from stop/kill)
     const currentAttempt = this.repository.getAttempt(attemptId);
@@ -435,7 +498,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const durationMs = attemptRecord?.startedAt
       ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
       : undefined;
-    const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail) : [];
+    const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail, configuredSecrets) : [];
     const exitEvent = {
       attemptId,
       type: eventType,
