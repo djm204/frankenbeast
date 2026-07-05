@@ -213,6 +213,13 @@ export class CliLlmAdapter implements IAdapter {
             activeProvider = nextProvider;
             continue;
           }
+          if (hasRateLimitedProvider(exhaustedProviders)) {
+            const sleepMs = this.resolveSleepMs(exhaustedProviders);
+            await sleepFn(sleepMs);
+            exhaustedProviders.clear();
+            activeProvider = initialProvider;
+            continue;
+          }
           throw new Error(buildNoCliProvidersAvailableSummary(exhaustedProviders), { cause: failure });
         }
 
@@ -465,6 +472,10 @@ function normalizeProviderChain(
 ): string[] {
   const ordered = [selectedProvider, ...(providers ?? [])];
   return [...new Set(ordered.filter((name) => name.length > 0))];
+}
+
+function hasRateLimitedProvider(exhaustedProviders: Map<string, CommandFailure>): boolean {
+  return [...exhaustedProviders.values()].some((failure) => failure.rateLimited);
 }
 
 function buildNoCliProvidersAvailableSummary(exhaustedProviders: Map<string, CommandFailure>): string {

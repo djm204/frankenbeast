@@ -641,6 +641,33 @@ describe('CliLlmAdapter', () => {
         expect(calls[2]!.cmd).toBe('claude');
       });
 
+      it('retries a rate-limited provider when later fallback provider CLI is missing', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }) },
+          { stdout: 'claude recovered', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('claude recovered');
+        expect(sleepFn).toHaveBeenCalledWith(5_000);
+        expect(calls).toHaveLength(3);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+        expect(calls[2]!.cmd).toBe('claude');
+      });
+
       it('does not forward the selected provider model to fallback providers in chat mode', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'rate limit exceeded', exitCode: 1 },
