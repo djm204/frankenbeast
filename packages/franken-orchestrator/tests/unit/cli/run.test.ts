@@ -301,7 +301,7 @@ describe('resolvePhases', () => {
 describe('missing run plan guidance', () => {
   it('formats an actionable first-run message for an empty plan directory', () => {
     expect(formatMissingRunPlanGuidance('/project/.fbeast/plans/plan-2026-03-08')).toBe(
-      'No default run plan directory found under /project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
+      'No runnable default run plan chunks found under /project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
     );
   });
 
@@ -313,6 +313,12 @@ describe('missing run plan guidance', () => {
     expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
 
     writeFileSync(join(root, '00_PLAN.md'), '# plan metadata');
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    writeFileSync(join(root, 'design.md'), '# design');
+    expect(defaultRunPlanNeedsGuidance(root)).toBe(true);
+
+    writeFileSync(join(root, '01_IMPLEMENT.md'), '# implementation chunk');
     expect(defaultRunPlanNeedsGuidance(root)).toBe(false);
 
     rmSync(root, { recursive: true, force: true });
@@ -870,7 +876,7 @@ describe('main() execution', () => {
     await main();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'No default run plan directory found under /mock/project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
+      'No runnable default run plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-08. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-08`, or run `frankenbeast interview` first and then plan the generated design before running.',
     );
     expect(MockSession).not.toHaveBeenCalled();
     expect(mockSessionStart).not.toHaveBeenCalled();

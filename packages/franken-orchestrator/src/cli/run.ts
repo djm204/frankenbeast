@@ -112,9 +112,16 @@ export function defaultRunPlanNeedsGuidance(planDir: string): boolean {
   try {
     const stats = statSync(planDir);
     if (!stats.isDirectory()) return false;
-    return readdirSync(planDir).length === 0;
-  } catch {
-    return true;
+    return !readdirSync(planDir).some((entry) => (
+      entry.endsWith('.md') &&
+      !entry.startsWith('00_') &&
+      /^\d{2}/.test(entry)
+    ));
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return true;
+    }
+    throw err;
   }
 }
 
@@ -122,7 +129,7 @@ export function formatMissingRunPlanGuidance(
   planDir: string,
 ): string {
   const planName = basename(planDir);
-  return 'No default run plan directory found under ' + planDir + '. '
+  return 'No runnable default run plan chunks found under ' + planDir + '. '
     + `Create it with \`frankenbeast plan --design-doc <file> --plan-name ${planName}\`, `
     + 'or run `frankenbeast interview` first and then plan the generated design before running.';
 }
