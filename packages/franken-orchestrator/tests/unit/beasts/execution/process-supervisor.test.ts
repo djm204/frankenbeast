@@ -171,7 +171,7 @@ describe('ProcessSupervisor', () => {
       try {
         await new ProcessSupervisor({ projectRoot: workDir }).spawn({
           command: process.execPath,
-          args: ['-e', 'console.log(JSON.stringify(process.env))'],
+          args: ['-e', 'process.stdout.write(JSON.stringify(process.env) + \"\\n\")'],
           cwd: workDir,
           env: { FRANKENBEAST_RUN_CONFIG: '/x' },
         }, callbacks);

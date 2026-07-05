@@ -213,14 +213,14 @@ function makeConfig(overrides: Partial<import('../../../src/cli/session.js').Ses
 // ── Tests ──
 
 describe('Session', () => {
-  // Suppress console.log from displaySummary
-  const origLog = console.log;
+  // Suppress console.info from displaySummary
+  const origLog = console.info;
   beforeEach(() => {
     vi.clearAllMocks();
-    console.log = vi.fn();
+    console.info = vi.fn();
   });
   afterEach(() => {
-    console.log = origLog;
+    console.info = origLog;
   });
 
   describe('SessionPhase type', () => {

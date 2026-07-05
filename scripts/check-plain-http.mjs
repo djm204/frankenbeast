@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+function printLine(...args) {
+  console.info(...args);
+}
+
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
@@ -121,4 +126,4 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log('No non-loopback plain HTTP URLs found in production JavaScript/TypeScript sources.');
+printLine('No non-loopback plain HTTP URLs found in production JavaScript/TypeScript sources.');

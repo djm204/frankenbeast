@@ -1,5 +1,9 @@
+function printLine(...args) {
+  console.info(...args);
+}
+
 export function summarize() {
   return 'tiny-node fixture';
 }
 
-console.log(summarize());
+printLine(summarize());

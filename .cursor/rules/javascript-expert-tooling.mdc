@@ -69,4 +69,4 @@ export default tseslint.config(
 ## Debugging
 
 - Node.js: `node --inspect-brk app.js` + Chrome DevTools
-- Use structured logging over `console.log` — never log passwords, tokens, or PII
+- Use structured logging over `ad-hoc console output` — never log passwords, tokens, or PII

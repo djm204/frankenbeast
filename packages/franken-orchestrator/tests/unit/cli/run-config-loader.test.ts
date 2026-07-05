@@ -144,7 +144,7 @@ describe('RunConfigLoader', () => {
       await writeFile(filePath, JSON.stringify(config));
       process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
 
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
       try {
         loadRunConfigFromEnv();
         expect(consoleSpy).toHaveBeenCalledWith(`loaded config from ${filePath}`);

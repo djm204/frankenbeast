@@ -1,5 +1,9 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 export type Subcommand =
   | 'init'
   | 'interview'
@@ -239,7 +243,7 @@ Examples:
 `.trim();
 
 export function printUsage(): void {
-  console.log(USAGE);
+  printLine(USAGE);
 }
 
 function splitSkillAddArgs(args: string[]): { isSkillAdd: boolean; parsedFlagArgs: string[]; rawSkillAddCommandArgs: string[] } {

@@ -50,7 +50,7 @@ describe('fbeast-uninstall entrypoint', () => {
       },
     }));
     vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
     process.chdir(root);
     process.argv = ['node', 'fbeast-uninstall', '--purge'];
 
@@ -82,7 +82,7 @@ describe('fbeast-uninstall entrypoint', () => {
       },
     }));
     vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
     process.chdir(root);
     process.argv = ['node', 'fbeast-uninstall', '--client=codex', '--purge'];
 
@@ -100,7 +100,7 @@ describe('fbeast-uninstall entrypoint', () => {
     const root = tmpDir();
     dirs.push(root);
     vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
     process.chdir(root);
     process.argv = ['node', 'fbeast-uninstall', '--client=codez', '--purge'];
 
@@ -108,6 +108,6 @@ describe('fbeast-uninstall entrypoint', () => {
       'Invalid --client value "codez". Expected claude, gemini, or codex.',
     );
 
-    expect(console.log).not.toHaveBeenCalledWith('fbeast uninstalled.');
+    expect(console.info).not.toHaveBeenCalledWith('fbeast uninstalled.');
   });
 });

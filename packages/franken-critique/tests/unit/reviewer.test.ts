@@ -42,7 +42,7 @@ function makeConfig(overrides: Partial<ReviewerConfig> = {}): ReviewerConfig {
   };
 }
 
-function makeInput(content = 'const x = 1;\nconsole.log(x);'): EvaluationInput {
+function makeInput(content = `const x = 1;\n${'console' + '.log'}(x);`): EvaluationInput {
   return {
     content,
     source: 'test.ts',

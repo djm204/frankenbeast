@@ -138,7 +138,7 @@ describe('runBeastMode', () => {
     const root = tmpDir();
     dirs.push(root);
     const deps = makeDeps(root, { exec: vi.fn().mockRejectedValue(new Error('frankenbeast: binary not found')) });
-    const mockLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const mockLog = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
     await runBeastMode([], deps);
 

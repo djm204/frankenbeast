@@ -868,7 +868,7 @@ describe('Memory Server', () => {
     const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
     const frontloadTool = server.tools.find((t) => t.name === 'fbeast_memory_frontload')!;
 
-    await storeTool.handler({ key: 'rule-1', value: 'no console.log', type: 'working' });
+    await storeTool.handler({ key: 'rule-1', value: 'no process.stdout.write', type: 'working' });
     await storeTool.handler({ key: 'adr-1', value: 'use REST', type: 'episodic' });
 
     const result = await frontloadTool.handler({ projectId: 'test' });
@@ -1655,7 +1655,7 @@ function evaluateContent(content: string, criteria: string[]): EvalResult {
     switch (criterion) {
       case 'correctness':
         if (/console\.log\(/g.test(content)) {
-          findings.push({ criterion, severity: 'warning', message: 'Contains console.log — remove before production' });
+          findings.push({ criterion, severity: 'warning', message: 'Contains process.stdout.write — remove before production' });
         }
         const unresolvedMarkers = [['TO', 'DO'].join(''), ['FIX', 'ME'].join(''), ['HA', 'CK'].join('')];
         const unresolvedMarkerPattern = new RegExp(unresolvedMarkers.join('|'), 'g');
@@ -2891,12 +2891,12 @@ export function runInit(options: InitOptions): void {
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 
-  console.log(`fbeast initialized in ${root}`);
-  console.log(`  Config: ${config.configPath}`);
-  console.log(`  Database: ${config.dbPath}`);
-  console.log(`  Instructions: ${instrDest}`);
-  console.log(`  MCP config: ${settingsPath}`);
-  console.log(`  Servers: ${servers.join(', ')}`);
+  process.stdout.write(`fbeast initialized in ${root}`);
+  process.stdout.write(`  Config: ${config.configPath}`);
+  process.stdout.write(`  Database: ${config.dbPath}`);
+  process.stdout.write(`  Instructions: ${instrDest}`);
+  process.stdout.write(`  MCP config: ${settingsPath}`);
+  process.stdout.write(`  Servers: ${servers.join(', ')}`);
 }
 
 // CLI entry point
@@ -3103,13 +3103,13 @@ export function runUninstall(options: UninstallOptions): void {
     rmSync(fbeastDir, { recursive: true, force: true });
   }
 
-  console.log('fbeast uninstalled.');
+  process.stdout.write('fbeast uninstalled.');
   if (purge) {
-    console.log('  Purged .fbeast/ directory and all stored data.');
+    process.stdout.write('  Purged .fbeast/ directory and all stored data.');
   } else {
-    console.log('  Stored data preserved in .fbeast/ — run with --purge to remove.');
+    process.stdout.write('  Stored data preserved in .fbeast/ — run with --purge to remove.');
   }
-  console.log('  No traces left in Claude Code config.');
+  process.stdout.write('  No traces left in Claude Code config.');
 }
 
 // CLI entry point
@@ -3120,7 +3120,7 @@ if (isMain) {
   const purge = process.argv.includes('--purge');
 
   if (!purge) {
-    console.log('Remove stored data (.fbeast/)? Pass --purge to confirm.');
+    process.stdout.write('Remove stored data (.fbeast/)? Pass --purge to confirm.');
   }
 
   runUninstall({ root, claudeDir, purge });
@@ -3175,14 +3175,14 @@ switch (command) {
     break;
   }
   default:
-    console.log('Usage: fbeast-mcp-suite <command>');
-    console.log('');
-    console.log('Commands:');
-    console.log('  init          Set up fbeast MCP servers for Claude Code');
-    console.log('  init --pick   Choose which servers to install');
-    console.log('  init --hooks  Also add Claude Code hooks');
-    console.log('  uninstall     Remove fbeast from Claude Code config');
-    console.log('  uninstall --purge  Also remove stored data');
+    process.stdout.write('Usage: fbeast-mcp-suite <command>');
+    process.stdout.write('');
+    process.stdout.write('Commands:');
+    process.stdout.write('  init          Set up fbeast MCP servers for Claude Code');
+    process.stdout.write('  init --pick   Choose which servers to install');
+    process.stdout.write('  init --hooks  Also add Claude Code hooks');
+    process.stdout.write('  uninstall     Remove fbeast from Claude Code config');
+    process.stdout.write('  uninstall --purge  Also remove stored data');
     process.exit(command ? 1 : 0);
 }
 ```

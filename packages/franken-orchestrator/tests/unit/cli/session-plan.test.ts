@@ -235,7 +235,7 @@ function makeConfig(
 // ── Tests ──
 
 describe('Session plan phase — CliLlmAdapter wiring', () => {
-  const origLog = console.log;
+  const origLog = console.info;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -245,11 +245,11 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     progressCtorOptions = undefined;
     progressInstance = undefined;
     llmGraphBuilderCtorArg = undefined;
-    console.log = vi.fn();
+    console.info = vi.fn();
   });
 
   afterEach(() => {
-    console.log = origLog;
+    console.info = origLog;
   });
 
   it('runPlan() passes a cached CliLlmAdapter-backed LLM to LlmGraphBuilder', async () => {

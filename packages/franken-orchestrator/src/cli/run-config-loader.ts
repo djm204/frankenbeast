@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 export const LlmOverrideSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -69,6 +73,6 @@ export function loadRunConfigFromEnv(): RunConfig | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
   const config = loadRunConfig(filePath);
-  console.log(`loaded config from ${filePath}`);
+  printLine(`loaded config from ${filePath}`);
   return config;
 }

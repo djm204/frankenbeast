@@ -238,7 +238,7 @@ describe('parseArgs', () => {
   });
 
   it('prints usage text including init, network, chat-server, skill, security', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     printUsage();
 

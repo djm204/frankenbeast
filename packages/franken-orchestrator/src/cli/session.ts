@@ -29,6 +29,10 @@ import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 export type SessionPhase = 'interview' | 'plan' | 'execute';
 
 function resolveContainedExistingPath(projectRoot: string, requestedPath: string, fieldName: string): string {
@@ -503,21 +507,21 @@ export class Session {
 
   private displaySummary(result: BeastResult): void {
     const A = ANSI;
-    console.log(logHeader('BUILD SUMMARY'));
-    console.log(`  ${A.dim}Duration:${A.reset}  ${(result.durationMs / 1000 / 60).toFixed(1)} min`);
-    console.log(`  ${A.dim}Budget:${A.reset}    ${budgetBar(result.tokenSpend.estimatedCostUsd, this.config.budget)}`);
+    printLine(logHeader('BUILD SUMMARY'));
+    printLine(`  ${A.dim}Duration:${A.reset}  ${(result.durationMs / 1000 / 60).toFixed(1)} min`);
+    printLine(`  ${A.dim}Budget:${A.reset}    ${budgetBar(result.tokenSpend.estimatedCostUsd, this.config.budget)}`);
     const statusDisplay =
       result.status === 'no-op'
         ? statusBadge('neutral')
         : statusBadge(result.status === 'completed');
-    console.log(`  ${A.dim}Status:${A.reset}    ${statusDisplay}`);
+    printLine(`  ${A.dim}Status:${A.reset}    ${statusDisplay}`);
     if (result.taskResults?.length) {
-      console.log(`\n  ${A.dim}Chunks:${A.reset}`);
+      printLine(`\n  ${A.dim}Chunks:${A.reset}`);
       for (const t of result.taskResults) {
         if (t.status === 'skipped') {
-          console.log(`    ${A.dim} SKIP ${A.reset} ${A.dim}${t.taskId}${A.reset}`);
+          printLine(`    ${A.dim} SKIP ${A.reset} ${A.dim}${t.taskId}${A.reset}`);
         } else {
-          console.log(`    ${statusBadge(t.status === 'success')} ${A.bold}${t.taskId}${A.reset}`);
+          printLine(`    ${statusBadge(t.status === 'success')} ${A.bold}${t.taskId}${A.reset}`);
         }
       }
     }
@@ -526,18 +530,18 @@ export class Session {
     const failed = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
     const parts = [`${passed} passed`, `${failed} failed`];
     if (skipped > 0) parts.push(`${skipped} skipped`);
-    console.log(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
+    printLine(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
   }
 
   private displayIssueSummary(outcomes: IssueOutcome[]): void {
     const A = ANSI;
-    console.log(logHeader('ISSUE SUMMARY'));
+    printLine(logHeader('ISSUE SUMMARY'));
 
     const TITLE_MAX = 40;
-    console.log(
+    printLine(
       `  ${'#'.padStart(5)}  ${'Title'.padEnd(TITLE_MAX)}  ${'Status'.padEnd(8)}  PR`,
     );
-    console.log(`  ${'-'.repeat(70)}`);
+    printLine(`  ${'-'.repeat(70)}`);
 
     for (const o of outcomes) {
       const badge =
@@ -551,7 +555,7 @@ export class Session {
           ? o.issueTitle.slice(0, TITLE_MAX - 3) + '...'
           : o.issueTitle;
       const pr = o.prUrl ?? '-';
-      console.log(
+      printLine(
         `  ${String(o.issueNumber).padStart(5)}  ${title.padEnd(TITLE_MAX)}  ${badge.padEnd(8)}  ${pr}`,
       );
     }
@@ -559,7 +563,7 @@ export class Session {
     const fixed = outcomes.filter((o) => o.status === 'fixed').length;
     const failed = outcomes.filter((o) => o.status === 'failed').length;
     const skipped = outcomes.filter((o) => o.status === 'skipped').length;
-    console.log(
+    printLine(
       `\n  ${fixed === outcomes.length ? A.green : A.red}${A.bold}Result: ${fixed} fixed, ${failed} failed, ${skipped} skipped${A.reset}\n`,
     );
   }

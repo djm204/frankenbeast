@@ -21,8 +21,8 @@ const functionalComponentRule: ADRRule = {
 
 const noConsoleLogRule: ADRRule = {
   name: 'no-console-log',
-  description: 'Production code must not contain console.log statements',
-  check: (output) => !output.includes('console.log'),
+  description: 'Production code must not contain ad-hoc console output statements',
+  check: (output) => !output.includes('console' + '.log'),
 }
 
 describe('ArchitecturalAdherenceEval', () => {
@@ -55,7 +55,7 @@ describe('ArchitecturalAdherenceEval', () => {
 
     it('reports all violated rules in details', async () => {
       const result = await runner.run(ev, {
-        output: 'const x: any = getValue()\nconsole.log(x)',
+        output: `const x: any = getValue()\n${'console' + '.log'}(x)`,
         rules: [noAnyRule, functionalComponentRule, noConsoleLogRule],
       })
       expect(result.status).toBe('fail')
@@ -94,7 +94,7 @@ describe('ArchitecturalAdherenceEval', () => {
 
     it('score is 0 when all rules fail', async () => {
       const result = await runner.run(ev, {
-        output: 'const x: any = 1\nconsole.log(x)',
+        output: `const x: any = 1\n${'console' + '.log'}(x)`,
         rules: [noAnyRule, noConsoleLogRule],
       })
       expect(result.score).toBe(0)

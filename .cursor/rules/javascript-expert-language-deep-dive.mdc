@@ -10,11 +10,11 @@ Advanced JavaScript patterns and idioms for expert-level engineering.
 ## The Event Loop
 
 ```typescript
-console.log('1 - sync');
-setTimeout(() => console.log('2 - macrotask'), 0);
-Promise.resolve().then(() => console.log('3 - microtask'));
-queueMicrotask(() => console.log('4 - microtask'));
-console.log('5 - sync');
+process.stdout.write('1 - sync\n');
+setTimeout(() => process.stdout.write('2 - macrotask\n'), 0);
+Promise.resolve().then(() => process.stdout.write('3 - microtask\n'));
+queueMicrotask(() => process.stdout.write('4 - microtask\n'));
+process.stdout.write('5 - sync\n');
 // Output: 1, 5, 3, 4, 2 — sync > microtasks > macrotasks
 ```
 

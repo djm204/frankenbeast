@@ -668,9 +668,9 @@ describe('createStdinIO', () => {
     expect(typeof io.display).toBe('function');
   });
 
-  it('display delegates to console.log', () => {
+  it('display delegates to the console output sink', () => {
     const io = createStdinIO();
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     io.display('hello');
     expect(logSpy).toHaveBeenCalledWith('hello');
     logSpy.mockRestore();
@@ -840,7 +840,7 @@ describe('main() execution', () => {
   });
 
   it('prints actionable guidance before provider preflight when no plan chunks exist', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     mockParseArgs.mockReturnValue({
       subcommand: 'run',
       networkAction: undefined,
@@ -1164,7 +1164,7 @@ describe('main() execution', () => {
   });
 
   it('dispatches chat-server without creating a Session or REPL', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,
       maxDurationMs: 600_000,
@@ -1765,7 +1765,7 @@ describe('main() execution', () => {
   });
 
   it('suppresses the banner when running as a network-managed child process', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const originalManaged = process.env.FRANKENBEAST_NETWORK_MANAGED;
     process.env.FRANKENBEAST_NETWORK_MANAGED = '1';
 

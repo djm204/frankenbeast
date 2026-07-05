@@ -5,7 +5,7 @@ describe('BeastLogger service labels', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
   });
 
   afterEach(() => {

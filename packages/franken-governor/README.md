@@ -46,7 +46,7 @@ const readlineAdapter = { question: (prompt: string) => rl.question(prompt) };
 // state. A trigger whose source is missing is skipped (it cannot fire).
 const governor = createGovernor({
   readline: readlineAdapter,
-  memoryPort: { recordDecision: async (trace) => console.log('Audit:', trace) },
+  memoryPort: { recordDecision: async (trace) => process.stdout.write(`Audit: ${JSON.stringify(trace)}\n`) },
   evaluators: [new BudgetTrigger(), new SkillTrigger()],
   skillMetadata: {
     getSkillMetadata: (skillId) =>
@@ -69,9 +69,9 @@ const result = await governor.verifyRationale({
 // 'deploy-prod' is flagged destructive above, so the SkillTrigger fires and
 // the operator is prompted; a rejection (or non-TTY default) lands here:
 if (result.verdict === 'approved') {
-  console.log('Proceeding with execution');
+  process.stdout.write('Proceeding with execution');
 } else {
-  console.log('Blocked:', result.reason);
+  process.stdout.write('Blocked:', result.reason);
 }
 
 rl.close();

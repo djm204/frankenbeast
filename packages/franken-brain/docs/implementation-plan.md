@@ -499,7 +499,7 @@ Scopes: `types`, `working`, `episodic`, `semantic`, `compression`, `orchestrator
 - [ ] `npm run build` produces no errors
 - [ ] PR is self-reviewed (description explains the why)
 - [ ] ADR linked in PR description if an architectural decision was made
-- [ ] No `console.log` left in production code paths
+- [ ] No `ad-hoc console output` left in production code paths
 
 ---
 

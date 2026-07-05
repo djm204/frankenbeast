@@ -12,6 +12,10 @@ import sharp from 'sharp';
 import type { ILogger } from '../deps.js';
 import { isCommandFailure } from '../errors/command-failure.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 // ── ANSI escape codes ──
 
 const A = {
@@ -254,7 +258,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
-    console.log(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
+    printLine(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
     this.capture('INFO', this.withBadgeAndData(msg, data, src));
   }
 
@@ -268,7 +272,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const highlighted = highlightServices(line);
-    console.log(`${ts} ${A.gray}DEBUG ${badge}${highlighted}${A.reset}`);
+    printLine(`${ts} ${A.gray}DEBUG ${badge}${highlighted}${A.reset}`);
   }
 
   warn(msg: string, dataOrSource?: unknown, source?: string): void {
@@ -276,7 +280,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
-    console.log(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
+    printLine(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
     this.capture('WARN', this.withBadgeAndData(msg, data, src));
   }
 
@@ -285,7 +289,7 @@ export class BeastLogger implements ILogger {
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
     const line = this.withData(msg, data);
-    console.log(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${badge}${A.red}${line}${A.reset}`);
+    printLine(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${badge}${A.red}${line}${A.reset}`);
     this.capture('ERROR', this.withBadgeAndData(msg, data, src));
   }
 

@@ -277,7 +277,7 @@ it('does not inherit arbitrary host env into the child', async () => {
   process.env.GITHUB_TOKEN = 'ghp_should_not_leak';
   process.env.SECRET_X = 'nope';
   const sup = new ProcessSupervisor({ projectRoot: tmpRoot });
-  const seen = await captureChildEnv(sup, { command: process.execPath, args: ['-e', 'console.log(JSON.stringify(process.env))'], cwd: tmpRoot, env: { FRANKENBEAST_RUN_CONFIG: '/x' } });
+  const seen = await captureChildEnv(sup, { command: process.execPath, args: ['-e', 'process.stdout.write(JSON.stringify(process.env))'], cwd: tmpRoot, env: { FRANKENBEAST_RUN_CONFIG: '/x' } });
   expect(seen.GITHUB_TOKEN).toBeUndefined();
   expect(seen.SECRET_X).toBeUndefined();
   expect(seen.FRANKENBEAST_RUN_CONFIG).toBe('/x');

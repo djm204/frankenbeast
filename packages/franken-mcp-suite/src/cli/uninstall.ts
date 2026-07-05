@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
+
 import { existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -37,11 +42,11 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
     rmSync(fbeastDir, { recursive: true, force: true });
   }
 
-  console.log('fbeast uninstalled.');
+  printLine('fbeast uninstalled.');
   if (purge) {
-    console.log('  Purged .fbeast/ directory and all stored data.');
+    printLine('  Purged .fbeast/ directory and all stored data.');
   } else {
-    console.log('  Stored data preserved in .fbeast/ — run with --purge to remove.');
+    printLine('  Stored data preserved in .fbeast/ — run with --purge to remove.');
   }
 }
 

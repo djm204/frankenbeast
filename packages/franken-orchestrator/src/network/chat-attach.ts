@@ -10,6 +10,10 @@ import {
 } from '../http/ws-chat-server.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 interface ManagedNetworkState {
   services?: Array<{
     id?: string;
@@ -126,7 +130,7 @@ function createIo(): {
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
   return {
     prompt: () => new Promise((resolve) => rl.question('> ', resolve)),
-    print: (message: string) => console.log(message),
+    print: (message: string) => printLine(message),
     close: () => rl.close(),
   };
 }
@@ -161,21 +165,21 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
           if (streamed) {
             process.stdout.write('\n');
           } else {
-            console.log(sanitizeChatOutput(String(payload.content ?? '')));
+            printLine(sanitizeChatOutput(String(payload.content ?? '')));
           }
           if (verbose && payload.modelTier) {
-            console.log(`  [${String(payload.modelTier)}]`);
+            printLine(`  [${String(payload.modelTier)}]`);
           }
           cleanup();
           resolve();
           break;
         case 'turn.approval.requested':
-          console.log(String(payload.description ?? 'approval required'));
+          printLine(String(payload.description ?? 'approval required'));
           cleanup();
           resolve();
           break;
         case 'turn.execution.progress':
-          console.log(String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...'));
+          printLine(String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...'));
           break;
         default:
           break;

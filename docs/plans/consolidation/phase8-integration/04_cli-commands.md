@@ -37,13 +37,13 @@ export function registerSkillCommands(program: Command): void {
       const manager = new SkillManager(getSkillsDir());
       const skills = manager.listInstalled();
       if (skills.length === 0) {
-        console.log('No skills installed. Run `frankenbeast skill catalog` to browse available skills.');
+        process.stdout.write('No skills installed. Run `frankenbeast skill catalog` to browse available skills.');
         return;
       }
       for (const s of skills) {
         const status = s.enabled ? '✓' : '✗';
         const provider = s.provider ? ` (${s.provider})` : '';
-        console.log(`  ${status} ${s.name}${provider}`);
+        process.stdout.write(`  ${status} ${s.name}${provider}`);
       }
     });
 
@@ -82,7 +82,7 @@ export function registerSkillCommands(program: Command): void {
         const { provider, entry } = await findSkillInCatalogs(registry, name);
         await manager.install(provider, entry);
       }
-      console.log(`Skill '${name}' installed and enabled.`);
+      process.stdout.write(`Skill '${name}' installed and enabled.`);
     });
 
   skill
@@ -91,7 +91,7 @@ export function registerSkillCommands(program: Command): void {
     .action(async (name: string) => {
       const manager = new SkillManager(getSkillsDir());
       manager.enable(name);
-      console.log(`Skill '${name}' enabled.`);
+      process.stdout.write(`Skill '${name}' enabled.`);
     });
 
   skill
@@ -100,7 +100,7 @@ export function registerSkillCommands(program: Command): void {
     .action(async (name: string) => {
       const manager = new SkillManager(getSkillsDir());
       manager.disable(name);
-      console.log(`Skill '${name}' disabled.`);
+      process.stdout.write(`Skill '${name}' disabled.`);
     });
 
   skill
@@ -109,7 +109,7 @@ export function registerSkillCommands(program: Command): void {
     .action(async (name: string) => {
       const manager = new SkillManager(getSkillsDir());
       manager.remove(name);
-      console.log(`Skill '${name}' removed.`);
+      process.stdout.write(`Skill '${name}' removed.`);
     });
 }
 ```
@@ -131,7 +131,7 @@ export function registerProviderCommands(program: Command): void {
         const available = await p.isAvailable();
         const status = available ? 'authenticated' : 'not configured';
         const indicator = available ? '●' : '○';
-        console.log(`  ${indicator} ${p.name} — ${status}`);
+        process.stdout.write(`  ${indicator} ${p.name} — ${status}`);
       }
     });
 
@@ -148,7 +148,7 @@ export function registerProviderCommands(program: Command): void {
           if (useCliLogin) {
             // No additional config needed — CLI auth is already in place
             await saveProviderConfig(name, { type: `${name}-cli`, auth: 'cli-login' });
-            console.log(`Provider '${name}' added (using CLI login).`);
+            process.stdout.write(`Provider '${name}' added (using CLI login).`);
             return;
           }
         }
@@ -156,7 +156,7 @@ export function registerProviderCommands(program: Command): void {
       // API key path
       const apiKey = await promptSecret(`Enter API key for ${name}:`);
       await saveProviderConfig(name, { type: `${name}-api`, apiKey });
-      console.log(`Provider '${name}' added.`);
+      process.stdout.write(`Provider '${name}' added.`);
     });
 
   provider
@@ -164,7 +164,7 @@ export function registerProviderCommands(program: Command): void {
     .description('Set failover priority (first = primary)')
     .action(async (providers: string[]) => {
       await saveProviderOrder(providers);
-      console.log(`Provider order set: ${providers.join(' → ')}`);
+      process.stdout.write(`Provider order set: ${providers.join(' → ')}`);
     });
 }
 ```
@@ -182,12 +182,12 @@ export function registerSecurityCommands(program: Command): void {
     .description('Show current security profile and settings')
     .action(async () => {
       const config = await loadSecurityConfig();
-      console.log(`Profile: ${config.profile}`);
-      console.log(`  Injection detection: ${config.injectionDetection ? 'on' : 'off'}`);
-      console.log(`  PII masking: ${config.piiMasking ? 'on' : 'off'}`);
-      console.log(`  Output validation: ${config.outputValidation ? 'on' : 'off'}`);
-      if (config.tokenBudget) console.log(`  Token budget: ${config.tokenBudget}`);
-      if (config.allowedDomains?.length) console.log(`  Allowed domains: ${config.allowedDomains.join(', ')}`);
+      process.stdout.write(`Profile: ${config.profile}`);
+      process.stdout.write(`  Injection detection: ${config.injectionDetection ? 'on' : 'off'}`);
+      process.stdout.write(`  PII masking: ${config.piiMasking ? 'on' : 'off'}`);
+      process.stdout.write(`  Output validation: ${config.outputValidation ? 'on' : 'off'}`);
+      if (config.tokenBudget) process.stdout.write(`  Token budget: ${config.tokenBudget}`);
+      if (config.allowedDomains?.length) process.stdout.write(`  Allowed domains: ${config.allowedDomains.join(', ')}`);
     });
 
   security
@@ -199,7 +199,7 @@ export function registerSecurityCommands(program: Command): void {
     .action(async (profileOrSetting: string, opts) => {
       if (['strict', 'standard', 'permissive'].includes(profileOrSetting)) {
         await saveSecurityConfig({ profile: profileOrSetting as SecurityProfile });
-        console.log(`Security profile set to '${profileOrSetting}'.`);
+        process.stdout.write(`Security profile set to '${profileOrSetting}'.`);
       }
       // Apply individual overrides
       const overrides: Partial<SecurityConfig> = {};
@@ -208,7 +208,7 @@ export function registerSecurityCommands(program: Command): void {
       if (opts.outputValidation) overrides.outputValidation = opts.outputValidation === 'on';
       if (Object.keys(overrides).length > 0) {
         await saveSecurityConfig(overrides);
-        console.log('Security settings updated.');
+        process.stdout.write('Security settings updated.');
       }
     });
 }
@@ -228,7 +228,7 @@ export function registerDashboardCommand(program: Command): void {
     .action(async (opts) => {
       const { startDashboard } = await import('@frankenbeast/web');
       const url = await startDashboard({ port: parseInt(opts.port) });
-      console.log(`Dashboard running at ${url}`);
+      process.stdout.write(`Dashboard running at ${url}`);
       if (opts.open !== false) {
         const open = await import('open');
         await open.default(url);

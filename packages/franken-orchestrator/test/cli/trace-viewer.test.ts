@@ -22,7 +22,7 @@ describe('Trace viewer wiring', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
 
     mockStart.mockResolvedValue(undefined);
     mockStop.mockResolvedValue(undefined);

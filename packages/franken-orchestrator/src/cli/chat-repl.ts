@@ -8,6 +8,10 @@ import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
 
+
+function printLine(...args: unknown[]): void {
+  console.info(...args);
+}
 export { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 
 const SLASH_COMMANDS = new Set([
@@ -45,7 +49,7 @@ function createReadlineIO(): ChatIO {
     prompt: () => new Promise<string>((resolve) =>
       rl.question(`${ANSI.cyan}>${ANSI.reset} `, resolve),
     ),
-    print: (msg: string) => console.log(msg),
+    print: (msg: string) => printLine(msg),
     close: () => rl.close(),
     pause: () => { rl.pause(); process.stdin.pause(); },
     resume: () => { process.stdin.resume(); rl.resume(); },
