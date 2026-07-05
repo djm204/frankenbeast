@@ -4,7 +4,6 @@ import {
   resolveSecurityConfig,
   buildMiddlewareChain,
   type SecurityConfig,
-  type SecurityProfile,
   SecurityConfigSchema,
 } from '../../../src/middleware/security-profiles.js';
 
@@ -15,6 +14,7 @@ describe('SecurityProfiles', () => {
       expect(s.injectionDetection).toBe(true);
       expect(s.piiMasking).toBe(true);
       expect(s.outputValidation).toBe(true);
+      expect(s.webhookSignaturePolicy).toBe('required');
       expect(s.requireApproval).toBe('all');
     });
 
@@ -23,14 +23,16 @@ describe('SecurityProfiles', () => {
       expect(s.injectionDetection).toBe(true);
       expect(s.piiMasking).toBe(true);
       expect(s.outputValidation).toBe(true);
+      expect(s.webhookSignaturePolicy).toBe('required');
       expect(s.requireApproval).toBe('destructive');
     });
 
-    it('permissive only enables output validation', () => {
+    it('permissive only relaxes LLM middleware and approvals', () => {
       const s = PROFILE_DEFAULTS.permissive;
       expect(s.injectionDetection).toBe(false);
       expect(s.piiMasking).toBe(false);
       expect(s.outputValidation).toBe(true);
+      expect(s.webhookSignaturePolicy).toBe('required');
       expect(s.requireApproval).toBe('none');
     });
   });
@@ -65,6 +67,14 @@ describe('SecurityProfiles', () => {
         customRules: [{ name: 'no-sql', pattern: 'DROP TABLE', action: 'block', target: 'request' }],
       });
       expect(config.customRules).toHaveLength(1);
+    });
+
+    it('allows an explicit local-only webhook signature override independent of profile', () => {
+      const config = resolveSecurityConfig('permissive', {
+        webhookSignaturePolicy: 'local-dev-unsigned',
+      });
+      expect(config.profile).toBe('permissive');
+      expect(config.webhookSignaturePolicy).toBe('local-dev-unsigned');
     });
   });
 
@@ -108,6 +118,7 @@ describe('SecurityProfiles', () => {
         injectionDetection: true,
         piiMasking: true,
         outputValidation: true,
+        webhookSignaturePolicy: 'required',
         requireApproval: 'destructive',
       };
       expect(SecurityConfigSchema.parse(config)).toEqual(config);
@@ -115,7 +126,13 @@ describe('SecurityProfiles', () => {
 
     it('rejects invalid profile', () => {
       expect(() =>
-        SecurityConfigSchema.parse({ profile: 'invalid', injectionDetection: true, piiMasking: true, outputValidation: true, requireApproval: 'all' }),
+        SecurityConfigSchema.parse({ profile: 'invalid', injectionDetection: true, piiMasking: true, outputValidation: true, webhookSignaturePolicy: 'required', requireApproval: 'all' }),
+      ).toThrow();
+    });
+
+    it('rejects invalid webhook signature policy', () => {
+      expect(() =>
+        SecurityConfigSchema.parse({ profile: 'standard', injectionDetection: true, piiMasking: true, outputValidation: true, webhookSignaturePolicy: 'disabled', requireApproval: 'destructive' }),
       ).toThrow();
     });
 
@@ -125,11 +142,25 @@ describe('SecurityProfiles', () => {
         injectionDetection: true,
         piiMasking: true,
         outputValidation: true,
+        webhookSignaturePolicy: 'local-dev-unsigned',
         requireApproval: 'all',
         allowedDomains: ['github.com'],
         maxTokenBudget: 50000,
       };
       expect(SecurityConfigSchema.parse(config)).toEqual(config);
+    });
+
+    it('rejects invalid custom rule regex patterns', () => {
+      const config: SecurityConfig = {
+        profile: 'standard',
+        injectionDetection: true,
+        piiMasking: true,
+        outputValidation: true,
+        webhookSignaturePolicy: 'required',
+        requireApproval: 'destructive',
+        customRules: [{ name: 'bad-regex', pattern: '[', action: 'block', target: 'request' }],
+      };
+      expect(() => SecurityConfigSchema.parse(config)).toThrow('pattern must be a valid regular expression');
     });
   });
 });

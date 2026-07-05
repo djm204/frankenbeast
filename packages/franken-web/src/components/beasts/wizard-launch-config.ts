@@ -18,12 +18,33 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
     config.executionMode = 'process';
   }
 
+  if (workflow?.workflowType === 'design-interview') {
+    if (typeof workflow.topic === 'string') {
+      config.goal = workflow.topic;
+    }
+    if (typeof workflow.outputPath === 'string') {
+      config.outputPath = workflow.outputPath;
+    }
+  }
+
   if (workflow?.workflowType === 'chunk-plan' && typeof workflow.docPath === 'string') {
     config.designDocPath = workflow.docPath;
   }
 
   if (workflow?.workflowType === 'chunk-plan' && typeof workflow.outputDir === 'string') {
     config.outputDir = workflow.outputDir;
+  }
+
+  if (workflow?.workflowType === 'martin-loop') {
+    if (typeof workflow.provider === 'string') {
+      config.provider = workflow.provider;
+    }
+    if (typeof workflow.objective === 'string') {
+      config.objective = workflow.objective;
+    }
+    if (typeof workflow.chunkDir === 'string') {
+      config.chunkDirectory = workflow.chunkDir;
+    }
   }
 
   return config;

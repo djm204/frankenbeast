@@ -19,6 +19,7 @@ export function createSecurityRoutes(deps: {
       config.injectionDetection !== defaults.injectionDetection ||
       config.piiMasking !== defaults.piiMasking ||
       config.outputValidation !== defaults.outputValidation ||
+      config.webhookSignaturePolicy !== defaults.webhookSignaturePolicy ||
       config.requireApproval !== defaults.requireApproval;
     return c.json({ ...config, isCustomized });
   });
@@ -46,7 +47,11 @@ export function createSecurityRoutes(deps: {
     ) as Partial<SecurityConfig>;
 
     if (parsed.profile) {
-      const resolved = resolveSecurityConfig(parsed.profile, parsed);
+      const current = deps.getSecurityConfig();
+      const resolved = resolveSecurityConfig(parsed.profile, {
+        webhookSignaturePolicy: current.webhookSignaturePolicy,
+        ...parsed,
+      });
       // Reject strict profile without allowedDomains
       if (
         resolved.profile === 'strict' &&

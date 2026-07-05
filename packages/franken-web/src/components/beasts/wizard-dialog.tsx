@@ -11,9 +11,15 @@ import { StepPrompts } from './steps/step-prompts';
 import { StepGit } from './steps/step-git';
 import { StepReview } from './steps/step-review';
 import { buildWizardLaunchConfig } from './wizard-launch-config';
+import {
+  WIZARD_SECTION_LABELS,
+  getFirstInvalidWizardStep,
+  validateWizardStep,
+  type WizardValidationErrors,
+} from './wizard-validation';
 import type { BeastContainerRuntimeStatus } from '../../lib/beast-api';
 
-const STEP_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git', 'Review'];
+const STEP_LABELS = [...WIZARD_SECTION_LABELS];
 
 interface WizardDialogProps {
   isOpen: boolean;
@@ -25,17 +31,57 @@ interface WizardDialogProps {
 }
 
 export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, launching, launchError }: WizardDialogProps) {
-  const { wizardStep, highestCompleted, wizardMode, nextStep, prevStep, setWizardStep, toggleWizardMode, stepValues } =
-    useBeastStore();
+  const {
+    wizardStep,
+    highestCompleted,
+    wizardMode,
+    nextStep,
+    prevStep,
+    setWizardStep,
+    toggleWizardMode,
+    stepValues,
+    setValidationErrors,
+    clearValidationErrors,
+  } = useBeastStore();
 
   const isLastStep = wizardStep === STEP_LABELS.length - 1;
   const isFirstStep = wizardStep === 0;
+  const currentValidationErrors = validateWizardStep(wizardStep, stepValues);
+  const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
+  const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues);
+  const formIsValid = Object.keys(formValidationErrors).length === 0;
+  const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues);
+
+  function syncValidationErrors(step: number, errors: WizardValidationErrors) {
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(step, errors);
+    } else {
+      clearValidationErrors(step);
+    }
+  }
 
   function buildAndLaunch() {
+    const firstInvalidStep = getFirstInvalidWizardStep(stepValues);
+    if (firstInvalidStep !== null) {
+      for (let i = 0; i < STEP_LABELS.length - 1; i += 1) {
+        syncValidationErrors(i, validateWizardStep(i, stepValues));
+      }
+      if (wizardMode === 'wizard') {
+        setWizardStep(firstInvalidStep);
+      }
+      return;
+    }
+
+    clearValidationErrors(wizardStep);
     onLaunch(buildWizardLaunchConfig(stepValues));
   }
 
   function handleNext() {
+    syncValidationErrors(wizardStep, currentValidationErrors);
+    if (!currentStepIsValid) {
+      return;
+    }
+
     if (isLastStep) {
       buildAndLaunch();
     } else {
@@ -56,6 +102,8 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
       default: return null;
     }
   }
+
+  const primaryActionDisabled = Boolean(launching) || !currentStepIsValid;
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -99,6 +147,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               steps={STEP_LABELS}
               currentStep={wizardStep}
               highestCompleted={highestCompleted}
+              stepStatuses={stepStatuses}
               onStepClick={setWizardStep}
             />
           )}
@@ -128,6 +177,12 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
             >
               {launching ? 'Launching agent. Please wait.' : ''}
             </div>
+            {wizardMode === 'wizard' && !launchError && !currentStepIsValid && (
+              <ValidationSummary stepLabel={STEP_LABELS[wizardStep] ?? 'Current step'} errors={currentValidationErrors} />
+            )}
+            {wizardMode === 'form' && !launchError && !formIsValid && (
+              <ValidationSummary stepLabel="Form View" errors={formValidationErrors} />
+            )}
             {launchError && (
               <div
                 role="alert"
@@ -152,9 +207,9 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                   <button
                     type="button"
                     onClick={handleNext}
-                    disabled={launching}
+                    disabled={primaryActionDisabled}
                     className="px-6 py-2.5 rounded-lg text-sm font-medium transition-colors
-                      bg-beast-accent text-beast-bg hover:bg-beast-accent-strong disabled:opacity-50"
+                      bg-beast-accent text-beast-bg hover:bg-beast-accent-strong disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {launching ? 'Launching...' : isLastStep ? 'Launch Agent' : wizardStep === STEP_LABELS.length - 2 ? 'Review' : 'Next'}
                   </button>
@@ -179,6 +234,46 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function ValidationSummary({ stepLabel, errors }: { stepLabel: string; errors: WizardValidationErrors }) {
+  return (
+    <div
+      role="alert"
+      className="rounded-lg border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200"
+    >
+      <p className="font-medium">Fix {stepLabel} before continuing:</p>
+      <ul className="mt-1 list-disc pl-5">
+        {Object.values(errors).map((message) => (
+          <li key={message}>{message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function buildStepStatuses(
+  wizardStep: number,
+  highestCompleted: number,
+  stepValues: Record<number, Record<string, unknown> | undefined>,
+): Record<number, 'complete' | 'error' | 'current' | 'locked'> {
+  const statuses: Record<number, 'complete' | 'error' | 'current' | 'locked'> = {};
+
+  for (let i = 0; i < STEP_LABELS.length; i += 1) {
+    const reachable = i === wizardStep || i <= highestCompleted;
+    if (!reachable) {
+      statuses[i] = 'locked';
+      continue;
+    }
+
+    statuses[i] = Object.keys(validateWizardStep(i, stepValues)).length > 0
+      ? 'error'
+      : i === wizardStep
+        ? 'current'
+        : 'complete';
+  }
+
+  return statuses;
 }
 
 function FormSection({ title, children }: { title: string; children: ReactNode }) {

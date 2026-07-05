@@ -73,6 +73,7 @@ describe('Chat HTTP Routes', () => {
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:5173');
     expect(preflight.headers.get('access-control-allow-headers')).toContain('authorization');
+    expect(preflight.headers.get('access-control-allow-credentials')).toBe('true');
 
     const response = await app.request('/v1/chat/sessions', {
       headers: {
@@ -94,6 +95,19 @@ describe('Chat HTTP Routes', () => {
       allowedOrigins: ['http://127.0.0.1:5173'],
     });
 
+    const preflight = await app.request('/v1/chat/sessions', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type',
+      },
+    });
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBeNull();
+    expect(preflight.headers.get('access-control-allow-credentials')).toBeNull();
+
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'https://evil.example',
@@ -103,6 +117,7 @@ describe('Chat HTTP Routes', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull();
   });
 
   it('does not treat wildcard CORS origins as credentialed allowlists', async () => {
@@ -739,6 +754,21 @@ describe('Chat HTTP Routes', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error.code).toBe('MALFORMED_JSON');
+  });
+
+  it('enforces request size limits before parsing oversized chat requests', async () => {
+    const res = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'p'.repeat(20_000) }),
+    });
+
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.error).toMatchObject({
+      code: 'PAYLOAD_TOO_LARGE',
+      details: { maxSize: 16 * 1024 },
+    });
   });
 
   it('enforces request size limits', async () => {

@@ -703,6 +703,124 @@ describe('ProcessBeastExecutor', () => {
       });
     });
 
+    it('redacts secrets from failed attempt stderr tails in repository events and eventBus publishes', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const appendSpy = vi.spyOn(logs, 'append');
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      await executor.start(run, martinLoopDefinition);
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+
+      const standaloneOpenAiKey = `sk-${'standaloneproviderkey1234567890'}`;
+      const githubToken = `ghp_${'abcdefghijklmnopqrstuvwxyz123456'}`;
+      const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
+      const geminiToken = `AIza${'abcdefghijklmnopqrstuvwxyz123456789'}`;
+
+      cb.onStderr('api_key=sk-live-secret-value password=hunter2');
+      cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-secret-value');
+      cb.onStderr('Authorization: Bot discord-bot-token-value');
+      cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
+      cb.onStderr(`Slack token ${slackToken}`);
+      cb.onStderr(`Google token ${geminiToken}`);
+      cb.onStderr('{"password":"json-password","client_secret":"json-secret","botToken":"camel-token"}');
+      cb.onStderr('{"password":"abc\\"def","accessToken":"camel-access-token"}');
+      cb.onStderr('redis://:cachepass@localhost:6379/0');
+      cb.onStderr('{"Authorization":"Basic basic-token-value"}');
+      cb.onStderr("headers: {'Authorization': 'Bot object-token-value'}");
+      cb.onStderr('jwt eyJhbG...cret');
+      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
+      cb.onExit(1, null);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const failEvent = repo.listEvents(run.id).find((e) => e.type === 'attempt.failed');
+      expect(failEvent).toBeDefined();
+      expect(failEvent!.payload).toMatchObject({
+        exitCode: 1,
+        lastStderrLines: [
+          'api_key=[REDACTED] password=[REDACTED]',
+          'OPENAI_API_KEY=[REDACTED] CLIENT_SECRET=[REDACTED]',
+          'Authorization: Bot [REDACTED]',
+          'Invalid API key: [REDACTED] and [REDACTED]',
+          'Slack token [REDACTED]',
+          'Google token [REDACTED]',
+          '{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}',
+          '{"password":[REDACTED],"accessToken":[REDACTED]}',
+          'redis://:[REDACTED]@localhost:6379/0',
+          '{"Authorization":"Basic [REDACTED]"}',
+          "headers: {'Authorization': 'Bot [REDACTED]'}",
+          'jwt eyJhbG...cret',
+          'posting to [REDACTED]',
+        ],
+      });
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        expect.any(String),
+        'stderr',
+        'api_key=[REDACTED] password=[REDACTED]',
+        expect.any(String),
+      );
+      const publishedLogLines = publishSpy.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type === 'run.log' && event.data.stream === 'stderr')
+        .map((event) => event.data.line);
+      expect(publishedLogLines).toContain('api_key=[REDACTED] password=[REDACTED]');
+      expect(publishedLogLines).toContain('{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}');
+      const serializedPersistedEvent = JSON.stringify(failEvent);
+      expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPersistedEvent).not.toContain('hunter2');
+      expect(serializedPersistedEvent).not.toContain('client-secret-value');
+      expect(serializedPersistedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
+      expect(serializedPersistedEvent).not.toContain(githubToken);
+      expect(serializedPersistedEvent).not.toContain(slackToken);
+      expect(serializedPersistedEvent).not.toContain(geminiToken);
+      expect(serializedPersistedEvent).not.toContain('json-password');
+      expect(serializedPersistedEvent).not.toContain('json-secret');
+      expect(serializedPersistedEvent).not.toContain('camel-token');
+      expect(serializedPersistedEvent).not.toContain('abc\\"def');
+      expect(serializedPersistedEvent).not.toContain('camel-access-token');
+      expect(serializedPersistedEvent).not.toContain('cachepass');
+      expect(serializedPersistedEvent).not.toContain('basic-token-value');
+      expect(serializedPersistedEvent).not.toContain('object-token-value');
+      expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
+      expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
+
+      const publishedFailure = publishSpy.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type === 'run.event')
+        .find((event) => ((event.data as { event?: { type?: string } }).event?.type === 'attempt.failed')) as
+        | { data: { event: { payload: unknown } } }
+        | undefined;
+      expect(publishedFailure).toBeDefined();
+      expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
+      const serializedPublishedEvent = JSON.stringify(publishedFailure);
+      expect(serializedPublishedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPublishedEvent).not.toContain('hunter2');
+      expect(serializedPublishedEvent).not.toContain('client-secret-value');
+      expect(serializedPublishedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
+      expect(serializedPublishedEvent).not.toContain(githubToken);
+      expect(serializedPublishedEvent).not.toContain(slackToken);
+      expect(serializedPublishedEvent).not.toContain(geminiToken);
+      expect(serializedPublishedEvent).not.toContain('json-password');
+      expect(serializedPublishedEvent).not.toContain('json-secret');
+      expect(serializedPublishedEvent).not.toContain('camel-token');
+      expect(serializedPublishedEvent).not.toContain('abc\\"def');
+      expect(serializedPublishedEvent).not.toContain('camel-access-token');
+      expect(serializedPublishedEvent).not.toContain('cachepass');
+      expect(serializedPublishedEvent).not.toContain('basic-token-value');
+      expect(serializedPublishedEvent).not.toContain('object-token-value');
+      expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
+      expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
+    });
+
     it('marks attempt as failed on signal kill', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

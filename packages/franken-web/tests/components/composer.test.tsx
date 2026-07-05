@@ -33,6 +33,34 @@ describe('Composer', () => {
     expect(button).toHaveProperty('disabled', true);
   });
 
+  it('explains why dispatch is disabled and marks the textarea for assistive tech', () => {
+    render(<Composer onSend={vi.fn()} disabled={true} connectionStatus="connected" status="streaming" />);
+
+    const input = screen.getByRole('textbox');
+    expect(input.getAttribute('aria-disabled')).toBe('true');
+    expect(input.getAttribute('aria-describedby')).toContain('composer-help');
+    expect(screen.getByText('Dispatch is disabled while Frankenbeast is responding.')).toBeTruthy();
+  });
+
+  it('announces connection and session states in a live status region', () => {
+    render(<Composer onSend={vi.fn()} disabled={false} connectionStatus="reconnecting" status="idle" />);
+
+    const liveRegion = screen.getByRole('status');
+    expect(liveRegion.getAttribute('aria-live')).toBe('polite');
+    expect(liveRegion.textContent).toContain('Reconnecting to chat');
+    expect(liveRegion.textContent).toContain('Ready to dispatch');
+  });
+
+  it('shows a reconnect affordance when the chat is disconnected', () => {
+    const onReconnect = vi.fn();
+    render(<Composer onSend={vi.fn()} onReconnect={onReconnect} disabled={false} connectionStatus="disconnected" status="idle" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try reconnecting' }));
+
+    expect(onReconnect).toHaveBeenCalledOnce();
+    expect(screen.getByText('Live chat is disconnected. Try reconnecting before sending time-sensitive work.')).toBeTruthy();
+  });
+
   it('does not call onSend with empty input', () => {
     const onSend = vi.fn();
     render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);

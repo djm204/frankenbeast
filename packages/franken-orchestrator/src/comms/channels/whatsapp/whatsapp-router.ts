@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { whatsappSignatureMiddleware } from '../../security/whatsapp-signature.js';
 import { WhatsAppWebhookSchema } from './whatsapp-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
@@ -9,7 +9,7 @@ export interface WhatsAppRouterOptions {
   sessionMapper: SessionMapper;
   appSecret: string;
   verifyToken: string;
-  verifySignature?: boolean;
+  verifySignature?: boolean | ((c: Context) => boolean);
 }
 
 export function whatsappRouter(options: WhatsAppRouterOptions) {
@@ -29,9 +29,13 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
   });
 
   // Incoming messages: Meta sends a POST request with signatures
-  const whatsappMiddleware = options.verifySignature !== false
-    ? whatsappSignatureMiddleware({ appSecret })
-    : async (_c: any, next: () => Promise<void>) => next();
+  const verify = whatsappSignatureMiddleware({ appSecret });
+  const whatsappMiddleware = async (c: Context, next: Next) => {
+    if (!shouldVerifySignature(options.verifySignature, c)) {
+      return next();
+    }
+    return verify(c, next);
+  };
   app.post('/webhook', whatsappMiddleware, async (c) => {
     const body = await c.req.json();
     const parsed = WhatsAppWebhookSchema.parse(body);
@@ -78,4 +82,11 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
   });
 
   return app;
+}
+
+function shouldVerifySignature(verifySignature: WhatsAppRouterOptions['verifySignature'], c: Context): boolean {
+  if (typeof verifySignature === 'function') {
+    return verifySignature(c);
+  }
+  return verifySignature !== false;
 }

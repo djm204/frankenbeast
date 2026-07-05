@@ -82,6 +82,126 @@ describe('commsRoutes', () => {
     expect(res.status).toBe(404);
   });
 
+  it('requires webhook signatures by default even when the security profile is permissive elsewhere', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+    });
+
+    const res = await app.request('/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Missing security headers' });
+  });
+
+  it('allows unsigned webhooks only for the explicit loopback development policy', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+
+    const local = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(local.status).toBe(200);
+    expect(await local.json()).toEqual({ challenge: 'ok' });
+
+    const external = await app.request('https://example.com/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(external.status).toBe(401);
+    expect(await external.json()).toEqual({ error: 'Missing security headers' });
+
+    const trustedIpv6Loopback = await app.request('http://[::1]/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ipv6-ok' }),
+    });
+    expect(trustedIpv6Loopback.status).toBe(200);
+    expect(await trustedIpv6Loopback.json()).toEqual({ challenge: 'ipv6-ok' });
+  });
+
+  it('requires signatures when trusted remote address or proxy headers show external traffic', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+
+    const spoofedHost = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-frankenbeast-remote-address': '203.0.113.10',
+      },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
+    });
+    expect(spoofedHost.status).toBe(401);
+    expect(await spoofedHost.json()).toEqual({ error: 'Missing security headers' });
+
+    const proxiedExternal = await app.request('https://public.example/webhooks/slack/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-frankenbeast-remote-address': '127.0.0.1',
+        'x-forwarded-for': '203.0.113.10',
+      },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
+    });
+    expect(proxiedExternal.status).toBe(401);
+    expect(await proxiedExternal.json()).toEqual({ error: 'Missing security headers' });
+  });
+
+  it('re-evaluates webhook signature policy for each request', async () => {
+    let webhookSignaturePolicy: 'required' | 'local-dev-unsigned' = 'local-dev-unsigned';
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+      getWebhookSignaturePolicy: () => webhookSignaturePolicy,
+    });
+
+    const localUnsigned = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(localUnsigned.status).toBe(200);
+
+    webhookSignaturePolicy = 'required';
+    const nowRequired = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
+    });
+    expect(nowRequired.status).toBe(401);
+    expect(await nowRequired.json()).toEqual({ error: 'Missing security headers' });
+  });
+
   it('throws when runtime is not provided', () => {
     expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });

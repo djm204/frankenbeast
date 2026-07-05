@@ -14,6 +14,7 @@ describe('handleSecurityCommand()', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('Injection Detection'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('PII Masking'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('Output Validation'));
+    expect(print).toHaveBeenCalledWith('  Webhook Signature Policy: required');
   });
 
   it('defaults to standard profile when none provided', async () => {
@@ -89,7 +90,7 @@ describe('handleSecurityCommand()', () => {
 
     await handleSecurityCommand({
       action: 'status',
-      currentSecurity: { profile: 'permissive', piiMasking: true },
+      currentSecurity: { profile: 'permissive', piiMasking: true, webhookSignaturePolicy: 'local-dev-unsigned' },
       print,
     });
 
@@ -97,6 +98,7 @@ describe('handleSecurityCommand()', () => {
     expect(print).toHaveBeenCalledWith('  Injection Detection: off');
     expect(print).toHaveBeenCalledWith('  PII Masking: on');
     expect(print).toHaveBeenCalledWith('  Output Validation: on');
+    expect(print).toHaveBeenCalledWith('  Webhook Signature Policy: local-dev-unsigned');
   });
 
   it('preserves existing config and security settings when setting profile', async () => {

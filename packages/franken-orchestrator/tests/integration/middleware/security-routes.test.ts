@@ -56,6 +56,26 @@ describe('Security API routes', () => {
     expect(body.requireApproval).toBe('none');
   });
 
+  it('PATCH /api/security with profile preserves explicit webhook signature policy', async () => {
+    const app = createTestApp();
+    const policyRes = await app.request('/api/security', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhookSignaturePolicy: 'local-dev-unsigned' }),
+    });
+    expect(policyRes.status).toBe(200);
+
+    const profileRes = await app.request('/api/security', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: 'permissive' }),
+    });
+    expect(profileRes.status).toBe(200);
+    const body = await profileRes.json();
+    expect(body.profile).toBe('permissive');
+    expect(body.webhookSignaturePolicy).toBe('local-dev-unsigned');
+  });
+
   it('PATCH /api/security with individual override', async () => {
     const app = createTestApp();
     const res = await app.request('/api/security', {

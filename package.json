@@ -1,6 +1,6 @@
 {
   "name": "frankenbeast",
-  "version": "0.40.5",
+  "version": "0.41.0",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -31,6 +31,8 @@
   },
   "overrides": {
     "esbuild": "^0.28.1",
-    "vite": "^8.1.3"
+    "hono": "^4.12.27",
+    "vite": "^8.1.3",
+    "ws": "^8.21.0"
   }
 }
