@@ -161,6 +161,40 @@ describe('AnalyticsPage', () => {
     });
   });
 
+  it('keeps prior metric values marked stale when a filtered summary refresh fails', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchSummary)
+      .mockResolvedValueOnce({
+        totalEvents: 3,
+        uniqueSessions: 2,
+        denialCount: 1,
+        errorCount: 1,
+        failureCount: 0,
+        securityDetectionCount: 1,
+        tokenTotals: { prompt: 100, completion: 50, total: 150 },
+        costTotals: { usd: 0.25 },
+      })
+      .mockRejectedValueOnce(new Error('summary timeout'));
+    vi.mocked(client.fetchSessions)
+      .mockResolvedValueOnce([
+        { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+      ]);
+
+    render(<AnalyticsPage client={client} />);
+    await screen.findByText('Metrics last updated for Last 24h.');
+
+    fireEvent.change(screen.getByLabelText('Session'), { target: { value: 'session-a' } });
+
+    expect(await screen.findByText('summary timeout')).toBeTruthy();
+    expect(screen.getByText('Metric values are still from Last 24h; refresh for Session session-a · Last 24h failed or is incomplete.')).toBeTruthy();
+    expect(screen.getByText('Showing previous metric values until refreshed.')).toBeTruthy();
+    expect(screen.getByLabelText('Analytics summary').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByText('3')).toBeTruthy();
+  });
+
   it('navigates event pages and exposes disabled pagination states', async () => {
     const client = mockClient();
     let resolveSecondPage!: (page: AnalyticsEventPage) => void;

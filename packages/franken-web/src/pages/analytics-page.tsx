@@ -48,7 +48,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isOverviewLoading, setIsOverviewLoading] = useState(true);
-  const [overviewLastUpdatedFilter, setOverviewLastUpdatedFilter] = useState<string | null>(null);
+  const [summaryFilter, setSummaryFilter] = useState<string | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(true);
   const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
@@ -73,12 +73,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
         .map((result) => result.reason instanceof Error ? result.reason.message : 'Unable to load analytics.');
       if (summaryResult.status === 'fulfilled') {
         setSummary(summaryResult.value);
+        setSummaryFilter(requestedFilterLabel);
       }
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
       }
       setOverviewError(errors.length > 0 ? errors.join('; ') : null);
-      setOverviewLastUpdatedFilter(requestedFilterLabel);
       setIsOverviewLoading(false);
     });
 
@@ -119,13 +119,16 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const canGoNext = currentPage < totalPages && !isEventsLoading;
   const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
   const currentFilterLabel = describeFilters(filters);
-  const hasStaleOverview = isOverviewLoading && (summary !== null || sessions.length > 0);
+  const isSummaryStale = summary !== null && summaryFilter !== null && summaryFilter !== currentFilterLabel;
+  const hasStaleOverview = (isOverviewLoading && summary !== null) || isSummaryStale;
   const overviewStatus = isOverviewLoading
     ? hasStaleOverview
       ? `Updating metrics for ${currentFilterLabel}...`
       : `Loading metrics for ${currentFilterLabel}...`
-    : overviewLastUpdatedFilter
-      ? `Metrics last updated for ${overviewLastUpdatedFilter}.`
+    : isSummaryStale && summaryFilter
+      ? `Metric values are still from ${summaryFilter}; refresh for ${currentFilterLabel} failed or is incomplete.`
+      : summaryFilter
+        ? `Metrics last updated for ${summaryFilter}.`
       : null;
   const activityEvents = useMemo(
     () => events.filter((event) => event.outcome === 'approved' && event.source !== 'governor'),
