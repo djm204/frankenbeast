@@ -74,6 +74,28 @@ describe('Composer', () => {
     expect(onSend).toHaveBeenCalledWith('keyboard send');
   });
 
+  it('does not send on Ctrl+Enter while dispatch is disabled', () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} disabled={true} connectionStatus="connected" status="sending" />);
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'blocked keyboard send' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('does not submit the form while dispatch is disabled', () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} disabled={true} connectionStatus="connected" status="sending" />);
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'blocked form send' } });
+    fireEvent.submit(input.closest('form')!);
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('submit button has a label', () => {
     render(<Composer onSend={vi.fn()} disabled={false} connectionStatus="connected" status="idle" />);
     const button = screen.getByRole('button');
