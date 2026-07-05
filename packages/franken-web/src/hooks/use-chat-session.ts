@@ -282,19 +282,27 @@ function preserveLocalRecoveryMessages(
     unmatchedSnapshotContentCounts.set(key, (unmatchedSnapshotContentCounts.get(key) ?? 0) + 1);
   }
 
+  const consumeSnapshotMatch = (message: ChatMessage): boolean => {
+    const key = `${message.role}\u0000${message.content}`;
+    const snapshotMatchCount = unmatchedSnapshotContentCounts.get(key) ?? 0;
+    if (snapshotMatchCount === 0) {
+      return false;
+    }
+    if (snapshotMatchCount === 1) {
+      unmatchedSnapshotContentCounts.delete(key);
+    } else {
+      unmatchedSnapshotContentCounts.set(key, snapshotMatchCount - 1);
+    }
+    return true;
+  };
+
   const localRecoveryMessages = current.flatMap((message): ChatMessage[] => {
     if (snapshotIds.has(message.id)) {
+      consumeSnapshotMatch(message);
       return [];
     }
 
-    const key = `${message.role}\u0000${message.content}`;
-    const snapshotMatchCount = unmatchedSnapshotContentCounts.get(key) ?? 0;
-    if (snapshotMatchCount > 0) {
-      if (snapshotMatchCount === 1) {
-        unmatchedSnapshotContentCounts.delete(key);
-      } else {
-        unmatchedSnapshotContentCounts.set(key, snapshotMatchCount - 1);
-      }
+    if (consumeSnapshotMatch(message)) {
       if (message.role === 'user' && message.receipt === 'failed') {
         clearedFailedDrafts.push(message.content);
       }

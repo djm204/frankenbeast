@@ -438,6 +438,62 @@ describe('useChatSession', () => {
     expect(result.current.messages).toContainEqual(expect.objectContaining({ id: secondId }));
   });
 
+  it('keeps failed retryable duplicates when snapshots already account for prior matching messages', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let firstSend!: Promise<void>;
+    act(() => {
+      firstSend = result.current.send('repeatable prompt');
+    });
+    const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+    });
+    await act(async () => {
+      await firstSend;
+    });
+
+    let secondSend!: Promise<void>;
+    act(() => {
+      secondSend = result.current.send('repeatable prompt');
+    });
+    const secondId = (JSON.parse(socket.sent[1] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.shutdown();
+    });
+    await expect(secondSend).rejects.toThrow('Connection closed');
+
+    const reconnect = MockWebSocket.instances[1]!;
+    act(() => {
+      reconnect.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [{ id: firstId, role: 'user', content: 'repeatable prompt', timestamp: '2026-03-09T00:00:03Z' }],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: secondId,
+      content: 'repeatable prompt',
+      receipt: 'failed',
+      canRetry: true,
+    }));
+    expect(result.current.clearedFailedDraft).toBeUndefined();
+  });
+
   it('drops failed placeholders when reconnect snapshots include the prompt', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
