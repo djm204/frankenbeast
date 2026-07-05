@@ -439,7 +439,8 @@ export class CliLlmAdapter implements IAdapter {
         // Don't keep the event loop alive waiting on the hard-kill fallback;
         // short-lived invocations should exit promptly after a timeout reject.
         hardKillTimer.unref();
-        settle(() => reject(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`)));
+        const error = Object.assign(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`), { code: 'ETIMEDOUT' });
+        settle(() => reject(error));
       }, this.opts.timeoutMs);
 
       child.on('close', (code) => {

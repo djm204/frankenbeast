@@ -388,7 +388,7 @@ export class CliSkillExecutor {
         );
         config.martin?.onProviderAttempt?.(provider, iteration, renderedPrompt);
       },
-      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
+      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset' | 'spawn-error') => {
         this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
         config.martin?.onProviderSwitch?.(fromProvider, toProvider, reason);
       },

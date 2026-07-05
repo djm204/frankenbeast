@@ -26,6 +26,7 @@ interface MockChildOpts {
   stderr?: string;
   exitCode?: number;
   hang?: boolean;
+  error?: Error & { code?: string };
 }
 
 /** Create a mock ChildProcess that emits stdout/stderr then closes. */
@@ -38,7 +39,11 @@ function mockChild(opts: MockChildOpts): ChildProcess {
     pid: 12345,
   }) as unknown as ChildProcess;
 
-  if (!opts.hang) {
+  if (opts.error) {
+    process.nextTick(() => {
+      child.emit('error', opts.error);
+    });
+  } else if (!opts.hang) {
     process.nextTick(() => {
       if (opts.stdout) (child.stdout as EventEmitter).emit('data', Buffer.from(opts.stdout));
       if (opts.stderr) (child.stderr as EventEmitter).emit('data', Buffer.from(opts.stderr));
@@ -370,6 +375,55 @@ describe('MartinLoop', () => {
     // Second call should use codex provider's command
     const secondCallArgs = mockSpawn.mock.calls[1] as unknown[];
     expect(secondCallArgs[0]).toBe('codex');
+  });
+
+  it('switches to the next configured provider when the active provider binary is missing', async () => {
+    const onProviderSwitch = vi.fn();
+
+    queueMock({ error: Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }) });
+    queueMock({ stdout: 'Codex did it!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      providers: ['claude', 'codex'],
+      maxIterations: 2,
+      onProviderSwitch,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    expect((mockSpawn.mock.calls[0] as unknown[])[0]).toBe('claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+    expect(onProviderSwitch).toHaveBeenCalledWith('claude', 'codex', 'spawn-error');
+  });
+
+  it('sleeps and retries the original provider when a rate-limited primary is followed by a missing fallback CLI', async () => {
+    const sleepFn = vi.fn(async () => undefined);
+    const onSleep = vi.fn();
+    const onProviderSwitch = vi.fn();
+
+    queueMock({ stderr: 'rate limit exceeded retry-after: 1', exitCode: 1 });
+    queueMock({ error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }) });
+    queueMock({ stdout: 'Claude recovered!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      providers: ['claude', 'codex'],
+      maxIterations: 3,
+      _sleepFn: sleepFn,
+      onSleep,
+      onProviderSwitch,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(3);
+    expect((mockSpawn.mock.calls[0] as unknown[])[0]).toBe('claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+    expect((mockSpawn.mock.calls[2] as unknown[])[0]).toBe('claude');
+    expect(onSleep).toHaveBeenCalledWith(1_000, 'claude parseRetryAfter');
+    expect(sleepFn).toHaveBeenCalledWith(1_000);
+    expect(onProviderSwitch).toHaveBeenCalledWith('claude', 'codex', 'rate-limit');
+    expect(onProviderSwitch).toHaveBeenCalledWith('codex', 'claude', 'post-sleep-reset');
   });
 
   // ── 10. Strips CLAUDE* env vars for claude provider ──
