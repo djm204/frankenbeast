@@ -221,7 +221,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
 
   const clientRef = useRef(new ChatApiClient(opts.baseUrl));
-  // Refresh the client when the baseUrl changes; useRef alone would pin the original.
+  // Refresh the client when the baseUrl changes; useRef alone would pin the
+  // original client after a proxy/origin switch.
   useEffect(() => {
     clientRef.current = new ChatApiClient(opts.baseUrl);
   }, [opts.baseUrl]);

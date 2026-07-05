@@ -38,11 +38,12 @@ The frontend uses same-origin API paths at runtime:
 
 - Browser requests target `/v1/*` and `/api/*` on the dashboard origin.
 - During `dev:chat`, `dev`, and `preview`, Vite proxies those paths to the backend and injects the operator token server-side only.
+- The browser chat client never accepts or attaches a long-lived operator bearer token; authentication must come from the same-origin server/BFF layer or scoped HttpOnly/SameSite session cookies.
 - Production/static deployments must serve the dashboard behind the orchestrator or another server-side BFF/reverse proxy that terminates TLS and forwards same-origin API paths; do not configure browser-readable backend URLs or tokens.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
-If you use a non-default backend port:
+If you use a non-default backend port in local development, set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242

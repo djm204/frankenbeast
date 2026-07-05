@@ -15,6 +15,7 @@ describe('vite dev proxy configuration', () => {
   });
 
   it('injects the operator token only in the server-side dev proxy after an origin check', () => {
+    expect(CONFIG_SOURCE).toContain("'/v1': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken, { ws: true })");
     expect(CONFIG_SOURCE).toContain('command === \'serve\'');
     expect(CONFIG_SOURCE).toContain('assertNoBrowserOperatorToken(loadProxyEnv(loadEnv, mode, repoRootDir, process.cwd()))');
     expect(CONFIG_SOURCE).toContain('await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');
@@ -22,6 +23,7 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).toContain("req.headers['sec-fetch-site']");
     expect(CONFIG_SOURCE).toContain('proxyReq.setHeader');
     expect(CONFIG_SOURCE).not.toContain('headers: { authorization');
+    expect(CONFIG_SOURCE).not.toContain('operatorProxy(');
   });
 
   it('allows browser-proven same-origin requests and requires loopback for unmarked requests', () => {
