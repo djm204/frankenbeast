@@ -417,12 +417,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onerror = () => {
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
+      }
       setConnectionStatus('error');
       setStatus('error');
     };
 
     socket.onclose = () => {
       socketRef.current = null;
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
+      }
       setConnectionStatus('disconnected');
       if (shouldReconnect) {
         setSocketGeneration((current) => current + 1);

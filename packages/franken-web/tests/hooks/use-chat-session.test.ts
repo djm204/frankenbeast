@@ -339,6 +339,44 @@ describe('useChatSession', () => {
     });
   });
 
+  it('clears approval resolving state after websocket interruption so users can retry', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(result.current.approvalResolving).toBe(true);
+
+    act(() => socket.shutdown());
+
+    await waitFor(() => {
+      expect(result.current.approvalResolving).toBe(false);
+      expect(result.current.approvalError).toContain('Connection interrupted');
+    });
+
+    await act(async () => {
+      await result.current.approve(false);
+    });
+
+    expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
+  });
+
   it('preserves streamed messages after HTTP approval fallback', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
