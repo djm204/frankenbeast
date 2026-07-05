@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from '../../../src/http/routes/dashboard-routes.js';
+
+let ticketStore: SseConnectionTicketStore | undefined;
 
 function createMockDeps(): DashboardRouteDeps {
   return {
@@ -32,10 +35,17 @@ function createMockDeps(): DashboardRouteDeps {
     getProviders: vi.fn().mockReturnValue([
       { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
+    operatorToken: 'dashboard-token',
+    ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
 }
 
 describe('dashboard routes', () => {
+  afterEach(() => {
+    ticketStore?.destroy();
+    ticketStore = undefined;
+  });
+
   describe('GET /', () => {
     it('returns aggregated dashboard state', async () => {
       const deps = createMockDeps();
@@ -86,18 +96,72 @@ describe('dashboard routes', () => {
   });
 
   describe('GET /events', () => {
-    it('returns SSE content-type', async () => {
+    it('POST /events/ticket returns a short-lived stream ticket', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events/ticket', { method: 'POST' });
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ticket?: string };
+      expect(body.ticket).toBeTruthy();
+    });
+
+    it('rejects raw streams without a ticket', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
       const res = await app.request('/events');
 
+      expect(res.status).toBe(401);
+    });
+
+    it('preserves unauthenticated local-dev streams when no operator token is configured', async () => {
+      const deps = createMockDeps();
+      deps.operatorToken = undefined;
+      deps.ticketStore = undefined;
+      const app = createDashboardRoutes(deps);
+
+      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+      expect(ticketRes.status).toBe(200);
+      expect(await ticketRes.json()).toEqual({ ticket: null });
+
+      const res = await app.request('/events');
       expect(res.headers.get('content-type')).toContain('text/event-stream');
+      await res.body?.cancel();
+    });
+
+    it('returns SSE content-type with a valid ticket', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+      const { ticket } = await ticketRes.json() as { ticket: string };
+
+      const res = await app.request(`/events?ticket=${ticket}`);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      await res.body?.cancel();
+    });
+
+    it('rejects a reused stream ticket', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+      const { ticket } = await ticketRes.json() as { ticket: string };
+
+      const first = await app.request(`/events?ticket=${ticket}`);
+      expect(first.status).toBe(200);
+      await first.body?.cancel();
+
+      const second = await app.request(`/events?ticket=${ticket}`);
+      expect(second.status).toBe(401);
     });
 
     it('sends initial snapshot event in the stream', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const res = await app.request('/events');
+      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+      const { ticket } = await ticketRes.json() as { ticket: string };
+      const res = await app.request(`/events?ticket=${ticket}`);
 
       // Read partial stream — the SSE connection stays open, so we read
       // chunks until we have enough data for the initial snapshot.
@@ -133,7 +197,9 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const res = await app.request('/events');
+        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+        const { ticket } = await ticketRes.json() as { ticket: string };
+        const res = await app.request(`/events?ticket=${ticket}`);
 
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
@@ -167,7 +233,9 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const res = await app.request('/events');
+        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
+        const { ticket } = await ticketRes.json() as { ticket: string };
+        const res = await app.request(`/events?ticket=${ticket}`);
         const reader = res.body!.getReader();
 
         await reader.read();

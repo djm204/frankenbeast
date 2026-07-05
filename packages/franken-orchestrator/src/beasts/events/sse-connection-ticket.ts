@@ -19,6 +19,7 @@ export class SseConnectionTicketStore {
     this.ttlMs = options?.ttlMs ?? 30_000;
     const cleanupMs = options?.cleanupIntervalMs ?? 60_000;
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
+    this.cleanupInterval.unref?.();
   }
 
   issue(token: string): string {

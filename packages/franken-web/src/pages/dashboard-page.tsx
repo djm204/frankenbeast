@@ -21,8 +21,17 @@ export function DashboardPage({ client }: DashboardPageProps) {
     client.fetchSnapshot()
       .then((snap) => { if (!stale) setSnapshot(snap); })
       .catch(console.error);
-    const unsub = client.subscribeToDashboard((snap) => { if (!stale) setSnapshot(snap); });
-    return () => { stale = true; unsub(); };
+    let unsub: (() => void) | undefined;
+    client.subscribeToDashboard((snap) => { if (!stale) setSnapshot(snap); })
+      .then((nextUnsub) => {
+        if (stale) {
+          nextUnsub();
+          return;
+        }
+        unsub = nextUnsub;
+      })
+      .catch(console.error);
+    return () => { stale = true; unsub?.(); };
   }, [client]); // eslint-disable-line react-hooks/exhaustive-deps — setSnapshot is stable (Zustand v5)
 
   if (loading) return <div className="dashboard-loading">Loading dashboard...</div>;

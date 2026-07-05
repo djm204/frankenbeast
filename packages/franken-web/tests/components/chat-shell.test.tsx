@@ -182,7 +182,7 @@ const mockDashboardSnapshot = {
 const mockDashboardFetchSnapshot = vi.fn().mockResolvedValue(mockDashboardSnapshot);
 const mockDashboardToggleSkill = vi.fn().mockResolvedValue(undefined);
 const mockDashboardUpdateSecurityProfile = vi.fn().mockResolvedValue(undefined);
-const mockDashboardSubscribe = vi.fn().mockReturnValue(vi.fn());
+const mockDashboardSubscribe = vi.fn().mockResolvedValue(vi.fn());
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -422,7 +422,7 @@ afterEach(() => {
   mockDashboardUpdateSecurityProfile.mockReset();
   mockDashboardUpdateSecurityProfile.mockResolvedValue(undefined);
   mockDashboardSubscribe.mockReset();
-  mockDashboardSubscribe.mockReturnValue(vi.fn());
+  mockDashboardSubscribe.mockResolvedValue(vi.fn());
   mockGetRun.mockReset();
   mockGetRun.mockResolvedValue({
     run: {
