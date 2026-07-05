@@ -334,7 +334,12 @@ describe('useChatSession error banners', () => {
     });
 
     expect(result.current.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: userMessageId, content: 'preserve delivered prompt', receipt: 'delivered' }),
+      expect.objectContaining({
+        id: userMessageId,
+        content: 'preserve delivered prompt',
+        receipt: 'failed',
+        canRetry: true,
+      }),
     ]));
   });
 

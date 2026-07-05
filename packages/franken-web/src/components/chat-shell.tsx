@@ -223,6 +223,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     approve,
     approvalError,
     approvalResolving,
+    clearedFailedDraft: reconciledFailedDraft,
     connectionStatus,
     costUsd,
     dismissError,
@@ -245,6 +246,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     sessionId: selectedSessionId,
     sessionSeed,
   });
+
+  useEffect(() => {
+    if (reconciledFailedDraft) {
+      setClearedFailedDraft((current) => ({
+        content: reconciledFailedDraft.content,
+        nonce: (current?.nonce ?? 0) + 1,
+      }));
+    }
+  }, [reconciledFailedDraft]);
 
   const chatClient = useMemo(
     () => new ChatApiClient(baseUrl),

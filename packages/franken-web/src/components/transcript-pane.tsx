@@ -44,7 +44,7 @@ export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false
             </div>
             <p className="message-card__content">{message.content}</p>
             {message.error && <p className="message-card__error">{message.error}</p>}
-            {message.role === 'user' && message.receipt === 'failed' && onRetryMessage && (
+            {message.role === 'user' && message.receipt === 'failed' && message.canRetry !== false && onRetryMessage && (
               <button
                 className="button button--secondary button--small message-card__action"
                 disabled={retryDisabled}

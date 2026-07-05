@@ -30,6 +30,7 @@ export interface ChatMessage {
   modelTier?: string;
   receipt?: MessageReceipt;
   error?: string;
+  canRetry?: boolean;
   streaming?: boolean;
 }
 
@@ -53,6 +54,7 @@ export interface UseChatSessionResult {
   approvalResolving: boolean;
   connectionStatus: ConnectionStatus;
   costUsd: number;
+  clearedFailedDraft?: { content: string; nonce: number };
   dismissError: (id: string) => void;
   errorBanners: ChatErrorBanner[];
   messages: ChatMessage[];
@@ -221,10 +223,10 @@ function updateReceipt(
   ));
 }
 
-function markMessageFailed(messages: ChatMessage[], messageId: string, error: string): ChatMessage[] {
+function markMessageFailed(messages: ChatMessage[], messageId: string, error: string, canRetry = true): ChatMessage[] {
   return messages.map((message) => (
     message.id === messageId
-      ? { ...message, receipt: 'failed', error }
+      ? { ...message, receipt: 'failed', error, canRetry }
       : message
   ));
 }
@@ -266,19 +268,23 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
   ];
 }
 
-function preserveLocalRecoveryMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
+function preserveLocalRecoveryMessages(
+  current: ChatMessage[],
+  transcript: TranscriptMessage[],
+): { messages: ChatMessage[]; clearedFailedDrafts: string[] } {
   const snapshot = normalizeTranscript(transcript);
   const snapshotIds = new Set(snapshot.map((message) => message.id));
   const unmatchedSnapshotContentCounts = new Map<string, number>();
+  const clearedFailedDrafts: string[] = [];
 
   for (const message of snapshot) {
     const key = `${message.role}\u0000${message.content}`;
     unmatchedSnapshotContentCounts.set(key, (unmatchedSnapshotContentCounts.get(key) ?? 0) + 1);
   }
 
-  const localRecoveryMessages = current.filter((message) => {
+  const localRecoveryMessages = current.flatMap((message): ChatMessage[] => {
     if (snapshotIds.has(message.id)) {
-      return false;
+      return [];
     }
 
     const key = `${message.role}\u0000${message.content}`;
@@ -289,13 +295,29 @@ function preserveLocalRecoveryMessages(current: ChatMessage[], transcript: Trans
       } else {
         unmatchedSnapshotContentCounts.set(key, snapshotMatchCount - 1);
       }
-      return false;
+      if (message.role === 'user' && message.receipt === 'failed') {
+        clearedFailedDrafts.push(message.content);
+      }
+      return [];
     }
 
-    return message.role === 'user' && Boolean(message.receipt);
+    if (message.role !== 'user' || !message.receipt || message.canRetry === false) {
+      return [];
+    }
+
+    if (message.receipt === 'failed') {
+      return [message];
+    }
+
+    return [{
+      ...message,
+      receipt: 'failed',
+      error: message.error ?? 'The server acknowledged this message but did not include it in the refreshed transcript. Resend to recover it.',
+      canRetry: true,
+    }];
   });
 
-  return [...snapshot, ...localRecoveryMessages];
+  return { messages: [...snapshot, ...localRecoveryMessages], clearedFailedDrafts };
 }
 
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
@@ -304,6 +326,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [approvalResolving, setApprovalResolving] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [costUsd, setCostUsd] = useState(0);
+  const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [projectId, setProjectId] = useState(opts.projectId);
@@ -340,21 +363,33 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setErrorBanners((current) => current.filter((item) => item.id !== id));
   }
 
-  function failPendingSend(messageId: string, error: Error) {
+  function notifyClearedFailedDrafts(contents: string[]) {
+    for (const content of contents) {
+      setClearedFailedDraft((current) => ({ content, nonce: (current?.nonce ?? 0) + 1 }));
+    }
+  }
+
+  function reconcileRecoveryMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
+    const recovery = preserveLocalRecoveryMessages(current, transcript);
+    notifyClearedFailedDrafts(recovery.clearedFailedDrafts);
+    return recovery.messages;
+  }
+
+  function failPendingSend(messageId: string, error: Error, canRetry = true) {
     const pending = pendingSendsRef.current.get(messageId);
     if (!pending) {
       return;
     }
     clearTimeout(pending.timeoutId);
     pendingSendsRef.current.delete(messageId);
-    setMessages((current) => markMessageFailed(current, messageId, error.message));
+    setMessages((current) => markMessageFailed(current, messageId, error.message, canRetry));
     setStatus('error');
     pending.reject(error);
   }
 
-  function failAllPendingSends(error: Error) {
+  function failAllPendingSends(error: Error, canRetry = true) {
     for (const messageId of pendingSendsRef.current.keys()) {
-      failPendingSend(messageId, error);
+      failPendingSend(messageId, error, canRetry);
     }
   }
 
@@ -372,7 +407,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     void clientRef.current.getSession(sessionId)
       .then((refreshed) => {
         setSocketToken(refreshed.socketToken);
-        setMessages((current) => preserveLocalRecoveryMessages(current, refreshed.transcript));
+        setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
@@ -518,7 +553,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'session.ready':
           if (!readyRef.current) {
             readyRef.current = true;
-            setMessages((current) => preserveLocalRecoveryMessages(current, payload.transcript));
+            setMessages((current) => reconcileRecoveryMessages(current, payload.transcript));
             setPendingApproval(payload.pendingApproval ?? null);
             setProjectId(payload.projectId);
           }
@@ -613,12 +648,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
               timestamp: payload.timestamp,
             },
           ]);
-          failAllPendingSends(new Error(payload.message));
           const missingSessionCanRefresh = payload.code === 'NO_SESSION';
           const canRetryMessage = Boolean(lastMessageRef.current)
             && payload.code !== 'INVALID_EVENT'
             && payload.code !== 'NO_SESSION'
             && payload.code !== 'NOT_FOUND';
+          failAllPendingSends(new Error(payload.message), canRetryMessage);
           const action = missingSessionCanRefresh
             ? 'retry-session'
             : canRetryMessage ? 'retry-message' : 'dismiss';
@@ -838,6 +873,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     approve,
     approvalError,
     approvalResolving,
+    clearedFailedDraft,
     connectionStatus,
     costUsd,
     dismissError,

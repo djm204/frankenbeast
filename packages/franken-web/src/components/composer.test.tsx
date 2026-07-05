@@ -153,6 +153,28 @@ describe('Composer failed-send recovery', () => {
     expect(onRetryMessage).toHaveBeenCalledWith('user-failed-1');
   });
 
+  it('does not show resend controls for non-retryable failed user messages', () => {
+    render(
+      <TranscriptPane
+        messages={[
+          {
+            id: 'user-failed-1',
+            role: 'user',
+            content: 'invalid oversized dispatch',
+            timestamp: '2026-07-05T00:00:00.000Z',
+            receipt: 'failed',
+            error: 'INVALID_EVENT',
+            canRetry: false,
+          },
+        ]}
+        onRetryMessage={vi.fn()}
+        showTypingIndicator={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Resend failed message' })).toBeNull();
+  });
+
   it('disables failed-message resends while another turn is active', () => {
     render(
       <TranscriptPane

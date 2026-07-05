@@ -382,6 +382,7 @@ describe('useChatSession', () => {
       id: failedId,
       content: 'keep failed draft after reconnect',
       receipt: 'failed',
+      canRetry: true,
     }));
   });
 
@@ -475,6 +476,87 @@ describe('useChatSession', () => {
     expect(result.current.messages.filter((message) => message.content === 'server already handled this')).toHaveLength(1);
     expect(result.current.messages).toContainEqual(expect.objectContaining({ id: 'server-copy' }));
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ id: failedId }));
+    expect(result.current.clearedFailedDraft).toMatchObject({ content: 'server already handled this' });
+  });
+
+  it('marks acknowledged local messages retryable when reconnect snapshots omit them', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('accepted but not persisted');
+    });
+    const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:01Z' });
+    });
+    await act(async () => {
+      await sendPromise;
+    });
+
+    act(() => {
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      content: 'accepted but not persisted',
+      receipt: 'failed',
+      canRetry: true,
+    }));
+  });
+
+  it('does not expose message retry for non-retryable turn errors', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let failedSend!: Promise<void>;
+    act(() => {
+      failedSend = result.current.send('oversized prompt');
+    });
+    const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.message({
+        type: 'turn.error',
+        code: 'INVALID_EVENT',
+        message: 'Prompt is too large',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    await expect(failedSend).rejects.toThrow('Prompt is too large');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      receipt: 'failed',
+      canRetry: false,
+    }));
+    expect(result.current.errorBanners[0]).toMatchObject({ action: 'dismiss' });
   });
 
   it('surfaces pending approvals and sends approval responses over the socket', async () => {
