@@ -10,8 +10,8 @@ const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
 const UNRESOLVED_COMMENT_MARKERS = [
   ['TO', 'DO'].join(''),
   ['FIX', 'ME'].join(''),
-  'HACK',
-  'XXX',
+  ['HA', 'CK'].join(''),
+  ['X', 'XX'].join(''),
 ] as const;
 const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
