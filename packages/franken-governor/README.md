@@ -46,7 +46,7 @@ const readlineAdapter = { question: (prompt: string) => rl.question(prompt) };
 // state. A trigger whose source is missing is skipped (it cannot fire).
 const governor = createGovernor({
   readline: readlineAdapter,
-  memoryPort: { recordDecision: async (trace) => process.stdout.write('Audit:', trace) },
+  memoryPort: { recordDecision: async (trace) => process.stdout.write(`Audit: ${JSON.stringify(trace)}\n`) },
   evaluators: [new BudgetTrigger(), new SkillTrigger()],
   skillMetadata: {
     getSkillMetadata: (skillId) =>

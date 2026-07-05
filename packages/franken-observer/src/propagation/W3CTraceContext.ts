@@ -45,7 +45,7 @@ const ZEROS_16  = '0'.repeat(16)
  *
  * ```ts
  * const ctx = parseTraceparent(req.headers['traceparent'])
- * if (ctx) process.stdout.write(ctx.traceId, ctx.sampled)
+ * if (ctx) process.stdout.write(`${ctx.traceId} ${ctx.sampled}\n`)
  * ```
  */
 export function parseTraceparent(header: string | null | undefined): TraceparentFields | null {
