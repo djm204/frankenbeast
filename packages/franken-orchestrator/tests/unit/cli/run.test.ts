@@ -992,7 +992,7 @@ describe('main() execution', () => {
       budget: 10,
       provider: 'claude',
       providerSpecified: true,
-      providers: undefined,
+      providers: ['gemini'],
       designDoc: undefined,
       planDir: undefined,
       planName: undefined,
