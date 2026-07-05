@@ -225,7 +225,7 @@ function hasLoopExit(body: string): boolean {
   let pendingLoopOrSwitch = false; // next `{` opens a loop/switch body
   let arrowPending = false; // we just saw `=>`, awaiting its body
 
-  const insideFunction = (): boolean =>
+  const isInsideNestedCallable = (): boolean =>
     conciseMarkers.length > 0 || braceStack.some((f) => f.isFunc);
   const insideNestedLoopOrSwitch = (): boolean =>
     braceStack.some((f) => f.loopOrSwitch);
@@ -301,7 +301,7 @@ function hasLoopExit(body: string): boolean {
     }
 
     if (LOOP_EXIT_KEYWORDS.has(token)) {
-      if (insideFunction()) continue;
+      if (isInsideNestedCallable()) continue;
       if (token === 'break' && insideNestedLoopOrSwitch()) continue;
       return true;
     }
