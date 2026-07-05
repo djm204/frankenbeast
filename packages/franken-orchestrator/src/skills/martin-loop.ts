@@ -459,6 +459,9 @@ export class MartinLoop {
       try {
         result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
+        if (config.abortSignal?.aborted) {
+          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        }
         if (isAbortError(error)) {
           throw error;
         }
