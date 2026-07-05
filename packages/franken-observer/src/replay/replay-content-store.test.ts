@@ -12,9 +12,9 @@ describe('ReplayContentStore', () => {
     const ref = store.put('hello world');
 
     expect(ref).toBe(hashContent('hello world'));
-    expect(ref).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(existsSync(join(root, 'blobs', ref.replace(/^sha256:/, '')))).toBe(true);
-    expect(existsSync(join(root, 'blobs', ref))).toBe(false);
+    expect(ref).toMatch(/^[a-f0-9]{64}$/);
+    expect(existsSync(join(root, 'blobs', ref))).toBe(true);
+    expect(existsSync(join(root, 'blobs', `sha256:${ref}`))).toBe(false);
     expect(store.get(ref)).toBe('hello world');
   });
 
@@ -28,14 +28,23 @@ describe('ReplayContentStore', () => {
     expect(() => store.get(ref)).toThrow(/hash mismatch/i);
   });
 
-  it('can read pre-prefix replay refs for existing durable artifacts', () => {
+  it('rejects refs that are not exact lowercase sha256 hex before reading', () => {
     const root = mkdtempSync(join(tmpdir(), 'replay-'));
     const store = new ReplayContentStore(root);
     const ref = store.put('legacy content');
-    const legacyRef = ref.replace(/^sha256:/, '');
 
-    store.__corruptForTest(legacyRef, 'legacy content');
+    const invalidRefs = [
+      `sha256:${ref}`,
+      ref.toUpperCase(),
+      ref.slice(0, 63),
+      `../${ref}`,
+      `/tmp/${ref}`,
+      `${ref.slice(0, 32)}/${ref.slice(32)}`,
+      `${ref}00`,
+    ];
 
-    expect(store.get(legacyRef)).toBe('legacy content');
+    for (const invalidRef of invalidRefs) {
+      expect(() => store.get(invalidRef)).toThrow(/exactly 64 lowercase sha256 hex/i);
+    }
   });
 });
