@@ -24,7 +24,7 @@
     "lint:fix": "eslint src/ tests/ --fix",
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [
     "frankenbeast",

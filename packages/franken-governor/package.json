@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "INTEGRATION=true vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [
     "frankenbeast",

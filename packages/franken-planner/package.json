@@ -20,7 +20,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
     "@franken/types": "0.7.4"

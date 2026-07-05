@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:live": "FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
     "@frankenbeast/observer": "0.7.9",

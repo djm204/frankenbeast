@@ -8,30 +8,23 @@ function readJson(relPath: string): unknown {
   return JSON.parse(readFileSync(resolve(ROOT, relPath), 'utf-8'));
 }
 
-const PACKAGE_DIRS = [
-  'franken-brain',
-  'franken-critique',
-  'franken-governor',
-  'franken-observer',
-  'franken-orchestrator',
-  'franken-planner',
-  'franken-types',
-] as const;
-
 describe('release-please monorepo config', () => {
   const config = readJson('release-please-config.json') as {
     packages: Record<string, { 'release-type'?: string; component?: string }>;
   };
   const manifest = readJson('.release-please-manifest.json') as Record<string, string>;
   const rootPackage = readJson('package.json') as { version: string };
+  const packageDirs = Object.keys(config.packages)
+    .filter((key) => key.startsWith('packages/'))
+    .map((key) => key.replace(/^packages\//, ''));
 
   it('config has root "." entry preserved', () => {
     expect(config.packages['.']).toBeDefined();
     expect(config.packages['.']['release-type']).toBe('node');
   });
 
-  it('config has entries for all 7 packages', () => {
-    for (const dir of PACKAGE_DIRS) {
+  it('config has entries for every package release-managed in this repo', () => {
+    for (const dir of packageDirs) {
       const key = `packages/${dir}`;
       expect(config.packages[key], `missing config entry for ${key}`).toBeDefined();
     }
@@ -42,14 +35,14 @@ describe('release-please monorepo config', () => {
   });
 
   it('each package entry has release-type "node"', () => {
-    for (const dir of PACKAGE_DIRS) {
+    for (const dir of packageDirs) {
       const key = `packages/${dir}`;
       expect(config.packages[key]?.['release-type'], `${key} missing release-type`).toBe('node');
     }
   });
 
   it('each package entry has a component name', () => {
-    for (const dir of PACKAGE_DIRS) {
+    for (const dir of packageDirs) {
       const key = `packages/${dir}`;
       expect(config.packages[key]?.component, `${key} missing component`).toBeTruthy();
     }
@@ -59,8 +52,8 @@ describe('release-please monorepo config', () => {
     expect(manifest['.']).toBe(rootPackage.version);
   });
 
-  it('manifest has entries for all 7 packages', () => {
-    for (const dir of PACKAGE_DIRS) {
+  it('manifest has entries for every package release-managed in this repo', () => {
+    for (const dir of packageDirs) {
       const key = `packages/${dir}`;
       expect(manifest[key], `missing manifest entry for ${key}`).toBeDefined();
     }
@@ -71,7 +64,7 @@ describe('release-please monorepo config', () => {
   });
 
   it('manifest versions match actual package.json versions', () => {
-    for (const dir of PACKAGE_DIRS) {
+    for (const dir of packageDirs) {
       const key = `packages/${dir}`;
       const pkg = readJson(`packages/${dir}/package.json`) as { version: string };
       expect(manifest[key], `${key} version mismatch`).toBe(pkg.version);
@@ -79,14 +72,14 @@ describe('release-please monorepo config', () => {
   });
 
   it('no per-module release-please-config.json files exist', () => {
-    for (const dir of PACKAGE_DIRS) {
+    for (const dir of packageDirs) {
       const configPath = resolve(ROOT, `packages/${dir}/release-please-config.json`);
       expect(existsSync(configPath), `${configPath} should not exist`).toBe(false);
     }
   });
 
   it('no per-module .release-please-manifest.json files exist', () => {
-    for (const dir of PACKAGE_DIRS) {
+    for (const dir of packageDirs) {
       const manifestPath = resolve(ROOT, `packages/${dir}/.release-please-manifest.json`);
       expect(existsSync(manifestPath), `${manifestPath} should not exist`).toBe(false);
     }

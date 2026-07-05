@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --reporter=verbose --config vitest.integration.config.ts",
     "lint": "eslint src/ tests/",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [],
   "author": "",

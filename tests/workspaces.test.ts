@@ -157,8 +157,8 @@ describe('npm workspaces configuration', () => {
         expect(pkg.scripts?.build, `${path} must define a build script`).toBeDefined();
         expect(
           pkg.scripts?.prepublishOnly,
-          `${path} must build before npm publish so dist/bin entries are fresh`,
-        ).toBe('npm run build');
+          `${path} must build the workspace before npm publish so dist/bin entries and internal dependency types are fresh`,
+        ).toBe('npm --prefix ../.. run build');
       }
     });
   });
