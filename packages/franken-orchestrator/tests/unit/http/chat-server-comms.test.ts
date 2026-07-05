@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -64,10 +64,18 @@ describe('startChatServer comms pass-through', () => {
   });
 
   it('passes network security config to createChatApp so comms can read webhook policy', async () => {
-    let config = {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-server-security-config-'));
+    tempDirs.push(dir);
+    const configFile = join(dir, 'config.json');
+    let config: {
       security: {
-        profile: 'permissive' as const,
-        webhookSignaturePolicy: 'local-dev-unsigned' as const,
+        profile: 'strict' | 'standard' | 'permissive';
+        webhookSignaturePolicy: 'required' | 'local-dev-unsigned';
+      };
+    } = {
+      security: {
+        profile: 'permissive',
+        webhookSignaturePolicy: 'local-dev-unsigned',
       },
     };
 
@@ -81,8 +89,8 @@ describe('startChatServer comms pass-through', () => {
       networkControl: {
         root: '/tmp/project',
         frankenbeastDir: '/tmp/project/.frankenbeast',
-        configFile: '/tmp/project/.frankenbeast/config.json',
-        getConfig: () => config,
+        configFile,
+        getConfig: () => config as never,
         setConfig: (next) => {
           config = next as typeof config;
         },
@@ -91,6 +99,10 @@ describe('startChatServer comms pass-through', () => {
 
     const opts = mockedCreateChatApp.mock.calls[0]![0];
     expect(opts.securityConfig?.getSecurityConfig().webhookSignaturePolicy).toBe('local-dev-unsigned');
+
+    opts.securityConfig?.setSecurityConfig({ webhookSignaturePolicy: 'required' });
+    expect(config.security.webhookSignaturePolicy).toBe('required');
+    await expect(readFile(configFile, 'utf-8')).resolves.toContain('"webhookSignaturePolicy": "required"');
   });
 
   it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {

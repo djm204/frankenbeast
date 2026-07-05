@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { slackSignatureMiddleware } from '../../security/slack-signature.js';
 import { SlackEventBaseSchema, SlackInteractionSchema } from './slack-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
@@ -8,16 +8,20 @@ export interface SlackRouterOptions {
   gateway: ChatGateway;
   sessionMapper: SessionMapper;
   signingSecret: string;
-  verifySignature?: boolean;
+  verifySignature?: boolean | ((c: Context) => boolean);
 }
 
 export function slackRouter(options: SlackRouterOptions) {
   const { gateway, sessionMapper, signingSecret } = options;
   const app = new Hono();
 
-  if (options.verifySignature !== false) {
-    app.use('*', slackSignatureMiddleware({ signingSecret }));
-  }
+  const verify = slackSignatureMiddleware({ signingSecret });
+  app.use('*', async (c, next) => {
+    if (!shouldVerifySignature(options.verifySignature, c)) {
+      return next();
+    }
+    return verify(c, next);
+  });
 
   // Events API: https://api.slack.com/events-api
   app.post('/events', async (c) => {
@@ -89,4 +93,11 @@ export function slackRouter(options: SlackRouterOptions) {
   });
 
   return app;
+}
+
+function shouldVerifySignature(verifySignature: SlackRouterOptions['verifySignature'], c: Context): boolean {
+  if (typeof verifySignature === 'function') {
+    return verifySignature(c);
+  }
+  return verifySignature !== false;
 }

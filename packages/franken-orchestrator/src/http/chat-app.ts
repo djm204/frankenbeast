@@ -221,7 +221,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       runtime: opts.commsRuntime,
     };
     if (opts.securityConfig) {
-      commsRoutesOpts.webhookSignaturePolicy = opts.securityConfig.getSecurityConfig().webhookSignaturePolicy;
+      commsRoutesOpts.getWebhookSignaturePolicy = () => opts.securityConfig!.getSecurityConfig().webhookSignaturePolicy;
     }
     app.route('/', commsRoutes(commsRoutesOpts));
   }

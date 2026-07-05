@@ -1,7 +1,8 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
@@ -342,13 +343,16 @@ function createNetworkSecurityConfigAdapter(networkControl: NonNullable<StartCha
     },
     setSecurityConfig: (config) => {
       const current = networkControl.getConfig();
-      networkControl.setConfig({
+      const next = {
         ...current,
         security: {
           ...current.security,
           ...config,
         },
-      });
+      };
+      networkControl.setConfig(next);
+      mkdirSync(dirname(networkControl.configFile), { recursive: true });
+      writeFileSync(networkControl.configFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
     },
   };
 }

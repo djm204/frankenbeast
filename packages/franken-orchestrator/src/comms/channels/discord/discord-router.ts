@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { discordSignatureMiddleware } from '../../security/discord-signature.js';
 import { DiscordInteractionSchema, DiscordInteractionType } from './discord-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
@@ -8,16 +8,20 @@ export interface DiscordRouterOptions {
   gateway: ChatGateway;
   sessionMapper: SessionMapper;
   publicKey: string;
-  verifySignature?: boolean;
+  verifySignature?: boolean | ((c: Context) => boolean);
 }
 
 export function discordRouter(options: DiscordRouterOptions) {
   const { gateway, sessionMapper, publicKey } = options;
   const app = new Hono();
 
-  if (options.verifySignature !== false) {
-    app.use('*', discordSignatureMiddleware({ publicKey }));
-  }
+  const verify = discordSignatureMiddleware({ publicKey });
+  app.use('*', async (c, next) => {
+    if (!shouldVerifySignature(options.verifySignature, c)) {
+      return next();
+    }
+    return verify(c, next);
+  });
 
   app.post('/interactions', async (c) => {
     const body = await c.req.json();
@@ -85,4 +89,11 @@ export function discordRouter(options: DiscordRouterOptions) {
   });
 
   return app;
+}
+
+function shouldVerifySignature(verifySignature: DiscordRouterOptions['verifySignature'], c: Context): boolean {
+  if (typeof verifySignature === 'function') {
+    return verifySignature(c);
+  }
+  return verifySignature !== false;
 }
