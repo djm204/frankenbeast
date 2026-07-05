@@ -11,7 +11,7 @@ import type {
   SkillCatalogEntry,
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.js';
+import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
 export interface ClaudeCliOptions {
   binaryPath?: string;
@@ -38,18 +38,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
   constructor(private options: ClaudeCliOptions = {}) {}
 
   async isAvailable(): Promise<boolean> {
-    try {
-      const proc = spawn(this.binaryPath, ['--version'], {
-        env: this.sanitizedEnv(),
-        timeout: 5000,
-      });
-      return new Promise((resolve) => {
-        proc.on('close', (code) => resolve(code === 0));
-        proc.on('error', () => resolve(false));
-      });
-    } catch {
-      return false;
-    }
+    return isCliAvailable(this.binaryPath, this.sanitizedEnv());
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {

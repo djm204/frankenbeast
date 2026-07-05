@@ -7,6 +7,33 @@ export interface CollectResult {
 }
 
 /**
+ * Check whether a CLI binary can be executed successfully.
+ */
+export async function isCliAvailable(
+  command: string,
+  env?: NodeJS.ProcessEnv,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const options: { env?: NodeJS.ProcessEnv; stdio: 'ignore'; timeout: number } = {
+        stdio: 'ignore',
+        timeout: timeoutMs,
+      };
+      if (env) {
+        options.env = env;
+      }
+
+      const proc = spawn(command, ['--version'], options);
+      proc.on('close', (code) => resolve(code === 0));
+      proc.on('error', () => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
  * Spawn a CLI command, collect stdout, enforce timeout.
  * Returns empty stdout on any failure.
  */

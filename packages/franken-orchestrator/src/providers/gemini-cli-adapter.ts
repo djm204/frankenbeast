@@ -14,7 +14,7 @@ import type {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
-import { collectCliOutput, extractAuthFields } from './discover-skills-helpers.js';
+import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -42,15 +42,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   constructor(private options: GeminiCliOptions = {}) {}
 
   async isAvailable(): Promise<boolean> {
-    try {
-      const proc = spawn(this.binaryPath, ['--version'], { timeout: 5000 });
-      return new Promise((resolve) => {
-        proc.on('close', (code) => resolve(code === 0));
-        proc.on('error', () => resolve(false));
-      });
-    } catch {
-      return false;
-    }
+    return isCliAvailable(this.binaryPath);
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { extractAuthFields } from '../../../src/providers/discover-skills-helpers.js';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { extractAuthFields, isCliAvailable } from '../../../src/providers/discover-skills-helpers.js';
 
 describe('extractAuthFields', () => {
   it('extracts env vars matching auth patterns', () => {
@@ -35,5 +38,31 @@ describe('extractAuthFields', () => {
 
   it('returns empty array when no keys match', () => {
     expect(extractAuthFields({ PORT: '80', HOST: 'localhost' })).toEqual([]);
+  });
+});
+
+describe('isCliAvailable', () => {
+  it('returns true when the CLI exits successfully for --version', async () => {
+    await expect(isCliAvailable(process.execPath)).resolves.toBe(true);
+  });
+
+  it('returns false when the CLI cannot be spawned', async () => {
+    await expect(isCliAvailable('definitely-missing-frankenbeast-cli')).resolves.toBe(false);
+  });
+
+  it('passes the provided environment to the availability probe', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'franken-cli-availability-'));
+    const script = join(dir, 'env-check-cli');
+    writeFileSync(
+      script,
+      '#!/usr/bin/env node\nprocess.exit(process.argv[2] === "--version" && process.env.FRANKEN_CLI_AVAILABLE === "1" ? 0 : 1);\n',
+      'utf8',
+    );
+    chmodSync(script, 0o755);
+
+    await expect(
+      isCliAvailable(script, { ...process.env, FRANKEN_CLI_AVAILABLE: '1' }),
+    ).resolves.toBe(true);
+    await expect(isCliAvailable(script, { ...process.env })).resolves.toBe(false);
   });
 });
