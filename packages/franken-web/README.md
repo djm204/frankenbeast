@@ -34,11 +34,11 @@ From a second terminal, start the dashboard:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-The frontend automatically resolves the API URL at runtime:
+The frontend uses same-origin API paths at runtime:
 
-- If `VITE_API_URL` is set, requests target that absolute URL.
-- Otherwise requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
-- Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
+- Browser requests target `/v1/*` and `/api/*` on the dashboard origin.
+- During `dev:chat`, `dev`, and `preview`, Vite proxies those paths to the backend and injects the operator token server-side only.
+- Production/static deployments must serve the dashboard behind the orchestrator or another server-side BFF/reverse proxy that terminates TLS and forwards same-origin API paths; do not configure browser-readable backend URLs or tokens.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { OrchestratorConfigSchema } from '../franken-orchestrator/src/config/orchestrator-config.js';
 import { createSecretStore } from '../franken-orchestrator/src/network/secret-store.js';
 
@@ -16,7 +16,7 @@ import { createSecretStore } from '../franken-orchestrator/src/network/secret-st
  */
 export type EnvLoader = (mode: string, dir: string, prefix: string) => Record<string, string>;
 
-export type SecretStoreOperatorTokenResolver = (rootDir: string) => Promise<string>;
+export type SecretStoreOperatorTokenResolver = (rootDir: string, configPath?: string) => Promise<string>;
 
 export function loadProxyEnv(
   load: EnvLoader,
@@ -37,9 +37,12 @@ export function assertNoBrowserOperatorToken(env: Record<string, string>): void 
   }
 }
 
-export async function resolveSecretStoreOperatorToken(rootDir: string): Promise<string> {
+export async function resolveSecretStoreOperatorToken(rootDir: string, configPath?: string): Promise<string> {
   try {
-    const configJson = await readFile(join(rootDir, '.fbeast', 'config.json'), 'utf8');
+    const resolvedConfigPath = configPath
+      ? (isAbsolute(configPath) ? configPath : resolve(rootDir, configPath))
+      : join(rootDir, '.fbeast', 'config.json');
+    const configJson = await readFile(resolvedConfigPath, 'utf8');
     const config = OrchestratorConfigSchema.parse(JSON.parse(configJson));
     const operatorTokenRef = config.network.operatorTokenRef?.trim();
     if (!operatorTokenRef) {
@@ -66,7 +69,8 @@ export async function loadProxyOperatorToken(
   const env = loadProxyEnv(load, mode, rootDir, packageDir);
   assertNoBrowserOperatorToken(env);
 
-  const secretStoreToken = await resolveFromSecretStore(rootDir);
+  const activeConfigPath = env.FRANKENBEAST_CONFIG_FILE || env.FRANKENBEAST_CONFIG_PATH;
+  const secretStoreToken = await resolveFromSecretStore(rootDir, activeConfigPath);
   if (secretStoreToken) {
     return secretStoreToken;
   }

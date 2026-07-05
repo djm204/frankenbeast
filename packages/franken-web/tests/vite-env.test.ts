@@ -30,6 +30,19 @@ describe('loadProxyOperatorToken', () => {
     ).resolves.toBe('secret-store-token');
   });
 
+  it('passes the active config path to the secret-store resolver', async () => {
+    const load = loaderFor({
+      [ROOT]: { FRANKENBEAST_CONFIG_FILE: '/tmp/custom-frankenbeast.json' },
+      [PKG]: {},
+    });
+    const resolveFromSecretStore = vi.fn(async () => 'secret-store-token');
+
+    await expect(
+      loadProxyOperatorToken(load, 'production', ROOT, PKG, resolveFromSecretStore),
+    ).resolves.toBe('secret-store-token');
+    expect(resolveFromSecretStore).toHaveBeenCalledWith(ROOT, '/tmp/custom-frankenbeast.json');
+  });
+
   it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set', async () => {
     const load = loaderFor({
       [ROOT]: {},

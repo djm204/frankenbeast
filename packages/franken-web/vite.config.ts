@@ -6,6 +6,8 @@ import type { IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { loadProxyOperatorToken } from './vite-env';
 
+type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
+
 const repoRootDir = fileURLToPath(new URL('../../', import.meta.url));
 const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -31,7 +33,7 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
     return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
   if (!originValue) {
-    return true;
+    return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
 
   const host = req.headers.host;
@@ -72,11 +74,18 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
   };
 }
 
-export default defineConfig(async ({ mode }) => {
+export default defineConfig(async ({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
-  const proxyOperatorToken = await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd());
+  const proxyOperatorToken = command === 'serve'
+    ? await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())
+    : '';
+  const serverSideProxy: ServerSideProxyConfig = {
+    '/v1/beasts': withServerSideOperatorAuth(beastProxyTarget, proxyOperatorToken),
+    '/v1': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken, { ws: true }),
+    '/api': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken),
+  };
 
   return {
     plugins: [tailwindcss(), react()],
@@ -84,11 +93,10 @@ export default defineConfig(async ({ mode }) => {
       __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
     },
     server: {
-      proxy: {
-        '/v1/beasts': withServerSideOperatorAuth(beastProxyTarget, proxyOperatorToken),
-        '/v1': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken, { ws: true }),
-        '/api': withServerSideOperatorAuth(proxyTarget, proxyOperatorToken),
-      },
+      proxy: serverSideProxy,
+    },
+    preview: {
+      proxy: serverSideProxy,
     },
     build: {
       outDir: 'dist',
