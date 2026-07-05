@@ -42,7 +42,12 @@ export type { ApprovalChannel } from './gateway/index.js';
 export { ApprovalGateway } from './gateway/index.js';
 export type { AuditRecorder, ApprovalGatewayDeps } from './gateway/index.js';
 export { GovernorCritiqueAdapter } from './gateway/index.js';
-export type { GovernorCritiqueAdapterDeps } from './gateway/index.js';
+export type {
+  BudgetStateSource,
+  GovernorCritiqueAdapterDeps,
+  SkillGovernanceMetadata,
+  SkillMetadataSource,
+} from './gateway/index.js';
 export { createGovernor } from './gateway/index.js';
 export type { CreateGovernorOptions } from './gateway/index.js';
 export { ApprovalWaiterRegistry } from './gateway/index.js';

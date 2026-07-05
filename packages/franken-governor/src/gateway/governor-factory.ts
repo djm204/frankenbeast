@@ -1,4 +1,9 @@
-import { GovernorCritiqueAdapter, type GovernorCritiqueAdapterDeps } from './governor-critique-adapter.js';
+import {
+  GovernorCritiqueAdapter,
+  type BudgetStateSource,
+  type GovernorCritiqueAdapterDeps,
+  type SkillMetadataSource,
+} from './governor-critique-adapter.js';
 import { GovernorAuditRecorder } from '../audit/audit-recorder.js';
 import { CliChannel, type ReadlineAdapter } from '../channels/cli-channel.js';
 import type { GovernorMemoryPort } from '../audit/governor-memory-port.js';
@@ -12,6 +17,10 @@ export interface CreateGovernorOptions {
   readonly projectId?: string;
   readonly operatorName?: string;
   readonly config?: Partial<GovernorConfig>;
+  /** Skill governance flags for SkillTrigger contexts (e.g. a skill registry). */
+  readonly skillMetadata?: SkillMetadataSource;
+  /** Budget circuit-breaker state for BudgetTrigger contexts (e.g. MOD-05). */
+  readonly budgetState?: BudgetStateSource;
 }
 
 export function createGovernor(options: CreateGovernorOptions): GovernorCritiqueAdapter {
@@ -33,5 +42,7 @@ export function createGovernor(options: CreateGovernorOptions): GovernorCritique
     evaluators: options.evaluators ?? [],
     projectId: options.projectId ?? 'default',
     config,
+    ...(options.skillMetadata ? { skillMetadata: options.skillMetadata } : {}),
+    ...(options.budgetState ? { budgetState: options.budgetState } : {}),
   });
 }

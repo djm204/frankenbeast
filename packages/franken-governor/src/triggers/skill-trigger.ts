@@ -23,7 +23,9 @@ export class SkillTrigger implements TriggerEvaluator<SkillTriggerContext> {
       triggered: true,
       triggerId: this.triggerId,
       reason: `Skill '${context.skillId}' ${reasons.join(' and ')}`,
-      severity: 'high',
+      // Destructive skills are critical (downstream policy maps 'critical' to a
+      // hard denial); HITL-only skills are high (review/approval required).
+      severity: context.isDestructive ? 'critical' : 'high',
     };
   }
 }
