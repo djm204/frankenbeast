@@ -236,6 +236,60 @@ describe('AnalyticsPage', () => {
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
   });
 
+  it('labels row data as partial and disables JSON copy until full detail loads', async () => {
+    const client = mockClient();
+    let resolveDetail!: (event: Awaited<ReturnType<AnalyticsApiClient['fetchEventDetail']>>) => void;
+    vi.mocked(client.fetchEventDetail).mockReturnValueOnce(new Promise((resolve) => {
+      resolveDetail = resolve;
+    }));
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
+
+    expect(await screen.findByText('Partial row data')).toBeTruthy();
+    expect(screen.getByText('Loading full event detail; the fields below are from the selected table row.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('Copy JSON is available after full event detail loads.')).toBeTruthy();
+
+    resolveDetail({
+      id: 'governor:1',
+      timestamp: '2026-04-28T12:01:00.000Z',
+      sessionId: 'session-a',
+      toolName: 'exec_command',
+      source: 'governor',
+      category: 'decision',
+      outcome: 'denied',
+      summary: 'Denied destructive command',
+      severity: 'error',
+      raw: { decision: 'denied', full: true },
+      links: {},
+    });
+
+    expect(await screen.findByText('Full event detail')).toBeTruthy();
+    expect(screen.getByText('This drawer is showing the full analytics event detail.')).toBeTruthy();
+    expect(screen.getByText('"full": true')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', false);
+  });
+
+  it('keeps failed details labelled as partial and offers retry', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEventDetail).mockRejectedValueOnce(new Error('detail timeout'));
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
+
+    expect(await screen.findByText('detail timeout')).toBeTruthy();
+    expect(screen.getByText('Partial row data')).toBeTruthy();
+    expect(screen.getByText('Full event detail is not loaded; the fields below are only from the selected table row.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry detail' }));
+
+    expect(await screen.findByText('Full event detail')).toBeTruthy();
+    expect(screen.queryByText('detail timeout')).toBeNull();
+    expect(client.fetchEventDetail).toHaveBeenCalledTimes(2);
+  });
+
   it('opens details from the row action and restores focus to the action when closed', async () => {
     const client = mockClient();
 

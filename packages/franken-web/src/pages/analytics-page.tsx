@@ -42,6 +42,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [sessions, setSessions] = useState<AnalyticsSessionOption[]>([]);
   const [eventPage, setEventPage] = useState<AnalyticsEventPage | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [hasFullDetail, setHasFullDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -49,6 +51,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailTriggerEventIdRef = useRef<string | null>(null);
+  const detailRequestSeqRef = useRef(0);
   const deferDetailFocusUntilEventsLoadRef = useRef(false);
   const sawDeferredEventsLoadRef = useRef(false);
 
@@ -142,11 +145,28 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     detailTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     detailTriggerEventIdRef.current = event.id;
     setSelectedEvent(event);
+    setHasFullDetail(false);
+    await loadEventDetail(event.id);
+  }
+
+  async function loadEventDetail(eventId: string) {
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
+    setIsDetailLoading(true);
     setDetailError(null);
     try {
-      setSelectedEvent(await client.fetchEventDetail(event.id));
+      const detail = await client.fetchEventDetail(eventId);
+      if (detailRequestSeqRef.current !== requestSeq) return;
+      setSelectedEvent(detail);
+      setHasFullDetail(true);
     } catch (error) {
+      if (detailRequestSeqRef.current !== requestSeq) return;
+      setHasFullDetail(false);
       setDetailError(error instanceof Error ? error.message : 'Unable to load event detail.');
+    } finally {
+      if (detailRequestSeqRef.current === requestSeq) {
+        setIsDetailLoading(false);
+      }
     }
   }
 
@@ -165,7 +185,10 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
   function closeDetail() {
     const triggerEventId = detailTriggerEventIdRef.current;
+    detailRequestSeqRef.current += 1;
     setSelectedEvent(null);
+    setIsDetailLoading(false);
+    setHasFullDetail(false);
     setDetailError(null);
     setPendingFocusEventId(triggerEventId);
   }
@@ -307,7 +330,10 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
         <DetailDrawer
           detail={selectedEvent}
           error={detailError}
+          hasFullDetail={hasFullDetail}
+          isLoading={isDetailLoading}
           onClose={closeDetail}
+          onRetry={() => void loadEventDetail(selectedEvent.id)}
           onSessionFilter={(sessionId) => {
             deferDetailFocusUntilEventsLoadRef.current = true;
             sawDeferredEventsLoadRef.current = false;
@@ -391,16 +417,24 @@ function AnalyticsTable({
 function DetailDrawer({
   detail,
   error,
+  hasFullDetail,
+  isLoading,
   onClose,
+  onRetry,
   onSessionFilter,
 }: {
   detail: AnalyticsEvent;
   error: string | null;
+  hasFullDetail: boolean;
+  isLoading: boolean;
   onClose: () => void;
+  onRetry: () => void;
   onSessionFilter: (sessionId: string) => void;
 }) {
   const rawJson = JSON.stringify(detail.raw, null, 2);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const detailStateLabel = hasFullDetail ? 'Full event detail' : 'Partial row data';
+  const copyDisabled = !hasFullDetail;
 
   return (
     <Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -430,6 +464,17 @@ function DetailDrawer({
 
             {error && <div className="analytics-alert">{error}</div>}
 
+            <div className="analytics-detail-status" aria-live="polite">
+              <strong>{detailStateLabel}</strong>
+              <span>
+                {hasFullDetail
+                  ? 'This drawer is showing the full analytics event detail.'
+                  : isLoading
+                    ? 'Loading full event detail; the fields below are from the selected table row.'
+                    : 'Full event detail is not loaded; the fields below are only from the selected table row.'}
+              </span>
+            </div>
+
             <dl className="analytics-detail-list">
               <div><dt>Time</dt><dd>{detail.timestamp}</dd></div>
               <div><dt>Outcome</dt><dd>{detail.outcome}</dd></div>
@@ -451,11 +496,27 @@ function DetailDrawer({
               <button
                 className="button button--secondary button--small"
                 type="button"
+                disabled={copyDisabled}
                 onClick={() => void navigator.clipboard?.writeText(rawJson)}
               >
                 Copy JSON
               </button>
+              {error && (
+                <button
+                  className="button button--secondary button--small"
+                  type="button"
+                  onClick={onRetry}
+                >
+                  Retry detail
+                </button>
+              )}
             </div>
+
+            {copyDisabled && (
+              <p className="analytics-drawer__caption">
+                Copy JSON is available after full event detail loads.
+              </p>
+            )}
 
             <pre className="analytics-raw">
               {rawJson.split('\n').map((line, index) => (
