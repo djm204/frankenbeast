@@ -478,6 +478,7 @@ export class MartinLoop {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
         if (failure.kind === 'spawn_error') {
+          iteration--;
           exhaustedProviders.set(activeProvider, failure);
           const nextProvider = providers.find(p => !exhaustedProviders.has(p));
           if (nextProvider) {

@@ -386,7 +386,7 @@ describe('MartinLoop', () => {
     const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       providers: ['claude', 'codex'],
-      maxIterations: 2,
+      maxIterations: 1,
       onProviderSwitch,
     }));
 
@@ -409,7 +409,7 @@ describe('MartinLoop', () => {
     const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       providers: ['claude', 'codex'],
-      maxIterations: 3,
+      maxIterations: 1,
       _sleepFn: sleepFn,
       onSleep,
       onProviderSwitch,
