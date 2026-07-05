@@ -49,11 +49,28 @@ export function resolveChatRequestBaseUrl(
   }
 }
 
+export function resolveChatRequestCredentials(
+  requestBaseUrl: string,
+  locationOrigin: string | undefined = typeof window !== 'undefined' ? window.location.origin : undefined,
+): RequestCredentials {
+  if (!locationOrigin) {
+    return 'same-origin';
+  }
+
+  try {
+    return new URL(requestBaseUrl, locationOrigin).origin === locationOrigin ? 'same-origin' : 'include';
+  } catch {
+    return 'same-origin';
+  }
+}
+
 export class ChatApiClient {
   private readonly requestBaseUrl: string;
+  private readonly requestCredentials: RequestCredentials;
 
   constructor(private readonly baseUrl: string) {
     this.requestBaseUrl = resolveChatRequestBaseUrl(baseUrl);
+    this.requestCredentials = resolveChatRequestCredentials(this.requestBaseUrl);
   }
 
   async createSession(projectId: string): Promise<ChatSession> {
@@ -114,7 +131,7 @@ export class ChatApiClient {
     // bearer token in bundled client code.
     const effectiveInit: RequestInit = {
       ...init,
-      credentials: init.credentials ?? 'same-origin',
+      credentials: init.credentials ?? this.requestCredentials,
     };
     const res = await fetch(`${this.requestBaseUrl}${path}`, effectiveInit);
 

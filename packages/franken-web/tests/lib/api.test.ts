@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChatApiClient, resolveChatRequestBaseUrl } from '../../src/lib/api';
+import { ChatApiClient, resolveChatRequestBaseUrl, resolveChatRequestCredentials } from '../../src/lib/api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -68,6 +68,16 @@ describe('ChatApiClient', () => {
       expect(resolveChatRequestBaseUrl('https://chat-api.example.test', 'http://dashboard.local', false)).toBe(
         'https://chat-api.example.test',
       );
+    });
+  });
+
+  describe('resolveChatRequestCredentials', () => {
+    it('uses same-origin credentials for same-origin chat forwarding', () => {
+      expect(resolveChatRequestCredentials('http://dashboard.local', 'http://dashboard.local')).toBe('same-origin');
+    });
+
+    it('includes cookies for explicit cross-origin session-authenticated chat APIs', () => {
+      expect(resolveChatRequestCredentials('https://chat-api.example.test', 'http://dashboard.local')).toBe('include');
     });
   });
 
