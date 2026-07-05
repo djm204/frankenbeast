@@ -12,21 +12,23 @@ const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 
-const SENSITIVE_CONFIG_KEY_PATTERN = /(?:^|[_\-.])(?:password|passwd|pwd|secret|client[_\-.]?secret|token|api[_\-.]?key|access[_\-.]?key|auth|credential|webhook[_\-.]?url)(?:$|[_\-.])/i;
+const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhookurl)/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function isConfiguredSecretKey(key: string): boolean {
-  return SENSITIVE_CONFIG_KEY_PATTERN.test(key);
+  return SENSITIVE_CONFIG_KEY_PATTERN.test(key.replace(/[_\-.]/g, ''));
 }
 
 function addConfiguredSecretValue(secrets: Set<string>, value: unknown): void {
   if (typeof value !== 'string') return;
-  const trimmed = value.trim();
-  if (trimmed.length < MIN_CONFIGURED_SECRET_LENGTH) return;
-  secrets.add(trimmed);
+  const fragments = value.split(/\r?\n/);
+  for (const fragment of fragments) {
+    const trimmed = fragment.trim();
+    if (trimmed.length >= MIN_CONFIGURED_SECRET_LENGTH) secrets.add(trimmed);
+  }
 }
 
 function collectConfiguredSecretsFromObject(
@@ -34,6 +36,8 @@ function collectConfiguredSecretsFromObject(
   secrets: Set<string>,
   path: string[] = [],
 ): void {
+  const currentPathIsSensitive = path.length > 0 && isConfiguredSecretKey(path.join('.'));
+  if (currentPathIsSensitive) addConfiguredSecretValue(secrets, input);
   if (!input || typeof input !== 'object') return;
   if (Array.isArray(input)) {
     for (const item of input) collectConfiguredSecretsFromObject(item, secrets, path);
