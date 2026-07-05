@@ -78,7 +78,9 @@ describe('AnalyticsPage', () => {
     render(<AnalyticsPage client={client} />);
 
     expect(await screen.findByText('Total Events')).toBeTruthy();
-    expect(screen.getByText('3')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText('3')).toBeTruthy();
+    });
     expect(screen.getByText('Activity')).toBeTruthy();
     expect(screen.getByText('Decisions & Failures')).toBeTruthy();
     expect(screen.getByText('fbeast_observer_log')).toBeTruthy();
@@ -221,15 +223,36 @@ describe('AnalyticsPage', () => {
     });
   });
 
-  it('opens a read-only drawer with raw details when a row is selected', async () => {
+  it('opens event details in a labelled modal dialog and focuses the close button', async () => {
     const client = mockClient();
 
     render(<AnalyticsPage client={client} />);
     fireEvent.click(await screen.findByText('Denied destructive command'));
 
-    expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeTruthy();
+    const dialog = await screen.findByRole('dialog', { name: 'Denied destructive command' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(screen.getByText('"decision": "denied"')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close' })).toBe(document.activeElement);
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
+  });
+
+  it('opens details from keyboard and restores focus to the event row when closed', async () => {
+    const client = mockClient();
+
+    render(<AnalyticsPage client={client} />);
+    const eventCell = await screen.findByText('Denied destructive command');
+    const eventRow = eventCell.closest('tr') as HTMLTableRowElement;
+    eventRow.focus();
+
+    fireEvent.keyDown(eventRow, { key: 'Enter' });
+    expect(await screen.findByRole('dialog', { name: 'Denied destructive command' })).toBeTruthy();
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.activeElement).toBe(eventRow);
+    });
   });
 
   it('keeps successful analytics sections visible when one endpoint fails', async () => {
