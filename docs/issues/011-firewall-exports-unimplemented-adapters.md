@@ -5,7 +5,7 @@ Area: `frankenfirewall`
 
 ## Summary
 
-The package root exports `GeminiAdapter` and `MistralAdapter`, but both classes are TODO shells that throw on every interface method.
+The package root exports `GeminiAdapter` and `MistralAdapter`, but both classes are unfinished adapter shells that throw on every interface method.
 
 ## Intended Behavior
 

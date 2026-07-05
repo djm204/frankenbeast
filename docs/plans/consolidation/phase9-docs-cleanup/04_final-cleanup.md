@@ -17,10 +17,9 @@ Verify all Phase 1 temporary pass-throughs have been replaced with real implemen
 Phase 1 left temporary pass-throughs where deleted packages were imported. Phase 8 must have replaced all of them with real adapter classes. Search for any remaining — **any found is a blocker, not a cleanup task**:
 
 ```bash
-# Search for Phase 1 TODO markers
-grep -r "TODO.*Phase 1" packages/
-grep -r "TODO.*consolidation" packages/
-grep -r "STUB.*deleted" packages/
+# Search for tracked deferred-work markers
+find packages -type f \( -name "*.ts" -o -name "*.tsx" \) -print0 | xargs -0 grep -n "Follow-up(Phase"
+find packages -type f \( -name "*.ts" -o -name "*.tsx" \) -print0 | xargs -0 grep -n "STUB.*deleted"
 
 # Search for imports of deleted packages
 grep -r "franken-comms" packages/ --include="*.ts"

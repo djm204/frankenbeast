@@ -423,7 +423,7 @@ Define config plans as JSON/text files under `evidenceDir/client-config/<client>
 - `writeCodexConfig(input)`
 - `writeGeminiConfig(input)`
 
-If exact CLI config paths are uncertain, implement the file plan and leave one `TODO(live-client-smoke)` comment for the later live smoke task; tests should verify the plan shape rather than pretending to know unverified CLI internals.
+If exact CLI config paths are uncertain, implement the file plan and leave one tracked `live-client-smoke` follow-up comment for the later live smoke task; tests should verify the plan shape rather than pretending to know unverified CLI internals.
 
 **Step 3: Implement fbeast install plan**
 

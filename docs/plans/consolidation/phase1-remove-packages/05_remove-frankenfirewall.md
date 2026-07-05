@@ -37,13 +37,13 @@ grep -r "frankenfirewall" packages/ --include="*.ts" --include="*.tsx" --include
 
 1. **Ingestion phase** — the Beast Loop's ingestion phase calls the firewall to validate incoming prompts before sending to the LLM. Replace with pass-through:
    ```typescript
-   // TODO: Phase 4 — LlmMiddleware.beforeRequest() replaces firewall input validation
+   // Follow-up(Phase 4): LlmMiddleware.beforeRequest() replaces firewall input validation
    // For now, pass input through unmodified
    ```
 
 2. **Response handling** — firewall may filter LLM responses before returning to the user. Replace with pass-through:
    ```typescript
-   // TODO: Phase 4 — LlmMiddleware.afterResponse() replaces firewall output filtering
+   // Follow-up(Phase 4): LlmMiddleware.afterResponse() replaces firewall output filtering
    ```
 
 3. **`dep-factory.ts`** — dynamic import for firewall module. Remove the import, replace with pass-through no-op.
