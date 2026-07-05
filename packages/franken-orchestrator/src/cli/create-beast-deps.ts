@@ -8,6 +8,8 @@ import {
   buildMiddlewareChain,
   resolveSecurityConfig,
   type SecurityProfile,
+  type SecurityRule,
+  type WebhookSignaturePolicy,
 } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { SkillConfigStore } from '../skills/skill-config-store.js';
@@ -46,9 +48,11 @@ export interface BeastDepsConfig {
     injectionDetection?: boolean;
     piiMasking?: boolean;
     outputValidation?: boolean;
+    webhookSignaturePolicy?: WebhookSignaturePolicy;
     allowedDomains?: string[];
     maxTokenBudget?: number;
     requireApproval?: 'all' | 'destructive' | 'none';
+    customRules?: SecurityRule[];
   };
   brain?: {
     dbPath?: string;

@@ -79,6 +79,9 @@ export async function handleSecurityCommand(deps: SecurityCommandDeps): Promise<
         ...(currentSecurity?.outputValidation !== undefined
           ? { outputValidation: currentSecurity.outputValidation }
           : {}),
+        ...(currentSecurity?.webhookSignaturePolicy !== undefined
+          ? { webhookSignaturePolicy: currentSecurity.webhookSignaturePolicy }
+          : {}),
         ...(currentSecurity?.allowedDomains !== undefined ? { allowedDomains: currentSecurity.allowedDomains } : {}),
         ...(currentSecurity?.maxTokenBudget !== undefined ? { maxTokenBudget: currentSecurity.maxTokenBudget } : {}),
         ...(currentSecurity?.requireApproval !== undefined ? { requireApproval: currentSecurity.requireApproval } : {}),
@@ -88,6 +91,7 @@ export async function handleSecurityCommand(deps: SecurityCommandDeps): Promise<
       print(`  Injection Detection: ${config.injectionDetection ? 'on' : 'off'}`);
       print(`  PII Masking: ${config.piiMasking ? 'on' : 'off'}`);
       print(`  Output Validation: ${config.outputValidation ? 'on' : 'off'}`);
+      print(`  Webhook Signature Policy: ${config.webhookSignaturePolicy}`);
       return;
     }
     case 'set': {

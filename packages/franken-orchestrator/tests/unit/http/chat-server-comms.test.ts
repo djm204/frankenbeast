@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -61,6 +61,58 @@ describe('startChatServer comms pass-through', () => {
     const opts = mockedCreateChatApp.mock.calls[0]![0];
     expect(opts).toHaveProperty('commsConfig', commsConfig);
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
+  });
+
+  it('passes network security config to createChatApp so comms can read webhook policy', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-server-security-config-'));
+    tempDirs.push(dir);
+    const configFile = join(dir, 'config.json');
+    let config: {
+      security: {
+        profile: 'strict' | 'standard' | 'permissive';
+        webhookSignaturePolicy: 'required' | 'local-dev-unsigned';
+        customRules?: Array<{ name: string; pattern: string; action: 'block' | 'warn' | 'log'; target: 'request' | 'response' | 'both' }>;
+      };
+    } = {
+      security: {
+        profile: 'permissive',
+        webhookSignaturePolicy: 'local-dev-unsigned',
+      },
+    };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-comms-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig: { orchestrator: {}, channels: {} },
+      networkControl: {
+        root: '/tmp/project',
+        frankenbeastDir: '/tmp/project/.frankenbeast',
+        configFile,
+        getConfig: () => config as never,
+        setConfig: (next) => {
+          config = next as typeof config;
+        },
+      },
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts.securityConfig?.getSecurityConfig().webhookSignaturePolicy).toBe('local-dev-unsigned');
+
+    opts.securityConfig?.setSecurityConfig({
+      webhookSignaturePolicy: 'required',
+      customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+    });
+    expect(config.security.webhookSignaturePolicy).toBe('required');
+    expect(config.security.customRules).toEqual([{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }]);
+    expect(opts.securityConfig?.getSecurityConfig().customRules).toEqual([
+      { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+    ]);
+    const writtenConfig = await readFile(configFile, 'utf-8');
+    expect(writtenConfig).toContain('"webhookSignaturePolicy": "required"');
+    expect(writtenConfig).toContain('"customRules"');
   });
 
   it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {

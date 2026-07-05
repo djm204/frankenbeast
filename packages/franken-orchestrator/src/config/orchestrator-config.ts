@@ -22,14 +22,32 @@ export const ProviderConfigSchema = z.object({
   extraArgs: z.array(z.string()).optional(),
 });
 
+const RegexPatternSchema = z.string().min(1).refine((pattern) => {
+  try {
+    new RegExp(pattern, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'pattern must be a valid regular expression' });
+
+export const SecurityRuleInputSchema = z.object({
+  name: z.string().min(1),
+  pattern: RegexPatternSchema,
+  action: z.enum(['block', 'warn', 'log']),
+  target: z.enum(['request', 'response', 'both']),
+});
+
 export const SecurityConfigInputSchema = z.object({
   profile: z.enum(['strict', 'standard', 'permissive']).optional(),
   injectionDetection: z.boolean().optional(),
   piiMasking: z.boolean().optional(),
   outputValidation: z.boolean().optional(),
+  webhookSignaturePolicy: z.enum(['required', 'local-dev-unsigned']).optional(),
   allowedDomains: z.array(z.string()).optional(),
   maxTokenBudget: z.number().positive().optional(),
   requireApproval: z.enum(['all', 'destructive', 'none']).optional(),
+  customRules: z.array(SecurityRuleInputSchema).optional(),
 });
 
 export const BrainConfigSchema = z.object({

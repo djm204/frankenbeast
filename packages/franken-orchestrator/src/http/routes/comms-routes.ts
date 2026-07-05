@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { ChatGateway } from '../../comms/gateway/chat-gateway.js';
 import { SessionMapper } from '../../comms/core/session-mapper.js';
 import { slackRouter } from '../../comms/channels/slack/slack-router.js';
@@ -12,12 +12,15 @@ import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.
 import type { CommsConfig } from '../../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
 
-import type { SecurityProfile } from '../../middleware/security-profiles.js';
+import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
+
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
 
 export interface CommsRoutesOptions {
   config: CommsConfig;
   runtime?: CommsRuntimePort;
-  securityProfile?: SecurityProfile;
+  webhookSignaturePolicy?: WebhookSignaturePolicy;
+  getWebhookSignaturePolicy?: () => WebhookSignaturePolicy;
 }
 
 export function commsRoutes(options: CommsRoutesOptions): Hono {
@@ -32,10 +35,15 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   const gateway = new ChatGateway(runtime);
-  const verifySignature = options.securityProfile !== 'permissive';
+  const getWebhookSignaturePolicy = options.getWebhookSignaturePolicy
+    ?? (() => options.webhookSignaturePolicy ?? 'required');
+  const shouldVerifySignature = (c: Context) => {
+    const policy = getWebhookSignaturePolicy();
+    return policy !== 'local-dev-unsigned' || !isLoopbackWebhookRequest(c.req.raw);
+  };
 
-  if (!verifySignature) {
-    console.warn('[comms] Webhook signature verification disabled (security profile: permissive)');
+  if (getWebhookSignaturePolicy() === 'local-dev-unsigned') {
+    console.warn('[comms] Webhook signature verification disabled for loopback-only local development');
   }
 
   const app = new Hono();
@@ -50,7 +58,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       signingSecret: slack.signingSecret,
-      verifySignature,
+      verifySignature: shouldVerifySignature,
     }));
   }
 
@@ -62,7 +70,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       gateway,
       sessionMapper,
       publicKey: discord.publicKey,
-      verifySignature,
+      verifySignature: shouldVerifySignature,
     }));
   }
 
@@ -89,7 +97,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
       sessionMapper,
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,
-      verifySignature,
+      verifySignature: shouldVerifySignature,
     }));
   }
 
@@ -106,4 +114,42 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   });
 
   return app;
+}
+
+function isLoopbackWebhookRequest(request: Request): boolean {
+  const hostname = new URL(request.url).hostname;
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  const realIp = request.headers.get('x-real-ip');
+  const trustedRemoteAddress = request.headers.get(TRUSTED_REMOTE_ADDRESS_HEADER);
+
+  if (trustedRemoteAddress !== null) {
+    return isLoopbackAddress(trustedRemoteAddress)
+      && isLoopbackAddress(hostname)
+      && isForwardedForLoopback(forwardedFor)
+      && (realIp === null || isLoopbackAddress(realIp));
+  }
+
+  // Unit tests call Hono directly and therefore do not have an IncomingMessage
+  // socket. In real Node HTTP traffic http-server-utils sets the trusted peer
+  // address header above, after overwriting any client-supplied value.
+  return isLoopbackAddress(hostname);
+}
+
+function isForwardedForLoopback(forwardedFor: string | null): boolean {
+  if (forwardedFor === null) {
+    return true;
+  }
+  return forwardedFor
+    .split(',')
+    .map((address) => address.trim())
+    .filter(Boolean)
+    .every(isLoopbackAddress);
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '::ffff:127.0.0.1';
 }

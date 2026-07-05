@@ -5,6 +5,7 @@ import type { Hono } from 'hono';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3737;
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
 
 export async function handleHonoHttpRequest(app: Hono, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
@@ -57,6 +58,10 @@ function toRequest(request: IncomingMessage): Request {
     }
     headers.set(key, value);
   }
+
+  // Set after copying request headers so clients cannot spoof the trusted peer
+  // address consumed by security-sensitive route guards.
+  headers.set(TRUSTED_REMOTE_ADDRESS_HEADER, request.socket.remoteAddress ?? '');
 
   if (method === 'GET' || method === 'HEAD') {
     return new Request(url, { method, headers, signal: abortController.signal });
