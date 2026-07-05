@@ -22,14 +22,20 @@ export type {
 } from '@franken/types';
 export type { ChatSessionResponse as ChatSession } from '@franken/types';
 
-export function toSocketUrl(baseUrl: string, sessionId: string, token: string): string {
+export const CHAT_SOCKET_PROTOCOL = 'franken.chat.v1';
+export const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
+
+export function toSocketUrl(baseUrl: string, sessionId: string, _token?: string): string {
   const url = new URL(baseUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/chat/ws`;
   url.search = '';
   url.searchParams.set('sessionId', sessionId);
-  url.searchParams.set('token', token);
   return url.toString();
+}
+
+export function toSocketProtocols(token: string): string[] {
+  return [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`];
 }
 
 export function resolveChatRequestBaseUrl(
@@ -125,8 +131,12 @@ export class ChatApiClient {
     );
   }
 
-  socketUrl(sessionId: string, token: string): string {
+  socketUrl(sessionId: string, token?: string): string {
     return toSocketUrl(this.requestBaseUrl, sessionId, token);
+  }
+
+  socketProtocols(token: string): string[] {
+    return toSocketProtocols(token);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {

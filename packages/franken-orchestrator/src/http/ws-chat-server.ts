@@ -8,7 +8,6 @@ import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
 import {
   verifyChatSocketRequest,
-  type VerifyChatSocketRequestOptions,
 } from './ws-chat-auth.js';
 import {
   ClientSocketEventSchema,
@@ -42,6 +41,8 @@ export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOp
   path?: string;
   server: HttpServer;
 }
+
+const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -351,6 +352,21 @@ function requestOrigin(request: IncomingMessage): string | null {
   return typeof origin === 'string' ? origin : null;
 }
 
+function extractChatSocketProtocolToken(request: IncomingMessage): string | null {
+  const protocols = request.headers['sec-websocket-protocol'];
+  const values = Array.isArray(protocols) ? protocols : protocols ? [protocols] : [];
+  for (const value of values) {
+    for (const protocol of value.split(',')) {
+      const trimmed = protocol.trim();
+      if (trimmed.startsWith(CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX)) {
+        const token = trimmed.slice(CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX.length);
+        return token || null;
+      }
+    }
+  }
+  return null;
+}
+
 function closeUnauthorized(
   socket: Duplex,
   status: number,
@@ -371,7 +387,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
     }
 
     const sessionId = url.searchParams.get('sessionId');
-    const token = url.searchParams.get('token');
+    const token = extractChatSocketProtocolToken(request);
     if (!sessionId) {
       closeUnauthorized(socket, 400);
       return;

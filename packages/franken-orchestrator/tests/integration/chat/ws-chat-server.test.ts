@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocket } from 'ws';
 import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
 import {
   ChatSocketController,
+  attachChatWebSocketServer,
 } from '../../../src/http/ws-chat-server.js';
 import {
   createSessionTokenSecret,
@@ -28,7 +31,96 @@ function createPeer() {
   };
 }
 
+function createTestRuntime(): ChatRuntime {
+  return new ChatRuntime({
+    engine: new ConversationEngine({
+      llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
+      projectName: 'proj',
+    }),
+    turnRunner: new TurnRunner({
+      execute: vi.fn().mockResolvedValue({
+        status: 'success',
+        summary: 'Done',
+        filesChanged: [],
+        testsRun: 0,
+        errors: [],
+      }),
+    }),
+  });
+}
+
+function listen(server: ReturnType<typeof createServer>): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('Expected TCP listener address');
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+function onceSocket(socket: WebSocket, event: 'open' | 'close' | 'error'): Promise<unknown[]> {
+  return new Promise((resolve) => {
+    socket.once(event, (...args: unknown[]) => resolve(args));
+  });
+}
+
 describe('ws chat server', () => {
+  it('accepts upgrade requests with socket tokens in websocket subprotocols', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
+      ['franken.chat.v1', `franken.chat.token.${token}`],
+    );
+
+    await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
+    expect(socket.protocol).toBe('franken.chat.v1');
+    expect(socket.url).not.toContain(token);
+
+    socket.close();
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rejects upgrade requests that still pass socket tokens in query strings', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}&token=${encodeURIComponent(token)}`,
+    );
+
+    await onceSocket(socket, 'error');
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('emits typing, delta, and complete events for a reply turn', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
