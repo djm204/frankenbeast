@@ -1,3 +1,4 @@
+import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AnalyticsApiClient,
@@ -45,7 +46,11 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(true);
+  const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
+  const detailTriggerEventIdRef = useRef<string | null>(null);
+  const deferDetailFocusUntilEventsLoadRef = useRef(false);
+  const sawDeferredEventsLoadRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,8 +118,29 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     [events],
   );
 
-  async function openDetail(event: AnalyticsEvent) {
-    detailTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  useEffect(() => {
+    if (!pendingFocusEventId) return;
+    if (deferDetailFocusUntilEventsLoadRef.current) {
+      if (isEventsLoading) {
+        sawDeferredEventsLoadRef.current = true;
+        return;
+      }
+      if (!sawDeferredEventsLoadRef.current) return;
+    } else if (isEventsLoading) {
+      return;
+    }
+    const currentRowTrigger = Array.from(document.querySelectorAll<HTMLElement>('[data-analytics-event-id]'))
+      .find((element) => element.dataset.analyticsEventId === pendingFocusEventId);
+    const fallbackTrigger = detailTriggerRef.current?.isConnected ? detailTriggerRef.current : null;
+    (currentRowTrigger ?? fallbackTrigger)?.focus();
+    deferDetailFocusUntilEventsLoadRef.current = false;
+    sawDeferredEventsLoadRef.current = false;
+    setPendingFocusEventId(null);
+  }, [events, isEventsLoading, pendingFocusEventId]);
+
+  async function openDetail(event: AnalyticsEvent, trigger?: HTMLElement) {
+    detailTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    detailTriggerEventIdRef.current = event.id;
     setSelectedEvent(event);
     setDetailError(null);
     try {
@@ -122,13 +148,6 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : 'Unable to load event detail.');
     }
-  }
-
-  function closeDetail() {
-    const trigger = detailTriggerRef.current;
-    setSelectedEvent(null);
-    setDetailError(null);
-    window.setTimeout(() => trigger?.focus(), 0);
   }
 
   function updateFilter(next: Partial<AnalyticsFilters>) {
@@ -142,6 +161,13 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   function updatePageSize(nextPageSize: number) {
     setPageSize(nextPageSize);
     setPage(1);
+  }
+
+  function closeDetail() {
+    const triggerEventId = detailTriggerEventIdRef.current;
+    setSelectedEvent(null);
+    setDetailError(null);
+    setPendingFocusEventId(triggerEventId);
   }
 
   return (
@@ -282,7 +308,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
           detail={selectedEvent}
           error={detailError}
           onClose={closeDetail}
-          onSessionFilter={(sessionId) => updateFilter({ sessionId })}
+          onSessionFilter={(sessionId) => {
+            deferDetailFocusUntilEventsLoadRef.current = true;
+            sawDeferredEventsLoadRef.current = false;
+            closeDetail();
+            updateFilter({ sessionId });
+          }}
         />
       )}
     </main>
@@ -304,7 +335,7 @@ function AnalyticsTable({
   title,
 }: {
   events: AnalyticsEvent[];
-  onSelect: (event: AnalyticsEvent) => void;
+  onSelect: (event: AnalyticsEvent, trigger: HTMLElement) => void;
   title: string;
 }) {
   return (
@@ -325,7 +356,7 @@ function AnalyticsTable({
                 <th>Tool</th>
                 <th>Outcome</th>
                 <th>Summary</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -338,12 +369,13 @@ function AnalyticsTable({
                   <td>{event.summary}</td>
                   <td>
                     <button
-                      aria-label={`Open details for ${event.summary}`}
-                      className="analytics-table__details-button"
+                      aria-label={`View details for ${event.summary}`}
+                      className="analytics-table__detail-button"
+                      data-analytics-event-id={event.id}
                       type="button"
-                      onClick={() => onSelect(event)}
+                      onClick={(clickEvent) => onSelect(event, clickEvent.currentTarget)}
                     >
-                      Open details
+                      Details
                     </button>
                   </td>
                 </tr>
@@ -367,58 +399,73 @@ function DetailDrawer({
   onClose: () => void;
   onSessionFilter: (sessionId: string) => void;
 }) {
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const rawJson = JSON.stringify(detail.raw, null, 2);
-
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-  }, [detail.id]);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <aside aria-label="Analytics event detail" className="analytics-drawer" role="dialog">
-      <div className="analytics-drawer__header">
-        <div>
-          <p className="eyebrow">{detail.source}</p>
-          <h3>{detail.summary}</h3>
-        </div>
-        <button ref={closeButtonRef} className="button button--secondary button--small" type="button" onClick={onClose}>Close</button>
-      </div>
-
-      {error && <div className="analytics-alert">{error}</div>}
-
-      <dl className="analytics-detail-list">
-        <div><dt>Time</dt><dd>{detail.timestamp}</dd></div>
-        <div><dt>Outcome</dt><dd>{detail.outcome}</dd></div>
-        <div><dt>Session</dt><dd>{detail.sessionId ?? '-'}</dd></div>
-        <div><dt>Tool</dt><dd>{detail.toolName ?? '-'}</dd></div>
-        <div><dt>Run</dt><dd>{detail.links.runId ?? '-'}</dd></div>
-        <div><dt>Agent</dt><dd>{detail.links.agentId ?? '-'}</dd></div>
-      </dl>
-
-      <div className="analytics-drawer__actions">
-        <button
-          className="button button--secondary button--small"
-          disabled={!detail.sessionId}
-          type="button"
-          onClick={() => detail.sessionId && onSessionFilter(detail.sessionId)}
+    <Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="analytics-drawer-overlay" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          aria-modal="true"
+          asChild
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            closeButtonRef.current?.focus();
+          }}
         >
-          Filter Session
-        </button>
-        <button
-          className="button button--secondary button--small"
-          type="button"
-          onClick={() => void navigator.clipboard?.writeText(rawJson)}
-        >
-          Copy JSON
-        </button>
-      </div>
+          <aside className="analytics-drawer">
+            <div className="analytics-drawer__header">
+              <div>
+                <p className="eyebrow">{detail.source}</p>
+                <Dialog.Title asChild>
+                  <h3>{detail.summary}</h3>
+                </Dialog.Title>
+              </div>
+              <Dialog.Close asChild>
+                <button ref={closeButtonRef} className="button button--secondary button--small" type="button">Close</button>
+              </Dialog.Close>
+            </div>
 
-      <pre className="analytics-raw">
-        {rawJson.split('\n').map((line, index) => (
-          <span key={`${index}-${line}`}>{line}</span>
-        ))}
-      </pre>
-    </aside>
+            {error && <div className="analytics-alert">{error}</div>}
+
+            <dl className="analytics-detail-list">
+              <div><dt>Time</dt><dd>{detail.timestamp}</dd></div>
+              <div><dt>Outcome</dt><dd>{detail.outcome}</dd></div>
+              <div><dt>Session</dt><dd>{detail.sessionId ?? '-'}</dd></div>
+              <div><dt>Tool</dt><dd>{detail.toolName ?? '-'}</dd></div>
+              <div><dt>Run</dt><dd>{detail.links.runId ?? '-'}</dd></div>
+              <div><dt>Agent</dt><dd>{detail.links.agentId ?? '-'}</dd></div>
+            </dl>
+
+            <div className="analytics-drawer__actions">
+              <button
+                className="button button--secondary button--small"
+                disabled={!detail.sessionId}
+                type="button"
+                onClick={() => detail.sessionId && onSessionFilter(detail.sessionId)}
+              >
+                Filter Session
+              </button>
+              <button
+                className="button button--secondary button--small"
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(rawJson)}
+              >
+                Copy JSON
+              </button>
+            </div>
+
+            <pre className="analytics-raw">
+              {rawJson.split('\n').map((line, index) => (
+                <span key={`${index}-${line}`}>{line}</span>
+              ))}
+            </pre>
+          </aside>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
