@@ -88,12 +88,14 @@ describe('DashboardApiClient', () => {
   });
 
   describe('updateSecurityProfile', () => {
-    it('sends PATCH with profile value', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    it('sends PATCH with profile value and returns resolved security config', async () => {
+      const security = { ...makeMockSnapshot().security, profile: 'strict', requireApproval: 'all' };
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => security });
 
       const client = new DashboardApiClient(BASE_URL);
-      await client.updateSecurityProfile('strict');
+      const result = await client.updateSecurityProfile('strict');
 
+      expect(result).toEqual(security);
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${BASE_URL}/api/security`,
         {

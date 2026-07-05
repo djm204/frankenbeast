@@ -689,10 +689,42 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('clears retry alerts when an older skill toggle confirms the failed latest state', async () => {
+    const firstEnable = deferred<void>();
+    const secondDisable = deferred<void>();
+    const failedFinalEnable = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(firstEnable.promise)
+        .mockReturnValueOnce(secondDisable.promise)
+        .mockReturnValueOnce(failedFinalEnable.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+
+    failedFinalEnable.reject(new Error('HTTP 500'));
+    firstEnable.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.queryByRole('button', { name: 'Retry enabling shell' })).toBeNull();
+    });
+  });
+
   it('retains the retry alert for a failed latest security save when an older save later succeeds', async () => {
-    const firstStrictSave = deferred<void>();
-    const secondPermissiveSave = deferred<void>();
-    const failedFinalStrictSave = deferred<void>();
+    const firstStrictSave = deferred<DashboardSnapshot['security']>();
+    const secondPermissiveSave = deferred<DashboardSnapshot['security']>();
+    const failedFinalStrictSave = deferred<DashboardSnapshot['security']>();
+    const permissiveSecurity: DashboardSnapshot['security'] = {
+      profile: 'permissive',
+      injectionDetection: false,
+      piiMasking: false,
+      outputValidation: false,
+      requireApproval: 'none',
+    };
     const client = mockClient({
       updateSecurityProfile: vi.fn()
         .mockReturnValueOnce(firstStrictSave.promise)
@@ -706,11 +738,40 @@ describe('DashboardPage', () => {
     fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'strict' } });
 
     failedFinalStrictSave.reject(new Error('HTTP 409'));
-    secondPermissiveSave.resolve(undefined);
+    secondPermissiveSave.resolve(permissiveSecurity);
 
     await waitFor(() => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('permissive');
+      expect(screen.getByText('Injection Detection: [off]')).toBeTruthy();
+      expect(screen.getByText('PII Masking: [off]')).toBeTruthy();
+      expect(screen.getByText('Output Validation: [off]')).toBeTruthy();
+      expect(screen.getByText('Approval Required: none')).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Retry saving strict' })).toBeTruthy();
+    });
+  });
+
+  it('clears retry alerts when an older security save confirms the failed latest profile', async () => {
+    const firstStrictSave = deferred<DashboardSnapshot['security']>();
+    const secondPermissiveSave = deferred<DashboardSnapshot['security']>();
+    const failedFinalStrictSave = deferred<DashboardSnapshot['security']>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(firstStrictSave.promise)
+        .mockReturnValueOnce(secondPermissiveSave.promise)
+        .mockReturnValueOnce(failedFinalStrictSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'strict' } });
+
+    failedFinalStrictSave.reject(new Error('HTTP 409'));
+    firstStrictSave.resolve({ ...snapshot.security, profile: 'strict', requireApproval: 'all' });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+      expect(screen.queryByRole('button', { name: 'Retry saving strict' })).toBeNull();
     });
   });
 

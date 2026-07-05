@@ -44,13 +44,14 @@ export class DashboardApiClient {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
-  async updateSecurityProfile(profile: string): Promise<void> {
+  async updateSecurityProfile(profile: string): Promise<DashboardSecurity> {
     const res = await fetch(`${this.baseUrl}/api/security`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as DashboardSecurity;
   }
 
   // NOTE: EventSource cannot attach an Authorization header. Browser clients
