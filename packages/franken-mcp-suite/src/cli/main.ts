@@ -98,7 +98,14 @@ switch (subcommand) {
         });
       },
       exec: async (cmd, args) => {
-        const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+        const isWindows = process.platform === 'win32';
+        const result = spawn(
+          cmd,
+          args,
+          isWindows
+            ? { stdio: 'pipe', shell: true, encoding: 'utf8' }
+            : { stdio: 'inherit', shell: false },
+        );
         if (result.error) {
           const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
           throw new Error(
@@ -108,15 +115,27 @@ switch (subcommand) {
           );
         }
         if (result.status !== 0) {
-          if (process.platform === 'win32' && result.status === 1) {
+          const stdout = result.stdout ? String(result.stdout) : '';
+          const stderr = result.stderr ? String(result.stderr) : '';
+          const shellOutput = `${stdout}\n${stderr}`.toLowerCase();
+          const isWindowsCommandNotFound =
+            isWindows &&
+            (shellOutput.includes('is not recognized') ||
+              shellOutput.includes('not recognized as an internal or external command') ||
+              shellOutput.includes('command not found'));
+          if (isWindowsCommandNotFound) {
             throw new Error(`${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
           }
+          if (stdout) process.stdout.write(stdout);
+          if (stderr) process.stderr.write(stderr);
           throw new Error(
             result.signal
               ? `${cmd} killed by signal ${result.signal}`
               : `${cmd} exited with ${result.status}`,
           );
         }
+        if (result.stdout) process.stdout.write(String(result.stdout));
+        if (result.stderr) process.stderr.write(String(result.stderr));
       },
     });
     break;

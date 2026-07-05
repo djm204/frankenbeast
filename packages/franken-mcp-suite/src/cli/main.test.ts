@@ -177,10 +177,16 @@ describe('fbeast main CLI', () => {
     mockExit.mockRestore();
   });
 
-  it('maps Windows mcp beast handoff exit status to standalone install help', async () => {
+  it('maps Windows missing mcp beast handoff binary output to standalone install help', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir());
-    const mockSpawnSync = vi.fn().mockReturnValue({ status: 1, signal: null, error: undefined });
+    const mockSpawnSync = vi.fn().mockReturnValue({
+      status: 1,
+      signal: null,
+      error: undefined,
+      stdout: '',
+      stderr: "'frankenbeast' is not recognized as an internal or external command",
+    });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
     process.argv = ['node', 'fbeast', 'mcp', 'beast'];
@@ -193,11 +199,30 @@ describe('fbeast main CLI', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'frankenbeast',
       ['beasts', 'catalog'],
-      expect.objectContaining({ stdio: 'inherit', shell: true }),
+      expect.objectContaining({ stdio: 'pipe', shell: true, encoding: 'utf8' }),
     );
     expect(message).toContain('npm install -g franken-orchestrator');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');
     mockLog.mockRestore();
+    cwdSpy.mockRestore();
+    platformSpy.mockRestore();
+  });
+
+  it('preserves real Windows mcp beast handoff failures', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir());
+    const mockSpawnSync = vi.fn().mockReturnValue({
+      status: 1,
+      signal: null,
+      error: undefined,
+      stdout: '',
+      stderr: 'catalog configuration failed',
+    });
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'beast'];
+
+    await expect(import('./main.js')).rejects.toThrow('frankenbeast exited with 1');
     cwdSpy.mockRestore();
     platformSpy.mockRestore();
   });
