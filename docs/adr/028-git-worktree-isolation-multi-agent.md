@@ -1,10 +1,10 @@
 # ADR-028: Git Worktree Isolation for Multi-Agent Concurrency
 
 - **Date:** 2026-03-16
-- **Status:** Accepted (implemented for tracked-agent runs)
+- **Status:** Accepted (implemented for tracked-agent runs; agent-deletion cleanup not implemented)
 - **Deciders:** pfk
 
-> **Implementation status (2026-07-05):** Implemented for tracked-agent beast runs. `create-beast-services.ts` wires `ProcessBeastExecutor` with `worktreeIsolation.enabled: true`, and `ProcessBeastExecutor.start()` calls `createBeastWorktree()` (`beasts/execution/git-worktree-isolation.ts`) for runs with a `trackedAgentId`, running `git worktree add`, rewriting the child `cwd`, and exporting the worktree path/branch. Ad-hoc (non-tracked) runs and the direct local-CLI `frankenbeast run` path still share the configured checkout via branch switching (`GitBranchIsolator`).
+> **Implementation status (2026-07-05):** Implemented for tracked-agent beast runs. `create-beast-services.ts` wires `ProcessBeastExecutor` with `worktreeIsolation.enabled: true`, and `ProcessBeastExecutor.start()` calls `createBeastWorktree()` (`beasts/execution/git-worktree-isolation.ts`, base dir `.frankenbeast/.worktrees/`) for runs with a `trackedAgentId`, running `git worktree add -b beast/<id>`, rewriting the child `cwd`, and exporting the worktree path/branch. The run process removes its own worktree on exit (`process-beast-executor.ts:228`, best-effort). **Not implemented:** agent *deletion* cleanup — `AgentService.softDeleteAgent()` only flips status to `deleted` and does not remove any lingering worktree or the `beast/<id>` branch, so the lifecycle promise "deleting an agent removes its worktree and branch" is not yet met. Ad-hoc (non-tracked) runs and the direct local-CLI `frankenbeast run` path still share the configured checkout via branch switching (`GitBranchIsolator`).
 
 ## Context
 

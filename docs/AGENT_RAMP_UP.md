@@ -9,7 +9,7 @@
 
 - 10 npm-workspace packages under `packages/` (see [RAMP_UP.md](RAMP_UP.md) module table).
 - Build/test/typecheck via turbo: `npm run build` / `npm test` / `npm run typecheck`; per package `npx turbo run test --filter=<workspace-name>`.
-- Runtime state lives under `.fbeast/` (`beast.db`, `plans/`, `.build/`, `audit/`, `state/`) — never commit it.
+- Runtime state lives under **two** generated dirs — never commit either: `.fbeast/` (`beast.db`, `plans/`, `.build/`, `audit/`, `state/`) and `.frankenbeast/` (tracked-agent worktrees under `.frankenbeast/.worktrees/`, daemon pidfile `.frankenbeast/beasts-daemon.pid`).
 - Docs claims are audited against code; when you change behavior, update ARCHITECTURE/DATA_FLOW/RAMP_UP in the same PR.
 
 ## Active Decisions
@@ -22,11 +22,11 @@ Implemented and enforced (verify before relying on legacy docs that say otherwis
 - **ADR-036 (both)** — safety modules fail closed (`FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the only opt-out); sandboxed container execution via `ContainerBeastExecutor` (a `ProcessSupervisor` whose spawn spec is rewritten to a docker invocation by `toDockerSpec`).
 - **ADR-037** — durable audit + replay capture; phase snapshots require `config.stateDir` (the CLI always sets it).
 - **ADR-038** — central MCP governance gate in dispatch.
-- **ADR-028** git worktree isolation — implemented for tracked-agent runs (`ProcessBeastExecutor.start()` → `createBeastWorktree()`); ad-hoc/local-CLI runs still share the checkout via branch switching.
+- **ADR-028** git worktree isolation — implemented for tracked-agent runs (`ProcessBeastExecutor.start()` → `createBeastWorktree()`, per-run teardown on exit); ad-hoc/local-CLI runs still share the checkout via branch switching. Caveat: agent *deletion* does not remove the worktree/branch (`softDeleteAgent` is status-only).
 
 Accepted but **not (fully) implemented** — do not describe as live:
 
-- **ADR-027** beast daemon — `beasts-daemon` subcommand exists; follow-up work tracked in [#463](https://github.com/djm204/frankenbeast/issues/463).
+- **ADR-027** beast daemon — `beasts-daemon` subcommand + `:4050` API + pidfile exist; the residual gaps (per ADR-027) are automatic lazy-start and CLI/chat-server-local wiring — `beasts` commands still build CLI-local services and `chat-server` runs in-process unless `FRANKENBEAST_BEAST_DAEMON_URL` is set. (#463 is closed; see ADR-027 for the live gap description.)
 - Recovery loop wiring (beast-loop-explained "Loop 4") — tracked in [#496](https://github.com/djm204/frankenbeast/issues/496).
 - Parallel/recursive execution strategies — tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
 
