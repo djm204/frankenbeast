@@ -1,7 +1,10 @@
 import type { ApprovalRequest, ApprovalResponse, ApprovalOutcome } from '../core/types.js';
 import type { GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
-import { SignatureVerifier } from '../security/signature-verifier.js';
+import {
+  formatApprovalResponseSignaturePayload,
+  SignatureVerifier,
+} from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
 import { createSessionToken } from '../security/session-token.js';
 import {
@@ -68,7 +71,7 @@ export class ApprovalGateway {
   }
 
   private verifySignature(response: ApprovalResponse): void {
-    const payload = JSON.stringify({
+    const payload = formatApprovalResponseSignaturePayload({
       requestId: response.requestId,
       decision: response.decision,
     });

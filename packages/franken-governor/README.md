@@ -432,18 +432,21 @@ interface EpisodicTraceRecord {
 Enable cryptographic verification of approval responses to prevent tampering:
 
 ```typescript
-import { SignatureVerifier } from '@franken/governor';
+import { formatApprovalResponseSignaturePayload, SignatureVerifier } from '@franken/governor';
 
 const secret = process.env.GOVERNOR_SIGNING_SECRET!;
 const verifier = new SignatureVerifier(secret);
 
-// Sign a payload
-const payload = JSON.stringify({ requestId: 'abc', decision: 'APPROVE' });
+// Sign the deterministic approval-response payload. Do not use JSON.stringify:
+// object key order can differ across runtimes and break verification.
+const payload = formatApprovalResponseSignaturePayload({ requestId: 'abc', decision: 'APPROVE' });
 const signature = verifier.sign(payload);
 
 // Verify (timing-safe comparison)
 const isValid = verifier.verify(payload, signature);
 ```
+
+The canonical signed approval-response payload is `requestId:<url-encoded-id>|decision:<url-encoded-decision>` (for example `requestId:abc|decision:APPROVE`). Custom approval UIs and non-TypeScript clients must sign those exact bytes rather than serialized JSON.
 
 To enable in the gateway:
 

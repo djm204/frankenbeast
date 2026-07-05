@@ -3,7 +3,10 @@ import { ApprovalGateway } from '../../../src/gateway/approval-gateway.js';
 import type { ApprovalChannel } from '../../../src/gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse } from '../../../src/core/types.js';
 import { defaultConfig } from '../../../src/core/config.js';
-import { SignatureVerifier } from '../../../src/security/signature-verifier.js';
+import {
+  formatApprovalResponseSignaturePayload,
+  SignatureVerifier,
+} from '../../../src/security/signature-verifier.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import {
   SignatureVerificationError,
@@ -62,7 +65,10 @@ describe('ApprovalGateway — security integration', () => {
 
   it('passes when requireSignedApprovals is true and signature is valid', async () => {
     const verifier = new SignatureVerifier('secret');
-    const responsePayload = JSON.stringify({ requestId: 'req-001', decision: 'APPROVE' });
+    const responsePayload = formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+    });
     const validSig = verifier.sign(responsePayload);
     const channel = makeFakeChannel({ signature: validSig });
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
@@ -73,6 +79,27 @@ describe('ApprovalGateway — security integration', () => {
       signatureVerifier: verifier,
     });
 
+    const outcome = await gateway.requestApproval(makeRequest());
+    expect(outcome.decision).toBe('APPROVE');
+  });
+
+  it('uses a deterministic signature payload that is independent of JSON key order', async () => {
+    const verifier = new SignatureVerifier('secret');
+    const jsonPayloadWithDifferentOrder = JSON.stringify({ decision: 'APPROVE', requestId: 'req-001' });
+    const deterministicPayload = formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+    });
+    const channel = makeFakeChannel({ signature: verifier.sign(deterministicPayload) });
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config,
+      signatureVerifier: verifier,
+    });
+
+    expect(jsonPayloadWithDifferentOrder).not.toBe(deterministicPayload);
     const outcome = await gateway.requestApproval(makeRequest());
     expect(outcome.decision).toBe('APPROVE');
   });
@@ -126,7 +153,10 @@ describe('ApprovalGateway — security integration', () => {
   it('constructs a verifier from config.signingSecret and accepts a valid signature', async () => {
     const signingSecret = 'secret-from-config';
     const verifier = new SignatureVerifier(signingSecret);
-    const validSig = verifier.sign(JSON.stringify({ requestId: 'req-001', decision: 'APPROVE' }));
+    const validSig = verifier.sign(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+    }));
     const channel = makeFakeChannel({ signature: validSig });
     const wiredGateway = new ApprovalGateway({
       channel,
@@ -159,7 +189,7 @@ describe('ApprovalGateway — security integration', () => {
     // Attacker replays a genuinely-signed approval for request A against active request B.
     const verifier = new SignatureVerifier('secret');
     const signedForOther = verifier.sign(
-      JSON.stringify({ requestId: 'req-OTHER', decision: 'APPROVE' }),
+      formatApprovalResponseSignaturePayload({ requestId: 'req-OTHER', decision: 'APPROVE' }),
     );
     const channel = makeFakeChannel({ requestId: 'req-OTHER', signature: signedForOther });
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'secret' };
