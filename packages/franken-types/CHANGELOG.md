@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.4](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.3...franken-types-v0.7.4) (2026-07-05)
+
+
+### Bug Fixes
+
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+* **orchestrator:** preserve MCP tool HITL metadata ([#552](https://github.com/djm204/frankenbeast/issues/552)) ([2008c70](https://github.com/djm204/frankenbeast/commit/2008c707c9297958c498ba3cc30cb898c1a46018))
+* **web:** improve approval pending UX ([397aad6](https://github.com/djm204/frankenbeast/commit/397aad66ed038e7329447866e54c327c73952e3b)), closes [#654](https://github.com/djm204/frankenbeast/issues/654)
+
 ## [0.7.3](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.2...franken-types-v0.7.3) (2026-07-04)
 
 
