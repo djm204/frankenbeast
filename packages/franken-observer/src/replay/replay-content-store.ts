@@ -16,7 +16,7 @@ export class ReplayContentStore {
   }
 
   put(content: string): string {
-    const ref = hashContent(content).replace(/^sha256:/, '');
+    const ref = hashContent(content);
     const path = this.blobPath(ref);
     if (!existsSync(path)) {
       writeFileSync(path, content, 'utf8');

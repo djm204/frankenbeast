@@ -11,7 +11,7 @@ describe('ReplayContentStore', () => {
     const store = new ReplayContentStore(root);
     const ref = store.put('hello world');
 
-    expect(ref).toBe(hashContent('hello world').replace(/^sha256:/, ''));
+    expect(ref).toBe(hashContent('hello world'));
     expect(ref).toMatch(/^[a-f0-9]{64}$/);
     expect(existsSync(join(root, 'blobs', ref))).toBe(true);
     expect(existsSync(join(root, 'blobs', `sha256:${ref}`))).toBe(false);
