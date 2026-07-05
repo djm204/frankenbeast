@@ -401,6 +401,61 @@ describe('ChatShell', () => {
     expect(screen.getByText('turn.execution.start')).toBeDefined();
   });
 
+  it('labels conversations with preview, state, message count, updated time, and a shortened id', async () => {
+    mockListSessions.mockResolvedValue([
+      {
+        id: 'session-1234567890abcdef',
+        projectId: 'test-project',
+        state: 'awaiting_approval',
+        messageCount: 3,
+        preview: 'Need deploy approval',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', {
+        name: /Need deploy approval — awaiting_approval · 3 messages · updated just now · session-…cdef/,
+      })).toBeDefined();
+      expect(screen.getByText('1 saved conversation available.')).toBeDefined();
+    });
+  });
+
+  it('shows loading, error, and retry states for conversation list failures', async () => {
+    mockListSessions.mockRejectedValueOnce(new Error('session service down'));
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    const conversationSelect = screen.getByLabelText('Conversation') as HTMLSelectElement;
+    expect(conversationSelect.disabled).toBe(true);
+    expect(screen.getByText('Loading saved conversations…')).toBeDefined();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('session service down');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry conversations' }));
+
+    await waitFor(() => {
+      expect(mockListSessions).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('1 saved conversation available.')).toBeDefined();
+    });
+  });
+
+  it('distinguishes an empty conversation list from a failed load', async () => {
+    mockListSessions.mockResolvedValueOnce([]);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No saved conversations yet.')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
+
   it('fetches network logs when a service is selected on the Network page', async () => {
     window.location.hash = '#/network';
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);

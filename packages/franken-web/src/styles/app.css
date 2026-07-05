@@ -1024,9 +1024,17 @@ button {
   display: none;
 }
 
+.field-hint,
+.field-error {
+  font-size: 0.82rem;
+}
+
+.field-hint {
+  color: var(--text-subtle);
+}
+
 .field-error {
   color: var(--danger);
-  font-size: 0.82rem;
 }
 
 .beast-card__modules {
