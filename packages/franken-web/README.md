@@ -34,10 +34,11 @@ From a second terminal, start the dashboard:
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
-The frontend automatically resolves the API URL at runtime:
+The frontend keeps API requests same-origin so the server/dev-proxy can attach
+operator auth without exposing credentials to browser JavaScript:
 
-- If `VITE_API_URL` is set, requests target that absolute URL.
-- Otherwise requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
+- Requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
+- Do not set `VITE_API_URL` for token-gated dashboard traffic; direct browser-to-backend requests cannot carry the long-lived operator token safely.
 - Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
@@ -46,7 +47,7 @@ If you use a non-default backend port:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
 For Beast controls, keep the operator token on the orchestrator/server side. Do not set a Vite-prefixed browser token; `franken-web` refuses to start when `VITE_BEAST_OPERATOR_TOKEN` is present because Vite bundles `VITE_*` values into client code.
@@ -75,9 +76,9 @@ FRANKENBEAST_BEAST_OPERATOR_TOKEN=<your-operator-token>
 For web-only overrides, you can still create a `.env.local` file in this package directory (never committed), but it must not contain operator credentials:
 
 ```env
-# Required — Base URL of the franken-orchestrator HTTP server.
-# Defaults to window.location.origin if omitted (works when served by the orchestrator).
-VITE_API_URL=http://localhost:3737
+# Optional — franken-orchestrator HTTP server for the Vite dev proxy.
+# Browser requests stay same-origin and the proxy forwards them here.
+VITE_API_PROXY_TARGET=http://localhost:3737
 
 # Optional — Project identifier for scoping chat sessions. Defaults to "default".
 VITE_PROJECT_ID=my-project

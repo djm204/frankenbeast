@@ -54,10 +54,11 @@ npm --workspace @frankenbeast/web run dev:chat
 
 That points the frontend at the same-origin API paths; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
-If your backend is on a different port, set `VITE_API_URL` explicitly:
+If your backend is on a different port, keep browser requests same-origin and
+point the Vite dev proxy at the backend:
 
 ```bash
-VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
 Open the URL Vite prints, usually:
@@ -97,9 +98,9 @@ Only bind to `0.0.0.0` when you actually need remote access.
 
 `The UI loads but does not connect`
 
-- make sure the backend is running on the same URL as `VITE_API_URL`
+- make sure the backend is running on the same URL as `VITE_API_PROXY_TARGET`
 - check that the backend printed the expected localhost URL
-- if you changed host or port, update `VITE_API_URL` to match
+- if you changed host or port, update `VITE_API_PROXY_TARGET` to match
 
 `WebSocket is rejected from another origin`
 

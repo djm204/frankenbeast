@@ -12,6 +12,7 @@ export interface NetworkRegistryContext {
   repoRoot: string;
   configFile?: string | undefined;
   configOverrides?: string[] | undefined;
+  operatorToken?: string | undefined;
 }
 
 export interface NetworkServiceRuntimeConfig {

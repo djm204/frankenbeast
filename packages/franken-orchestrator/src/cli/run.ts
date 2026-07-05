@@ -1104,11 +1104,25 @@ export async function runNetworkCommand(
   }
 
   const configFile = args.config ? resolvePath(args.config) : undefined;
+  let networkSecretStore: ISecretStore | undefined;
+  try {
+    networkSecretStore = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
+      projectRoot: root,
+      passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+    });
+  } catch {
+    networkSecretStore = undefined;
+  }
+  const operatorToken = await resolveBeastOperatorToken(root, {
+    ...(networkSecretStore ? { secretStore: networkSecretStore } : {}),
+    config,
+  }).catch(() => undefined);
   const services = filterNetworkServices(
     deps.resolveServices(config, {
       repoRoot: root,
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      ...(operatorToken ? { operatorToken } : {}),
     }),
     action === 'up' ? undefined : args.networkTarget,
   );

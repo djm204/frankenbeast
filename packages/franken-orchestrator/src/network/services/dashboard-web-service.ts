@@ -34,6 +34,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
         VITE_API_URL: '',
         VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
         VITE_BEAST_API_PROXY_TARGET: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
+        ...(context.operatorToken ? { FRANKENBEAST_BEAST_OPERATOR_TOKEN: context.operatorToken } : {}),
       },
     },
   }),

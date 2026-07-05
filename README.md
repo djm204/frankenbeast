@@ -384,7 +384,7 @@ If you run the backend on a different port:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
 For Beast controls, set the operator token once in the repo root `.env` so both the server and dashboard see it:
