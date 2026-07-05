@@ -9,7 +9,7 @@ type ActivitySeverity = 'info' | 'success' | 'warning' | 'error';
 
 interface ActivityLink {
   label: string;
-  href: string;
+  href?: string;
 }
 
 interface ActivityViewModel {
@@ -73,7 +73,7 @@ function statusForActivity(event: ActivityEvent, data: Record<string, unknown>):
     return data.approved === true ? 'Approved' : 'Rejected';
   }
   if (event.type === 'turn.execution.complete') {
-    return 'Complete';
+    return data.status === 'failed' ? 'Failed' : 'Complete';
   }
   if (event.type === 'turn.execution.start') {
     return 'Started';
@@ -86,7 +86,7 @@ function statusForActivity(event: ActivityEvent, data: Record<string, unknown>):
 }
 
 function severityForActivity(event: ActivityEvent, data: Record<string, unknown>): ActivitySeverity {
-  if (event.type === 'turn.error' || data.approved === false) {
+  if (event.type === 'turn.error' || data.approved === false || data.status === 'failed') {
     return 'error';
   }
   if (event.type === 'turn.approval.requested') {
@@ -105,6 +105,7 @@ function summarizeActivity(event: ActivityEvent): string {
   const code = stringValue(data, 'code');
   const description = stringValue(data, 'description');
   const summary = stringValue(data, 'summary');
+  const taskDescription = stringValue(data, 'taskDescription');
 
   if (event.type === 'turn.error') {
     return [code, message ?? 'Turn failed'].filter(Boolean).join(': ');
@@ -120,6 +121,9 @@ function summarizeActivity(event: ActivityEvent): string {
   }
   if (message) {
     return message;
+  }
+  if (taskDescription) {
+    return taskDescription;
   }
 
   return 'Open details to inspect runtime event data.';
@@ -141,13 +145,13 @@ function activityLinks(data: Record<string, unknown>): ActivityLink[] {
   const artifactPath = stringValue(data, 'artifactPath') ?? stringValue(data, 'artifact');
 
   if (sessionId) {
-    links.push({ label: `Session ${sessionId}`, href: `#/sessions/${encodeURIComponent(sessionId)}` });
+    links.push({ label: `Session ${sessionId}`, href: '#/sessions' });
   }
   if (runId) {
-    links.push({ label: `Run ${runId}`, href: `#/runs/${encodeURIComponent(runId)}` });
+    links.push({ label: `Run ${runId}`, href: '#/beasts' });
   }
   if (artifactPath) {
-    links.push({ label: `Artifact ${artifactPath}`, href: `#/artifacts?path=${encodeURIComponent(artifactPath)}` });
+    links.push({ label: `Artifact ${artifactPath}` });
   }
 
   return links;
@@ -165,7 +169,7 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
 }
 
 export function ActivityPane({ events }: ActivityPaneProps) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
     if (typeof endRef.current?.scrollIntoView === 'function') {
@@ -185,7 +189,11 @@ export function ActivityPane({ events }: ActivityPaneProps) {
           const viewModel = viewModelForActivity(event);
           const risk = riskLabel(event.data ?? {});
           return (
-            <li key={`${event.type}-${event.timestamp}-${index}`} className={`activity-event activity-event--${viewModel.severity}`}>
+            <li
+              key={`${event.type}-${event.timestamp}-${index}`}
+              ref={index === events.length - 1 ? endRef : undefined}
+              className={`activity-event activity-event--${viewModel.severity}`}
+            >
               <div className="activity-event__meta">
                 <span className={`activity-event__chip activity-event__chip--${viewModel.severity}`}>{viewModel.status}</span>
                 <time dateTime={event.timestamp}>{formatActivityTime(event.timestamp)}</time>
@@ -197,7 +205,9 @@ export function ActivityPane({ events }: ActivityPaneProps) {
                 <div className="activity-event__context" aria-label={`${viewModel.title} context`}>
                   {risk && <span className="activity-event__risk">{risk}</span>}
                   {viewModel.links.map((link) => (
-                    <a key={`${link.label}-${link.href}`} href={link.href}>{link.label}</a>
+                    link.href
+                      ? <a key={`${link.label}-${link.href}`} href={link.href}>{link.label}</a>
+                      : <span key={link.label} className="activity-event__context-label">{link.label}</span>
                   ))}
                 </div>
               )}
@@ -208,7 +218,6 @@ export function ActivityPane({ events }: ActivityPaneProps) {
             </li>
           );
         })}
-        <div ref={endRef} />
       </ol>
     </section>
   );

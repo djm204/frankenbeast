@@ -1079,8 +1079,13 @@ button {
   font-size: 0.82rem;
 }
 
-.activity-event__context a {
+.activity-event__context a,
+.activity-event__context-label {
   color: var(--accent-strong);
+}
+
+.activity-event__context-label {
+  overflow-wrap: anywhere;
 }
 
 .activity-event__details {

@@ -120,6 +120,44 @@ describe('useChatSession error banners', () => {
     });
   });
 
+  it('preserves approval metadata on activity events for readable timeline chips', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.approval.requested',
+          description: 'Run npm test',
+          risk: 'medium',
+          tool: 'terminal',
+          command: 'npm test',
+          affectedFiles: ['packages/franken-web/src/components/activity-pane.tsx'],
+          sessionId: 'session-1',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.activity[0]).toMatchObject({
+      type: 'turn.approval.requested',
+      data: {
+        description: 'Run npm test',
+        risk: 'medium',
+        tool: 'terminal',
+        command: 'npm test',
+        affectedFiles: ['packages/franken-web/src/components/activity-pane.tsx'],
+        sessionId: 'session-1',
+      },
+    });
+  });
+
   it('replaces the failed optimistic message when retrying the last message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
     vi.stubGlobal('WebSocket', MockWebSocket);
