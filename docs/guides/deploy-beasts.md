@@ -64,9 +64,10 @@ If you bind to a non-loopback host or run in managed network mode, the server re
 
 ## 2. Start the dashboard
 
-In a second terminal:
+In a second terminal, either reuse the same repo-root `.env`/secret-store token or export the same local token before starting Vite so the Node-side dev proxy can inject it server-side:
 
 ```bash
+export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 npm --workspace @frankenbeast/web run dev:chat
 ```
 
