@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { SignatureVerifier } from '../../../src/security/signature-verifier.js';
+import {
+  formatApprovalResponseSignaturePayload,
+  SignatureVerifier,
+} from '../../../src/security/signature-verifier.js';
 
 describe('SignatureVerifier', () => {
   const secret = 'test-secret-key';
@@ -27,10 +30,15 @@ describe('SignatureVerifier', () => {
     expect(otherVerifier.verify('payload', sig)).toBe(false);
   });
 
-  it('sign + verify round-trip succeeds', () => {
-    const payload = JSON.stringify({ requestId: 'req-001', decision: 'APPROVE' });
+  it('sign + verify round-trip succeeds for approval response payloads', () => {
+    const payload = formatApprovalResponseSignaturePayload({ requestId: 'req-001', decision: 'APPROVE' });
     const sig = verifier.sign(payload);
     expect(verifier.verify(payload, sig)).toBe(true);
+  });
+
+  it('formats approval response payloads without relying on JSON key order', () => {
+    expect(formatApprovalResponseSignaturePayload({ requestId: 'req-001', decision: 'APPROVE' }))
+      .toBe('requestId:req-001|decision:APPROVE');
   });
 
   it('produces deterministic signatures for same input', () => {

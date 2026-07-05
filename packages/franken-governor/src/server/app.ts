@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
 import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
-import { SignatureVerifier } from '../security/signature-verifier.js';
+import {
+  formatApprovalResponseSignaturePayload,
+  SignatureVerifier,
+} from '../security/signature-verifier.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -80,7 +83,7 @@ function verifyGovernorSignature(
 /**
  * Produce a signature for a resolved `ApprovalResponse` matching the format
  * `ApprovalGateway.verifySignature` expects (HMAC-SHA256 hex digest of
- * `JSON.stringify({ requestId, decision })`, via `SignatureVerifier`).
+ * `requestId:<id>|decision:<decision>`, via `SignatureVerifier`).
  *
  * Without this, a caller awaiting the approval through `ApprovalGateway`
  * with `config.requireSignedApprovals: true` would always unblock only to
@@ -98,7 +101,7 @@ function signApprovalResponse(
   signingSecret: string,
 ): string {
   return new SignatureVerifier(signingSecret).sign(
-    JSON.stringify({ requestId, decision }),
+    formatApprovalResponseSignaturePayload({ requestId, decision }),
   );
 }
 
