@@ -16,7 +16,7 @@ class MockWebSocket {
   send = vi.fn();
   close = vi.fn();
 
-  constructor(readonly url: string) {
+  constructor(readonly url: string, readonly protocols?: string | string[]) {
     MockWebSocket.instances.push(this);
   }
 }
@@ -64,6 +64,24 @@ describe('useChatSession error banners', () => {
       code: 'session_init_failed',
       actionLabel: 'Retry session',
     });
+  });
+
+  it('opens websocket connections without putting the socket token in the URL', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    expect(MockWebSocket.instances[0]!.url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=session-1');
+    expect(MockWebSocket.instances[0]!.url).not.toContain('socket-token');
+    expect(MockWebSocket.instances[0]!.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.socket-token',
+    ]);
   });
 
   it('turns socket turn errors into visible retry banners', async () => {

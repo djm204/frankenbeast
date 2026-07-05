@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChatApiClient, resolveChatRequestBaseUrl, resolveChatRequestCredentials } from '../../src/lib/api';
+import {
+  CHAT_SOCKET_PROTOCOL,
+  CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
+  ChatApiClient,
+  resolveChatRequestBaseUrl,
+  resolveChatRequestCredentials,
+} from '../../src/lib/api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -251,15 +257,24 @@ describe('ChatApiClient', () => {
   });
 
   describe('socketUrl', () => {
-    it('returns the websocket URL for a session', () => {
+    it('returns the websocket URL for a session without leaking the token into the query string', () => {
       const url = client.socketUrl('sess-1', 'signed-token');
-      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1&token=signed-token');
+      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1');
+      expect(url).not.toContain('signed-token');
+    });
+
+    it('sends the socket token via websocket subprotocols', () => {
+      expect(client.socketProtocols('signed-token')).toEqual([
+        CHAT_SOCKET_PROTOCOL,
+        `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}signed-token`,
+      ]);
     });
 
     it('keeps cross-origin websocket connections on the same-origin proxy', () => {
       const crossOrigin = new ChatApiClient('https://chat-api.example.test');
       const url = crossOrigin.socketUrl('sess-1', 'signed-token');
-      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1&token=signed-token');
+      expect(url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=sess-1');
+      expect(url).not.toContain('signed-token');
     });
   });
 

@@ -8,7 +8,6 @@ import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
 import {
   verifyChatSocketRequest,
-  type VerifyChatSocketRequestOptions,
 } from './ws-chat-auth.js';
 import {
   ClientSocketEventSchema,
@@ -41,6 +40,14 @@ export interface ChatSocketConnectRequest {
 export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOptions {
   path?: string;
   server: HttpServer;
+}
+
+export const CHAT_SOCKET_PROTOCOL = 'franken.chat.v1';
+export const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
+
+interface ChatSocketProtocolAuth {
+  hasChatProtocol: boolean;
+  token: string | null;
 }
 
 function nowIso(): string {
@@ -351,6 +358,24 @@ function requestOrigin(request: IncomingMessage): string | null {
   return typeof origin === 'string' ? origin : null;
 }
 
+function extractChatSocketProtocolAuth(request: IncomingMessage): ChatSocketProtocolAuth {
+  const protocols = request.headers['sec-websocket-protocol'];
+  const values = Array.isArray(protocols) ? protocols : protocols ? [protocols] : [];
+  let hasChatProtocol = false;
+  let token: string | null = null;
+  for (const value of values) {
+    for (const protocol of value.split(',')) {
+      const trimmed = protocol.trim();
+      if (trimmed === CHAT_SOCKET_PROTOCOL) {
+        hasChatProtocol = true;
+      } else if (trimmed.startsWith(CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX)) {
+        token = trimmed.slice(CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX.length) || null;
+      }
+    }
+  }
+  return { hasChatProtocol, token };
+}
+
 function closeUnauthorized(
   socket: Duplex,
   status: number,
@@ -371,11 +396,12 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
     }
 
     const sessionId = url.searchParams.get('sessionId');
-    const token = url.searchParams.get('token');
-    if (!sessionId) {
+    const protocolAuth = extractChatSocketProtocolAuth(request);
+    if (!sessionId || !protocolAuth.hasChatProtocol) {
       closeUnauthorized(socket, 400);
       return;
     }
+    const { token } = protocolAuth;
 
     const auth = controller.connect(
       {
@@ -396,6 +422,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
       close: () => socket.destroy(),
       send: () => undefined,
     });
+    request.headers['sec-websocket-protocol'] = CHAT_SOCKET_PROTOCOL;
 
     server.handleUpgrade(request, socket, head, (ws: WebSocket) => {
       const peer = requestToPeer(ws);

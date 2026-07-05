@@ -7,6 +7,7 @@ const mockGetSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockApprove = vi.fn();
 const mockSocketUrl = vi.fn();
+const mockSocketProtocols = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
   ChatApiClient: vi.fn(function (this: {
@@ -15,12 +16,14 @@ vi.mock('../../src/lib/api', () => ({
     sendMessage: typeof mockSendMessage;
     approve: typeof mockApprove;
     socketUrl: typeof mockSocketUrl;
+    socketProtocols: typeof mockSocketProtocols;
   }) {
     this.createSession = mockCreateSession;
     this.getSession = mockGetSession;
     this.sendMessage = mockSendMessage;
     this.approve = mockApprove;
     this.socketUrl = mockSocketUrl;
+    this.socketProtocols = mockSocketProtocols;
   }),
 }));
 
@@ -28,6 +31,7 @@ class MockWebSocket {
   static instances: MockWebSocket[] = [];
 
   readonly url: string;
+  readonly protocols?: string | string[];
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
@@ -38,8 +42,9 @@ class MockWebSocket {
     this.readyState = 3;
   });
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url;
+    this.protocols = protocols;
     MockWebSocket.instances.push(this);
   }
 
@@ -110,7 +115,8 @@ describe('useChatSession', () => {
       approved: true,
       state: 'active',
     });
-    mockSocketUrl.mockReturnValue('ws://localhost:3000/v1/chat/ws?sessionId=chat-1&token=signed-token');
+    mockSocketUrl.mockReturnValue('ws://localhost:3000/v1/chat/ws?sessionId=chat-1');
+    mockSocketProtocols.mockReturnValue(['franken.chat.v1', 'franken.chat.token.signed-token']);
   });
 
   afterEach(() => {
@@ -126,9 +132,14 @@ describe('useChatSession', () => {
 
     expect(mockCreateSession).toHaveBeenCalledWith('test-proj');
     expect(mockSocketUrl).toHaveBeenCalledWith('chat-1', 'signed-token');
+    expect(mockSocketProtocols).toHaveBeenCalledWith('signed-token');
     expect(MockWebSocket.instances[0]?.url).toBe(
-      'ws://localhost:3000/v1/chat/ws?sessionId=chat-1&token=signed-token',
+      'ws://localhost:3000/v1/chat/ws?sessionId=chat-1',
     );
+    expect(MockWebSocket.instances[0]?.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.signed-token',
+    ]);
   });
 
   it('streams assistant messages and updates receipts', async () => {

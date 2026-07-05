@@ -58,7 +58,7 @@ describe('AppErrorBoundary', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0]?.[0]).toContain('Boom while rendering dashboard');
     expect(writeText.mock.calls[0]?.[0]).toContain('0.1.0-test');
-    expect(screen.getByRole('button', { name: /diagnostics copied/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /diagnostics copied/i })).toBeTruthy();
   });
 
   it('prompts for manual diagnostics when the clipboard API is unavailable', async () => {

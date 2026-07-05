@@ -4,6 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface } from 'node:readline';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
+import {
+  CHAT_SOCKET_PROTOCOL,
+  CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
+} from '../http/ws-chat-server.js';
 
 interface ManagedNetworkState {
   services?: Array<{
@@ -84,7 +88,10 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
       socketToken: string;
     };
   };
-  const socket = new WebSocket(`${target.wsUrl}?sessionId=${body.data.id}&token=${body.data.socketToken}`);
+  const socket = new WebSocket(
+    `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
+    [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+  );
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => resolve(), { once: true });
     socket.addEventListener('error', () => reject(new Error('Managed chat websocket failed to connect')), { once: true });

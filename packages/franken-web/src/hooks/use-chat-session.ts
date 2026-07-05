@@ -424,7 +424,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setConnectionStatus('connecting');
     readyRef.current = false;
 
-    const socket = new WebSocket(clientRef.current.socketUrl(sessionId, socketToken));
+    const socket = new WebSocket(
+      clientRef.current.socketUrl(sessionId, socketToken),
+      clientRef.current.socketProtocols(socketToken),
+    );
     socketRef.current = socket;
 
     socket.onopen = () => {

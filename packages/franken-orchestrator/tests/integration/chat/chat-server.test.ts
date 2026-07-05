@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { createBeastServices } from '../../../src/beasts/create-beast-services.js';
 import { startChatServer } from '../../../src/http/chat-server.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
+import {
+  CHAT_SOCKET_PROTOCOL,
+  CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
+} from '../../../src/http/ws-chat-server.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/chat-server');
@@ -60,7 +64,10 @@ describe('chat server bootstrap', () => {
         };
       };
 
-      const socket = new WebSocket(`${server.wsUrl}?sessionId=${body.data.id}&token=${body.data.socketToken}`);
+      const socket = new WebSocket(
+        `${server.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
+        [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+      );
       await new Promise<void>((resolve, reject) => {
         socket.addEventListener('open', () => resolve(), { once: true });
         socket.addEventListener('error', (event) => reject(event.error ?? new Error('websocket error')), { once: true });
