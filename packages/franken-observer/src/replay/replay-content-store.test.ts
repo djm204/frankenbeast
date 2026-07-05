@@ -25,4 +25,15 @@ describe('ReplayContentStore', () => {
 
     expect(() => store.get(ref)).toThrow(/hash mismatch/i);
   });
+
+  it('can read pre-prefix replay refs for existing durable artifacts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const store = new ReplayContentStore(root);
+    const ref = store.put('legacy content');
+    const legacyRef = ref.replace(/^sha256:/, '');
+
+    store.__corruptForTest(legacyRef, 'legacy content');
+
+    expect(store.get(legacyRef)).toBe('legacy content');
+  });
 });

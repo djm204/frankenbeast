@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
 
 export class ReplayContentStore {
@@ -23,7 +24,7 @@ export class ReplayContentStore {
 
   get(ref: string): string {
     const content = readFileSync(join(this.dir, ref), 'utf8');
-    if (hashContent(content) !== ref) {
+    if (!contentHashMatches(content, ref)) {
       throw new Error(`Replay blob hash mismatch for ${ref}`);
     }
     return content;
