@@ -357,6 +357,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
       await closedServer;
+      options.analyticsDeps?.analytics.close?.();
     },
   };
 }

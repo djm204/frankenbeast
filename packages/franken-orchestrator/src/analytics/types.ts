@@ -73,4 +73,5 @@ export interface AnalyticsService {
   listSessions(filters: AnalyticsFilters): Promise<AnalyticsSessionOption[]>;
   listEvents(request: AnalyticsPageRequest): Promise<AnalyticsEventPage>;
   getEvent(id: string): Promise<AnalyticsEvent | null>;
+  close?(): void;
 }

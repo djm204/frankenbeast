@@ -175,6 +175,40 @@ describe('createSqliteAnalyticsService', () => {
     expect(detail?.raw).toMatchObject({ verdict: 'flagged' });
   });
 
+  it('reuses one SQLite handle across a dashboard event read and closes it on service shutdown', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    seedFbeastDb(dbPath);
+    const closeSpy = vi.spyOn(Database.prototype, 'close');
+
+    const service = createSqliteAnalyticsService({ dbPath });
+    const result = await service.listEvents({ timeWindow: 'all' });
+
+    expect(result.total).toBe(5);
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    service.close?.();
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    await expect(service.listEvents({ timeWindow: 'all' })).resolves.toMatchObject({ total: 0 });
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    closeSpy.mockRestore();
+  });
+
+  it('opens the shared SQLite handle when the database appears after service construction', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const service = createSqliteAnalyticsService({ dbPath });
+
+    await expect(service.listEvents({ timeWindow: 'all' })).resolves.toMatchObject({ total: 0 });
+
+    seedFbeastDb(dbPath);
+    const result = await service.listEvents({ timeWindow: 'all' });
+
+    expect(result.total).toBe(5);
+    service.close?.();
+  });
+
   it('sorts mixed SQLite and ISO event timestamps by chronological time', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
     const dbPath = join(workDir, 'beast.db');
