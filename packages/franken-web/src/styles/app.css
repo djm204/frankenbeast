@@ -986,7 +986,10 @@ button {
   flex-direction: column;
   gap: 0.75rem;
   max-height: 18rem;
+  margin: 0;
+  padding: 0;
   overflow: auto;
+  list-style: none;
 }
 
 .activity-event {
@@ -996,16 +999,102 @@ button {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.activity-event--error {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.activity-event--warning {
+  border-color: rgba(251, 191, 36, 0.55);
+}
+
+.activity-event--success {
+  border-color: rgba(74, 222, 128, 0.45);
+}
+
+.activity-event__meta,
+.activity-event__context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.activity-event__meta {
+  margin-bottom: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.activity-event__chip,
+.activity-event__risk {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.12rem 0.48rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.activity-event__chip--error {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
+}
+
+.activity-event__chip--warning {
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #fde68a;
+}
+
+.activity-event__chip--success {
+  border-color: rgba(74, 222, 128, 0.45);
+  color: #bbf7d0;
+}
+
+.activity-event__title {
+  margin: 0 0 0.15rem;
+  font-size: 0.98rem;
+}
+
 .activity-event__type {
   display: block;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.35rem;
   font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
   color: var(--accent-strong);
+  font-size: 0.78rem;
 }
 
 .activity-event__summary {
   display: block;
+  margin: 0;
   color: var(--text-muted);
+  word-break: break-word;
+}
+
+.activity-event__context {
+  margin-top: 0.65rem;
+  font-size: 0.82rem;
+}
+
+.activity-event__context a,
+.activity-event__context-label {
+  color: var(--accent-strong);
+}
+
+.activity-event__context-label {
+  overflow-wrap: anywhere;
+}
+
+.activity-event__details {
+  margin-top: 0.65rem;
+}
+
+.activity-event__details pre {
+  overflow: auto;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 

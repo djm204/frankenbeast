@@ -646,7 +646,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             ...current,
             {
               type: payload.type,
-              data: { description: payload.description },
+              data: {
+                description: payload.description,
+                ...(payload.tool ? { tool: payload.tool } : {}),
+                ...(payload.command ? { command: payload.command } : {}),
+                ...(payload.risk ? { risk: payload.risk } : {}),
+                ...(payload.affectedFiles ? { affectedFiles: payload.affectedFiles } : {}),
+                ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+              },
               timestamp: payload.timestamp,
             },
           ]);
