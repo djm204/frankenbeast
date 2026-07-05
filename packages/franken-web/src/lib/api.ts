@@ -32,8 +32,28 @@ export function toSocketUrl(baseUrl: string, sessionId: string, token: string): 
   return url.toString();
 }
 
+export function resolveChatRequestBaseUrl(
+  baseUrl: string,
+  locationOrigin: string | undefined = typeof window !== 'undefined' ? window.location.origin : undefined,
+): string {
+  if (!locationOrigin) {
+    return baseUrl;
+  }
+
+  try {
+    const configured = new URL(baseUrl, locationOrigin);
+    return configured.origin === locationOrigin ? baseUrl : locationOrigin;
+  } catch {
+    return locationOrigin;
+  }
+}
+
 export class ChatApiClient {
-  constructor(private readonly baseUrl: string) {}
+  private readonly requestBaseUrl: string;
+
+  constructor(private readonly baseUrl: string) {
+    this.requestBaseUrl = resolveChatRequestBaseUrl(baseUrl);
+  }
 
   async createSession(projectId: string): Promise<ChatSession> {
     return this.request<ChatSession>('/v1/chat/sessions', {
@@ -95,7 +115,7 @@ export class ChatApiClient {
       ...init,
       credentials: init.credentials ?? 'same-origin',
     };
-    const res = await fetch(`${this.baseUrl}${path}`, effectiveInit);
+    const res = await fetch(`${this.requestBaseUrl}${path}`, effectiveInit);
 
     if (!res.ok) {
       let message = `HTTP ${res.status}`;

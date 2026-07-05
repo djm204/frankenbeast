@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChatApiClient } from '../../src/lib/api';
+import { ChatApiClient, resolveChatRequestBaseUrl } from '../../src/lib/api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -36,6 +36,32 @@ describe('ChatApiClient', () => {
       const headers = init.headers as Record<string, string>;
       expect(headers).toEqual({ 'Content-Type': 'application/json' });
       expect(init.credentials).toBe('same-origin');
+    });
+
+    it('forces explicit cross-origin chat API URLs through the same-origin BFF', async () => {
+      const crossOrigin = new ChatApiClient('https://chat-api.example.test');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { id: 'x', projectId: 'p', transcript: [], state: 'active', socketToken: 't', tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 }, costUsd: 0, createdAt: '2026-03-09T00:00:00Z', updatedAt: '2026-03-09T00:00:00Z' } }),
+      });
+
+      await crossOrigin.createSession('p');
+
+      expect(mockFetch.mock.calls[0]![0]).toBe(`${window.location.origin}/v1/chat/sessions`);
+    });
+  });
+
+  describe('resolveChatRequestBaseUrl', () => {
+    it('preserves same-origin explicit base URLs', () => {
+      expect(resolveChatRequestBaseUrl('http://dashboard.local/api-root', 'http://dashboard.local')).toBe(
+        'http://dashboard.local/api-root',
+      );
+    });
+
+    it('rewrites cross-origin explicit base URLs to the dashboard origin', () => {
+      expect(resolveChatRequestBaseUrl('https://chat-api.example.test', 'http://dashboard.local')).toBe(
+        'http://dashboard.local',
+      );
     });
   });
 
