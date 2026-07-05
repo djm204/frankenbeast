@@ -6,6 +6,24 @@ const ROOT = join(import.meta.dirname, '..');
 const readPkg = (rel: string) =>
   JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
 
+const majorMinorPatch = (version: string) => {
+  const match = version.match(/^(?:\^|~)?(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) {
+    throw new Error(`Unsupported semver range: ${version}`);
+  }
+  return match.slice(1).map(Number) as [number, number, number];
+};
+
+const isAtLeast = (version: string, minimum: string) => {
+  const current = majorMinorPatch(version);
+  const target = majorMinorPatch(minimum);
+  for (let index = 0; index < current.length; index += 1) {
+    if (current[index] > target[index]) return true;
+    if (current[index] < target[index]) return false;
+  }
+  return true;
+};
+
 describe('npm workspaces configuration', () => {
   describe('root package.json', () => {
     const rootPkg = readPkg('package.json');
@@ -16,6 +34,11 @@ describe('npm workspaces configuration', () => {
 
     it('remains private (required for workspaces)', () => {
       expect(rootPkg.private).toBe(true);
+    });
+
+    it('pins ws to a security-fixed version for all workspace consumers', () => {
+      expect(rootPkg.overrides?.ws).toBeDefined();
+      expect(isAtLeast(rootPkg.overrides.ws, '8.21.0')).toBe(true);
     });
   });
 
