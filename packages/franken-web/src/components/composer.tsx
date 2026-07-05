@@ -12,6 +12,10 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
   const [value, setValue] = useState('');
 
   function submitCurrentValue() {
+    if (disabled) {
+      return;
+    }
+
     const trimmed = value.trim();
     if (!trimmed) {
       return;
