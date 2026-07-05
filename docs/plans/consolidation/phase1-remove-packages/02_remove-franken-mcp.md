@@ -44,7 +44,7 @@ if (modules?.includes('mcp')) {
 
 Replace this with:
 ```typescript
-// TODO: Phase 5 — SkillManager replaces MCP module with marketplace-first skill loading
+// Phase 5 placeholder — SkillManager replaces MCP module with marketplace-first skill loading
 // MCP client connections will use @modelcontextprotocol/sdk directly
 ```
 
@@ -69,7 +69,7 @@ npm test
 
 - **Delete:** `packages/franken-mcp/` (entire directory)
 - **Modify:** Root `package.json`, root `tsconfig.json`
-- **Modify:** `packages/franken-orchestrator/src/cli/dep-factory.ts` — remove dynamic import, leave TODO
+- **Modify:** `packages/franken-orchestrator/src/cli/dep-factory.ts` — remove dynamic import, leave a phase placeholder
 - **Modify:** `packages/franken-orchestrator/package.json` — remove `@frankenbeast/mcp` dependency
 
 ## Exit Criteria

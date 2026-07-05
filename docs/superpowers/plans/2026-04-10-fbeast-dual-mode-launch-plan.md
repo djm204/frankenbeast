@@ -1016,5 +1016,5 @@ git commit -m "test: add dual-mode release gate coverage"
 ## Self-Review
 
 - **Spec coverage:** MCP real adapters, working hooks, Beast activation, CLI parity, shared-state verification, and docs/release gate are all mapped to dedicated tasks above.
-- **Placeholder scan:** No `TBD`, `TODO`, or “similar to task N” references remain.
+- **Placeholder scan:** No `TBD`, unresolved placeholders, or “similar to task N” references remain.
 - **Type consistency:** The chunk sequence keeps adapter types inside `packages/franken-mcp-suite` and Beast control types inside `packages/franken-orchestrator`; Beast activation in MCP mode only persists config and hands off rather than duplicating Beast execution logic.

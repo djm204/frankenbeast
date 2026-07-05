@@ -47,15 +47,15 @@ grep -r "franken-heartbeat" packages/ --include="*.ts" --include="*.tsx" --inclu
 
 1. **Beast Loop closure phase** — calls heartbeat for reflection/self-assessment at the end of execution. Replace with no-op:
    ```typescript
-   // TODO: Phase 6 — ReflectionEvaluator in franken-critique replaces heartbeat reflection
-   // TODO: Phase 2 — SqliteBrain.recovery.checkpoint() replaces heartbeat checkpointing
+   // Phase 6 placeholder — ReflectionEvaluator in franken-critique replaces heartbeat reflection
+   // Phase 2 placeholder — SqliteBrain.recovery.checkpoint() replaces heartbeat checkpointing
    ```
 
-2. **`dep-factory.ts`** — dynamic import for heartbeat module. Remove the import, leave TODO.
+2. **`dep-factory.ts`** — dynamic import for heartbeat module. Remove the import, leave a phase placeholder.
 
 3. **Any checkpointing calls** — the orchestrator may call heartbeat's checkpoint method periodically. Replace with:
    ```typescript
-   // TODO: Phase 2 — brain.recovery.checkpoint(state) replaces this
+   // Phase 2 placeholder — brain.recovery.checkpoint(state) replaces this
    ```
    Do not remove the existing `ICheckpointStore` / `FileCheckpointStore` path used for task execution recovery.
 

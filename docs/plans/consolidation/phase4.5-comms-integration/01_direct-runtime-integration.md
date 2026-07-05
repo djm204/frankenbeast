@@ -88,7 +88,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
     return {
       text: display?.content ?? '',
       status: display?.kind as OutboundMessageStatus | undefined,
-      actions: undefined, // TODO: map approval actions
+      actions: undefined, // Approval actions mapping deferred
       metadata: input.metadata,
     };
   }

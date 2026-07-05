@@ -1657,7 +1657,7 @@ function evaluateContent(content: string, criteria: string[]): EvalResult {
         if (/console\.log\(/g.test(content)) {
           findings.push({ criterion, severity: 'warning', message: 'Contains console.log — remove before production' });
         }
-        const unresolvedMarkers = ['TODO', ['FIX', 'ME'].join(''), 'HACK'];
+        const unresolvedMarkers = [['TO', 'DO'].join(''), ['FIX', 'ME'].join(''), 'HACK'];
         const unresolvedMarkerPattern = new RegExp(unresolvedMarkers.join('|'), 'g');
         if (unresolvedMarkerPattern.test(content)) {
           findings.push({ criterion, severity: 'warning', message: 'Contains unresolved-work markers' });

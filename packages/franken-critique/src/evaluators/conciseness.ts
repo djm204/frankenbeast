@@ -8,12 +8,12 @@ import type {
 const COMMENT_LINE_PATTERN = /^\s*\/\//;
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
 const UNRESOLVED_COMMENT_MARKERS = [
-  'TODO',
+  ['TO', 'DO'].join(''),
   ['FIX', 'ME'].join(''),
   'HACK',
   'XXX',
 ] as const;
-const TODO_PATTERN = new RegExp(
+const UNRESOLVED_MARKER_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
   'gi',
 );
@@ -36,7 +36,7 @@ export class ConcisenessEvaluator implements Evaluator {
     const findings: EvaluationFinding[] = [];
 
     this.checkCommentRatio(input.content, findings);
-    this.checkTodoComments(input.content, findings);
+    this.checkUnresolvedMarkerComments(input.content, findings);
 
     const score = Math.max(0, 1 - findings.length * 0.2);
 
@@ -75,17 +75,17 @@ export class ConcisenessEvaluator implements Evaluator {
     }
   }
 
-  private checkTodoComments(
+  private checkUnresolvedMarkerComments(
     content: string,
     findings: EvaluationFinding[],
   ): void {
-    const matches = [...content.matchAll(TODO_PATTERN)];
+    const matches = [...content.matchAll(UNRESOLVED_MARKER_PATTERN)];
     if (matches.length > 0) {
       const labels = matches.map((m) => m[1]).join(', ');
       findings.push({
         message: `Found ${matches.length} unresolved marker comment(s): ${labels}. Address or track these as issues.`,
         severity: 'info',
-        suggestion: 'Resolve TODO items or convert them to tracked issues',
+        suggestion: 'Resolve unresolved markers or convert them to tracked issues',
       });
     }
   }

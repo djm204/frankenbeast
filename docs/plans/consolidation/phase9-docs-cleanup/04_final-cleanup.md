@@ -17,9 +17,9 @@ Verify all Phase 1 temporary pass-throughs have been replaced with real implemen
 Phase 1 left temporary pass-throughs where deleted packages were imported. Phase 8 must have replaced all of them with real adapter classes. Search for any remaining — **any found is a blocker, not a cleanup task**:
 
 ```bash
-# Search for Phase 1 TODO markers
-grep -r "TODO.*Phase 1" packages/
-grep -r "TODO.*consolidation" packages/
+# Search for Phase 1 placeholder markers
+grep -r "Phase 1.*placeholder" packages/
+grep -r "consolidation.*placeholder" packages/
 grep -r "STUB.*deleted" packages/
 
 # Search for imports of deleted packages

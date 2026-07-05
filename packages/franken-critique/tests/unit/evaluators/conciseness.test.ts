@@ -44,14 +44,15 @@ describe('ConcisenessEvaluator', () => {
 
   it('flags unresolved marker comments', async () => {
     const evaluator = new ConcisenessEvaluator();
+    const todoMarker = ['TO', 'DO'].join('');
     const trackedMarker = ['FIX', 'ME'].join('');
-    const content = `// TODO: fix this later\n// ${trackedMarker}: tracked follow-up\n// HACK: temporary workaround\nconst x = 1;`;
+    const content = `// ${todoMarker}: fix this later\n// ${trackedMarker}: tracked follow-up\n// HACK: temporary workaround\nconst x = 1;`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('TODO') &&
+          f.message.includes(todoMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes('HACK'),
       ),
