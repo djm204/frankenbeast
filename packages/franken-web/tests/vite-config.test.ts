@@ -13,6 +13,11 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).toContain('target: proxyTarget');
     expect(CONFIG_SOURCE).toContain('changeOrigin: true');
   });
+
+  it('injects chat auth at the dev proxy instead of in browser code', () => {
+    expect(CONFIG_SOURCE).toContain("operatorProxy(proxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat'))");
+    expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('authorization'");
+  });
 });
 
 describe('operator token bridge', () => {

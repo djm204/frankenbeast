@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
@@ -37,6 +37,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/v1': {
+          ...operatorProxy(proxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat')),
           target: proxyTarget,
           changeOrigin: true,
           ws: true,
@@ -52,3 +53,22 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
+
+function operatorProxy(
+  target: string,
+  operatorToken: string,
+  shouldInject: (path: string) => boolean,
+): ProxyOptions {
+  return {
+    target,
+    changeOrigin: true,
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        if (!operatorToken || !shouldInject(req.url ?? '')) {
+          return;
+        }
+        proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+      });
+    },
+  };
+}

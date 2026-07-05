@@ -11,20 +11,22 @@ describe('ChatApiClient', () => {
     vi.clearAllMocks();
   });
 
-  describe('operator token plumbing', () => {
-    it('sends Authorization: Bearer when constructed with an operator token', async () => {
-      const tokened = new ChatApiClient('http://localhost:3000', 'op-secret');
+  describe('server-side chat authentication', () => {
+    it('does not accept or attach browser bearer tokens', async () => {
+      const LegacyCtor = ChatApiClient as unknown as { new (baseUrl: string, token: string): ChatApiClient };
+      const tokened = new LegacyCtor('http://localhost:3000', 'op-secret');
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: { id: 'x', projectId: 'p', transcript: [], state: 'active', socketToken: 't', tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 }, costUsd: 0, createdAt: '2026-03-09T00:00:00Z', updatedAt: '2026-03-09T00:00:00Z' } }),
       });
       await tokened.createSession('p');
       const init = mockFetch.mock.calls[0]![1] as RequestInit;
-      const headers = init.headers as Headers;
-      expect(headers.get('authorization')).toBe('Bearer op-secret');
+      const headers = init.headers as Record<string, string>;
+      expect(headers).toEqual({ 'Content-Type': 'application/json' });
+      expect(init.credentials).toBe('same-origin');
     });
 
-    it('does not add Authorization when constructed without a token', async () => {
+    it('uses same-origin credentials so server-side sessions can authenticate requests', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: { id: 'x', projectId: 'p', transcript: [], state: 'active', socketToken: 't', tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 }, costUsd: 0, createdAt: '2026-03-09T00:00:00Z', updatedAt: '2026-03-09T00:00:00Z' } }),
@@ -33,6 +35,7 @@ describe('ChatApiClient', () => {
       const init = mockFetch.mock.calls[0]![1] as RequestInit;
       const headers = init.headers as Record<string, string>;
       expect(headers).toEqual({ 'Content-Type': 'application/json' });
+      expect(init.credentials).toBe('same-origin');
     });
   });
 
