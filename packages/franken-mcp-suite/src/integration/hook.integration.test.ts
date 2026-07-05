@@ -50,12 +50,12 @@ describe('fbeast-hook runtime', () => {
 
   it('redacts inline credentials from the governor context before it is checked/logged', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
-      context: "curl -H 'Authorization: Bearer sk-secret-abc123' https://api.example.com --password credential-fixture",
+      context: "curl -H 'Authorization: Bearer bearer-fixture-token' https://api.example.com --password credential-fixture",
     });
 
     expect(result.exitCode).toBe(0);
     const seen = result.checkCalls[0]!.context;
-    expect(seen).not.toContain('«redacted:key-prefix…»');
+    expect(seen).not.toContain('bearer-fixture-token');
     expect(seen).not.toContain('credential-fixture');
     expect(seen).toContain('[REDACTED]');
   });
