@@ -5,9 +5,12 @@ type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 
 type WorkflowValues = {
   workflowType?: unknown;
+  topic?: unknown;
+  outputPath?: unknown;
   docPath?: unknown;
   outputDir?: unknown;
-  repoUrl?: unknown;
+  provider?: unknown;
+  objective?: unknown;
   chunkDir?: unknown;
 };
 
@@ -31,6 +34,15 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
       errors.workflowType = 'Workflow type is required.';
     }
 
+    if (values.workflowType === 'design-interview') {
+      if (isBlank(values.topic)) {
+        errors.topic = 'Design interview goal is required.';
+      }
+      if (isBlank(values.outputPath)) {
+        errors.outputPath = 'Design interview output path is required.';
+      }
+    }
+
     if (values.workflowType === 'chunk-plan') {
       if (isBlank(values.docPath)) {
         errors.docPath = 'Design doc path is required.';
@@ -40,12 +52,25 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
       }
     }
 
-    if (values.workflowType === 'issues-agent' && isBlank(values.repoUrl)) {
-      errors.repoUrl = 'Repository URL is required.';
+    if (values.workflowType === 'martin-loop') {
+      if (isBlank(values.provider)) {
+        errors.provider = 'Provider is required.';
+      }
+      if (isBlank(values.objective)) {
+        errors.objective = 'Objective is required.';
+      }
+      if (isBlank(values.chunkDir)) {
+        errors.chunkDir = 'Chunk directory path is required.';
+      }
     }
 
-    if (values.workflowType === 'martin-loop' && isBlank(values.chunkDir)) {
-      errors.chunkDir = 'Chunk directory path is required.';
+    if (
+      !isBlank(values.workflowType) &&
+      values.workflowType !== 'design-interview' &&
+      values.workflowType !== 'chunk-plan' &&
+      values.workflowType !== 'martin-loop'
+    ) {
+      errors.workflowType = 'Choose a supported launch workflow.';
     }
   }
 

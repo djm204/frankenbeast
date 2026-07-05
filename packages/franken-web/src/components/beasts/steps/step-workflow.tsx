@@ -6,7 +6,6 @@ import type { BeastContainerRuntimeStatus, BeastExecutionMode } from '../../../l
 const WORKFLOWS = [
   { id: 'design-interview', title: 'Design Interview', description: 'Launch interactive design session' },
   { id: 'chunk-plan', title: 'Chunk Design Doc', description: 'Break a design doc into implementation chunks' },
-  { id: 'issues-agent', title: 'Issues Agent', description: 'Work through issues/tickets' },
   { id: 'martin-loop', title: 'Run Chunked Project', description: 'Execute an already-chunked plan' },
 ];
 
@@ -95,16 +94,29 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
       </fieldset>
 
       {values.workflowType === 'design-interview' && (
-        <div>
-          <label htmlFor="wf-topic" className="block text-sm font-medium text-beast-text mb-1.5">Topic / Context</label>
-          <textarea
-            id="wf-topic"
-            value={(values.topic as string) ?? ''}
-            onChange={(e) => updateField('topic', e.target.value)}
-            placeholder="Describe the topic or context for the design interview..."
-            rows={3}
-            className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent resize-y"
-          />
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="wf-topic" className="block text-sm font-medium text-beast-text mb-1.5">Goal</label>
+            <textarea
+              id="wf-topic"
+              value={(values.topic as string) ?? ''}
+              onChange={(e) => updateField('topic', e.target.value)}
+              placeholder="Describe what the design interview should produce..."
+              rows={3}
+              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent resize-y"
+            />
+          </div>
+          <div>
+            <label htmlFor="wf-output-path" className="block text-sm font-medium text-beast-text mb-1.5">Output Path</label>
+            <input
+              id="wf-output-path"
+              type="text"
+              value={(values.outputPath as string) ?? ''}
+              onChange={(e) => updateField('outputPath', e.target.value)}
+              placeholder="docs/design.md"
+              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+            />
+          </div>
         </div>
       )}
 
@@ -135,44 +147,45 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
         </div>
       )}
 
-      {values.workflowType === 'issues-agent' && (
+      {values.workflowType === 'martin-loop' && (
         <div className="space-y-4">
           <div>
-            <label htmlFor="wf-repo" className="block text-sm font-medium text-beast-text mb-1.5">Repository URL</label>
+            <label htmlFor="wf-provider" className="block text-sm font-medium text-beast-text mb-1.5">Provider</label>
+            <select
+              id="wf-provider"
+              value={(values.provider as string) ?? ''}
+              onChange={(e) => updateField('provider', e.target.value)}
+              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+            >
+              <option value="">Select provider...</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini</option>
+              <option value="aider">Aider</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="wf-objective" className="block text-sm font-medium text-beast-text mb-1.5">Objective</label>
             <input
-              id="wf-repo"
+              id="wf-objective"
               type="text"
-              value={(values.repoUrl as string) ?? ''}
-              onChange={(e) => updateField('repoUrl', e.target.value)}
-              placeholder="https://github.com/org/repo"
+              value={(values.objective as string) ?? ''}
+              onChange={(e) => updateField('objective', e.target.value)}
+              placeholder="Describe what the Martin Loop should accomplish..."
               className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
             />
           </div>
           <div>
-            <label htmlFor="wf-labels" className="block text-sm font-medium text-beast-text mb-1.5">Label Filters</label>
+            <label htmlFor="wf-dir" className="block text-sm font-medium text-beast-text mb-1.5">Chunk Directory Path</label>
             <input
-              id="wf-labels"
+              id="wf-dir"
               type="text"
-              value={(values.labelFilters as string) ?? ''}
-              onChange={(e) => updateField('labelFilters', e.target.value)}
-              placeholder="bug, enhancement"
+              value={(values.chunkDir as string) ?? ''}
+              onChange={(e) => updateField('chunkDir', e.target.value)}
+              placeholder="/path/to/chunks/"
               className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
             />
           </div>
-        </div>
-      )}
-
-      {values.workflowType === 'martin-loop' && (
-        <div>
-          <label htmlFor="wf-dir" className="block text-sm font-medium text-beast-text mb-1.5">Chunk Directory Path</label>
-          <input
-            id="wf-dir"
-            type="text"
-            value={(values.chunkDir as string) ?? ''}
-            onChange={(e) => updateField('chunkDir', e.target.value)}
-            placeholder="/path/to/chunks/"
-            className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-          />
         </div>
       )}
     </div>
