@@ -248,6 +248,25 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.cmd).toBe('/usr/local/bin/claude-custom');
       });
 
+      it('passes configured provider override extraArgs to the selected provider argv', async () => {
+        const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providerOverrides: {
+              claude: { extraArgs: ['--temperature', '0.5'] },
+            },
+          },
+          spawnFn,
+        );
+
+        await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(calls[0]!.args).toContain('--temperature');
+        expect(calls[0]!.args[calls[0]!.args.indexOf('--temperature') + 1]).toBe('0.5');
+      });
+
       it('builds args via provider.buildArgs() and pipes prompt via stdin', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
