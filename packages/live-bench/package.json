@@ -10,8 +10,12 @@
   },
   "files": [
     "dist",
-    "corpus"
+    "corpus",
+    "fixtures"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

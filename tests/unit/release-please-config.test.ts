@@ -31,8 +31,8 @@ describe('release-please monorepo config', () => {
     }
   });
 
-  it('config has at least 8 package entries (root + 7 modules)', () => {
-    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(8);
+  it('config has at least 11 package entries (root + 10 modules)', () => {
+    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(11);
   });
 
   it('each package entry has release-type "node"', () => {
@@ -60,8 +60,8 @@ describe('release-please monorepo config', () => {
     }
   });
 
-  it('manifest has at least 8 entries', () => {
-    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(8);
+  it('manifest has at least 11 entries', () => {
+    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(11);
   });
 
   it('manifest versions match actual package.json versions', () => {
@@ -70,6 +70,22 @@ describe('release-please monorepo config', () => {
       const pkg = readJson(`packages/${dir}/package.json`) as { version: string };
       expect(manifest[key], `${key} version mismatch`).toBe(pkg.version);
     }
+  });
+
+  it('user-facing release packages are publishable to npm', () => {
+    for (const dir of ['franken-mcp-suite', 'franken-web', 'live-bench']) {
+      const pkg = readJson(`packages/${dir}/package.json`) as {
+        private?: boolean;
+        publishConfig?: { access?: string };
+      };
+      expect(pkg.private, `packages/${dir} must not be private`).not.toBe(true);
+      expect(pkg.publishConfig?.access, `packages/${dir} must publish publicly`).toBe('public');
+    }
+  });
+
+  it('live-bench publishes fixtures referenced by its bundled corpus', () => {
+    const pkg = readJson('packages/live-bench/package.json') as { files?: string[] };
+    expect(pkg.files).toEqual(expect.arrayContaining(['corpus', 'fixtures']));
   });
 
   it('no per-module release-please-config.json files exist', () => {
