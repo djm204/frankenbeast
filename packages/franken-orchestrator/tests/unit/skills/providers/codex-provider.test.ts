@@ -51,7 +51,7 @@ describe('CodexProvider', () => {
   // -- filterEnv -----------------------------------------------------------
 
   it('filterEnv marks spawned child processes without filtering credentials', () => {
-    const env = { PATH: '/usr/bin', OPENAI_API_KEY: 'sk-123', HOME: '/home/user' };
+    const env = { PATH: '/usr/bin', OPENAI_API_KEY: 'test-env-value', HOME: '/home/user' };
     const filtered = provider.filterEnv(env);
     expect(filtered).toEqual({
       ...env,

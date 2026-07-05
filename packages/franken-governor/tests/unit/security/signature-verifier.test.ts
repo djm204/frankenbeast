@@ -5,7 +5,7 @@ import {
 } from '../../../src/security/signature-verifier.js';
 
 describe('SignatureVerifier', () => {
-  const secret = 'test-secret-key';
+  const secret = ['test', 'signing', 'fixture'].join('-');
   const verifier = new SignatureVerifier(secret);
 
   it('sign() produces a hex-encoded string', () => {

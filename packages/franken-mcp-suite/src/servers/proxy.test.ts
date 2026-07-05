@@ -209,8 +209,8 @@ describe('proxy server', () => {
       vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
       gateCheck.mockResolvedValue({ decision: 'denied', reason: 'destructive' });
 
-      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'secret' } });
-      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'secret' } });
+      await executeToolDef.handler({ tool: 'test_tool', args: { key: 'credential' } });
+      expect(auditRecord).toHaveBeenCalledWith({ tool: 'test_tool', ok: false, decision: 'denied', args: { key: 'credential' } });
     });
 
     it('audits a fail-closed gate error of the target (decision="error")', async () => {

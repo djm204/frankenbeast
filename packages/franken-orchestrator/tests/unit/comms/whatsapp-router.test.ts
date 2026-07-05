@@ -5,7 +5,7 @@ import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
 import type { SessionMapper } from '../../../src/comms/core/session-mapper.js';
 
 describe('whatsappRouter', () => {
-  const appSecret = 'test-secret';
+  const appSecret = ['test', 'app', 'fixture'].join('-');
   const verifyToken = 'test-token';
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),

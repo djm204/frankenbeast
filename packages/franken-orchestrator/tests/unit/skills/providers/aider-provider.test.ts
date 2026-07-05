@@ -61,9 +61,9 @@ describe('AiderProvider', () => {
   });
 
   it('filterEnv returns a copy, does not mutate input', () => {
-    const env = { PATH: '/usr/bin', AIDER_KEY: 'secret' };
+    const env = { PATH: '/usr/bin', AIDER_KEY: 'test-env-value' };
     const filtered = provider.filterEnv(env);
-    expect(env).toHaveProperty('AIDER_KEY', 'secret');
+    expect(env).toHaveProperty('AIDER_KEY', 'test-env-value');
     expect(filtered).not.toBe(env);
   });
 

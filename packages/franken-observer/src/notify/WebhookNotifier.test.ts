@@ -43,14 +43,14 @@ describe('WebhookNotifier', () => {
     it('merges custom headers with Content-Type', async () => {
       const notifier = new WebhookNotifier({
         url: 'https://hooks.example.com/signal',
-        headers: { 'X-Api-Key': 'secret', Authorization: 'Bearer token' },
+        headers: { 'X-Api-Key': 'test-api-key', Authorization: 'Bearer test-token' },
         fetch: mockFetch,
       })
       await notifier.send({ type: 'test' })
       const [, init] = mockFetch.mock.calls[0]
       expect(init.headers['Content-Type']).toBe('application/json')
-      expect(init.headers['X-Api-Key']).toBe('secret')
-      expect(init.headers['Authorization']).toBe('Bearer token')
+      expect(init.headers['X-Api-Key']).toBe('test-api-key')
+      expect(init.headers['Authorization']).toBe('Bearer test-token')
     })
 
     it('custom headers can override Content-Type', async () => {

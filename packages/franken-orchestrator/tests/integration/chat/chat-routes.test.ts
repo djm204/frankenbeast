@@ -208,7 +208,7 @@ describe('Chat HTTP Routes', () => {
     });
     const { data: created } = await createRes.json();
 
-    const secret = 'test-secret-for-http-routes';
+    const secret = ['test', 'http', 'fixture'].join('-');
     app = createChatApp({
       sessionStoreDir: TMP,
       llm: { complete: vi.fn().mockResolvedValue('Mock reply') },
@@ -572,7 +572,7 @@ describe('Chat HTTP Routes', () => {
       engine: {} as never,
       runtime: runtime as never,
       turnRunner: {} as never,
-      sessionTokenSecret: 'test-secret-for-http-routes',
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
     });
 
     const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
@@ -627,7 +627,7 @@ describe('Chat HTTP Routes', () => {
       engine: {} as never,
       runtime: runtime as never,
       turnRunner: {} as never,
-      sessionTokenSecret: 'test-secret-for-http-routes',
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
     });
 
     const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {

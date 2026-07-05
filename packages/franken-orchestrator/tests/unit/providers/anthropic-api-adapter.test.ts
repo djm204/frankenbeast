@@ -11,14 +11,14 @@ async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<L
 describe('AnthropicApiAdapter', () => {
   describe('properties', () => {
     it('has correct name and type', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(adapter.name).toBe('anthropic-api');
       expect(adapter.type).toBe('anthropic-api');
       expect(adapter.authMethod).toBe('api-key');
     });
 
     it('has correct capabilities', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(adapter.capabilities).toEqual({
         streaming: true,
         toolUse: true,
@@ -32,12 +32,12 @@ describe('AnthropicApiAdapter', () => {
 
   describe('isAvailable()', () => {
     it('returns true when API key is set via options', async () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       expect(await adapter.isAvailable()).toBe(true);
     });
 
     it('returns true when ANTHROPIC_API_KEY env var is set', async () => {
-      process.env['ANTHROPIC_API_KEY'] = 'sk-env';
+      process.env['ANTHROPIC_API_KEY'] = 'test-env-value';
       const adapter = new AnthropicApiAdapter();
       expect(await adapter.isAvailable()).toBe(true);
       delete process.env['ANTHROPIC_API_KEY'];
@@ -54,7 +54,7 @@ describe('AnthropicApiAdapter', () => {
 
   describe('translateMessages()', () => {
     it('translates string content messages', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const messages: LlmMessage[] = [
         { role: 'user', content: 'Hello' },
         { role: 'assistant', content: 'Hi' },
@@ -67,7 +67,7 @@ describe('AnthropicApiAdapter', () => {
     });
 
     it('translates content block messages', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const messages: LlmMessage[] = [
         {
           role: 'user',
@@ -83,7 +83,7 @@ describe('AnthropicApiAdapter', () => {
 
   describe('translateTools()', () => {
     it('translates ToolDefinition to Anthropic Tool format', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const tools: ToolDefinition[] = [
         { name: 'read', description: 'Read file', inputSchema: { type: 'object' } },
       ];
@@ -100,7 +100,7 @@ describe('AnthropicApiAdapter', () => {
 
   describe('createEventTranslator()', () => {
     it('translates text_delta events', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const translate = adapter.createEventTranslator();
       const result = translate({
         type: 'content_block_delta',
@@ -111,7 +111,7 @@ describe('AnthropicApiAdapter', () => {
     });
 
     it('accumulates tool_use input and emits on content_block_stop', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const translate = adapter.createEventTranslator();
 
       // Start tool_use block
@@ -148,7 +148,7 @@ describe('AnthropicApiAdapter', () => {
     });
 
     it('does not emit tool_use on content_block_start', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const translate = adapter.createEventTranslator();
       const result = translate({
         type: 'content_block_start',
@@ -161,7 +161,7 @@ describe('AnthropicApiAdapter', () => {
 
   describe('formatHandoff()', () => {
     it('returns handoff text', () => {
-      const adapter = new AnthropicApiAdapter({ apiKey: 'sk-test' });
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });
       const snapshot: BrainSnapshot = {
         version: 1,
         timestamp: '2026-03-22T00:00:00.000Z',

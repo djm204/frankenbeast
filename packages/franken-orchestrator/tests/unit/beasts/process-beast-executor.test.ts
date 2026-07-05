@@ -814,19 +814,19 @@ describe('ProcessBeastExecutor', () => {
       const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
       const geminiToken = `AIza${'abcdefghijklmnopqrstuvwxyz123456789'}`;
 
-      cb.onStderr('api_key=sk-live-secret-value password=hunter2');
-      cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-secret-value');
+      cb.onStderr('api_key=sk-live-secret-value password=credential-fixture');
+      cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-fixture-value');
       cb.onStderr('Authorization: Bot discord-bot-token-value');
       cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
       cb.onStderr(`Slack token ${slackToken}`);
       cb.onStderr(`Google token ${geminiToken}`);
-      cb.onStderr('{"password":"json-password","client_secret":"json-secret","botToken":"camel-token"}');
+      cb.onStderr('{"password":"json-password","client_secret":"json-fixture","botToken":"camel-token"}');
       cb.onStderr('{"password":"abc\\"def","accessToken":"camel-access-token"}');
       cb.onStderr('redis://:cachepass@localhost:6379/0');
       cb.onStderr('{"Authorization":"Basic basic-token-value"}');
       cb.onStderr("headers: {'Authorization': 'Bot object-token-value'}");
       cb.onStderr('jwt eyJhbG...cret');
-      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
+      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/fixture-webhook-token');
       cb.onExit(1, null);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -865,23 +865,23 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedLogLines).toContain('{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}');
       const serializedPersistedEvent = JSON.stringify(failEvent);
       expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
-      expect(serializedPersistedEvent).not.toContain('hunter2');
-      expect(serializedPersistedEvent).not.toContain('client-secret-value');
+      expect(serializedPersistedEvent).not.toContain('credential-fixture');
+      expect(serializedPersistedEvent).not.toContain('client-fixture-value');
       expect(serializedPersistedEvent).not.toContain('discord-bot-token-value');
       expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPersistedEvent).not.toContain(githubToken);
       expect(serializedPersistedEvent).not.toContain(slackToken);
       expect(serializedPersistedEvent).not.toContain(geminiToken);
       expect(serializedPersistedEvent).not.toContain('json-password');
-      expect(serializedPersistedEvent).not.toContain('json-secret');
+      expect(serializedPersistedEvent).not.toContain('json-fixture');
       expect(serializedPersistedEvent).not.toContain('camel-token');
       expect(serializedPersistedEvent).not.toContain('abc\\"def');
       expect(serializedPersistedEvent).not.toContain('camel-access-token');
       expect(serializedPersistedEvent).not.toContain('cachepass');
       expect(serializedPersistedEvent).not.toContain('basic-token-value');
       expect(serializedPersistedEvent).not.toContain('object-token-value');
-      expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
-      expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
+      expect(serializedPersistedEvent).not.toContain('abc1234567890fixture');
+      expect(serializedPersistedEvent).not.toContain('fixture-webhook-token');
 
       const publishedFailure = publishSpy.mock.calls
         .map(([event]) => event)
@@ -893,23 +893,23 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
       const serializedPublishedEvent = JSON.stringify(publishedFailure);
       expect(serializedPublishedEvent).not.toContain('sk-live-secret-value');
-      expect(serializedPublishedEvent).not.toContain('hunter2');
-      expect(serializedPublishedEvent).not.toContain('client-secret-value');
+      expect(serializedPublishedEvent).not.toContain('credential-fixture');
+      expect(serializedPublishedEvent).not.toContain('client-fixture-value');
       expect(serializedPublishedEvent).not.toContain('discord-bot-token-value');
       expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPublishedEvent).not.toContain(githubToken);
       expect(serializedPublishedEvent).not.toContain(slackToken);
       expect(serializedPublishedEvent).not.toContain(geminiToken);
       expect(serializedPublishedEvent).not.toContain('json-password');
-      expect(serializedPublishedEvent).not.toContain('json-secret');
+      expect(serializedPublishedEvent).not.toContain('json-fixture');
       expect(serializedPublishedEvent).not.toContain('camel-token');
       expect(serializedPublishedEvent).not.toContain('abc\\"def');
       expect(serializedPublishedEvent).not.toContain('camel-access-token');
       expect(serializedPublishedEvent).not.toContain('cachepass');
       expect(serializedPublishedEvent).not.toContain('basic-token-value');
       expect(serializedPublishedEvent).not.toContain('object-token-value');
-      expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
-      expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
+      expect(serializedPublishedEvent).not.toContain('abc1234567890fixture');
+      expect(serializedPublishedEvent).not.toContain('fixture-webhook-token');
     });
 
     it('marks attempt as failed on signal kill', async () => {

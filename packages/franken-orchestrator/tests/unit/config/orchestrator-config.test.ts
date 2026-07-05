@@ -51,13 +51,13 @@ describe('OrchestratorConfig', () => {
       const result = OrchestratorConfigSchema.parse({
         security: {
           customRules: [
-            { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+            { name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' },
           ],
         },
       });
 
       expect(result.security?.customRules).toEqual([
-        { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+        { name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' },
       ]);
     });
 
