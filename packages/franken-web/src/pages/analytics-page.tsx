@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AnalyticsApiClient,
   AnalyticsEvent,
@@ -45,6 +45,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(true);
+  const detailTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +114,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   );
 
   async function openDetail(event: AnalyticsEvent) {
+    detailTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedEvent(event);
     setDetailError(null);
     try {
@@ -120,6 +122,13 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : 'Unable to load event detail.');
     }
+  }
+
+  function closeDetail() {
+    const trigger = detailTriggerRef.current;
+    setSelectedEvent(null);
+    setDetailError(null);
+    window.setTimeout(() => trigger?.focus(), 0);
   }
 
   function updateFilter(next: Partial<AnalyticsFilters>) {
@@ -272,10 +281,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
         <DetailDrawer
           detail={selectedEvent}
           error={detailError}
-          onClose={() => {
-            setSelectedEvent(null);
-            setDetailError(null);
-          }}
+          onClose={closeDetail}
           onSessionFilter={(sessionId) => updateFilter({ sessionId })}
         />
       )}
@@ -361,15 +367,21 @@ function DetailDrawer({
   onClose: () => void;
   onSessionFilter: (sessionId: string) => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const rawJson = JSON.stringify(detail.raw, null, 2);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, [detail.id]);
+
   return (
-    <aside aria-label="Analytics event detail" className="analytics-drawer" role="dialog">
+    <aside aria-label="Analytics event detail" aria-modal="true" className="analytics-drawer" role="dialog">
       <div className="analytics-drawer__header">
         <div>
           <p className="eyebrow">{detail.source}</p>
           <h3>{detail.summary}</h3>
         </div>
-        <button className="button button--secondary button--small" type="button" onClick={onClose}>Close</button>
+        <button ref={closeButtonRef} className="button button--secondary button--small" type="button" onClick={onClose}>Close</button>
       </div>
 
       {error && <div className="analytics-alert">{error}</div>}

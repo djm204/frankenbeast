@@ -240,11 +240,19 @@ describe('AnalyticsPage', () => {
 
     detailsAction.focus();
     expect(document.activeElement).toBe(detailsAction);
-    fireEvent.keyDown(detailsAction, { key: 'Enter', code: 'Enter' });
     fireEvent.click(detailsAction);
 
     expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeTruthy();
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(closeButton);
+    });
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
+
+    fireEvent.click(closeButton);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(detailsAction);
+    });
   });
 
   it('keeps successful analytics sections visible when one endpoint fails', async () => {
