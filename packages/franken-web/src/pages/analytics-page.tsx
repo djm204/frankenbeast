@@ -319,16 +319,27 @@ function AnalyticsTable({
                 <th>Tool</th>
                 <th>Outcome</th>
                 <th>Summary</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {events.map((event) => (
-                <tr key={event.id} onClick={() => onSelect(event)}>
+                <tr key={event.id}>
                   <td>{formatTime(event.timestamp)}</td>
                   <td>{event.sessionId ?? '-'}</td>
                   <td>{event.toolName ?? event.source}</td>
                   <td><span className={`analytics-outcome analytics-outcome--${event.severity}`}>{event.outcome}</span></td>
                   <td>{event.summary}</td>
+                  <td>
+                    <button
+                      aria-label={`Open details for ${event.summary}`}
+                      className="analytics-table__details-button"
+                      type="button"
+                      onClick={() => onSelect(event)}
+                    >
+                      Open details
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
