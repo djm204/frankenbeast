@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -94,7 +94,7 @@ function installTimeoutExit(binDir: string, status: number): void {
 
 function installRuntimeWithoutTimeout(binDir: string): void {
   const bash = findCommand('bash');
-  const python = findCommand('python3');
+  const node = findCommand('node');
   const cat = findCommand('cat');
   const bashPath = join(binDir, 'bash');
   writeFileSync(bashPath, [
@@ -104,13 +104,13 @@ function installRuntimeWithoutTimeout(binDir: string): void {
   ].join('\n'));
   chmodSync(bashPath, 0o755);
 
-  const pythonPath = join(binDir, 'python3');
-  writeFileSync(pythonPath, [
+  const nodePath = join(binDir, 'node');
+  writeFileSync(nodePath, [
     '#!/bin/sh',
-    `exec ${python} "$@"`,
+    `exec ${node} "$@"`,
     '',
   ].join('\n'));
-  chmodSync(pythonPath, 0o755);
+  chmodSync(nodePath, 0o755);
 
   const catPath = join(binDir, 'cat');
   writeFileSync(catPath, [
@@ -569,6 +569,33 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+});
+
+describe('generated script runtime dependencies', () => {
+  const tempRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of tempRoots) {
+      if (existsSync(root)) {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+    tempRoots.length = 0;
+  });
+
+  it('parses stdin with node and never depends on python3', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+
+    for (const client of ['claude', 'gemini', 'codex'] as const) {
+      const { preTool, postTool } = writeHookScripts(root, client);
+      for (const script of [preTool, postTool]) {
+        const body = readFileSync(script, 'utf8');
+        expect(body, `${client} ${script}`).not.toContain('python3');
+        expect(body, `${client} ${script}`).toContain("node -e");
+      }
+    }
   });
 });
 
