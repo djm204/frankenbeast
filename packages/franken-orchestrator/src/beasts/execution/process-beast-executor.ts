@@ -13,7 +13,7 @@ const REDACTED_SECRET = '[REDACTED]';
 
 function redactFailureStderrLine(line: string): string {
   return line
-    .replace(/(authorization\s*:\s*(?:bearer|basic|bot)\s+)\S+/gi, `$1${REDACTED_SECRET}`)
+    .replace(/((?:"|')?authorization(?:"|')?\s*:\s*(?:"|')?(?:bearer|basic|bot)\s+)[^\s"',;}]+/gi, `$1${REDACTED_SECRET}`)
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, REDACTED_SECRET)
     .replace(/\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}\b/gi, REDACTED_SECRET)
@@ -22,10 +22,10 @@ function redactFailureStderrLine(line: string): string {
     .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, REDACTED_SECRET)
     .replace(/\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]\b/gi, REDACTED_SECRET)
     .replace(
-      /((?:"|')?\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url|[a-z0-9]*(?:token|secret|password|apikey|accesskey|webhookurl))\b(?:"|')?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/gi,
+      /((?:"|')?\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url|[a-z0-9]*(?:token|secret|password|apikey|accesskey|webhookurl))\b(?:"|')?\s*[=:]\s*)((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*')|[^\s,;}]+)/gi,
       `$1${REDACTED_SECRET}`,
     )
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]*:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
     .replace(
       /https?:\/\/[^\s'"`<>]*(?:hooks\.slack\.com\/services|discord(?:app)?\.com\/api\/webhooks|webhook)[^\s'"`<>]*/gi,
       REDACTED_SECRET,

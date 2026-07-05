@@ -730,7 +730,11 @@ describe('ProcessBeastExecutor', () => {
       cb.onStderr(`Slack token ${slackToken}`);
       cb.onStderr(`Google token ${geminiToken}`);
       cb.onStderr('{"password":"json-password","client_secret":"json-secret","botToken":"camel-token"}');
-      cb.onStderr('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.abc1234567890secret');
+      cb.onStderr('{"password":"abc\\"def","accessToken":"camel-access-token"}');
+      cb.onStderr('redis://:cachepass@localhost:6379/0');
+      cb.onStderr('{"Authorization":"Basic basic-token-value"}');
+      cb.onStderr("headers: {'Authorization': 'Bot object-token-value'}");
+      cb.onStderr('jwt eyJhbG...cret');
       cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
       cb.onExit(1, null);
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -747,7 +751,11 @@ describe('ProcessBeastExecutor', () => {
           'Slack token [REDACTED]',
           'Google token [REDACTED]',
           '{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}',
-          'jwt [REDACTED]',
+          '{"password":[REDACTED],"accessToken":[REDACTED]}',
+          'redis://:[REDACTED]@localhost:6379/0',
+          '{"Authorization":"Basic [REDACTED]"}',
+          "headers: {'Authorization': 'Bot [REDACTED]'}",
+          'jwt eyJhbG...cret',
           'posting to [REDACTED]',
         ],
       });
@@ -776,6 +784,11 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPersistedEvent).not.toContain('json-password');
       expect(serializedPersistedEvent).not.toContain('json-secret');
       expect(serializedPersistedEvent).not.toContain('camel-token');
+      expect(serializedPersistedEvent).not.toContain('abc\\"def');
+      expect(serializedPersistedEvent).not.toContain('camel-access-token');
+      expect(serializedPersistedEvent).not.toContain('cachepass');
+      expect(serializedPersistedEvent).not.toContain('basic-token-value');
+      expect(serializedPersistedEvent).not.toContain('object-token-value');
       expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
       expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
 
@@ -799,6 +812,11 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPublishedEvent).not.toContain('json-password');
       expect(serializedPublishedEvent).not.toContain('json-secret');
       expect(serializedPublishedEvent).not.toContain('camel-token');
+      expect(serializedPublishedEvent).not.toContain('abc\\"def');
+      expect(serializedPublishedEvent).not.toContain('camel-access-token');
+      expect(serializedPublishedEvent).not.toContain('cachepass');
+      expect(serializedPublishedEvent).not.toContain('basic-token-value');
+      expect(serializedPublishedEvent).not.toContain('object-token-value');
       expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
       expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
     });
