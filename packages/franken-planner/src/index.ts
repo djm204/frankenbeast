@@ -34,7 +34,7 @@ export {
 
 // ── DAG graph ──────────────────────────────────────────────────────
 export { PlanGraph, createPlanVersion } from './core/dag.js';
-export type { PlanVersion } from './core/dag.js';
+export type { PlanGraphFromTasksOptions, PlanVersion } from './core/dag.js';
 
 // ── Type guards ────────────────────────────────────────────────────
 export { isTask, isIntent } from './core/guards.js';
@@ -71,6 +71,7 @@ export { RecoveryController } from './recovery/recovery-controller.js';
 export { ErrorIngester } from './recovery/error-ingester.js';
 export type { ErrorClassification } from './recovery/error-ingester.js';
 export { RecoveryPlanGenerator } from './recovery/recovery-plan-generator.js';
+export { insertFixItTask } from './recovery/fix-it-injector.js';
 
 // ── Module port interfaces ─────────────────────────────────────────
 export type { GuardrailsModule } from './modules/mod01.js';

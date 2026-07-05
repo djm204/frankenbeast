@@ -13,8 +13,7 @@ export function applyModifications(graph: PlanGraph, changes: TaskModification[]
 
   const changeMap = new Map(changes.map((c) => [c.taskId, c]));
 
-  // Rebuild in topological order so addTask dependency references always resolve.
-  let result = PlanGraph.empty();
+  const updatedTasks: Task[] = [];
   for (const task of graph.topoSort()) {
     const change = changeMap.get(task.id);
     const updatedTask: Task = change
@@ -26,7 +25,7 @@ export function applyModifications(graph: PlanGraph, changes: TaskModification[]
             : {}),
         }
       : task;
-    result = result.addTask(updatedTask, graph.getDependencies(task.id));
+    updatedTasks.push({ ...updatedTask, dependsOn: graph.getDependencies(task.id) });
   }
-  return result;
+  return PlanGraph.fromTasks(updatedTasks, { version: graph.version, reason: graph.reason });
 }

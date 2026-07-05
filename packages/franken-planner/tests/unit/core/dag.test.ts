@@ -183,63 +183,36 @@ describe('PlanGraph — removeTask', () => {
   });
 });
 
-describe('PlanGraph — insertFixItTask', () => {
-  it('inserts fix before the failed task', () => {
-    const g = PlanGraph.empty()
-      .addTask(makeTask('a'))
-      .addTask(makeTask('b'), [createTaskId('a')]);
-    const fix = makeTask('fix-b');
-    const g2 = g.insertFixItTask(createTaskId('b'), fix);
 
-    expect(g2.size()).toBe(3);
-    expect(g2.getDependencies(createTaskId('fix-b'))).toContain(createTaskId('a'));
-    expect(g2.getDependencies(createTaskId('b'))).toContain(createTaskId('fix-b'));
-    expect(g2.getDependencies(createTaskId('b'))).not.toContain(createTaskId('a'));
+describe('PlanGraph — fromTasks', () => {
+  it('builds a graph from tasks supplied in dependency-last order', () => {
+    const a = makeTask('a');
+    const b = makeTask('b', { dependsOn: [createTaskId('a')] });
+    const c = makeTask('c', { dependsOn: [createTaskId('b')] });
+
+    const g = PlanGraph.fromTasks([c, b, a]);
+
+    expect(g.topoSort()).toEqual([a, b, c]);
+    expect(g.getDependencies(createTaskId('c'))).toEqual([createTaskId('b')]);
   });
 
-  it('is immutable — original graph unchanged', () => {
-    const g = PlanGraph.empty().addTask(makeTask('a'));
-    g.insertFixItTask(createTaskId('a'), makeTask('fix-a'));
-    expect(g.size()).toBe(1);
-  });
-
-  it('increments version', () => {
-    const g = PlanGraph.empty().addTask(makeTask('a'));
-    const g2 = g.insertFixItTask(createTaskId('a'), makeTask('fix-a'));
-    expect(g2.version).toBe(g.version + 1);
-  });
-
-  it('sets a recovery reason on the new version', () => {
-    const g = PlanGraph.empty().addTask(makeTask('a'));
-    const g2 = g.insertFixItTask(createTaskId('a'), makeTask('fix-a'));
-    expect(g2.reason).toMatch(/recovery/i);
-  });
-
-  it('throws TaskNotFoundError when target does not exist', () => {
-    expect(() =>
-      PlanGraph.empty().insertFixItTask(createTaskId('missing'), makeTask('fix'))
-    ).toThrowError(TaskNotFoundError);
-  });
-
-  it('throws DuplicateTaskError when fix task id already exists', () => {
-    const g = PlanGraph.empty()
-      .addTask(makeTask('a'))
-      .addTask(makeTask('b'), [createTaskId('a')]);
-    // 'a' already exists — inserting a fix-it with the same id must not silently overwrite it.
-    expect(() => g.insertFixItTask(createTaskId('b'), makeTask('a'))).toThrowError(
+  it('throws DuplicateTaskError when task ids are duplicated', () => {
+    expect(() => PlanGraph.fromTasks([makeTask('a'), makeTask('a')])).toThrowError(
       DuplicateTaskError
     );
   });
 
-  it('fix task result is sorted before the failed task', () => {
-    const g = PlanGraph.empty()
-      .addTask(makeTask('a'))
-      .addTask(makeTask('b'), [createTaskId('a')]);
-    const g2 = g.insertFixItTask(createTaskId('b'), makeTask('fix-b'));
-    const sorted = g2.topoSort().map((t) => t.id);
-    expect(sorted.indexOf(createTaskId('fix-b'))).toBeLessThan(
-      sorted.indexOf(createTaskId('b'))
-    );
+  it('throws when a task references an unknown dependency', () => {
+    const task = makeTask('a', { dependsOn: [createTaskId('missing')] });
+
+    expect(() => PlanGraph.fromTasks([task])).toThrow(/Dependency 'missing' not found/);
+  });
+
+  it('throws CyclicDependencyError when tasks form a cycle', () => {
+    const a = makeTask('a', { dependsOn: [createTaskId('b')] });
+    const b = makeTask('b', { dependsOn: [createTaskId('a')] });
+
+    expect(() => PlanGraph.fromTasks([a, b])).toThrowError(CyclicDependencyError);
   });
 });
 
@@ -256,12 +229,10 @@ describe('PlanGraph — versioning', () => {
     expect(g.removeTask(createTaskId('a')).version).toBe(0);
   });
 
-  it('each insertFixItTask call increments version by 1', () => {
-    const g = PlanGraph.empty().addTask(makeTask('a'));
-    const g2 = g.insertFixItTask(createTaskId('a'), makeTask('fix-a'));
-    const g3 = g2.insertFixItTask(createTaskId('a'), makeTask('fix-a2'));
-    expect(g2.version).toBe(1);
-    expect(g3.version).toBe(2);
+  it('fromTasks can carry a supplied version and reason', () => {
+    const g = PlanGraph.fromTasks([makeTask('a')], { version: 3, reason: 'rebuilt' });
+    expect(g.version).toBe(3);
+    expect(g.reason).toBe('rebuilt');
   });
 });
 
