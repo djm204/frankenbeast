@@ -342,6 +342,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setApprovalError(null);
     updateApprovalResolving(false);
     setMessages([]);
+    setSessionId(null);
+    setSocketToken(null);
     setPendingApproval(null);
     setShowTypingIndicator(false);
     setTier(null);
@@ -391,6 +393,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       cancelled = true;
     };
   }, [opts.projectId, opts.sessionId, opts.sessionSeed, opts.baseUrl, sessionRetrySeed]);
+
+  useEffect(() => {
+    if (!sessionId || !socketToken || typeof window === 'undefined') {
+      return;
+    }
+
+    function handleOnline() {
+      setConnectionStatus('reconnecting');
+      setSocketGeneration((current) => current + 1);
+    }
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [sessionId, socketToken]);
 
   useEffect(() => {
     if (!sessionId || !socketToken) {
@@ -515,12 +531,18 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
               timestamp: payload.timestamp,
             },
           ]);
-          const canRetryMessage = Boolean(lastMessageRef.current) && payload.code !== 'INVALID_EVENT';
+          const sessionRecoveryCodes = new Set(['NO_SESSION', 'NOT_FOUND']);
+          const canRetryMessage = Boolean(lastMessageRef.current)
+            && payload.code !== 'INVALID_EVENT'
+            && !sessionRecoveryCodes.has(payload.code);
+          const action = sessionRecoveryCodes.has(payload.code)
+            ? 'retry-session'
+            : canRetryMessage ? 'retry-message' : 'dismiss';
           addErrorBanner(makeBanner(
             'Turn failed',
             payload.message,
-            canRetryMessage ? 'retry-message' : 'dismiss',
-            canRetryMessage ? 'Retry last message' : 'Dismiss',
+            action,
+            action === 'retry-session' ? 'Retry session' : canRetryMessage ? 'Retry last message' : 'Dismiss',
             payload.code,
           ));
           setStatus('error');
