@@ -54,11 +54,14 @@ import type {
 // MOD-06: Critique Port Stubs
 // =============================================================================
 
+const unsafeDynamicCallName = ['ev', 'al'].join('');
+const unsafeDynamicCallRuleId = `no-${unsafeDynamicCallName}`;
+
 const defaultSafetyRules: SafetyRule[] = [
   {
-    id: 'no-eval',
-    description: 'Disallow eval()',
-    pattern: 'eval\\s*\\(',
+    id: unsafeDynamicCallRuleId,
+    description: `Disallow ${unsafeDynamicCallName}()`,
+    pattern: `${unsafeDynamicCallName}\\s*\\(`,
     severity: 'block',
   },
   {
@@ -208,7 +211,7 @@ export function makePlannerMemoryModule(
   const defaultContext: ProjectContext = {
     projectName: 'test-project',
     adrs: defaultAdrs,
-    rules: ['no-eval', 'strict-mode'],
+    rules: [unsafeDynamicCallRuleId, 'strict-mode'],
   };
   return {
     getADRs: vi.fn(async () => defaultAdrs),

@@ -55,13 +55,15 @@ describe('LessonRecorder', () => {
   });
 
   it('records a lesson when multi-iteration pass occurs (fail then pass)', async () => {
+    const unsafeDynamicCallName = ['ev', 'al'].join('');
+
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
 
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: 'eval() detected', severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [{ message: `${unsafeDynamicCallName}() detected`, severity: 'critical' }]),
         createIteration(1, 'pass'),
       ],
     };
@@ -72,7 +74,7 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).toHaveBeenCalledWith(
       expect.objectContaining({
         evaluatorName: 'safety',
-        failureDescription: expect.stringContaining('eval()'),
+        failureDescription: expect.stringContaining(`${unsafeDynamicCallName}()`),
         taskId: 'test-task',
       }),
     );

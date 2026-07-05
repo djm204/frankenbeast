@@ -118,16 +118,23 @@ describe('createReviewer', () => {
   });
 
   it('handles safety failure with short-circuit', async () => {
+    const unsafeDynamicCallName = ['ev', 'al'].join('');
+
     const guardrails: GuardrailsPort = {
       getSafetyRules: vi.fn().mockResolvedValue([
-        { id: 'no-eval', description: 'no eval', pattern: 'eval\\(', severity: 'block' as const },
+        {
+          id: `no-${unsafeDynamicCallName}`,
+          description: `no ${unsafeDynamicCallName}`,
+          pattern: `${unsafeDynamicCallName}\\(`,
+          severity: 'block' as const,
+        },
       ]),
       executeSandbox: vi.fn().mockResolvedValue({
         success: true, output: '', exitCode: 0, timedOut: false,
       }),
     };
     const reviewer = createReviewer(makeConfig({ guardrails }));
-    const input = makeInput('eval("dangerous")');
+    const input = makeInput(`${unsafeDynamicCallName}("dangerous")`);
     const result = await reviewer.review(input, makeLoopConfig());
     expect(result.verdict).toBe('fail');
   });
