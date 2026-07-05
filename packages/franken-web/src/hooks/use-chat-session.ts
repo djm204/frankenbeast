@@ -268,10 +268,19 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
 function preserveLocalRecoveryMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
   const snapshot = normalizeTranscript(transcript);
   const snapshotIds = new Set(snapshot.map((message) => message.id));
-  const localRecoveryMessages = current.filter((message) => (
-    (message.receipt === 'failed' || message.receipt === 'accepted')
-    && !snapshotIds.has(message.id)
-  ));
+  const snapshotContentKeys = new Set(snapshot.map((message) => `${message.role}\u0000${message.content}`));
+  const localRecoveryMessages = current.filter((message) => {
+    if (snapshotIds.has(message.id)) {
+      return false;
+    }
+    if (message.receipt === 'failed') {
+      return true;
+    }
+    if (message.receipt === 'accepted') {
+      return !snapshotContentKeys.has(`${message.role}\u0000${message.content}`);
+    }
+    return false;
+  });
 
   return [...snapshot, ...localRecoveryMessages];
 }
@@ -336,10 +345,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
   }
 
-  function cancelAllPendingSends() {
+  function rejectAllPendingSends(error: Error) {
     for (const [, pending] of pendingSendsRef.current.entries()) {
       clearTimeout(pending.timeoutId);
-      pending.resolve();
+      pending.reject(error);
     }
     pendingSendsRef.current.clear();
   }
@@ -386,7 +395,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     } else if (action === 'retry-message' && lastMessageRef.current) {
       const { clientMessageId, content } = lastMessageRef.current;
       setMessages((current) => current.filter((message) => message.id !== clientMessageId));
-      void send(content);
+      void send(content).catch(() => undefined);
     }
   }
 
@@ -639,6 +648,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onclose = () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
       socketRef.current = null;
       failAllPendingSends(new Error('Connection closed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
@@ -659,7 +671,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     return () => {
       shouldReconnect = false;
-      cancelAllPendingSends();
+      rejectAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
       socket.close();
       socketRef.current = null;
     };
@@ -702,7 +714,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setCostUsd(refreshed.costUsd);
           setStatus('idle');
         } catch (error) {
-          readyRef.current = true;
           setMessages((current) => updateReceipt(current, clientMessageId, 'accepted'));
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',
