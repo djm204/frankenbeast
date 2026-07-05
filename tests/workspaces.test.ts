@@ -149,13 +149,16 @@ describe('npm workspaces configuration', () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `packages/${entry.name}/package.json`);
 
-    it('declares the shared MIT license on every publishable package', () => {
+    it('declares the shared MIT license on every publishable package and the top-level README', () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
         if (pkg.private === true) continue;
 
         expect(pkg.license, `${path} must declare the shared product license`).toBe('MIT');
       }
+
+      const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+      expect(readme).toMatch(/## License\n\nMIT\n?$/);
     });
 
     it('builds dist artifacts before publishing publishable packages', () => {

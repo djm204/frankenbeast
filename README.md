@@ -804,4 +804,4 @@ frankenbeast/
 
 ## License
 
-ISC
+MIT
