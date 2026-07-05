@@ -60,10 +60,15 @@ describe('npm workspaces configuration', () => {
     it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const devDependencies = pkg.devDependencies ?? {};
+        const declaredDependencies = {
+          ...pkg.dependencies,
+          ...pkg.devDependencies,
+          ...pkg.optionalDependencies,
+          ...pkg.peerDependencies,
+        };
 
         for (const dependencyName of ['vitest', '@vitest/coverage-v8']) {
-          const version = devDependencies[dependencyName];
+          const version = declaredDependencies[dependencyName];
           if (version === undefined) continue;
 
           expect(
@@ -74,14 +79,29 @@ describe('npm workspaces configuration', () => {
       }
     });
 
-    it('keeps the lockfile resolved to the same non-vulnerable Vitest floor', () => {
+    it('keeps every locked Vitest and Vite package on its security floor', () => {
       const lockfile = readJson('package-lock.json');
+      const toolchainFloors = {
+        vitest: minimumVitest,
+        '@vitest/coverage-v8': minimumVitest,
+        vite: '8.1.3',
+      };
 
-      for (const packageName of ['vitest', '@vitest/coverage-v8']) {
-        const lockedVersion = lockfile.packages?.[`node_modules/${packageName}`]?.version;
+      for (const [packageName, minimumVersion] of Object.entries(toolchainFloors)) {
+        const lockedEntries = Object.entries(lockfile.packages ?? {})
+          .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
 
-        expect(lockedVersion, `${packageName} missing from package-lock.json`).toBeDefined();
-        expect(isAtLeast(lockedVersion, minimumVitest)).toBe(true);
+        expect(lockedEntries.length, `${packageName} missing from package-lock.json`).toBeGreaterThan(0);
+
+        for (const [path, packageDetails] of lockedEntries) {
+          const lockedVersion = (packageDetails as { version?: string }).version;
+
+          expect(lockedVersion, `${packageName} at ${path} is missing a locked version`).toBeDefined();
+          expect(
+            isAtLeast(lockedVersion ?? '0.0.0', minimumVersion),
+            `${packageName} at ${path} must stay >= ${minimumVersion}`,
+          ).toBe(true);
+        }
       }
     });
   });
