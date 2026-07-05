@@ -5,13 +5,35 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
-  release-please:
+  validate-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Validate release before creating tags
+        run: |
+          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts
+          npm run lint:security
+          npx turbo run build typecheck test lint
+
+  release-please:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
@@ -72,22 +94,14 @@ jobs:
 
       - run: npm ci
 
-      - name: Gate publish on tests, typecheck, lint, and build
-        run: |
-          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts
-          npm run lint:security
-          npx turbo run build typecheck test lint
+      - name: Build publish artifacts after validation
+        run: npx turbo run build
 
       - name: Publish released npm packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "NPM_TOKEN secret is required to publish released packages" >&2
-            exit 1
-          fi
-
           if [ -z "${PATHS_RELEASED:-}" ] || [ "${PATHS_RELEASED:-}" = "null" ]; then
             echo "No released package paths reported by release-please"
             exit 0
@@ -115,6 +129,11 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "Skipping $name@$version: already published"
               continue
+            fi
+
+            if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+              echo "NPM_TOKEN secret is required to publish $name@$version" >&2
+              exit 1
             fi
 
             echo "Publishing $name@$version from $package_path"

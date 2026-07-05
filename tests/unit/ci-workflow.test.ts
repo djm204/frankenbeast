@@ -97,14 +97,24 @@ describe('release-please.yml publishes released npm packages', () => {
     expect(content).toMatch(/- name: Publish released npm packages\n\s+env:\n\s+NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
   });
 
-  it('drops repository write permissions from the publish job', () => {
+  it('keeps OIDC scoped to the publish job only', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content).toMatch(/permissions:\n\s+contents: read\n\njobs:/);
     expect(content).toMatch(/publish-npm:[\s\S]*permissions:\n\s+contents: read\n\s+id-token: write/);
   });
 
-  it('gates publish on build, typecheck, test, and lint before npm publish', () => {
+  it('validates build, typecheck, test, and lint before release records are created', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toMatch(/turbo run.*build.*typecheck.*test.*lint/);
+    expect(content).toContain('validate-release:');
+    expect(content).toContain('release-please:\n    needs: validate-release');
+    expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run.*build.*typecheck.*test.*lint/);
+  });
+
+  it('defers npm token enforcement until a public package needs publishing', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    const tokenCheckIndex = content.indexOf('NPM_TOKEN secret is required to publish $name@$version');
+    const privateSkipIndex = content.indexOf('Skipping $package_path: package is private');
+    expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
     expect(content).toContain('npm publish "$package_path" --access public --provenance');
   });
 });
