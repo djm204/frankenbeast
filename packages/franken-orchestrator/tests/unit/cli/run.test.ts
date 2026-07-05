@@ -1398,6 +1398,44 @@ describe('main() execution', () => {
     }));
   });
 
+  it('rejects non-loopback plaintext explicit beast daemon URLs before proxying', async () => {
+    process.env.FRANKENBEAST_BEAST_DAEMON_URL = 'http://internal-service:4050';
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    } as never);
+
+    await expect(main()).rejects.toThrow(/FRANKENBEAST_BEAST_DAEMON_URL must use https:\/\//i);
+    expect(mockStartChatServer).not.toHaveBeenCalled();
+  });
+
   it('dispatches beasts-daemon without creating a Session or REPL', async () => {
     mockParseArgs.mockReturnValue({
       subcommand: 'beasts-daemon',

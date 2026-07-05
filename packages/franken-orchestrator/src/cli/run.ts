@@ -52,7 +52,7 @@ import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
-import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
+import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -753,7 +753,12 @@ export async function main(): Promise<void> {
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
       const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
-      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL
+        ? assertLocalPlaintextOrSecureHttpUrl(
+            process.env.FRANKENBEAST_BEAST_DAEMON_URL,
+            'FRANKENBEAST_BEAST_DAEMON_URL',
+          )
+        : undefined;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({
             beastsDb: join(paths.frankenbeastDir, 'beast.db'),
