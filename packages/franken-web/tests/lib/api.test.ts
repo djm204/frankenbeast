@@ -58,9 +58,15 @@ describe('ChatApiClient', () => {
       );
     });
 
-    it('rewrites cross-origin explicit base URLs to the dashboard origin', () => {
+    it('rewrites cross-origin explicit base URLs to the dashboard origin while the dev proxy is active', () => {
       expect(resolveChatRequestBaseUrl('https://chat-api.example.test', 'http://dashboard.local')).toBe(
         'http://dashboard.local',
+      );
+    });
+
+    it('honors explicit cross-origin API URLs when no same-origin proxy is active', () => {
+      expect(resolveChatRequestBaseUrl('https://chat-api.example.test', 'http://dashboard.local', false)).toBe(
+        'https://chat-api.example.test',
       );
     });
   });

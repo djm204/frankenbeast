@@ -15,9 +15,15 @@ describe('vite dev proxy configuration', () => {
   });
 
   it('injects chat auth at the dev proxy instead of in browser code', () => {
+    expect(CONFIG_SOURCE).toContain("'/v1/chat'");
     expect(CONFIG_SOURCE).toContain('env.VITE_API_URL || proxyTarget');
     expect(CONFIG_SOURCE).toContain("operatorProxy(chatProxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat'))");
     expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('authorization'");
+  });
+
+  it('keeps non-chat /v1 routes on the generic proxy target', () => {
+    expect(CONFIG_SOURCE).toContain("'/v1': {");
+    expect(CONFIG_SOURCE).toContain('target: proxyTarget');
   });
 });
 

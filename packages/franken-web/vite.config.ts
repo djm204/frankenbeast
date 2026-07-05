@@ -37,9 +37,14 @@ export default defineConfig(({ mode }) => {
           target: beastProxyTarget,
           changeOrigin: true,
         },
-        '/v1': {
+        '/v1/chat': {
           ...operatorProxy(chatProxyTarget, beastOperatorToken, (path) => path.startsWith('/v1/chat')),
           target: chatProxyTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+        '/v1': {
+          target: proxyTarget,
           changeOrigin: true,
           ws: true,
         },
