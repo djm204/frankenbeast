@@ -7,6 +7,10 @@
  */
 
 const CHROMA_URL = process.env['CHROMA_URL'] ?? 'http://localhost:8000';
+const CHROMA_TENANT = process.env['CHROMA_TENANT'] ?? 'default_tenant';
+const CHROMA_DATABASE = process.env['CHROMA_DATABASE'] ?? 'default_database';
+
+export {};
 
 interface ChromaCollection {
   name: string;
@@ -14,7 +18,9 @@ interface ChromaCollection {
 }
 
 async function createCollection(name: string, metadata?: Record<string, string>): Promise<void> {
-  const res = await fetch(`${CHROMA_URL}/api/v1/collections`, {
+  const tenant = encodeURIComponent(CHROMA_TENANT);
+  const database = encodeURIComponent(CHROMA_DATABASE);
+  const res = await fetch(`${CHROMA_URL}/api/v2/tenants/${tenant}/databases/${database}/collections`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, metadata, get_or_create: true }),
@@ -32,7 +38,7 @@ async function main(): Promise<void> {
 
   // Check connectivity
   try {
-    const heartbeat = await fetch(`${CHROMA_URL}/api/v1/heartbeat`);
+    const heartbeat = await fetch(`${CHROMA_URL}/api/v2/heartbeat`);
     if (!heartbeat.ok) throw new Error(`Status ${heartbeat.status}`);
   } catch (error) {
     console.error(`Cannot reach ChromaDB at ${CHROMA_URL}. Is it running?`);
