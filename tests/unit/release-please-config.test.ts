@@ -16,6 +16,9 @@ const PACKAGE_DIRS = [
   'franken-orchestrator',
   'franken-planner',
   'franken-types',
+  'franken-mcp-suite',
+  'franken-web',
+  'live-bench',
 ] as const;
 
 describe('release-please monorepo config', () => {
@@ -30,15 +33,15 @@ describe('release-please monorepo config', () => {
     expect(config.packages['.']['release-type']).toBe('node');
   });
 
-  it('config has entries for all 7 packages', () => {
+  it('config has entries for all 10 packages', () => {
     for (const dir of PACKAGE_DIRS) {
       const key = `packages/${dir}`;
       expect(config.packages[key], `missing config entry for ${key}`).toBeDefined();
     }
   });
 
-  it('config has at least 8 package entries (root + 7 modules)', () => {
-    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(8);
+  it('config has at least 11 package entries (root + 10 modules)', () => {
+    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(11);
   });
 
   it('each package entry has release-type "node"', () => {
@@ -59,15 +62,15 @@ describe('release-please monorepo config', () => {
     expect(manifest['.']).toBe(rootPackage.version);
   });
 
-  it('manifest has entries for all 7 packages', () => {
+  it('manifest has entries for all 10 packages', () => {
     for (const dir of PACKAGE_DIRS) {
       const key = `packages/${dir}`;
       expect(manifest[key], `missing manifest entry for ${key}`).toBeDefined();
     }
   });
 
-  it('manifest has at least 8 entries', () => {
-    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(8);
+  it('manifest has at least 11 entries', () => {
+    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(11);
   });
 
   it('manifest versions match actual package.json versions', () => {
@@ -75,6 +78,17 @@ describe('release-please monorepo config', () => {
       const key = `packages/${dir}`;
       const pkg = readJson(`packages/${dir}/package.json`) as { version: string };
       expect(manifest[key], `${key} version mismatch`).toBe(pkg.version);
+    }
+  });
+
+  it('user-facing release packages are publishable to npm', () => {
+    for (const dir of ['franken-mcp-suite', 'franken-web', 'live-bench']) {
+      const pkg = readJson(`packages/${dir}/package.json`) as {
+        private?: boolean;
+        publishConfig?: { access?: string };
+      };
+      expect(pkg.private, `packages/${dir} must not be private`).not.toBe(true);
+      expect(pkg.publishConfig?.access, `packages/${dir} must publish publicly`).toBe('public');
     }
   });
 

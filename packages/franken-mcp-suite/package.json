@@ -20,7 +20,13 @@
     "fbeast-init": "./dist/cli/init.js",
     "fbeast-uninstall": "./dist/cli/uninstall.js"
   },
-  "files": ["dist", "instructions"],
+  "files": [
+    "dist",
+    "instructions"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

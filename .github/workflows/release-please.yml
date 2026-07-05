@@ -7,10 +7,14 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      paths_released: ${{ steps.release.outputs.paths_released }}
     steps:
       - name: Release Please
         id: release
@@ -47,3 +51,68 @@ jobs:
             echo "Promoting root release: $root_tag"
             gh release edit "$root_tag" --latest
           fi
+
+  publish-npm:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Gate publish on tests, typecheck, lint, and build
+        run: |
+          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts
+          npm run lint:security
+          npx turbo run build typecheck test lint
+
+      - name: Publish released npm packages
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret is required to publish released packages" >&2
+            exit 1
+          fi
+
+          if [ -z "${PATHS_RELEASED:-}" ] || [ "${PATHS_RELEASED:-}" = "null" ]; then
+            echo "No released package paths reported by release-please"
+            exit 0
+          fi
+
+          echo "$PATHS_RELEASED" | jq -r '.[]' | while IFS= read -r package_path; do
+            package_json="$package_path/package.json"
+            if [ "$package_path" = "." ]; then
+              package_json="package.json"
+            fi
+
+            if [ ! -f "$package_json" ]; then
+              echo "Skipping $package_path: no package.json"
+              continue
+            fi
+
+            is_private=$(node -e "const p=require('./${package_json}'); console.log(p.private === true ? 'true' : 'false')")
+            if [ "$is_private" = "true" ]; then
+              echo "Skipping $package_path: package is private"
+              continue
+            fi
+
+            name=$(node -e "console.log(require('./${package_json}').name)")
+            version=$(node -e "console.log(require('./${package_json}').version)")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "Skipping $name@$version: already published"
+              continue
+            fi
+
+            echo "Publishing $name@$version from $package_path"
+            npm publish "$package_path" --access public --provenance
+          done

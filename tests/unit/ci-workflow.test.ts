@@ -69,7 +69,7 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
   });
 });
 
-describe('release-please.yml (unchanged)', () => {
+describe('release-please.yml publishes released npm packages', () => {
   it('release-please.yml exists', () => {
     expect(existsSync(RELEASE_PATH)).toBe(true);
   });
@@ -82,6 +82,25 @@ describe('release-please.yml (unchanged)', () => {
   it('references correct manifest-file path', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content).toContain('manifest-file: .release-please-manifest.json');
+  });
+
+  it('exposes release-please released paths to a publish job', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content).toContain('paths_released: ${{ steps.release.outputs.paths_released }}');
+    expect(content).toContain('publish-npm:');
+    expect(content).toContain('PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}');
+  });
+
+  it('authenticates npm with the NPM_TOKEN secret and registry auth', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content).toContain('registry-url: https://registry.npmjs.org');
+    expect(content).toContain('NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}');
+  });
+
+  it('gates publish on build, typecheck, test, and lint before npm publish', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content).toMatch(/turbo run.*build.*typecheck.*test.*lint/);
+    expect(content).toContain('npm publish "$package_path" --access public --provenance');
   });
 });
 

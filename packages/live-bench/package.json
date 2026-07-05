@@ -8,7 +8,13 @@
   "bin": {
     "fbeast-live-bench": "./dist/cli/main.js"
   },
-  "files": ["dist", "corpus"],
+  "files": [
+    "dist",
+    "corpus"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

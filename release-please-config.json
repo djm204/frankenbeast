@@ -2,16 +2,46 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "separate-pull-requests": false,
   "changelog-sections": [
-    { "type": "feat", "section": "Features" },
-    { "type": "feature", "section": "Features" },
-    { "type": "fix", "section": "Bug Fixes" },
-    { "type": "perf", "section": "Performance" },
-    { "type": "refactor", "section": "Refactoring" },
-    { "type": "chore", "section": "Miscellaneous" },
-    { "type": "docs", "section": "Documentation" },
-    { "type": "ci", "section": "CI/CD" },
-    { "type": "test", "section": "Tests" },
-    { "type": "adr", "section": "Architecture" }
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "feature",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance"
+    },
+    {
+      "type": "refactor",
+      "section": "Refactoring"
+    },
+    {
+      "type": "chore",
+      "section": "Miscellaneous"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation"
+    },
+    {
+      "type": "ci",
+      "section": "CI/CD"
+    },
+    {
+      "type": "test",
+      "section": "Tests"
+    },
+    {
+      "type": "adr",
+      "section": "Architecture"
+    }
   ],
   "packages": {
     ".": {
@@ -28,7 +58,10 @@
         "packages/franken-observer",
         "packages/franken-orchestrator",
         "packages/franken-planner",
-        "packages/franken-types"
+        "packages/franken-types",
+        "packages/franken-mcp-suite",
+        "packages/franken-web",
+        "packages/live-bench"
       ]
     },
     "packages/franken-brain": {
@@ -58,6 +91,18 @@
     "packages/franken-types": {
       "release-type": "node",
       "component": "franken-types"
+    },
+    "packages/franken-mcp-suite": {
+      "release-type": "node",
+      "component": "fbeast-mcp-suite"
+    },
+    "packages/franken-web": {
+      "release-type": "node",
+      "component": "frankenbeast-web"
+    },
+    "packages/live-bench": {
+      "release-type": "node",
+      "component": "fbeast-live-bench"
     }
   }
 }

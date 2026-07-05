@@ -1,8 +1,15 @@
 {
   "name": "@frankenbeast/web",
   "version": "0.1.0",
-  "private": true,
+  "description": "Browser dashboard for Frankenbeast operator workflows",
   "type": "module",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "dev:chat": "VITE_API_PROXY_TARGET=http://127.0.0.1:3737 vite",
