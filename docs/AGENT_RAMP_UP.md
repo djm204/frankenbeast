@@ -22,11 +22,11 @@ Implemented and enforced (verify before relying on legacy docs that say otherwis
 - **ADR-036 (both)** — safety modules fail closed (`FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the only opt-out); sandboxed container execution via `ContainerBeastExecutor` (a `ProcessSupervisor` whose spawn spec is rewritten to a docker invocation by `toDockerSpec`).
 - **ADR-037** — durable audit + replay capture; phase snapshots require `config.stateDir` (the CLI always sets it).
 - **ADR-038** — central MCP governance gate in dispatch.
+- **ADR-028** git worktree isolation — implemented for tracked-agent runs (`ProcessBeastExecutor.start()` → `createBeastWorktree()`); ad-hoc/local-CLI runs still share the checkout via branch switching.
 
 Accepted but **not (fully) implemented** — do not describe as live:
 
 - **ADR-027** beast daemon — `beasts-daemon` subcommand exists; follow-up work tracked in [#463](https://github.com/djm204/frankenbeast/issues/463).
-- **ADR-028** git worktree isolation — not implemented; tracked in [#494](https://github.com/djm204/frankenbeast/issues/494).
 - Recovery loop wiring (beast-loop-explained "Loop 4") — tracked in [#496](https://github.com/djm204/frankenbeast/issues/496).
 - Parallel/recursive execution strategies — tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
 

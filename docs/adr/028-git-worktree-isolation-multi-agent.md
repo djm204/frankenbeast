@@ -1,10 +1,10 @@
 # ADR-028: Git Worktree Isolation for Multi-Agent Concurrency
 
 - **Date:** 2026-03-16
-- **Status:** Accepted (not yet implemented — `ProcessBeastExecutor.start()` creates no worktrees and agents share the checkout via branch switching; implementation tracked in [#494](https://github.com/djm204/frankenbeast/issues/494))
+- **Status:** Accepted (implemented for tracked-agent runs)
 - **Deciders:** pfk
 
-> **Implementation status:** Accepted target architecture, not live behavior. `ProcessBeastExecutor.start()` does not yet create per-agent git worktrees, and concurrent beasts still share the configured checkout. Implementation is tracked in [#494](https://github.com/djm204/frankenbeast/issues/494); until it lands, operators should not rely on this ADR as current runtime behavior.
+> **Implementation status (2026-07-05):** Implemented for tracked-agent beast runs. `create-beast-services.ts` wires `ProcessBeastExecutor` with `worktreeIsolation.enabled: true`, and `ProcessBeastExecutor.start()` calls `createBeastWorktree()` (`beasts/execution/git-worktree-isolation.ts`) for runs with a `trackedAgentId`, running `git worktree add`, rewriting the child `cwd`, and exporting the worktree path/branch. Ad-hoc (non-tracked) runs and the direct local-CLI `frankenbeast run` path still share the configured checkout via branch switching (`GitBranchIsolator`).
 
 ## Context
 
