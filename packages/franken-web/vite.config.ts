@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, repoRootDir, ''), ...loadEnv(mode, process.cwd(), '') };
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
-  const operatorToken = env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || env.VITE_BEAST_OPERATOR_TOKEN || '';
+  const operatorToken = env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || '';
 
   return {
     plugins: [tailwindcss(), react()],

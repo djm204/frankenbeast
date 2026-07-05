@@ -36,8 +36,7 @@ npm --workspace @frankenbeast/web run dev:chat
 
 The frontend automatically resolves the API URL at runtime:
 
-- If `VITE_API_URL` is set, requests target that absolute URL.
-- Otherwise requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy.
+- Browser requests use same-origin `/v1/*` and `/api/*` paths, which works when the dashboard is served by the orchestrator or through the local Vite proxy. Use `VITE_API_PROXY_TARGET` to point the local proxy at a non-default backend.
 - Production deployments should use TLS-terminated `https://` and `wss://` endpoints. Plain HTTP is only appropriate for isolated local development.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
@@ -75,10 +74,6 @@ FRANKENBEAST_BEAST_OPERATOR_TOKEN=<your-operator-token>
 For web-only development settings, you can still create a `.env.local` file in this package directory (never committed):
 
 ```env
-# Required — Base URL of the franken-orchestrator HTTP server.
-# Defaults to window.location.origin if omitted (works when served by the orchestrator).
-VITE_API_URL=http://localhost:3737
-
 # Optional — Project identifier for scoping chat sessions. Defaults to "default".
 VITE_PROJECT_ID=my-project
 ```
@@ -94,7 +89,7 @@ VITE_PROJECT_ID=my-project
 3. When served by the orchestrator, the backend remains responsible for resolving and applying operator credentials server-side.
 4. If the server-side token is missing or invalid for a protected route, the server returns `401 UNAUTHORIZED`.
 
-**Server side:** For local development, the orchestrator prefers `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from the repo root `.env`, then falls back to `packages/franken-web/.env.local` when applicable. Keep the value server-side. The Vite dev proxy still accepts a legacy `VITE_BEAST_OPERATOR_TOKEN` from `.env.local` only as a server-side fallback for existing local setups; browser source must not read or send it.
+**Server side:** For local development, the Vite dev proxy reads `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from server-side env files. Keep the value server-side; do not expose it with a `VITE_` prefix.
 
 **Accepted headers** (server checks in order):
 - `Authorization: Bearer <token>`

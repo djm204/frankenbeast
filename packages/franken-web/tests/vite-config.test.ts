@@ -19,7 +19,7 @@ describe('operator token bridge', () => {
   it('does not bridge operator tokens into the client build', () => {
     expect(CONFIG_SOURCE).not.toContain("'import.meta.env.VITE_BEAST_OPERATOR_TOKEN'");
     expect(CONFIG_SOURCE).not.toContain('loadBeastOperatorToken');
-    expect(CONFIG_SOURCE).toContain('env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || env.VITE_BEAST_OPERATOR_TOKEN');
+    expect(CONFIG_SOURCE).toContain("env.FRANKENBEAST_BEAST_OPERATOR_TOKEN || ''");
     expect(CONFIG_SOURCE).toContain('operatorProxy(beastProxyTarget, operatorToken)');
     expect(CONFIG_SOURCE).toContain("path.startsWith('/v1/network') || path.startsWith('/v1/chat')");
     expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('authorization'");
