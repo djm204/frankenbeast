@@ -69,6 +69,133 @@ button {
   min-height: 100vh;
 }
 
+.app-shell-error {
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+}
+
+.app-shell-error__sidebar {
+  min-height: 100vh;
+}
+
+.app-shell-error__sidebar h1 {
+  margin: 0;
+  max-width: 18rem;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  line-height: 0.95;
+}
+
+.app-shell-error__main {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(1.5rem, 4vw, 4rem);
+}
+
+.app-shell-error__panel {
+  width: min(100%, 58rem);
+  display: grid;
+  gap: 1.35rem;
+  padding: clamp(1.4rem, 3vw, 2.5rem);
+  border: 1px solid rgba(255, 122, 107, 0.42);
+  border-radius: 1.6rem;
+  background:
+    linear-gradient(180deg, rgba(255, 122, 107, 0.12), transparent 38%),
+    var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.app-shell-error__panel h2 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 4.8rem);
+  line-height: 0.92;
+}
+
+.app-shell-error__panel p {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--text-muted);
+}
+
+.app-shell-error__details {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+}
+
+.app-shell-error__details div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.app-shell-error__details dt {
+  color: var(--text-subtle);
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.app-shell-error__details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-shell-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.primary-action,
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.72rem 1rem;
+  border-radius: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primary-action {
+  border: 1px solid rgba(181, 255, 129, 0.36);
+  background: var(--control-bg-primary);
+  color: var(--text);
+  box-shadow: var(--control-shadow);
+}
+
+.secondary-action {
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+  color: var(--text-muted);
+}
+
+.app-shell-error__diagnostics {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.app-shell-error__diagnostics summary {
+  cursor: pointer;
+  padding: 0.9rem 1rem;
+  color: var(--accent-strong);
+}
+
+.app-shell-error__diagnostics pre {
+  max-height: 18rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0 1rem 1rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
 .eyebrow {
   font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
   font-size: 0.72rem;
@@ -1177,6 +1304,14 @@ button {
 
   .sidebar--open {
     transform: translateX(0);
+  }
+
+  .app-shell-error .sidebar {
+    position: relative;
+    inset: auto;
+    width: auto;
+    min-height: auto;
+    transform: none;
   }
 
   .sidebar__toggle {
