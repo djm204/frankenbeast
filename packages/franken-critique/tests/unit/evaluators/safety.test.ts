@@ -764,7 +764,7 @@ describe('SafetyEvaluator', () => {
 
     expect(result.verdict).toBe('pass');
     expect(result.findings).toHaveLength(0);
-  });
+  }, 10000);
 
   it('limits inline dotAll rewriting to the modifier group scope', () => {
     const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {

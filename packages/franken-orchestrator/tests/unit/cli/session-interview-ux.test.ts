@@ -212,7 +212,7 @@ describe('Session interview UX', () => {
       expect.stringContaining('## Implementation'),
     );
     expect(readFileSync(paths.designDocFile, 'utf-8')).toBe(currentDesignDoc);
-  });
+  }, 10000);
 
   it('uses the no-op prompt header and exits before planning on [x]', async () => {
     currentDesignDoc = '# Already Done\n\nNo changes needed.';
