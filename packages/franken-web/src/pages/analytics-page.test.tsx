@@ -227,7 +227,7 @@ describe('AnalyticsPage', () => {
     const client = mockClient();
 
     render(<AnalyticsPage client={client} />);
-    fireEvent.click(await screen.findByText('Denied destructive command'));
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Denied destructive command' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
@@ -236,22 +236,79 @@ describe('AnalyticsPage', () => {
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
   });
 
-  it('opens details from keyboard and restores focus to the event row when closed', async () => {
+  it('opens details from the row action and restores focus to the action when closed', async () => {
     const client = mockClient();
 
     render(<AnalyticsPage client={client} />);
-    const eventCell = await screen.findByText('Denied destructive command');
-    const eventRow = eventCell.closest('tr') as HTMLTableRowElement;
-    eventRow.focus();
+    const detailButton = await screen.findByRole('button', { name: 'View details for Denied destructive command' });
+    detailButton.focus();
 
-    fireEvent.keyDown(eventRow, { key: 'Enter' });
+    fireEvent.click(detailButton);
     expect(await screen.findByRole('dialog', { name: 'Denied destructive command' })).toBeTruthy();
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
-      expect(document.activeElement).toBe(eventRow);
+      expect(document.activeElement).toBe(detailButton);
+    });
+  });
+
+  it('restores focus to the re-rendered action after applying the detail session filter', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEvents)
+      .mockResolvedValueOnce({
+        total: 1,
+        page: 1,
+        pageSize: 50,
+        events: [
+          {
+            id: 'governor:1',
+            timestamp: '2026-04-28T12:01:00.000Z',
+            sessionId: 'session-a',
+            toolName: 'exec_command',
+            source: 'governor',
+            category: 'decision',
+            outcome: 'denied',
+            summary: 'Denied destructive command',
+            severity: 'error',
+            raw: { decision: 'denied' },
+            links: {},
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        total: 1,
+        page: 1,
+        pageSize: 50,
+        events: [
+          {
+            id: 'governor:1',
+            timestamp: '2026-04-28T12:01:00.000Z',
+            sessionId: 'session-a',
+            toolName: 'exec_command',
+            source: 'governor',
+            category: 'decision',
+            outcome: 'denied',
+            summary: 'Denied destructive command',
+            severity: 'error',
+            raw: { decision: 'denied' },
+            links: {},
+          },
+        ],
+      });
+
+    render(<AnalyticsPage client={client} />);
+    const detailButton = await screen.findByRole('button', { name: 'View details for Denied destructive command' });
+    fireEvent.click(detailButton);
+    expect(await screen.findByRole('dialog', { name: 'Denied destructive command' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Session' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'View details for Denied destructive command' }));
     });
   });
 

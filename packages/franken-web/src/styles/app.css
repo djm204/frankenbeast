@@ -1189,7 +1189,7 @@ button {
 
 .analytics-table {
   width: 100%;
-  min-width: 44rem;
+  min-width: 50rem;
   border-collapse: collapse;
 }
 
@@ -1207,18 +1207,8 @@ button {
   font-weight: 650;
 }
 
-.analytics-table tbody tr {
-  cursor: pointer;
-}
-
-.analytics-table tbody tr:hover,
-.analytics-table tbody tr:focus-visible {
+.analytics-table tbody tr:hover {
   background: rgba(134, 228, 95, 0.08);
-}
-
-.analytics-table tbody tr:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
 }
 
 .analytics-table td {
@@ -1232,6 +1222,24 @@ button {
   overflow-wrap: anywhere;
   font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
   font-size: 0.8rem;
+}
+
+.analytics-table__detail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--control-bg);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.analytics-table__detail-button:hover {
+  background: var(--control-bg-hover);
 }
 
 .analytics-outcome {

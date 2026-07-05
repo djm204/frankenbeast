@@ -46,7 +46,11 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(true);
+  const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
+  const detailTriggerEventIdRef = useRef<string | null>(null);
+  const deferDetailFocusUntilEventsLoadRef = useRef(false);
+  const sawDeferredEventsLoadRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,8 +118,29 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
     [events],
   );
 
+  useEffect(() => {
+    if (!pendingFocusEventId) return;
+    if (deferDetailFocusUntilEventsLoadRef.current) {
+      if (isEventsLoading) {
+        sawDeferredEventsLoadRef.current = true;
+        return;
+      }
+      if (!sawDeferredEventsLoadRef.current) return;
+    } else if (isEventsLoading) {
+      return;
+    }
+    const currentRowTrigger = Array.from(document.querySelectorAll<HTMLElement>('[data-analytics-event-id]'))
+      .find((element) => element.dataset.analyticsEventId === pendingFocusEventId);
+    const fallbackTrigger = detailTriggerRef.current?.isConnected ? detailTriggerRef.current : null;
+    (currentRowTrigger ?? fallbackTrigger)?.focus();
+    deferDetailFocusUntilEventsLoadRef.current = false;
+    sawDeferredEventsLoadRef.current = false;
+    setPendingFocusEventId(null);
+  }, [events, isEventsLoading, pendingFocusEventId]);
+
   async function openDetail(event: AnalyticsEvent, trigger?: HTMLElement) {
     detailTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    detailTriggerEventIdRef.current = event.id;
     setSelectedEvent(event);
     setDetailError(null);
     try {
@@ -139,9 +164,10 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   }
 
   function closeDetail() {
+    const triggerEventId = detailTriggerEventIdRef.current;
     setSelectedEvent(null);
     setDetailError(null);
-    window.setTimeout(() => detailTriggerRef.current?.focus(), 0);
+    setPendingFocusEventId(triggerEventId);
   }
 
   return (
@@ -282,7 +308,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
           detail={selectedEvent}
           error={detailError}
           onClose={closeDetail}
-          onSessionFilter={(sessionId) => updateFilter({ sessionId })}
+          onSessionFilter={(sessionId) => {
+            deferDetailFocusUntilEventsLoadRef.current = true;
+            sawDeferredEventsLoadRef.current = false;
+            closeDetail();
+            updateFilter({ sessionId });
+          }}
         />
       )}
     </main>
@@ -325,30 +356,28 @@ function AnalyticsTable({
                 <th>Tool</th>
                 <th>Outcome</th>
                 <th>Summary</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {events.map((event) => (
-                <tr
-                  aria-label={`View details for ${event.summary}`}
-                  key={event.id}
-                  onClick={(pointerEvent) => {
-                    pointerEvent.currentTarget.focus();
-                    onSelect(event, pointerEvent.currentTarget);
-                  }}
-                  onKeyDown={(keyboardEvent) => {
-                    if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                      keyboardEvent.preventDefault();
-                      onSelect(event, keyboardEvent.currentTarget);
-                    }
-                  }}
-                  tabIndex={0}
-                >
+                <tr key={event.id}>
                   <td>{formatTime(event.timestamp)}</td>
                   <td>{event.sessionId ?? '-'}</td>
                   <td>{event.toolName ?? event.source}</td>
                   <td><span className={`analytics-outcome analytics-outcome--${event.severity}`}>{event.outcome}</span></td>
                   <td>{event.summary}</td>
+                  <td>
+                    <button
+                      aria-label={`View details for ${event.summary}`}
+                      className="analytics-table__detail-button"
+                      data-analytics-event-id={event.id}
+                      type="button"
+                      onClick={(clickEvent) => onSelect(event, clickEvent.currentTarget)}
+                    >
+                      Details
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
