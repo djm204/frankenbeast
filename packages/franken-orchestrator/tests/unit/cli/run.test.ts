@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -295,6 +295,36 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('missing run plan guidance', () => {
+  it('formats an actionable first-run message for an empty plan directory', () => {
+    expect(formatMissingRunPlanGuidance('/project/.fbeast/plans/plan-2026-03-08')).toBe(
+      'No plan found under /project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+    );
+  });
+
+  it('shows guidance only for run no-ops with no task results', () => {
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run' },
+      { status: 'no-op', taskResults: [] },
+    )).toBe(true);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run' },
+      { status: 'no-op', taskResults: [{ taskId: 'impl:01' }] },
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'plan' },
+      { status: 'no-op', taskResults: [] },
+    )).toBe(false);
+
+    expect(shouldShowMissingRunPlanGuidance(
+      { subcommand: 'run' },
+      { status: 'completed', taskResults: [] },
+    )).toBe(false);
   });
 });
 
@@ -778,6 +808,49 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('prints actionable guidance when run exits no-op before any plan chunks exist', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockParseArgs.mockReturnValue({
+      subcommand: 'run',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+    mockSessionStart.mockResolvedValueOnce({ status: 'no-op', taskResults: [] });
+
+    await main();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'No plan found under /mock/project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+    );
+    logSpy.mockRestore();
   });
 
   it('passes the run --resume flag into Session config', async () => {

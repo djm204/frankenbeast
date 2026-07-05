@@ -108,6 +108,20 @@ export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'design
   return { entryPhase: 'interview' };
 }
 
+export function formatMissingRunPlanGuidance(planDir: string): string {
+  return 'No plan found under ' + planDir + '. '
+    + 'Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.';
+}
+
+export function shouldShowMissingRunPlanGuidance(
+  args: Partial<Pick<CliArgs, 'subcommand'>>,
+  result: { status?: string; taskResults?: readonly unknown[] | undefined } | undefined,
+): boolean {
+  return args.subcommand === 'run'
+    && result?.status === 'no-op'
+    && (result.taskResults?.length ?? 0) === 0;
+}
+
 export interface ResumeTarget {
   planName: string;
   checkpointFile: string;
@@ -997,6 +1011,10 @@ export async function main(): Promise<void> {
   }
 
   const result = await session.start();
+
+  if (shouldShowMissingRunPlanGuidance(args, result)) {
+    console.log(formatMissingRunPlanGuidance(planDirOverride ?? paths.plansDir));
+  }
 
   // `no-op` is a benign terminal status (empty or intentionally-skipped plan),
   // so it must exit successfully alongside `completed` — otherwise CI/scripts
