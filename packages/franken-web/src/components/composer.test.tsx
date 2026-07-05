@@ -64,6 +64,61 @@ describe('Composer failed-send recovery', () => {
     });
   });
 
+  it('clears a composer failure only when a matching transcript retry succeeds', async () => {
+    const failedAttempt = deferred<void>();
+    const onSend = vi.fn().mockReturnValueOnce(failedAttempt.promise);
+    const { rerender } = render(<Composer connectionStatus="connected" disabled={false} onSend={onSend} status="idle" />);
+
+    const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'retry from transcript' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+    failedAttempt.reject(new Error('Socket ack timed out'));
+
+    await screen.findByRole('alert');
+    rerender(
+      <Composer
+        clearedFailedDraft={{ content: 'retry from transcript', nonce: 1 }}
+        connectionStatus="connected"
+        disabled={false}
+        onSend={onSend}
+        status="idle"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(input.value).toBe('');
+    });
+  });
+
+  it('keeps newer composer text when a transcript retry clears an older failure', async () => {
+    const failedAttempt = deferred<void>();
+    const onSend = vi.fn().mockReturnValueOnce(failedAttempt.promise);
+    const { rerender } = render(<Composer connectionStatus="connected" disabled={false} onSend={onSend} status="idle" />);
+
+    const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'old failed draft' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+    failedAttempt.reject(new Error('Socket ack timed out'));
+    await screen.findByRole('alert');
+    fireEvent.change(input, { target: { value: 'new unrelated draft' } });
+
+    rerender(
+      <Composer
+        clearedFailedDraft={{ content: 'old failed draft', nonce: 1 }}
+        connectionStatus="connected"
+        disabled={false}
+        onSend={onSend}
+        status="idle"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(input.value).toBe('new unrelated draft');
+    });
+  });
+
   it('shows resend controls for failed user messages', () => {
     const onRetryMessage = vi.fn();
     render(

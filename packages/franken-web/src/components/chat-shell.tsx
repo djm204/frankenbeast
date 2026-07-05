@@ -154,6 +154,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
+  const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
@@ -664,13 +665,22 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <TranscriptPane
                 messages={messages}
                 onRetryMessage={(messageId) => {
-                  void retryMessage(messageId).catch(() => undefined);
+                  const retriedMessage = messages.find((message) => message.id === messageId);
+                  void retryMessage(messageId).then(() => {
+                    if (retriedMessage?.role === 'user') {
+                      setClearedFailedDraft((current) => ({
+                        content: retriedMessage.content,
+                        nonce: (current?.nonce ?? 0) + 1,
+                      }));
+                    }
+                  }).catch(() => undefined);
                 }}
                 retryDisabled={status !== 'idle' && status !== 'error'}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
                 connectionStatus={connectionStatus}
+                clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
                 onSend={send}
                 status={status}

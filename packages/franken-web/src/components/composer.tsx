@@ -1,17 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConnectionStatus, SessionStatus } from '../hooks/use-chat-session';
 
 export interface ComposerProps {
   connectionStatus: ConnectionStatus;
+  clearedFailedDraft?: { content: string; nonce: number };
   disabled: boolean;
   onSend: (content: string) => Promise<void> | void;
   status: SessionStatus;
 }
 
-export function Composer({ connectionStatus, disabled, onSend, status }: ComposerProps) {
+export function Composer({ connectionStatus, clearedFailedDraft, disabled, onSend, status }: ComposerProps) {
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
+  const lastClearedFailedDraftNonceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!clearedFailedDraft || lastClearedFailedDraftNonceRef.current === clearedFailedDraft.nonce) {
+      return;
+    }
+
+    lastClearedFailedDraftNonceRef.current = clearedFailedDraft.nonce;
+    setError(null);
+    setValue((current) => (
+      current.trim() === clearedFailedDraft.content.trim()
+        ? ''
+        : current
+    ));
+  }, [clearedFailedDraft]);
 
   async function submitCurrentValue() {
     if (disabled) {
