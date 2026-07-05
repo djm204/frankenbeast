@@ -152,8 +152,9 @@ describe('useChatSession', () => {
       });
     });
 
-    await act(async () => {
-      await result.current.send('Ship the dashboard shell');
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('Ship the dashboard shell');
     });
 
     expect(result.current.messages).toHaveLength(1);
@@ -203,6 +204,10 @@ describe('useChatSession', () => {
         modelTier: 'premium_execution',
         timestamp: '2026-03-09T00:00:05Z',
       });
+    });
+
+    await act(async () => {
+      await sendPromise;
     });
 
     expect(result.current.messages).toHaveLength(2);
@@ -373,8 +378,21 @@ describe('useChatSession', () => {
       });
     });
 
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('Deploy the generated fix');
+    });
+
+    const outbound = JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string };
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        clientMessageId: outbound.clientMessageId,
+        timestamp: '2026-03-09T00:00:01Z',
+      });
+    });
     await act(async () => {
-      await result.current.send('Deploy the generated fix');
+      await sendPromise;
     });
 
     act(() => {

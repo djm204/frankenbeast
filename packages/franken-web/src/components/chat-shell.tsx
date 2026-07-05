@@ -189,6 +189,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     messages,
     pendingApproval,
     projectId: activeProjectId,
+    retryMessage,
     send,
     sessionId: activeSessionId,
     showTypingIndicator,
@@ -658,13 +659,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 </div>
               </section>
 
-              <TranscriptPane messages={messages} showTypingIndicator={showTypingIndicator} />
+              <TranscriptPane messages={messages} onRetryMessage={(messageId) => { void retryMessage(messageId); }} showTypingIndicator={showTypingIndicator} />
               <Composer
                 connectionStatus={connectionStatus}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
-                onSend={(content) => {
-                  void send(content);
-                }}
+                onSend={send}
                 status={status}
               />
             </section>

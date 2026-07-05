@@ -9,7 +9,7 @@ import {
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
-export type MessageReceipt = 'sending' | 'accepted' | 'delivered' | 'read';
+export type MessageReceipt = 'sending' | 'accepted' | 'delivered' | 'read' | 'failed';
 
 export interface ChatMessage {
   id: string;
@@ -18,6 +18,7 @@ export interface ChatMessage {
   timestamp: string;
   modelTier?: string;
   receipt?: MessageReceipt;
+  error?: string;
   streaming?: boolean;
 }
 
@@ -42,6 +43,7 @@ export interface UseChatSessionResult {
   messages: ChatMessage[];
   pendingApproval: PendingApproval | null;
   projectId: string;
+  retryMessage: (messageId: string) => Promise<void>;
   send: (content: string) => Promise<void>;
   sessionId: string | null;
   showTypingIndicator: boolean;
@@ -113,6 +115,14 @@ const EMPTY_TOKEN_TOTALS: TokenTotals = {
   premiumExecution: 0,
 };
 
+const SOCKET_SEND_ACK_TIMEOUT_MS = 15_000;
+
+interface PendingSend {
+  timeoutId: ReturnType<typeof setTimeout>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
 function makeId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -163,7 +173,15 @@ function updateReceipt(
 ): ChatMessage[] {
   return messages.map((message) => (
     message.id === messageId
-      ? { ...message, receipt }
+      ? { ...message, receipt, ...(receipt !== 'failed' ? { error: undefined } : {}) }
+      : message
+  ));
+}
+
+function markMessageFailed(messages: ChatMessage[], messageId: string, error: string): ChatMessage[] {
+  return messages.map((message) => (
+    message.id === messageId
+      ? { ...message, receipt: 'failed', error }
       : message
   ));
 }
@@ -228,6 +246,26 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   }, [opts.baseUrl]);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const pendingSendsRef = useRef<Map<string, PendingSend>>(new Map());
+
+  function failPendingSend(messageId: string, error: Error) {
+    const pending = pendingSendsRef.current.get(messageId);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timeoutId);
+    pendingSendsRef.current.delete(messageId);
+    setMessages((current) => markMessageFailed(current, messageId, error.message));
+    setStatus('error');
+    pending.reject(error);
+  }
+
+  function failAllPendingSends(error: Error) {
+    for (const messageId of pendingSendsRef.current.keys()) {
+      failPendingSend(messageId, error);
+    }
+  }
+
 
   useEffect(() => {
     let cancelled = false;
@@ -310,9 +348,17 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             setProjectId(payload.projectId);
           }
           return;
-        case 'message.accepted':
+        case 'message.accepted': {
+          const pending = pendingSendsRef.current.get(payload.clientMessageId);
+          if (pending) {
+            clearTimeout(pending.timeoutId);
+            pendingSendsRef.current.delete(payload.clientMessageId);
+            pending.resolve();
+          }
+          setStatus('idle');
           setMessages((current) => updateReceipt(current, payload.clientMessageId, 'accepted'));
           return;
+        }
         case 'message.delivered':
           setMessages((current) => updateReceipt(current, payload.clientMessageId, 'delivered'));
           return;
@@ -382,6 +428,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
               timestamp: payload.timestamp,
             },
           ]);
+          failAllPendingSends(new Error(payload.message));
           setStatus('error');
           return;
         case 'pong':
@@ -390,12 +437,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onerror = () => {
+      failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
       setConnectionStatus('error');
       setStatus('error');
     };
 
     socket.onclose = () => {
       socketRef.current = null;
+      failAllPendingSends(new Error('Connection closed before the server acknowledged the message.'));
       setConnectionStatus('disconnected');
       if (shouldReconnect) {
         setSocketGeneration((current) => current + 1);
@@ -412,7 +461,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   async function send(content: string): Promise<void> {
     const socket = socketRef.current;
     if (!sessionId) {
-      return;
+      throw new Error('Chat session is not ready yet. Your draft was kept.');
     }
 
     const clientMessageId = makeId('user');
@@ -432,23 +481,49 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
         const refreshed = await clientRef.current.getSession(sessionId);
-        setMessages(applySessionSnapshot(refreshed));
+        readyRef.current = true;
+        setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setTier(result.tier);
         setStatus('idle');
-      } catch {
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error('Message failed to send. Your draft was kept.');
+        setMessages((current) => markMessageFailed(current, clientMessageId, error.message));
         setStatus('error');
+        throw error;
       }
       return;
     }
 
-    socket.send(JSON.stringify({
-      type: 'message.send',
-      clientMessageId,
-      content,
-    }));
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
+      }, SOCKET_SEND_ACK_TIMEOUT_MS);
+      pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
+      try {
+        socket.send(JSON.stringify({
+          type: 'message.send',
+          clientMessageId,
+          content,
+        }));
+      } catch (err) {
+        failPendingSend(
+          clientMessageId,
+          err instanceof Error ? err : new Error('Message failed to send. Your draft was kept.'),
+        );
+      }
+    });
+  }
+
+  async function retryMessage(messageId: string): Promise<void> {
+    const message = messages.find((candidate) => candidate.id === messageId);
+    if (!message || message.role !== 'user') {
+      return;
+    }
+    setMessages((current) => current.filter((candidate) => candidate.id !== messageId));
+    await send(message.content);
   }
 
   async function approve(approved: boolean): Promise<void> {
@@ -496,6 +571,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     messages,
     pendingApproval,
     projectId,
+    retryMessage,
     send,
     sessionId,
     showTypingIndicator,
