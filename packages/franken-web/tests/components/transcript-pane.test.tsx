@@ -104,4 +104,48 @@ describe('TranscriptPane', () => {
 
     expect(screen.queryByRole('button', { name: /new messages/i })).toBeNull();
   });
+
+  it('follows streamed content changes for the existing last message while pinned', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const { rerender } = render(
+      <TranscriptPane
+        messages={[{ id: 'a1', role: 'assistant' as const, content: 'Chunk', timestamp: new Date().toISOString() }]}
+        showTypingIndicator={false}
+      />,
+    );
+    scrollIntoView.mockClear();
+
+    rerender(
+      <TranscriptPane
+        messages={[{ id: 'a1', role: 'assistant' as const, content: 'Chunk plus more streamed text', timestamp: new Date().toISOString() }]}
+        showTypingIndicator={false}
+      />,
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'end' });
+  });
+
+  it('resets pinned scroll state when the conversation changes', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const { container, rerender } = render(
+      <TranscriptPane
+        messages={[{ id: 'u1', role: 'user' as const, content: 'Old session', timestamp: new Date().toISOString() }]}
+        resetKey="session-1"
+        showTypingIndicator={false}
+      />,
+    );
+
+    const body = container.querySelector('.transcript-pane__body');
+    expect(body).toBeTruthy();
+    setScrollMetrics(body!, { scrollHeight: 1000, scrollTop: 100, clientHeight: 300 });
+    fireEvent.scroll(body!);
+    scrollIntoView.mockClear();
+
+    rerender(<TranscriptPane messages={[]} resetKey="session-2" showTypingIndicator={false} />);
+
+    expect(screen.queryByRole('button', { name: /new messages/i })).toBeNull();
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' });
+  });
 });

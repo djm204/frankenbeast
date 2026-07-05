@@ -3,6 +3,7 @@ import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface ActivityPaneProps {
   events: ActivityEvent[];
+  resetKey?: unknown;
 }
 
 function summarizeActivity(event: ActivityEvent): string {
@@ -27,8 +28,8 @@ function summarizeActivity(event: ActivityEvent): string {
   return 'Open details to inspect runtime event data.';
 }
 
-export function ActivityPane({ events }: ActivityPaneProps) {
-  const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll(events.length);
+export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
+  const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll(events.length, resetKey);
 
   return (
     <section className="rail-card" aria-label="Activity">

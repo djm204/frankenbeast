@@ -6,10 +6,11 @@ function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX;
 }
 
-export function usePinnedScroll(updateToken: unknown) {
+export function usePinnedScroll(updateToken: unknown, resetToken: unknown = undefined) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const previousUpdateTokenRef = useRef(updateToken);
+  const previousResetTokenRef = useRef(resetToken);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
   const [hasNewItems, setHasNewItems] = useState(false);
 
@@ -35,15 +36,22 @@ export function usePinnedScroll(updateToken: unknown) {
   }, []);
 
   useEffect(() => {
+    const resetChanged = !Object.is(previousResetTokenRef.current, resetToken);
     const tokenChanged = !Object.is(previousUpdateTokenRef.current, updateToken);
+    previousResetTokenRef.current = resetToken;
     previousUpdateTokenRef.current = updateToken;
+
+    if (resetChanged) {
+      scrollToLatest('auto');
+      return;
+    }
 
     if (isPinnedToBottom) {
       scrollToLatest();
     } else if (tokenChanged) {
       setHasNewItems(true);
     }
-  }, [isPinnedToBottom, scrollToLatest, updateToken]);
+  }, [isPinnedToBottom, resetToken, scrollToLatest, updateToken]);
 
   return {
     containerRef,

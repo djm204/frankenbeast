@@ -4,13 +4,16 @@ import { usePinnedScroll } from './use-pinned-scroll';
 export interface TranscriptPaneProps {
   messages: ChatMessage[];
   onRetryMessage?: (messageId: string) => void;
+  resetKey?: unknown;
   retryDisabled?: boolean;
   showTypingIndicator: boolean;
 }
 
-export function TranscriptPane({ messages, onRetryMessage, retryDisabled = false, showTypingIndicator }: TranscriptPaneProps) {
+export function TranscriptPane({ messages, onRetryMessage, resetKey, retryDisabled = false, showTypingIndicator }: TranscriptPaneProps) {
+  const lastMessage = messages.at(-1);
   const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll(
-    `${messages.length}:${showTypingIndicator}`,
+    `${messages.length}:${lastMessage?.id ?? ''}:${lastMessage?.content.length ?? 0}:${lastMessage?.receipt ?? ''}:${showTypingIndicator}`,
+    resetKey,
   );
 
   return (
