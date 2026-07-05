@@ -38,17 +38,32 @@ function isAllowedLocalPlaintext(urlText) {
   try {
     const parsed = new URL(urlText);
     const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    return parsed.protocol === 'http:' && (
-      host === 'localhost'
-      || host === '::1'
-      || host === '0:0:0:0:0:0:0:1'
-      || host === '0.0.0.0'
-      || host === '::'
-      || host === '127.0.0.1'
-      || host.startsWith('127.')
-    );
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'ws:') {
+      return false;
+    }
+    if (host === 'localhost' || host === '::1' || host === '0:0:0:0:0:0:0:1') {
+      return true;
+    }
+    if (!/^127(?:\.\d{1,3}){3}$/.test(host)) {
+      return false;
+    }
+    return host.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
   } catch {
     return false;
+  }
+}
+
+function literalUrlFromMatch(value) {
+  const interpolationIndex = value.indexOf('${');
+  if (interpolationIndex === -1) {
+    return value;
+  }
+  const prefix = value.slice(0, interpolationIndex);
+  try {
+    const parsed = new URL(prefix);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return undefined;
   }
 }
 
@@ -85,9 +100,9 @@ for (const scanRoot of scanRoots) {
       if (trimmed.startsWith('//') || trimmed.startsWith('*')) {
         continue;
       }
-      for (const match of line.matchAll(/http:\/\/[^\s'"`)>}]+/g)) {
-        const url = match[0];
-        if (url.includes('${')) {
+      for (const match of line.matchAll(/(?:http|ws):\/\/[^\s'"`)>]+/g)) {
+        const url = literalUrlFromMatch(match[0]);
+        if (!url) {
           continue;
         }
         if (!isAllowedLocalPlaintext(url)) {

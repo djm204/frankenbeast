@@ -24,6 +24,8 @@ describe('assertSecureProxyTarget', () => {
 
   it('rejects non-loopback plain HTTP proxy targets', () => {
     expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://internal-service')).toThrow(/https:\/\//);
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://127.attacker.example:3737')).toThrow(/https:\/\//);
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://0.0.0.0:3737')).toThrow(/https:\/\//);
   });
 });
 

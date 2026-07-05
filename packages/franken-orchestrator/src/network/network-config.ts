@@ -1,18 +1,24 @@
 import { z } from 'zod';
 
-const HostSchema = z.string().min(1).default('127.0.0.1');
 const PortSchema = z.number().int().min(1).max(65_535);
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = host.toLowerCase().replace(/^\[|\]$/g, '');
-  return normalized === 'localhost'
+  if (normalized === 'localhost'
     || normalized === '::1'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || normalized === '0.0.0.0'
-    || normalized === '::'
-    || normalized === '127.0.0.1'
-    || normalized.startsWith('127.');
+    || normalized === '0:0:0:0:0:0:0:1') {
+    return true;
+  }
+  if (!/^127(?:\.\d{1,3}){3}$/.test(normalized)) {
+    return false;
+  }
+  return normalized.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
+
+const LocalServiceHostSchema = z.string().min(1).refine(
+  isLoopbackHost,
+  { message: 'Managed service hosts must be loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.' },
+).default('127.0.0.1');
 
 function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], localProtocols: string[]): boolean {
   try {
@@ -57,20 +63,20 @@ export const NetworkOperatorConfigSchema = z.object({
 
 export const ChatServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: HostSchema,
+  host: LocalServiceHostSchema,
   port: PortSchema.default(3737),
   model: z.string().min(1).default('claude-sonnet-4-6'),
 });
 
 export const BeastDaemonServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: HostSchema,
+  host: LocalServiceHostSchema,
   port: PortSchema.default(4050),
 });
 
 export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  host: HostSchema,
+  host: LocalServiceHostSchema,
   port: PortSchema.default(5173),
   apiUrl: LocalHttpOrHttpsUrlSchema.default('http://127.0.0.1:3737'),
 });
@@ -104,7 +110,7 @@ export const WhatsAppChannelConfigSchema = z.object({
 
 export const CommsServiceConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  host: HostSchema,
+  host: LocalServiceHostSchema,
   port: PortSchema.default(3200),
   orchestratorWsUrl: LocalWsOrWssUrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),

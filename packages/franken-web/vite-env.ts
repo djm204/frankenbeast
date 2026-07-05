@@ -39,13 +39,15 @@ export function assertNoBrowserOperatorToken(env: Record<string, string>): void 
 
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  return normalized === 'localhost'
+  if (normalized === 'localhost'
     || normalized === '::1'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || normalized === '0.0.0.0'
-    || normalized === '::'
-    || normalized === '127.0.0.1'
-    || normalized.startsWith('127.');
+    || normalized === '0:0:0:0:0:0:0:1') {
+    return true;
+  }
+  if (!/^127(?:\.\d{1,3}){3}$/.test(normalized)) {
+    return false;
+  }
+  return normalized.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
 export function assertSecureProxyTarget(name: string, target: string): void {

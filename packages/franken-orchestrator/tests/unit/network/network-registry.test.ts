@@ -112,10 +112,24 @@ describe('network-registry', () => {
       comms: { orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
     })).toThrow(/wss:\/\//);
 
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'http://127.attacker.example:3737' },
+    })).toThrow(/https:\/\//);
+
     expect(NetworkConfigSchema.parse({
       dashboard: { apiUrl: 'https://internal-service:3737' },
       comms: { orchestratorWsUrl: 'wss://internal-service:3737/v1/chat/ws' },
     }).dashboard.apiUrl).toBe('https://internal-service:3737');
+  });
+
+  it('rejects non-loopback managed service hosts', () => {
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { host: 'dashboard.example.com' },
+    })).toThrow(/loopback-only/);
+
+    expect(() => NetworkConfigSchema.parse({
+      beastsDaemon: { host: '0.0.0.0' },
+    })).toThrow(/loopback-only/);
   });
 
   it('projects runtime config for each service', () => {
@@ -157,24 +171,13 @@ describe('network-registry', () => {
     });
   });
 
-  it('uses HTTPS for non-loopback dashboard and Beast proxy endpoints', () => {
+  it('refuses to project managed services on non-loopback hosts', () => {
     const config = defaultConfig();
     config.dashboard.host = 'dashboard.example.com';
     config.dashboard.apiUrl = 'https://api.example.com';
     config.beastsDaemon.host = 'beast.example.com';
 
-    const dashboard = resolveNetworkServices(config, context)
-      .find((service) => service.id === 'dashboard-web');
-
-    expect(dashboard?.runtimeConfig).toMatchObject({
-      url: 'https://dashboard.example.com:5173',
-      process: {
-        env: {
-          VITE_API_PROXY_TARGET: 'https://api.example.com',
-          VITE_BEAST_API_PROXY_TARGET: 'https://beast.example.com:4050',
-        },
-      },
-    });
+    expect(() => resolveNetworkServices(config, context)).toThrow(/loopback-only/);
   });
 
   it('forwards an explicit config path to spawned chat servers', () => {

@@ -1,7 +1,10 @@
 import { isLoopbackHost } from './network-config.js';
 
 export function localPlaintextOrSecureEndpoint(host: string, port: number): string {
-  const protocol = isLoopbackHost(host) ? 'http' : 'https';
+  if (!isLoopbackHost(host)) {
+    throw new Error(`Managed service host ${host} is not loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.`);
+  }
+  const protocol = 'http';
   const bracketedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${protocol}://` + `${bracketedHost}:${port}`;
 }
@@ -11,7 +14,10 @@ export function localPlaintextOrSecureHealthUrl(host: string, port: number, path
 }
 
 export function localPlaintextOrSecureWebSocketUrl(host: string, port: number, path: string): string {
-  const protocol = isLoopbackHost(host) ? 'ws' : 'wss';
+  if (!isLoopbackHost(host)) {
+    throw new Error(`Managed service host ${host} is not loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.`);
+  }
+  const protocol = 'ws';
   const bracketedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${protocol}://` + `${bracketedHost}:${port}${path}`;
 }
