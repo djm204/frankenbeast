@@ -9,33 +9,45 @@ function loaderFor(byDir: Record<string, Record<string, string>>): EnvLoader {
   return vi.fn((_mode: string, dir: string) => byDir[dir] ?? {});
 }
 
+const noSecretStoreToken = async () => '';
+
 describe('loadProxyOperatorToken', () => {
-  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file for the server proxy', () => {
+  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file for the server proxy', async () => {
     const load = loaderFor({
       [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
       [PKG]: {},
     });
-    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+    await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).resolves.toBe('root-token');
   });
 
-  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set', () => {
+  it('prefers the configured secret-store token when present', async () => {
+    const load = loaderFor({
+      [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
+      [PKG]: {},
+    });
+    await expect(
+      loadProxyOperatorToken(load, 'production', ROOT, PKG, async () => 'secret-store-token'),
+    ).resolves.toBe('secret-store-token');
+  });
+
+  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set', async () => {
     const load = loaderFor({
       [ROOT]: {},
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(() => loadProxyOperatorToken(load, 'production', ROOT, PKG)).toThrow(/must not be set/);
+    await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).rejects.toThrow(/must not be set/);
   });
 
-  it('rejects stale VITE tokens even when the server-side token is present', () => {
+  it('rejects stale VITE tokens even when the server-side token is present', async () => {
     const load = loaderFor({
       [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
     });
-    expect(() => loadProxyOperatorToken(load, 'production', ROOT, PKG)).toThrow(/must not be set/);
+    await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).rejects.toThrow(/must not be set/);
   });
 
-  it('returns an empty string when no server-side token is configured', () => {
+  it('returns an empty string when no server-side token is configured', async () => {
     const load = loaderFor({ [ROOT]: {}, [PKG]: {} });
-    expect(loadProxyOperatorToken(load, 'production', ROOT, PKG)).toBe('');
+    await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).resolves.toBe('');
   });
 });

@@ -15,12 +15,16 @@ describe('vite dev proxy configuration', () => {
   });
 
   it('injects the operator token only in the server-side dev proxy after an origin check', () => {
-    expect(CONFIG_SOURCE).toContain('loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');
+    expect(CONFIG_SOURCE).toContain('await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');
     expect(CONFIG_SOURCE).toContain('isSameOriginProxyRequest');
     expect(CONFIG_SOURCE).toContain("req.headers['sec-fetch-site']");
-    expect(CONFIG_SOURCE).toContain("res.statusCode = 403");
-    expect(CONFIG_SOURCE).toContain("proxy.on('proxyReq'");
-    expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('authorization'");
+    expect(CONFIG_SOURCE).toContain('proxyReq.setHeader');
+    expect(CONFIG_SOURCE).not.toContain('headers: { authorization');
+  });
+
+  it('requires browser metadata or a loopback peer before injecting the operator token', () => {
+    expect(CONFIG_SOURCE).toContain('isLoopbackRemoteAddress(req.socket.remoteAddress)');
+    expect(CONFIG_SOURCE).toContain('if (!originValue && !fetchSiteValue)');
   });
 
   it('does not define VITE_BEAST_OPERATOR_TOKEN into the browser bundle', () => {

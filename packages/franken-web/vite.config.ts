@@ -11,6 +11,13 @@ const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 
+function isLoopbackRemoteAddress(address: string | undefined): boolean {
+  return address === '127.0.0.1'
+    || address === '::1'
+    || address === '::ffff:127.0.0.1'
+    || address === 'localhost';
+}
+
 function isSameOriginProxyRequest(req: IncomingMessage): boolean {
   const fetchSite = req.headers['sec-fetch-site'];
   const fetchSiteValue = Array.isArray(fetchSite) ? fetchSite[0] : fetchSite;
@@ -20,6 +27,9 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
 
   const origin = req.headers.origin;
   const originValue = Array.isArray(origin) ? origin[0] : origin;
+  if (!originValue && !fetchSiteValue) {
+    return isLoopbackRemoteAddress(req.socket.remoteAddress);
+  }
   if (!originValue) {
     return true;
   }
@@ -31,7 +41,7 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
 
   try {
     const originUrl = new URL(originValue);
-    const protocol = req.socket.encrypted ? 'https:' : 'http:';
+    const protocol = (req.socket as { encrypted?: boolean }).encrypted ? 'https:' : 'http:';
     return originUrl.protocol === protocol && originUrl.host === host;
   } catch {
     return false;
@@ -62,11 +72,11 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
-  const proxyOperatorToken = loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd());
+  const proxyOperatorToken = await loadProxyOperatorToken(loadEnv, mode, repoRootDir, process.cwd());
 
   return {
     plugins: [tailwindcss(), react()],
