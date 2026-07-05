@@ -1,6 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "separate-pull-requests": false,
+  "plugins": [
+    "node-workspace"
+  ],
   "changelog-sections": [
     {
       "type": "feat",
@@ -60,8 +63,8 @@
         "packages/franken-planner",
         "packages/franken-types",
         "packages/franken-mcp-suite",
-        "packages/franken-web",
-        "packages/live-bench"
+        "packages/live-bench",
+        "packages/franken-web"
       ]
     },
     "packages/franken-brain": {
@@ -94,15 +97,15 @@
     },
     "packages/franken-mcp-suite": {
       "release-type": "node",
-      "component": "fbeast-mcp-suite"
-    },
-    "packages/franken-web": {
-      "release-type": "node",
-      "component": "frankenbeast-web"
+      "component": "franken-mcp-suite"
     },
     "packages/live-bench": {
       "release-type": "node",
-      "component": "fbeast-live-bench"
+      "component": "live-bench"
+    },
+    "packages/franken-web": {
+      "release-type": "node",
+      "component": "franken-web"
     }
   }
 }

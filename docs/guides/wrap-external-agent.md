@@ -30,7 +30,7 @@ For browser or service integration, run the orchestrator chat/dashboard backend:
 npm --workspace franken-orchestrator run chat-server -- --port 3737
 ```
 
-The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. Comms (`/api/comms`) and security (`/api/security`) are mounted by `createChatApp()` only when `commsConfig`/`commsRuntime` and `securityConfig` are supplied — the `chat-server` CLI path does not pass those, so do not expect those endpoints from the default server.
+The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. When comms channels are enabled, the CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) is mounted by `createChatApp()` when `securityConfig` is supplied.
 
 ## Option 3: Implement BeastLoop dependencies around your agent
 

@@ -108,41 +108,65 @@ describe('npm workspaces configuration', () => {
     });
   });
 
-  describe('cross-module dependencies use workspace protocol', () => {
-    const modulesWithFileDeps = [
-      { module: 'franken-critique', dep: '@franken/types' },
-      { module: 'franken-governor', dep: '@franken/types' },
-      { module: 'franken-orchestrator', dep: '@franken/types' },
-      { module: 'franken-planner', dep: '@franken/types' },
-    ];
+  describe('cross-module dependencies use coherent internal versions', () => {
+    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `packages/${entry.name}/package.json`);
+    const packageManifests = packageJsonPaths.map((path) => ({
+      path,
+      pkg: readPkg(path),
+    }));
+    const internalPackageVersions = new Map(
+      packageManifests.map(({ pkg }) => [pkg.name, pkg.version]),
+    );
 
-    for (const { module, dep } of modulesWithFileDeps) {
-      it(`${module} depends on ${dep} via "*" (not file:)`, () => {
-        const pkg = readPkg(`packages/${module}/package.json`);
-        const version = pkg.dependencies?.[dep];
-        expect(version).toBe('*');
-        expect(version).not.toMatch(/^file:/);
-      });
-    }
+    it('pins every internal dependency to the matching package version instead of registry wildcards', () => {
+      for (const { path, pkg } of packageManifests) {
+        for (const dependencySection of [
+          'dependencies',
+          'devDependencies',
+          'optionalDependencies',
+          'peerDependencies',
+        ]) {
+          const dependencies = pkg[dependencySection] ?? {};
 
-    it('franken-orchestrator depends on @frankenbeast/observer via "*" (not file:)', () => {
-      const pkg = readPkg('packages/franken-orchestrator/package.json');
-      const version = pkg.dependencies?.['@frankenbeast/observer'];
-      expect(version).toBe('*');
-      expect(version).not.toMatch(/^file:/);
+          for (const [name, version] of Object.entries(dependencies)) {
+            const internalVersion = internalPackageVersions.get(name);
+            if (internalVersion === undefined) continue;
+
+            expect(
+              version,
+              `${name} in ${path} ${dependencySection} must match the internal package version`,
+            ).toBe(internalVersion);
+          }
+        }
+      }
+    });
+  });
+
+  describe('publishable package manifests', () => {
+    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `packages/${entry.name}/package.json`);
+
+    it('builds dist artifacts before publishing publishable packages', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        if (pkg.private === true) continue;
+
+        expect(pkg.scripts?.build, `${path} must define a build script`).toBeDefined();
+        expect(
+          pkg.scripts?.prepublishOnly,
+          `${path} must build the workspace before npm publish so dist/bin entries and internal dependency types are fresh`,
+        ).toBe('npm --prefix ../.. run build');
+      }
     });
   });
 
   describe('no file: dependencies remain anywhere', () => {
-    const allPackages = [
-      'franken-brain',
-      'franken-critique',
-      'franken-governor',
-      'franken-observer',
-      'franken-orchestrator',
-      'franken-planner',
-      'franken-types',
-    ];
+    const allPackages = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
 
     for (const module of allPackages) {
       it(`packages/${module}/package.json has no file: dependencies`, () => {

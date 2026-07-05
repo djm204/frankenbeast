@@ -8,6 +8,6 @@
   "packages/franken-planner": "0.4.7",
   "packages/franken-types": "0.7.4",
   "packages/franken-mcp-suite": "0.1.0",
-  "packages/franken-web": "0.1.0",
-  "packages/live-bench": "0.1.0"
+  "packages/live-bench": "0.1.0",
+  "packages/franken-web": "0.1.0"
 }

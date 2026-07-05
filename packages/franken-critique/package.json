@@ -23,7 +23,8 @@
     "lint": "eslint src/ tests/",
     "lint:fix": "eslint src/ tests/ --fix",
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'"
+    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'",
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [
     "frankenbeast",
@@ -51,7 +52,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "*",
+    "@franken/types": "0.7.4",
     "hono": "^4.12.27",
     "zod": "^3.24.0"
   }

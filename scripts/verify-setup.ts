@@ -12,6 +12,8 @@ interface CheckResult {
   detail: string;
 }
 
+export {};
+
 const results: CheckResult[] = [];
 
 function check(name: string, ok: boolean, detail: string): void {
@@ -43,16 +45,13 @@ async function main(): Promise<void> {
 
   // ChromaDB
   const chromaUrl = process.env['CHROMA_URL'] ?? 'http://localhost:8000';
-  await checkHttp('ChromaDB', `${chromaUrl}/api/v1/heartbeat`);
+  await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`);
 
   // Grafana
   await checkHttp('Grafana', 'http://localhost:3000/api/health');
 
   // Tempo
   await checkHttp('Tempo', 'http://localhost:3200/ready');
-
-  // Firewall
-  await checkHttp('Firewall server', 'http://localhost:9090/health');
 
   // Print results
   console.log('Results:\n');

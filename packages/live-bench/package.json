@@ -20,10 +20,11 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:live": "FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live"
+    "test:live": "FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live",
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@frankenbeast/observer": "*",
+    "@frankenbeast/observer": "0.7.9",
     "better-sqlite3": "^12.6.2",
     "zod": "^3.24.0"
   },

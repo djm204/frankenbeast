@@ -32,16 +32,17 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --reporter=verbose",
     "test:watch": "vitest --reporter=verbose",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "*",
-    "franken-brain": "*",
-    "@franken/critique": "*",
-    "@franken/governor": "*",
-    "@frankenbeast/observer": "*",
-    "franken-orchestrator": "*",
-    "franken-planner": "*",
+    "@franken/types": "0.7.4",
+    "franken-brain": "0.6.5",
+    "@franken/critique": "0.6.9",
+    "@franken/governor": "0.5.7",
+    "@frankenbeast/observer": "0.7.9",
+    "franken-orchestrator": "0.39.0",
+    "franken-planner": "0.4.7",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2"
   },
