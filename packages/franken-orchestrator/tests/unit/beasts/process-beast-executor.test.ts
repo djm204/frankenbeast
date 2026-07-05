@@ -809,14 +809,16 @@ describe('ProcessBeastExecutor', () => {
       const [, callbacks] = supervisor.spawn.mock.calls[0];
       const cb = callbacks as ProcessCallbacks;
 
-      const standaloneOpenAiKey = `sk-${'standaloneproviderkey1234567890'}`;
-      const githubToken = `ghp_${'abcdefghijklmnopqrstuvwxyz123456'}`;
+      const providerKeyFixture = ['sk', 'proj', 'fixturevalue1234567890'].join('-');
+      const standaloneOpenAiKey = ['sk', 'standaloneproviderkey1234567890'].join('-');
+      const githubToken = ['ghp', 'abcdefghijklmnopqrstuvwxyz123456'].join('_');
       const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
-      const geminiToken = `AIza${'abcdefghijklmnopqrstuvwxyz123456789'}`;
+      const geminiToken = ['AI', 'za', 'abcdefghijklmnopqrstuvwxyz123456789'].join('');
+      const discordBotToken = ['discord', 'bot', 'token', 'value'].join('-');
 
-      cb.onStderr('api_key=sk-live-secret-value password=credential-fixture');
-      cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-fixture-value');
-      cb.onStderr('Authorization: Bot discord-bot-token-value');
+      cb.onStderr(`api_key=${providerKeyFixture} password=credential-fixture`);
+      cb.onStderr(`OPENAI_API_KEY=${providerKeyFixture} CLIENT_SECRET=client-fixture-value`);
+      cb.onStderr(`Authorization: Bot ${discordBotToken}`);
       cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
       cb.onStderr(`Slack token ${slackToken}`);
       cb.onStderr(`Google token ${geminiToken}`);
@@ -864,10 +866,10 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedLogLines).toContain('api_key=[REDACTED] password=[REDACTED]');
       expect(publishedLogLines).toContain('{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}');
       const serializedPersistedEvent = JSON.stringify(failEvent);
-      expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPersistedEvent).not.toContain(providerKeyFixture);
       expect(serializedPersistedEvent).not.toContain('credential-fixture');
       expect(serializedPersistedEvent).not.toContain('client-fixture-value');
-      expect(serializedPersistedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPersistedEvent).not.toContain(discordBotToken);
       expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPersistedEvent).not.toContain(githubToken);
       expect(serializedPersistedEvent).not.toContain(slackToken);
@@ -892,10 +894,10 @@ describe('ProcessBeastExecutor', () => {
       expect(publishedFailure).toBeDefined();
       expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
       const serializedPublishedEvent = JSON.stringify(publishedFailure);
-      expect(serializedPublishedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPublishedEvent).not.toContain(providerKeyFixture);
       expect(serializedPublishedEvent).not.toContain('credential-fixture');
       expect(serializedPublishedEvent).not.toContain('client-fixture-value');
-      expect(serializedPublishedEvent).not.toContain('discord-bot-token-value');
+      expect(serializedPublishedEvent).not.toContain(discordBotToken);
       expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPublishedEvent).not.toContain(githubToken);
       expect(serializedPublishedEvent).not.toContain(slackToken);
