@@ -1,5 +1,7 @@
 # Test Suite Audit — 2026-03-17
 
+> **Obsolete (2026-07-04):** this audit predates the ADR-031 consolidation; five of the packages it covers (frankenfirewall, franken-skills, franken-heartbeat, franken-mcp, franken-comms) no longer exist. See `docs/audits/test-suite-audit.md` for the current audit.
+
 > Hyper-critical audit of all ~2,541 tests across 13 packages + root integration.
 > Goal: identify fluff, padding, and mock-returns-mock tests that inflate count without catching bugs.
 

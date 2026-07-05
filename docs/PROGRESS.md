@@ -3,6 +3,12 @@
 > This document tracks PR-by-PR progress for Phases 2–7. Updated as each PR is completed.
 > Reference: [Implementation Plan](/home/pfk/.claude/plans/graceful-gathering-owl.md)
 
+## Current State (2026-07-04)
+
+- **Workspace**: 10 packages under `packages/` (franken-types, franken-brain, franken-planner, franken-observer, franken-critique, franken-governor, franken-orchestrator, franken-mcp-suite, franken-web, live-bench). ADR-031 consolidated 13 → 8; `@fbeast/mcp-suite` and `@fbeast/live-bench` were added afterwards.
+- **Build health**: `npm run build`, `npm run typecheck`, and `npm test` are all green via turbo (verified 2026-07-04: 20/20 test tasks; orchestrator 2,271 passed / 1 skipped; franken-web 252/252 including direct `vitest run`).
+- Phase sections below are historical PR-by-PR records; counts and package lists inside them reflect the repo at the time they were written (several cite packages since deleted — see ADR-031).
+
 ## Status Legend
 - [ ] Not started
 - [~] In progress
@@ -182,9 +188,9 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 | franken-orchestrator | 2,129 | 219 | PASS (1 skipped) |
 | franken-planner | 187 | 17 | PASS |
 | franken-types | 61 | 3 | PASS |
-| franken-web | 193 | 47 | FAIL (1 dashboard EventSource constructor test fails when run directly) |
+| franken-web | 193 | 47 | PASS (EventSource caveat resolved; 252/252 direct `vitest run` on 2026-07-04) |
 | Root integration/docs guard | 135 | 11 | PASS for `tests/docs-issue-86.test.ts`; broader root suite not re-counted in this update |
-| **Current tracked total** | **3,594** | **394** | **NOT ALL GREEN — see franken-web caveat** |
+| **Current tracked total** | **3,594** | **394** | **ALL GREEN as of 2026-07-04 (franken-web caveat resolved)** |
 
 ## Phase 8: CLI Gap Closure
 
@@ -252,7 +258,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 > Branch: `feat/chunk-session-context`
 
-- Canonical chunk execution state now lives under `.frankenbeast/.build/chunk-sessions/` with provider-agnostic transcript entries.
+- Canonical chunk execution state now lives under `.fbeast/.build/chunk-sessions/` with provider-agnostic transcript entries.
 - `MartinLoop` is session-aware: it can resume from canonical state, snapshot before compaction, compact at `>= 85%` context usage, and replay on provider switch.
 - `CliObserverBridge` now estimates rendered context-window usage in addition to cost and token accounting.
 - `CliSkillExecutor` and `dep-factory` wire chunk-session store, snapshot store, renderer, compactor, and recovery metadata (`lastKnownGoodCommit`).
@@ -298,7 +304,7 @@ Six chunks implementing the beast daemon execution pipeline:
 > Branch: `feat/architecture-consolidation`. PR: #243.
 > Plan: `docs/plans/consolidation/phase1-remove-packages/`
 
-Reduced monorepo from 13 to 8 packages per ADR-031.
+Reduced monorepo from 13 to 8 packages per ADR-031. (The workspace has since grown back to 10 with `@fbeast/mcp-suite` and `@fbeast/live-bench`.)
 
 **Deleted packages**: frankenfirewall (MOD-01), franken-skills (MOD-02), franken-heartbeat (MOD-08), franken-mcp, franken-comms
 
@@ -374,7 +380,7 @@ Directory-based `SkillManager` with CRUD, path traversal prevention, `ProviderSk
 
 > PR: #258
 
-Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persisting to `.frankenbeast/audit/<runId>.json`, `ExecutionReplayer` for timeline reconstruction.
+Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persisting to `.fbeast/audit/<runId>.json`, `ExecutionReplayer` for timeline reconstruction.
 
 ---
 
@@ -425,7 +431,7 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 3. **E2E tests require `npm run build`**: No `pretest:e2e` script yet.
 4. **No top-level `provider` or `dashboard` CLI subcommands**: `packages/franken-orchestrator/src/cli/args.ts` currently exposes `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security`. Provider/dashboard functionality lives in provider config, `chat-server`, HTTP routes, and `franken-web`.
 5. **ProviderRegistry only active in reflection path**: Task execution still flows through CliLlmAdapter → MartinLoop → spawn(). Multi-provider failover applies to heartbeat/reflection LLM calls only. This is by design — middleware applies to prompt text in-process, not subprocess stdio.
-6. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
+6. **McpSdkAdapter.callTool() is fail-closed, not functional**: it throws until an MCP client/server transport is configured (`src/adapters/mcp-sdk-adapter.ts`), so MCP tool dispatch from the CLI is unreachable (tracked in #21). `SkillManagerAdapter` is a real adapter over `SkillManager`; its `execute()` throws for non-`cli:` skills rather than returning fake output.
 
 ## Deploy-Beasts / Sandboxed Execution Tracking
 

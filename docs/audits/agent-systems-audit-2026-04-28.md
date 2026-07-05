@@ -2,6 +2,8 @@
 
 Date: 2026-04-28
 
+> **Addendum (2026-07-04):** the headline "container execution is a throwing placeholder" finding is resolved — `ContainerBeastExecutor` now wraps `ProcessBeastExecutor` with a `DockerSupervisor` (sandbox policy, ADR-036-sandboxed-beast-execution), and a CLI container beast mode landed in the 2026-07 deploy-beasts work. Statements below describe the codebase as of the audit date.
+
 Scope: live source and focused tests in `franken-orchestrator`, `franken-mcp-suite`, `franken-governor`, `franken-observer`, `franken-planner`, and `franken-critique`. This audit intentionally does not treat docs/ADRs as proof unless the implementation and tests back them.
 
 ## Executive Summary
