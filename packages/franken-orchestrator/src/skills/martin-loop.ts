@@ -22,7 +22,7 @@ import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
-import { classifyCommandFailure, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
+import { classifyCommandFailure, commandFailureFromExecError, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
 
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
   return parseResetTimeText(`${stderr}\n${stdout}`);
@@ -270,7 +270,9 @@ function spawnIteration(
       return;
     }
 
-    const cmd = config.command ?? provider.command;
+    const cmd = config.providerCommands?.[provider.name]
+      ?? (provider.name === config.provider ? config.command : undefined)
+      ?? provider.command;
     const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns, sessionContinue });
     const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;
     const args = provider.supportsStreamJson()
@@ -457,11 +459,97 @@ export class MartinLoop {
       try {
         result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
+        if (config.abortSignal?.aborted) {
+          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        }
         if (isAbortError(error)) {
           throw error;
         }
+        const failure = commandFailureFromExecError({
+          tool: 'llm',
+          provider: activeProvider,
+          command: resolved.command,
+          error,
+          detectRateLimit: (text) => resolved.isRateLimited(text),
+          parseRetryAfterMs: (text) => {
+            const providerMs = resolved.parseRetryAfter(text);
+            if (providerMs !== undefined) {
+              return providerMs;
+            }
+            const parsed = parseResetTimeText(text);
+            return parsed.sleepSeconds >= 0 ? parsed.sleepSeconds * 1000 : undefined;
+          },
+        });
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
+        if (config.abortSignal?.aborted) {
+          throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+        }
+        if (failure.kind === 'spawn_error') {
+          iteration--;
+          exhaustedProviders.set(activeProvider, failure);
+          const nextProvider = providers.find(p => !exhaustedProviders.has(p));
+          if (nextProvider) {
+            config.onProviderSwitch?.(activeProvider, nextProvider, 'spawn-error');
+            activeProvider = nextProvider;
+            if (chunkSession) {
+              chunkSession = {
+                ...chunkSession,
+                activeProvider,
+                updatedAt: new Date().toISOString(),
+              };
+              config.sessionStore?.save(chunkSession);
+            }
+            continue;
+          }
+
+          const rateLimitedFailures = [...exhaustedProviders.entries()]
+            .filter(([, data]) => data.rateLimited);
+          if (rateLimitedFailures.length > 0) {
+            let shortestSleep = Infinity;
+            let shortestSource = 'unknown';
+            for (const [providerName, data] of rateLimitedFailures) {
+              if (data.retryAfterMs !== undefined) {
+                const sleepSeconds = data.retryAfterMs / 1000;
+                if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
+                  shortestSleep = sleepSeconds;
+                  shortestSource = `${providerName} parseRetryAfter`;
+                }
+                continue;
+              }
+
+              const parsed = parseResetTime(data.stderr, data.stdout);
+              if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
+                shortestSleep = parsed.sleepSeconds;
+                shortestSource = parsed.source;
+              }
+            }
+
+            const sleepMs = shortestSleep === Infinity ? 120_000 : shortestSleep * 1000;
+            const sleepSource = shortestSleep === Infinity ? 'unknown' : shortestSource;
+            config.onSleep?.(sleepMs, sleepSource);
+            await sleepWithAbort(sleepMs, sleepFn, config.abortSignal);
+            pendingSleepMs = sleepMs;
+            exhaustedProviders.clear();
+            if (activeProvider !== initialProvider) {
+              config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
+            }
+            activeProvider = initialProvider;
+            if (chunkSession) {
+              chunkSession = {
+                ...chunkSession,
+                activeProvider,
+                updatedAt: new Date().toISOString(),
+              };
+              config.sessionStore?.save(chunkSession);
+            }
+            continue;
+          }
+
+          throw new Error(
+            `No configured LLM provider CLI is available. Install or configure one of: ${providers.join(', ')}. Last error: ${failure.summary}`,
+          );
+        }
         continue;
       }
 

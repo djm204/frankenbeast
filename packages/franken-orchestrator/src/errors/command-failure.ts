@@ -119,6 +119,26 @@ export function commandFailureFromExecError(options: CommandFailureFromExecError
   const exitCode = readExecExitCode(options.error);
   const code = readExecCode(options.error);
 
+  if (code === 'ETIMEDOUT') {
+    return classifyCommandFailure({
+      tool: options.tool,
+      command: options.command,
+      ...(options.provider ? { provider: options.provider } : {}),
+      exitCode: exitCode ?? 1,
+      timedOut: true,
+      stdout,
+      stderr,
+      normalizedOutput: options.normalizedOutput,
+      detectRateLimit: options.detectRateLimit,
+      parseRetryAfterMs: options.parseRetryAfterMs,
+      details: {
+        ...(options.details ?? {}),
+        code,
+        message,
+      },
+    });
+  }
+
   if (exitCode === undefined && code) {
     return {
       kind: 'spawn_error',

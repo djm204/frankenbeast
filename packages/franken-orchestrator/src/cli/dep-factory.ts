@@ -585,6 +585,11 @@ function createCliExecutorDeps(
     : undefined;
 
   const override = options.providersConfig?.[config.provider];
+  const providerCommands = Object.fromEntries(
+    Object.entries(options.providersConfig ?? {})
+      .filter(([, providerOverride]) => typeof providerOverride.command === 'string' && providerOverride.command.length > 0)
+      .map(([providerName, providerOverride]) => [providerName, providerOverride.command as string]),
+  );
   const executorObserverDeps: ObserverDeps = config.enableTracing
     ? observer.observerBridge.observerDeps
     : observer.observerBridge.disabledObserverDeps;
@@ -620,6 +625,7 @@ function createCliExecutorDeps(
         }),
       providers: options.providers,
       ...(override?.command ? { command: override.command } : {}),
+      ...(Object.keys(providerCommands).length > 0 ? { providerCommands } : {}),
     },
   );
 

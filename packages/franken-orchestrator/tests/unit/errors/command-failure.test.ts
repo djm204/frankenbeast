@@ -98,4 +98,26 @@ describe('commandFailureFromExecError', () => {
     expect(failure.details).toEqual(expect.objectContaining({ code: 'EPERM' }));
     expect(failure.summary).toContain('spawn');
   });
+
+  it('preserves timeout classification for ETIMEDOUT exec-style errors', () => {
+    const error = Object.assign(new Error('CLI timeout after 1000ms'), {
+      code: 'ETIMEDOUT',
+      stderr: 'model output mentioned rate limit handling',
+    });
+
+    const failure = commandFailureFromExecError({
+      tool: 'llm',
+      provider: 'claude',
+      command: 'claude',
+      error,
+      detectRateLimit: (text) => /rate limit/i.test(text),
+      parseRetryAfterMs: () => 5_000,
+    });
+
+    expect(failure.kind).toBe('timeout');
+    expect(failure.timedOut).toBe(true);
+    expect(failure.rateLimited).toBe(false);
+    expect(failure.retryAfterMs).toBeUndefined();
+    expect(failure.details).toEqual(expect.objectContaining({ code: 'ETIMEDOUT' }));
+  });
 });

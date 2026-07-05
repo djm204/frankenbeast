@@ -32,6 +32,7 @@ export interface MartinLoopConfig {
   readonly maxTurns: number;
   readonly provider: string;
   readonly command?: string | undefined;
+  readonly providerCommands?: Readonly<Record<string, string>> | undefined;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
@@ -54,7 +55,7 @@ export interface MartinLoopConfig {
   readonly onIteration?: ((iteration: number, result: IterationResult) => void) | undefined;
   readonly onSleep?: ((durationMs: number, source: string) => void) | undefined;
   readonly onProviderAttempt?: ((provider: string, iteration: number, renderedPrompt?: string) => void) | undefined;
-  readonly onProviderSwitch?: ((fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => void) | undefined;
+  readonly onProviderSwitch?: ((fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset' | 'spawn-error') => void) | undefined;
   readonly onSpawnError?: ((provider: string, error: string) => void) | undefined;
   readonly onProviderTimeout?: ((provider: string, timeoutMs: number) => void) | undefined;
   /** @internal Injected sleep function for testing — do not use in production. */

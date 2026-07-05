@@ -208,7 +208,7 @@ function runVerifyCommand(verifyCommand: string, cwd: string): void {
 
 type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<
   MartinLoopConfig,
-  'command' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
+  'command' | 'providerCommands' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
 >>;
 
 export class CliSkillExecutor {
@@ -388,12 +388,17 @@ export class CliSkillExecutor {
         );
         config.martin?.onProviderAttempt?.(provider, iteration, renderedPrompt);
       },
-      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
+      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset' | 'spawn-error') => {
         this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
         config.martin?.onProviderSwitch?.(fromProvider, toProvider, reason);
       },
       onSpawnError: (provider: string, error: string) => {
         this.logger?.error('MartinLoop: provider spawn error', { chunkId, provider, error }, 'martin');
+        const currentCost = this.computeCurrentCost();
+        const budgetResult = this.observer.breaker.check(currentCost);
+        if (budgetResult.tripped) {
+          abortForBudget(budgetResult);
+        }
         config.martin?.onSpawnError?.(provider, error);
       },
       onProviderTimeout: (provider: string, timeoutMs: number) => {

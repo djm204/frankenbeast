@@ -21,6 +21,7 @@ interface MockSpawnResult {
   exitCode?: number;
   delayMs?: number;
   neverExit?: boolean;
+  error?: Error & { code?: string };
 }
 
 function createMockSpawn(opts: {
@@ -98,7 +99,11 @@ function createQueuedSpawn(results: MockSpawnResult[]): {
     });
     Object.defineProperty(proc, 'kill', { value: killFn, writable: false });
 
-    if (!current.neverExit) {
+    if (current.error) {
+      setTimeout(() => {
+        proc.emit('error', current.error);
+      }, current.delayMs ?? 5);
+    } else if (!current.neverExit) {
       setTimeout(() => {
         if (current.stdout) stdoutStream.write(current.stdout);
         stdoutStream.end();
@@ -568,6 +573,47 @@ describe('CliLlmAdapter', () => {
         expect(calls[1]!.cmd).toBe('codex');
       });
 
+      it('switches to the next provider when the selected provider is missing from PATH', async () => {
+        const enoent = Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' });
+        const { spawnFn, calls } = createQueuedSpawn([
+          { error: enoent },
+          { stdout: 'codex success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('codex success');
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+      });
+
+      it('throws an actionable install/configuration error when no configured provider CLI exists', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { error: Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }) },
+          { error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }) },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+          } as never,
+          spawnFn,
+        );
+
+        await expect(adapter.execute({ prompt: 'test', maxTurns: 1 }))
+          .rejects.toThrow('Install one of: claude, codex, gemini, aider');
+      });
+
       it('sleeps after all configured providers are exhausted, then retries from the selected provider', async () => {
         const sleepFn = vi.fn(async () => {});
         const { spawnFn, calls } = createQueuedSpawn([
@@ -589,6 +635,33 @@ describe('CliLlmAdapter', () => {
 
         expect(result).toBe('claude recovered');
         expect(sleepFn).toHaveBeenCalledWith(3_000);
+        expect(calls).toHaveLength(3);
+        expect(calls[0]!.cmd).toBe('claude');
+        expect(calls[1]!.cmd).toBe('codex');
+        expect(calls[2]!.cmd).toBe('claude');
+      });
+
+      it('retries a rate-limited provider when later fallback provider CLI is missing', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'retry-after: 5', exitCode: 1 },
+          { error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }) },
+          { stdout: 'claude recovered', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        const result = await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+        expect(result).toBe('claude recovered');
+        expect(sleepFn).toHaveBeenCalledWith(5_000);
         expect(calls).toHaveLength(3);
         expect(calls[0]!.cmd).toBe('claude');
         expect(calls[1]!.cmd).toBe('codex');

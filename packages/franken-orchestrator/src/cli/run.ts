@@ -2,7 +2,7 @@
 
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -26,7 +26,7 @@ import { createCliDeps } from './dep-factory.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, delimiter, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
@@ -53,6 +53,7 @@ import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
+import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -306,6 +307,88 @@ interface ChatSurfaceDeps {
 
 function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
   return args.providerSpecified ? args.provider : config.providers.default;
+}
+
+function resolveEffectivePreflightProvider(selectedProvider: string, runConfig: RunConfig | undefined): string {
+  return runConfig?.llmConfig?.default?.provider
+    ?? runConfig?.provider
+    ?? selectedProvider;
+}
+
+export interface ProviderCliAvailability {
+  readonly provider: string;
+  readonly command: string;
+  readonly available: boolean;
+}
+
+export function checkProviderCliAvailability(
+  selectedProvider: string,
+  fallbackChain: readonly string[],
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+): ProviderCliAvailability[] {
+  const registry = createDefaultRegistry();
+  const providerNames = [...new Set([selectedProvider, ...fallbackChain].filter(Boolean))];
+  return providerNames.map((provider) => {
+    const command = overrides?.[provider]?.command ?? registry.get(provider).command;
+    return {
+      provider,
+      command,
+      available: isCommandAvailable(command),
+    };
+  });
+}
+
+export function assertAnyProviderCliAvailable(
+  selectedProvider: string,
+  fallbackChain: readonly string[],
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+): void {
+  const report = checkProviderCliAvailability(selectedProvider, fallbackChain, overrides);
+  if (report.some((entry) => entry.available)) {
+    return;
+  }
+
+  const attempted = report
+    .map((entry) => `${entry.provider} (${entry.command})`)
+    .join(', ');
+  throw new Error(
+    'No configured LLM provider CLI is available. '
+      + `Checked: ${attempted || 'none'}. `
+      + 'Install one of: claude, codex, gemini, aider; or configure providers.overrides.<provider>.command.',
+  );
+}
+
+function isCommandAvailable(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (trimmed.includes('/') || trimmed.includes('\\')) {
+    return canExecuteCommand(trimmed);
+  }
+
+  const pathEntries = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
+  const candidates = process.platform === 'win32' && extensions.some((ext) => trimmed.toLowerCase().endsWith(ext.toLowerCase()))
+    ? [trimmed]
+    : extensions.map((ext) => `${trimmed}${ext}`);
+
+  return pathEntries.some((dir) => candidates.some((candidate) => canExecuteCommand(join(dir, candidate))));
+}
+
+function canExecuteCommand(candidate: string): boolean {
+  try {
+    if (process.platform === 'win32') {
+      return existsSync(candidate);
+    }
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function resolveBeastOperatorToken(
@@ -860,6 +943,13 @@ export async function main(): Promise<void> {
   // Determine phases
   const { entryPhase, exitAfter } = resolvePhases(args);
   const provider = resolveSelectedProvider(args, config);
+  const runConfig = loadRunConfigFromEnv();
+  const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig);
+  assertAnyProviderCliAvailable(
+    preflightProvider,
+    args.providers ?? config.providers.fallbackChain,
+    config.providers.overrides,
+  );
 
   // Create and run session
   // Precedence: CLI args > config file > defaults

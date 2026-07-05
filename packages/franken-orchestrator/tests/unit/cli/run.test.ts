@@ -208,7 +208,7 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     enableHeartbeat: false,
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
-    providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+    providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
     network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
     beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
     chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -295,6 +295,27 @@ describe('resolvePhases', () => {
       designDoc: '/some/doc.md',
     });
     expect(result).toEqual({ entryPhase: 'execute' });
+  });
+});
+
+describe('provider CLI availability preflight', () => {
+  it('reports provider commands and honors command overrides', () => {
+    const report = checkProviderCliAvailability('claude', ['codex'], {
+      claude: { command: 'sh' },
+      codex: { command: 'definitely-missing-frankenbeast-provider-cli' },
+    });
+
+    expect(report).toEqual([
+      { provider: 'claude', command: 'sh', available: true },
+      { provider: 'codex', command: 'definitely-missing-frankenbeast-provider-cli', available: false },
+    ]);
+  });
+
+  it('throws an actionable error when no configured provider CLI is available', () => {
+    expect(() => assertAnyProviderCliAvailable('claude', ['codex'], {
+      claude: { command: 'definitely-missing-frankenbeast-claude' },
+      codex: { command: 'definitely-missing-frankenbeast-codex' },
+    })).toThrow('Install one of: claude, codex, gemini, aider');
   });
 });
 
@@ -739,6 +760,7 @@ describe('main() execution', () => {
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN;
     delete process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+    delete process.env.FRANKENBEAST_RUN_CONFIG;
     delete process.env.DISCORD_BOT_TOKEN;
     delete process.env.DISCORD_PUBLIC_KEY;
     for (const dir of tempDirs.splice(0)) {
@@ -795,6 +817,45 @@ describe('main() execution', () => {
     expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
       entryPhase: 'execute',
       resume: true,
+    }));
+  });
+
+  it('uses FRANKENBEAST_RUN_CONFIG provider for availability preflight before creating the Session', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-config-provider-${Date.now()}`);
+    const runConfigPath = join(root, 'run-config.json');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(runConfigPath, JSON.stringify({ provider: 'codex' }));
+    tempDirs.push(root);
+    process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
+
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: {
+        default: 'claude',
+        fallbackChain: [],
+        overrides: {
+          claude: { command: 'definitely-missing-frankenbeast-claude' },
+          codex: { command: 'sh' },
+        },
+      },
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+    } as any);
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'claude',
+      orchestratorConfig: expect.objectContaining({
+        providers: expect.objectContaining({ default: 'claude' }),
+      }),
     }));
   });
 
@@ -971,7 +1032,7 @@ describe('main() execution', () => {
       budget: 10,
       provider: 'claude',
       providerSpecified: true,
-      providers: undefined,
+      providers: ['gemini'],
       designDoc: undefined,
       planDir: undefined,
       planName: undefined,
@@ -1008,7 +1069,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',
@@ -1109,7 +1170,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       network: { mode: 'insecure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
@@ -1299,7 +1360,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
       network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
       beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
       chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
