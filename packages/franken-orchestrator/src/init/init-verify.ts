@@ -98,6 +98,7 @@ export async function verifyInit(options: {
   if (config.comms.telegram.enabled) {
     const missing: string[] = [];
     if (!config.comms.telegram.botTokenRef) missing.push('botTokenRef');
+    if (!config.comms.telegram.webhookSecretTokenRef) missing.push('webhookSecretTokenRef');
     if (missing.length > 0) {
       issues.push({
         code: 'telegram-incomplete',

@@ -578,6 +578,11 @@ async function buildChatServerCommsConfig(
     isDiscordPublicKeyLiteral,
   );
   const telegramBotToken = await resolveCommsSecret(root, config.comms.telegram.botTokenRef, secretStore);
+  const telegramWebhookSecretToken = await resolveCommsSecret(
+    root,
+    config.comms.telegram.webhookSecretTokenRef,
+    secretStore,
+  );
   const whatsappAccessToken = await resolveCommsSecret(root, config.comms.whatsapp.accessTokenRef, secretStore);
   const whatsappPhoneNumberId = await resolveCommsPublicRef(
     root,
@@ -598,6 +603,7 @@ async function buildChatServerCommsConfig(
   });
   requireCommsChannelFields('telegram', config.comms.telegram.enabled, {
     botToken: telegramBotToken,
+    webhookSecretToken: telegramWebhookSecretToken,
   });
   requireCommsChannelFields('whatsapp', config.comms.whatsapp.enabled, {
     accessToken: whatsappAccessToken,
@@ -625,6 +631,7 @@ async function buildChatServerCommsConfig(
       telegram: {
         enabled: config.comms.telegram.enabled,
         botToken: telegramBotToken,
+        webhookSecretToken: telegramWebhookSecretToken,
       },
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,

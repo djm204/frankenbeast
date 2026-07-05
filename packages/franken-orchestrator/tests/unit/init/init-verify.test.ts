@@ -167,7 +167,7 @@ describe('verifyInit', () => {
         'comms.slack.signingSecretRef': 'op://slack/signing-secret',
       },
     });
-    const { io, prompts } = scriptedIo('op://telegram/bot-token');
+    const { io, prompts } = scriptedIo('op://telegram/bot-token', 'op://telegram/webhook-secret');
 
     const result = await runRepairInit({
       configFile,
@@ -178,8 +178,9 @@ describe('verifyInit', () => {
     expect(result.config.comms.slack.enabled).toBe(true);
     expect(result.config.comms.telegram.enabled).toBe(true);
     expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.config.comms.telegram.webhookSecretTokenRef).toBe('op://telegram/webhook-secret');
     expect(result.state.selectedCommsTransports).toEqual(['slack', 'telegram']);
-    expect(prompts).toEqual(['Telegram bot token ref']);
+    expect(prompts).toEqual(['Telegram bot token ref', 'Telegram webhook secret token ref']);
   });
 
   it('repair treats directly enabled channel flags as comms-enabled', async () => {
@@ -198,7 +199,7 @@ describe('verifyInit', () => {
       completedSteps: ['module-selection', 'provider-config', 'security-selection', 'comms-transport-selection'],
       answers: {},
     });
-    const { io, prompts } = scriptedIo('op://telegram/bot-token');
+    const { io, prompts } = scriptedIo('op://telegram/bot-token', 'op://telegram/webhook-secret');
 
     const result = await runRepairInit({
       configFile,
@@ -209,7 +210,8 @@ describe('verifyInit', () => {
     expect(result.config.comms.enabled).toBe(true);
     expect(result.config.comms.telegram.enabled).toBe(true);
     expect(result.config.comms.telegram.botTokenRef).toBe('op://telegram/bot-token');
+    expect(result.config.comms.telegram.webhookSecretTokenRef).toBe('op://telegram/webhook-secret');
     expect(result.state.selectedCommsTransports).toEqual(['telegram']);
-    expect(prompts).toEqual(['Telegram bot token ref']);
+    expect(prompts).toEqual(['Telegram bot token ref', 'Telegram webhook secret token ref']);
   });
 });

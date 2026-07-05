@@ -206,11 +206,16 @@ describe('commsRoutes', () => {
     expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });
 
-  it('requires the full Telegram token segment before accepting updates', async () => {
+  it('requires the Telegram secret_token header before accepting updates', async () => {
+    const webhookSecretToken = 'telegram-webhook-secret';
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          telegram: { enabled: true, botToken: '123456:secret-token' },
+          telegram: {
+            enabled: true,
+            botToken: '123456:secret-token',
+            webhookSecretToken,
+          },
         },
       }),
       runtime: mockRuntime(),
@@ -226,18 +231,30 @@ describe('commsRoutes', () => {
         from: { id: 42, is_bot: false, first_name: 'Ada' },
       },
     };
-    const headers = { 'Content-Type': 'application/json' };
 
-    const partial = await app.request('/webhooks/telegram/123456anything', {
+    const missingHeader = await app.request('/webhooks/telegram', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    expect(partial.status).toBe(404);
+    expect(missingHeader.status).toBe(404);
 
-    const exact = await app.request('/webhooks/telegram/123456:secret-token', {
+    const tokenPath = await app.request('/webhooks/telegram/123456:secret-token', {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
+      body: JSON.stringify(body),
+    });
+    expect(tokenPath.status).toBe(404);
+
+    const exact = await app.request('/webhooks/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+      },
       body: JSON.stringify(body),
     });
     expect(exact.status).toBe(200);

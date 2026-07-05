@@ -44,6 +44,7 @@ const SENSITIVE_CONFIG_PATHS = [
   'comms.slack.signingSecretRef',
   'comms.discord.botTokenRef',
   'comms.telegram.botTokenRef',
+  'comms.telegram.webhookSecretTokenRef',
   'comms.whatsapp.accessTokenRef',
   'comms.whatsapp.appSecretRef',
   'comms.whatsapp.verifyTokenRef',
