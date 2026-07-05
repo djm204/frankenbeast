@@ -1,15 +1,24 @@
 import { z } from 'zod';
+import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 function resolveContainedConfigPath(fieldName: string, projectRoot: string | undefined, requested: string): string {
   if (!projectRoot) {
     return requested;
   }
 
-  const root = resolve(projectRoot);
-  const target = isAbsolute(requested) ? resolve(requested) : resolve(root, requested);
+  const root = canonicalPath(projectRoot);
+  const target = canonicalPath(isAbsolute(requested) ? requested : resolve(root, requested));
   const rel = relative(root, target);
   if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {
     throw new Error(`${fieldName} resolves outside project root: ${requested}`);

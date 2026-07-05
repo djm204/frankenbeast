@@ -33,7 +33,7 @@ export type SessionPhase = 'interview' | 'plan' | 'execute';
 
 function resolveContainedExistingPath(projectRoot: string, requestedPath: string, fieldName: string): string {
   const root = realpathSync(resolve(projectRoot));
-  const requested = isAbsolute(requestedPath) ? requestedPath : resolve(root, requestedPath);
+  const requested = isAbsolute(requestedPath) ? requestedPath : resolve(process.cwd(), requestedPath);
   const target = realpathSync(requested);
   const rel = relative(root, target);
   if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {

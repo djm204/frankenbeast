@@ -380,6 +380,26 @@ describe('Session', () => {
       rmSync(outsidePath, { force: true });
     });
 
+    it('resolves relative designDocPath from the invoking cwd before containment', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const originalCwd = process.cwd();
+      const config = makeConfig({ entryPhase: 'plan', exitAfter: 'plan' });
+      const nestedDir = resolve(config.paths.root, 'docs');
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(resolve(nestedDir, 'design.md'), '# Nested Design');
+
+      try {
+        process.chdir(nestedDir);
+        config.designDocPath = 'design.md';
+
+        await new Session(config).start();
+
+        expect(mockReadDesignDoc).not.toHaveBeenCalled();
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
     it('throws friendly ENOENT error when designDocPath file is missing', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       const missingPath = resolve(tmpdir(), `nonexistent-design-${Date.now()}.md`);
