@@ -580,6 +580,30 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('clears stale skill mutation errors when a server snapshot removes that skill', async () => {
+    const failedEnable = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    failedEnable.reject(new Error('HTTP 500'));
+    expect(await screen.findByText(/Could not enable shell/)).toBeTruthy();
+
+    pushSnapshot({ ...snapshot, skills: [] });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Retry enabling shell' })).toBeNull();
+    });
+  });
+
   it('ignores snapshots from a superseded dashboard client subscription', async () => {
     let pushStaleSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
     const firstClient = mockClient({

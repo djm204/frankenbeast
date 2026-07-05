@@ -61,7 +61,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     setSkillErrors((currentErrors) => Object.fromEntries(
       Object.entries(currentErrors).filter(([name, error]) => {
         const skill = snapshot.skills.find((candidate) => candidate.name === name);
-        return !skill || skill.enabled !== error.enabled;
+        return Boolean(skill && skill.enabled !== error.enabled);
       }),
     ));
     setSecurityError((currentError) => (
