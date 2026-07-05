@@ -26,6 +26,21 @@ export interface DashboardSnapshot {
   providers: DashboardProvider[];
 }
 
+function assertDashboardSseCanAuthenticate(url: string): void {
+  const location = globalThis.location;
+  if (!location?.href) {
+    return;
+  }
+
+  const eventSourceUrl = new URL(url, location.href);
+  if (eventSourceUrl.origin !== location.origin) {
+    throw new Error(
+      'Refusing to open dashboard SSE across origins: EventSource cannot attach the operator authorization credential. '
+      + 'Use the same-origin dashboard proxy or configure cookie/ticket auth for dashboard events.',
+    );
+  }
+}
+
 export class DashboardApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -61,6 +76,7 @@ export class DashboardApiClient {
     // constructor semantics, then fall back to callable test doubles.
     const EventSourceCtor: any = (globalThis as any).EventSource;
     const url = `${this.baseUrl}/api/dashboard/events`;
+    assertDashboardSseCanAuthenticate(url);
     let eventSource: EventSource;
     try {
       eventSource = new EventSourceCtor(url);
