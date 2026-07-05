@@ -135,12 +135,25 @@ describe('control-plane operator auth', () => {
       expect(res.status).toBe(200);
     });
 
-    it('dashboard SSE -> event stream with operator token', async () => {
+    it('dashboard SSE -> mints a ticket with operator token, then streams without bearer auth', async () => {
       const app = buildApp();
-      const res = await app.request('/api/dashboard/events', { headers: authHeader });
+      const ticketRes = await app.request('/api/dashboard/events/ticket', {
+        method: 'POST',
+        headers: authHeader,
+      });
+      expect(ticketRes.status).toBe(200);
+      const { ticket } = await ticketRes.json() as { ticket: string };
+
+      const res = await app.request(`/api/dashboard/events?ticket=${ticket}`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
       await res.body?.cancel();
+    });
+
+    it('dashboard SSE rejects bearer-auth streams without a one-shot ticket', async () => {
+      const app = buildApp();
+      const res = await app.request('/api/dashboard/events', { headers: authHeader });
+      expect(res.status).toBe(401);
     });
 
     it('comms inbound -> accepted with operator token', async () => {

@@ -26,21 +26,6 @@ export interface DashboardSnapshot {
   providers: DashboardProvider[];
 }
 
-function assertDashboardSseCanAuthenticate(url: string): void {
-  const location = globalThis.location;
-  if (!location?.href) {
-    return;
-  }
-
-  const eventSourceUrl = new URL(url, location.href);
-  if (eventSourceUrl.origin !== location.origin) {
-    throw new Error(
-      'Refusing to open dashboard SSE across origins: EventSource cannot attach the operator authorization credential. '
-      + 'Use the same-origin dashboard proxy or configure cookie/ticket auth for dashboard events.',
-    );
-  }
-}
-
 export class DashboardApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -68,26 +53,66 @@ export class DashboardApiClient {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
-  // NOTE: EventSource cannot attach an Authorization header. Keep dashboard
-  // browser clients on same-origin/BFF routes; do not put long-lived operator
-  // credentials in URLs, headers, or bundle-visible env values.
-  subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): () => void {
-    // EventSource may be mocked as a plain function in tests; prefer browser
-    // constructor semantics, then fall back to callable test doubles.
-    const EventSourceCtor: any = (globalThis as any).EventSource;
-    const url = `${this.baseUrl}/api/dashboard/events`;
-    assertDashboardSseCanAuthenticate(url);
-    let eventSource: EventSource;
-    try {
-      eventSource = new EventSourceCtor(url);
-    } catch {
-      eventSource = EventSourceCtor(url);
-    }
-    eventSource.addEventListener('snapshot', (event: any) => {
-      const snapshot = JSON.parse(event.data) as DashboardSnapshot;
-      onSnapshot(snapshot);
-    });
-    return () => eventSource.close();
+  // NOTE: EventSource cannot attach an Authorization header. Browser clients
+  // first mint a short-lived, one-shot stream ticket with normal authenticated
+  // fetch, then put only that ticket in the EventSource URL.
+  async subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): Promise<() => void> {
+    let eventSource: EventSource | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
+
+    const closeActiveSource = () => {
+      eventSource?.close();
+      eventSource = undefined;
+    };
+
+    const scheduleReconnect = () => {
+      if (closed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect().catch((err) => {
+          console.error(err);
+          scheduleReconnect();
+        });
+      }, 1_000);
+    };
+
+    const connect = async () => {
+      const ticketRes = await fetch(`${this.baseUrl}/api/dashboard/events/ticket`, { method: 'POST' });
+      if (!ticketRes.ok) throw new Error(`HTTP ${ticketRes.status}`);
+      const { ticket } = await ticketRes.json() as { ticket?: string | null };
+
+      if (closed) return;
+
+      // EventSource may be mocked as a plain function in tests; prefer browser
+      // constructor semantics, then fall back to callable test doubles.
+      const EventSourceCtor: any = (globalThis as any).EventSource;
+      const url = ticket
+        ? `${this.baseUrl}/api/dashboard/events?${new URLSearchParams({ ticket }).toString()}`
+        : `${this.baseUrl}/api/dashboard/events`;
+      let nextEventSource: EventSource;
+      try {
+        nextEventSource = new EventSourceCtor(url);
+      } catch {
+        nextEventSource = EventSourceCtor(url);
+      }
+      eventSource = nextEventSource;
+      nextEventSource.addEventListener('snapshot', (event: any) => {
+        const snapshot = JSON.parse(event.data) as DashboardSnapshot;
+        onSnapshot(snapshot);
+      });
+      nextEventSource.addEventListener('error', () => {
+        closeActiveSource();
+        scheduleReconnect();
+      });
+    };
+
+    await connect();
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      closeActiveSource();
+    };
   }
 
 }

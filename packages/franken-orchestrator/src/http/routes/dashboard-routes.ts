@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { SkillManager } from '../../skills/skill-manager.js';
 import type { SecurityConfig } from '../../middleware/security-profiles.js';
 
@@ -10,6 +11,8 @@ export interface DashboardRouteDeps {
   skillManager: SkillManager;
   getSecurityConfig: () => SecurityConfig;
   getProviders: () => Array<{ name: string; type: string; available: boolean; failoverOrder: number }>;
+  operatorToken?: string | undefined;
+  ticketStore?: SseConnectionTicketStore | undefined;
 }
 
 function buildSnapshot(deps: DashboardRouteDeps) {
@@ -30,14 +33,35 @@ function buildSnapshot(deps: DashboardRouteDeps) {
 
 export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   const app = new Hono();
+  const ticketStore = deps.ticketStore;
+  const operatorToken = deps.operatorToken;
 
   // GET /api/dashboard — aggregated snapshot of all dashboard state
   app.get('/', (c) => {
     return c.json(buildSnapshot(deps));
   });
 
-  // GET /api/dashboard/events — SSE stream for real-time dashboard updates
+  // POST /api/dashboard/events/ticket — authenticated callers mint a one-shot
+  // short-lived ticket before EventSource opens the SSE stream. EventSource
+  // cannot attach bearer headers, and raw streams are rejected below.
+  app.post('/events/ticket', (c) => {
+    if (!operatorToken) {
+      return c.json({ ticket: null });
+    }
+    if (!ticketStore) {
+      return c.json({ error: { code: 'UNAVAILABLE', message: 'Dashboard SSE tickets are not configured' } }, 503);
+    }
+
+    return c.json({ ticket: ticketStore.issue(operatorToken) });
+  });
+
+  // GET /api/dashboard/events — ticket-authenticated SSE stream for real-time dashboard updates
   app.get('/events', (c) => {
+    const ticket = c.req.query('ticket');
+    if (operatorToken && (!ticketStore || !ticket || !ticketStore.validate(ticket, operatorToken))) {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
+    }
+
     return streamSSE(c, async (stream) => {
       let lastSnapshot = JSON.stringify(buildSnapshot(deps));
 

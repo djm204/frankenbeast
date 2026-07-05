@@ -28,6 +28,7 @@ import type { SkillManager } from '../skills/skill-manager.js';
 import type { ProviderRegistry } from '../providers/provider-registry.js';
 import { createSkillRoutes } from './routes/skill-routes.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
+import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
 
 export interface ChatAppOptions {
@@ -169,13 +170,20 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       }
       return requireAuth()(c, next);
     });
+    app.use('/api/dashboard', requireAuth());
+    app.use('/api/dashboard/*', async (c, next) => {
+      if (new URL(c.req.url).pathname === '/api/dashboard/events') {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     for (const base of [
       '/v1/chat',
       '/v1/network',
       '/v1/comms',
       '/api/security',
       '/api/skills',
-      '/api/dashboard',
       '/api/analytics',
     ]) {
       app.use(base, requireAuth());
@@ -249,7 +257,11 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     }));
   }
   if (opts.dashboardDeps) {
-    app.route('/api/dashboard', createDashboardRoutes(opts.dashboardDeps));
+    app.route('/api/dashboard', createDashboardRoutes({
+      ...opts.dashboardDeps,
+      operatorToken: effectiveOperatorToken,
+      ticketStore: opts.dashboardDeps.ticketStore ?? new SseConnectionTicketStore(),
+    }));
   }
   if (opts.analyticsDeps) {
     app.route('/api/analytics', createAnalyticsRoutes(opts.analyticsDeps));
