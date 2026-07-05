@@ -47,7 +47,7 @@ import {
   stopNetworkService,
 } from '../network/network-supervisor-runtime.js';
 import type { ISecretStore } from '../network/secret-store.js';
-import { resolveSecurityConfig } from '../middleware/security-profiles.js';
+import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
@@ -276,6 +276,22 @@ export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): stri
     origins.push(`http://127.0.0.1:${port}`);
   }
   return origins;
+}
+
+function resolveConfigSecurity(config: OrchestratorConfig): SecurityConfig {
+  const security = config.security;
+  const overrides: Partial<Omit<SecurityConfig, 'profile'>> = {};
+  if (security?.injectionDetection !== undefined) overrides.injectionDetection = security.injectionDetection;
+  if (security?.piiMasking !== undefined) overrides.piiMasking = security.piiMasking;
+  if (security?.outputValidation !== undefined) overrides.outputValidation = security.outputValidation;
+  if (security?.webhookSignaturePolicy !== undefined) {
+    overrides.webhookSignaturePolicy = security.webhookSignaturePolicy;
+  }
+  if (security?.allowedDomains !== undefined) overrides.allowedDomains = security.allowedDomains;
+  if (security?.maxTokenBudget !== undefined) overrides.maxTokenBudget = security.maxTokenBudget;
+  if (security?.requireApproval !== undefined) overrides.requireApproval = security.requireApproval;
+  if (security?.customRules !== undefined) overrides.customRules = security.customRules;
+  return resolveSecurityConfig(security?.profile ?? 'standard', overrides);
 }
 
 interface ChatSurfaceDeps {
@@ -794,7 +810,7 @@ export async function main(): Promise<void> {
           ? {
               dashboardDeps: {
                 skillManager,
-                getSecurityConfig: () => resolveSecurityConfig('standard'),
+                getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
                 getProviders: () => providerRegistry.getProviders().map((p, i) => ({
                   name: p.name, type: p.type, available: true, failoverOrder: i,
                 })),

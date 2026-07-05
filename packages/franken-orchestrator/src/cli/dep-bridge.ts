@@ -99,9 +99,11 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
           ...(config.security.injectionDetection !== undefined ? { injectionDetection: config.security.injectionDetection } : {}),
           ...(config.security.piiMasking !== undefined ? { piiMasking: config.security.piiMasking } : {}),
           ...(config.security.outputValidation !== undefined ? { outputValidation: config.security.outputValidation } : {}),
+          ...(config.security.webhookSignaturePolicy ? { webhookSignaturePolicy: config.security.webhookSignaturePolicy } : {}),
           ...(config.security.allowedDomains ? { allowedDomains: config.security.allowedDomains } : {}),
           ...(config.security.maxTokenBudget !== undefined ? { maxTokenBudget: config.security.maxTokenBudget } : {}),
           ...(config.security.requireApproval ? { requireApproval: config.security.requireApproval } : {}),
+          ...(config.security.customRules ? { customRules: config.security.customRules } : {}),
         }
       : { profile: securityProfile },
     brain: {
