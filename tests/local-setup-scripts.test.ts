@@ -52,4 +52,41 @@ describe('local setup scripts', () => {
     expect(compose).toContain('http://localhost:8000/api/v2/heartbeat');
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
   });
+
+  it('.env.example documents current local env vars without removed service knobs', () => {
+    const envExample = read('.env.example');
+
+    for (const required of [
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'GOOGLE_API_KEY',
+      'GEMINI_API_KEY',
+      'CHROMA_URL',
+      'GRAFANA_USER',
+      'GRAFANA_PASSWORD',
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+      'FRANKENBEAST_PASSPHRASE',
+      'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
+      'FRANKENBEAST_BEAST_DAEMON_URL',
+      'FRANKENBEAST_RUN_CONFIG',
+      'FRANKENBEAST_MODULE_MEMORY',
+      'FRANKENBEAST_MODULE_PLANNER',
+      'FRANKENBEAST_MODULE_CRITIQUE',
+      'FRANKENBEAST_MODULE_GOVERNOR',
+      'FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES',
+      'FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL',
+    ]) {
+      expect(envExample).toContain(required);
+    }
+
+    for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
+      expect(envExample).not.toContain(removed);
+    }
+  });
 });
