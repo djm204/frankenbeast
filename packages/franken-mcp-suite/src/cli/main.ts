@@ -6,6 +6,7 @@ import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
+const FRANKENBEAST_INSTALL_HELP = "install franken-orchestrator with 'npm install -g franken-orchestrator'";
 
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
@@ -27,7 +28,7 @@ function passthrough(): never {
   if (result.error) {
     const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     if (isNotFound) {
-      console.error("frankenbeast: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'");
+      console.error(`frankenbeast: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
     } else {
       console.error(`frankenbeast: ${result.error.message}`);
     }
@@ -97,22 +98,44 @@ switch (subcommand) {
         });
       },
       exec: async (cmd, args) => {
-        const result = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+        const isWindows = process.platform === 'win32';
+        const result = spawn(
+          cmd,
+          args,
+          isWindows
+            ? { stdio: 'pipe', shell: true, encoding: 'utf8' }
+            : { stdio: 'inherit', shell: false },
+        );
         if (result.error) {
           const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
           throw new Error(
             isNotFound
-              ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
+              ? `${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`
               : `${cmd} failed: ${result.error.message}`,
           );
         }
         if (result.status !== 0) {
+          const stdout = result.stdout ? String(result.stdout) : '';
+          const stderr = result.stderr ? String(result.stderr) : '';
+          const shellOutput = `${stdout}\n${stderr}`.toLowerCase();
+          const isWindowsCommandNotFound =
+            isWindows &&
+            (shellOutput.includes('is not recognized') ||
+              shellOutput.includes('not recognized as an internal or external command') ||
+              shellOutput.includes('command not found'));
+          if (isWindowsCommandNotFound) {
+            throw new Error(`${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
+          }
+          if (stdout) process.stdout.write(stdout);
+          if (stderr) process.stderr.write(stderr);
           throw new Error(
             result.signal
               ? `${cmd} killed by signal ${result.signal}`
               : `${cmd} exited with ${result.status}`,
           );
         }
+        if (result.stdout) process.stdout.write(String(result.stdout));
+        if (result.stderr) process.stderr.write(String(result.stderr));
       },
     });
     break;

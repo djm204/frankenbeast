@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FbeastConfig } from '../shared/config.js';
 
+const FRANKENBEAST_INSTALL_COMMAND = 'npm install -g franken-orchestrator';
+
 export interface BeastModeDeps {
   root: string;
   confirm(message: string): Promise<boolean>;
@@ -38,7 +40,7 @@ export async function runBeastMode(argv: string[], deps: BeastModeDeps): Promise
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('binary not found') || msg.includes('ENOENT')) {
       console.log('\nTo launch the orchestrator, install the frankenbeast CLI:');
-      console.log('  npm link --workspace=franken-orchestrator');
+      console.log(`  ${FRANKENBEAST_INSTALL_COMMAND}`);
       console.log('  frankenbeast beasts catalog');
     } else {
       throw err;
