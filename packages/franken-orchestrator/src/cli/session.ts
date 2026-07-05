@@ -27,6 +27,7 @@ import { resolveUpstreamRepo } from './upstream-repo.js';
 import type { ChunkDefinition } from './file-writer.js';
 import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import type { ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
 
 export type SessionPhase = 'interview' | 'plan' | 'execute';
 
@@ -36,7 +37,7 @@ export interface SessionConfig {
   budget: number;
   provider: string;
   providers?: string[] | undefined;
-  providersConfig?: Record<string, { command?: string | undefined; model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;

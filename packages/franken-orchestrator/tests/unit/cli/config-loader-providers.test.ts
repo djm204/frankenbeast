@@ -49,7 +49,7 @@ describe('Config loader providers passthrough', () => {
         default: 'gemini',
         fallbackChain: ['gemini', 'claude'],
         overrides: {
-          gemini: { command: 'gemini-cli', model: 'gemini-pro' },
+          gemini: { command: 'gemini-cli', trustCommandOverride: true, model: 'gemini-pro' },
         },
       },
     }));
@@ -59,6 +59,7 @@ describe('Config loader providers passthrough', () => {
     expect(config.providers.fallbackChain).toEqual(['gemini', 'claude']);
     expect(config.providers.overrides['gemini']).toEqual({
       command: 'gemini-cli',
+      trustCommandOverride: true,
       model: 'gemini-pro',
     });
   });

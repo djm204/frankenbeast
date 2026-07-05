@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NetworkConfigSchema } from '../network/network-config.js';
+import { validateProviderCommandOverride } from './provider-command-override-policy.js';
 
 // Consolidation schemas (moved from run-config-v2.ts)
 
@@ -15,6 +16,8 @@ export const ProviderConfigSchema = z.object({
   ]),
   apiKey: z.string().optional(),
   cliPath: z.string().optional(),
+  trustCommandOverride: z.literal(true).optional(),
+  trustedCommandPaths: z.array(z.string()).optional(),
   model: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
 });
@@ -35,6 +38,8 @@ export const BrainConfigSchema = z.object({
 
 export const ProviderOverrideSchema = z.object({
   command: z.string().optional(),
+  trustCommandOverride: z.literal(true).optional(),
+  trustedCommandPaths: z.array(z.string()).optional(),
   model: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
 });
@@ -46,6 +51,16 @@ export const ProvidersConfigSchema = z.object({
   fallbackChain: z.array(z.string()).default(['claude', 'codex']),
   /** Per-provider overrides (command, model, extraArgs). */
   overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
+}).superRefine((providers, ctx) => {
+  for (const [name, override] of Object.entries(providers.overrides)) {
+    for (const message of validateProviderCommandOverride(name, override)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['overrides', name, 'command'],
+        message,
+      });
+    }
+  }
 });
 
 const MIN_TOTAL_TOKEN_BUDGET = 10_000;
@@ -104,6 +119,21 @@ const BaseOrchestratorConfigSchema = z.object({
 export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(
   NetworkConfigSchema.shape,
 ).superRefine((config, ctx) => {
+  config.consolidatedProviders?.forEach((provider, index) => {
+    if (!provider.type.endsWith('-cli') || !provider.cliPath) return;
+    for (const message of validateProviderCommandOverride(provider.type, {
+      cliPath: provider.cliPath,
+      trustCommandOverride: provider.trustCommandOverride,
+      trustedCommandPaths: provider.trustedCommandPaths,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['consolidatedProviders', index, 'cliPath'],
+        message,
+      });
+    }
+  });
+
   const minDurationMs =
     config.maxCritiqueIterations * MIN_DURATION_MS_PER_CRITIQUE_ITERATION;
   if (config.maxDurationMs < minDurationMs) {
