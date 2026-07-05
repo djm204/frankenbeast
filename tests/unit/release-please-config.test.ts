@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -14,9 +14,10 @@ describe('release-please monorepo config', () => {
   };
   const manifest = readJson('.release-please-manifest.json') as Record<string, string>;
   const rootPackage = readJson('package.json') as { version: string };
-  const packageDirs = Object.keys(config.packages)
-    .filter((key) => key.startsWith('packages/'))
-    .map((key) => key.replace(/^packages\//, ''));
+  const packageDirs = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 
   it('config has root "." entry preserved', () => {
     expect(config.packages['.']).toBeDefined();
