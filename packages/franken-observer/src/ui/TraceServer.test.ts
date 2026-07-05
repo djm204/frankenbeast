@@ -4,6 +4,7 @@ import { TraceServer } from './TraceServer.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
 import { TraceContext } from '../core/TraceContext.js'
 import { SpanLifecycle } from '../core/SpanLifecycle.js'
+import type { ExportAdapter } from '../export/ExportAdapter.js'
 
 function makeTrace(goal: string) {
   const trace = TraceContext.createTrace(goal)
@@ -162,6 +163,38 @@ describe('TraceServer', () => {
       await adapter.flush(makeTrace('Goal B'))
       const { traces } = await fetch(server.url + '/api/traces').then(r => r.json()) as { traces: unknown[] }
       expect(traces).toHaveLength(2)
+    })
+
+    it('uses adapter-provided summaries without loading full traces when available', async () => {
+      await server.stop()
+      const summaryAdapter = {
+        flush: async () => {},
+        queryByTraceId: async () => { throw new Error('queryByTraceId should not be called for summaries') },
+        listTraceIds: async () => { throw new Error('listTraceIds should not be called when summaries are available') },
+        listTraceSummaries: async () => [{
+          id: 'trace-summary-only',
+          goal: 'summary path',
+          status: 'completed',
+          spanCount: 12,
+          startedAt: 12345,
+        }],
+      } satisfies ExportAdapter & {
+        listTraceSummaries: () => Promise<Array<{
+          id: string
+          goal: string
+          status: string
+          spanCount: number
+          startedAt: number
+        }>>
+      }
+
+      server = new TraceServer({ adapter: summaryAdapter, port: 0 })
+      await server.start()
+
+      const { traces } = await fetch(server.url + '/api/traces').then(r => r.json()) as { traces: unknown[] }
+      expect(traces).toEqual([
+        { id: 'trace-summary-only', goal: 'summary path', status: 'completed', spanCount: 12, startedAt: 12345 },
+      ])
     })
   })
 

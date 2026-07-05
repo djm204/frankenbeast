@@ -1,6 +1,14 @@
 import type { Trace } from '../core/types.js'
 import { TraceContext } from '../core/TraceContext.js'
 
+export interface TraceSummary {
+  id: string
+  goal: string
+  status: Trace['status']
+  spanCount: number
+  startedAt: number
+}
+
 export function warnIfTraceHasActiveSpans(trace: Trace, destination = 'export'): void {
   const validation = TraceContext.validateTrace(trace)
   if (validation.ok) return
@@ -23,4 +31,10 @@ export interface ExportAdapter {
   queryByTraceId(traceId: string): Promise<Trace | null>
   /** List all stored trace ids. */
   listTraceIds(): Promise<string[]>
+  /**
+   * List lightweight trace summaries without hydrating child span payloads.
+   * Adapters that do not support this can omit it; callers should fall back to
+   * listTraceIds() + queryByTraceId().
+   */
+  listTraceSummaries?(): Promise<TraceSummary[]>
 }
