@@ -77,4 +77,20 @@ describe('WizardDialog validation', () => {
     expect(screen.getByRole('alert').textContent).toContain('Identity: Agent name is required');
     expect(screen.getByRole('alert').textContent).toContain('Workflow: Workflow type is required');
   });
+
+  it('includes the review summary in form view before the launch action', () => {
+    useBeastStore.getState().setStepValues(0, { name: 'Reviewable Agent' });
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
+
+    renderWizard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle form mode' }));
+
+    const reviewHeading = screen.getByRole('heading', { name: 'Review' });
+    const launchButton = screen.getByRole('button', { name: 'Launch Agent' });
+
+    expect(reviewHeading.compareDocumentPosition(launchButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('Reviewable Agent')).toBeTruthy();
+    expect(screen.getByText('design-interview')).toBeTruthy();
+  });
 });
