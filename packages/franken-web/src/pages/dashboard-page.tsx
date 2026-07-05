@@ -38,13 +38,13 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const mountedRef = useRef(false);
   const clientGenerationRef = useRef(0);
   const loadSequenceRef = useRef(0);
-  const issuedSkillMutationSequenceRef = useRef<Record<string, number>>({});
-  const skillMutationSequenceRef = useRef<Record<string, number>>({});
+  const issuedSkillMutationSequenceRef = useRef(new Map<string, number>());
+  const skillMutationSequenceRef = useRef(new Map<string, number>());
   const issuedSecurityMutationSequenceRef = useRef(0);
   const securityMutationSequenceRef = useRef(0);
   const confirmedSnapshotRef = useRef<DashboardSnapshot | null>(null);
   const serverSnapshotVersionRef = useRef(0);
-  const confirmedSkillMutationSequenceRef = useRef<Record<string, number>>({});
+  const confirmedSkillMutationSequenceRef = useRef(new Map<string, number>());
   const confirmedSecurityMutationSequenceRef = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillErrors, setSkillErrors] = useState<Record<string, SkillMutationError>>({});
@@ -135,6 +135,10 @@ export function DashboardPage({ client }: DashboardPageProps) {
     // Currently only the initial snapshot is pushed (heartbeats carry no data).
     mountedRef.current = true;
     clientGenerationRef.current += 1;
+    skillMutationSequenceRef.current.clear();
+    securityMutationSequenceRef.current = 0;
+    setSkillErrors({});
+    setSecurityError(null);
     const subscriptionGeneration = clientGenerationRef.current;
     if (!confirmedSnapshotRef.current && security) {
       setConfirmedSnapshot({ skills, security, providers });
@@ -162,11 +166,11 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [applyServerSnapshot, client, loadSnapshot, setConfirmedSnapshot]);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
-    const sequence = (issuedSkillMutationSequenceRef.current[name] ?? 0) + 1;
-    issuedSkillMutationSequenceRef.current[name] = sequence;
+    const sequence = (issuedSkillMutationSequenceRef.current.get(name) ?? 0) + 1;
+    issuedSkillMutationSequenceRef.current.set(name, sequence);
     const serverSnapshotVersion = serverSnapshotVersionRef.current;
     const clientGeneration = clientGenerationRef.current;
-    skillMutationSequenceRef.current[name] = sequence;
+    skillMutationSequenceRef.current.set(name, sequence);
     setSkillEnabled(name, enabled);
     setSkillErrors((currentErrors) => {
       const { [name]: _cleared, ...remainingErrors } = currentErrors;
@@ -177,13 +181,13 @@ export function DashboardPage({ client }: DashboardPageProps) {
         if (!mountedRef.current) return;
         if (clientGenerationRef.current !== clientGeneration) return;
         if (serverSnapshotVersionRef.current !== serverSnapshotVersion) return;
-        if (sequence < (confirmedSkillMutationSequenceRef.current[name] ?? 0)) return;
-        confirmedSkillMutationSequenceRef.current[name] = sequence;
-        const latestSkillRequest = skillMutationSequenceRef.current[name];
+        if (sequence < (confirmedSkillMutationSequenceRef.current.get(name) ?? 0)) return;
+        confirmedSkillMutationSequenceRef.current.set(name, sequence);
+        const latestSkillRequest = skillMutationSequenceRef.current.get(name);
         const isLatestSkillRequest = latestSkillRequest === undefined || latestSkillRequest === sequence;
         confirmSkillState(name, enabled, isLatestSkillRequest);
         if (isLatestSkillRequest) {
-          delete skillMutationSequenceRef.current[name];
+          skillMutationSequenceRef.current.delete(name);
           setSkillErrors((currentErrors) => {
             const { [name]: _cleared, ...remainingErrors } = currentErrors;
             return remainingErrors;
@@ -191,10 +195,10 @@ export function DashboardPage({ client }: DashboardPageProps) {
         }
       })
       .catch((error) => {
-        if (!mountedRef.current || clientGenerationRef.current !== clientGeneration || skillMutationSequenceRef.current[name] !== sequence) return;
-        delete skillMutationSequenceRef.current[name];
+        if (!mountedRef.current || clientGenerationRef.current !== clientGeneration || skillMutationSequenceRef.current.get(name) !== sequence) return;
+        skillMutationSequenceRef.current.delete(name);
         const confirmedSkill = confirmedSnapshotRef.current?.skills.find((skill) => skill.name === name);
-        if (confirmedSkill?.enabled === enabled) {
+        if (!confirmedSkill || confirmedSkill.enabled === enabled) {
           setSkillErrors((currentErrors) => {
             const { [name]: _cleared, ...remainingErrors } = currentErrors;
             return remainingErrors;

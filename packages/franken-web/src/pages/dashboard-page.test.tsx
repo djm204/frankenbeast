@@ -604,6 +604,66 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('ignores a failed skill mutation when a server snapshot removed that pending skill', async () => {
+    const failedEnable = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const client = mockClient({
+      toggleSkill: vi.fn().mockReturnValue(failedEnable.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    pushSnapshot({ ...snapshot, skills: [] });
+    failedEnable.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Retry enabling shell' })).toBeNull();
+    });
+  });
+
+  it('clears mutation errors when switching dashboard clients', async () => {
+    const failedEnable = deferred<void>();
+    const firstClient = mockClient({ toggleSkill: vi.fn().mockReturnValue(failedEnable.promise) });
+    const nextClient = mockClient();
+    const { rerender } = render(<DashboardPage client={firstClient} />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    failedEnable.reject(new Error('HTTP 500'));
+    expect(await screen.findByText(/Could not enable shell/)).toBeTruthy();
+
+    rerender(<DashboardPage client={nextClient} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+    });
+  });
+
+  it('handles skill names that collide with object prototype properties', async () => {
+    const failedToggle = deferred<void>();
+    const prototypeNameSnapshot: DashboardSnapshot = {
+      ...snapshot,
+      skills: [{ name: 'toString', enabled: false, hasContext: false, mcpServerCount: 0 }],
+    };
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(prototypeNameSnapshot),
+      toggleSkill: vi.fn().mockReturnValue(failedToggle.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable toString' }));
+    failedToggle.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable toString' }).getAttribute('aria-checked')).toBe('false');
+      expect(screen.getByText(/Could not enable toString/)).toBeTruthy();
+    });
+  });
+
   it('ignores snapshots from a superseded dashboard client subscription', async () => {
     let pushStaleSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
     const firstClient = mockClient({
