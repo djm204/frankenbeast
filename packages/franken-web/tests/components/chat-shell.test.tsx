@@ -273,6 +273,7 @@ vi.mock('../../src/lib/network-api.js', () => ({
 afterEach(() => {
   cleanup();
   window.location.hash = '';
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
   latestBeastEventHandlers = null;
   mockSubscribeToEvents.mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
@@ -640,21 +641,59 @@ describe('ChatShell', () => {
     expect(topbar?.textContent).toContain('test-project');
   });
 
-  it('exposes an accessible mobile navigation drawer toggle', () => {
-    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+  it('exposes an accessible mobile navigation drawer toggle', async () => {
+    const mediaQueryList = {
+      matches: true,
+      media: '(max-width: 920px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList;
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue(mediaQueryList));
+
+    const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
 
     const toggle = screen.getByRole('button', { name: 'Open navigation menu' });
+    const sidebar = container.querySelector<HTMLElement>('#dashboard-sidebar');
 
     expect(toggle.getAttribute('aria-controls')).toBe('dashboard-sidebar');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(toggle.getAttribute('class')).toContain('button');
+    expect(sidebar?.getAttribute('aria-hidden')).toBe('true');
+    expect(sidebar?.hasAttribute('inert')).toBe(true);
 
     fireEvent.click(toggle);
 
+    const openSidebar = container.querySelector<HTMLElement>('#dashboard-sidebar');
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(openSidebar?.getAttribute('aria-hidden')).toBeNull();
+    expect(openSidebar?.hasAttribute('inert')).toBe(false);
     expect(screen.getByRole('button', { name: 'Close navigation menu' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Dispatch' }).getAttribute('class')).toContain('button--primary');
     expect(screen.getByRole('button', { name: 'Reject' }).getAttribute('class')).toContain('button--secondary');
+
+    const closeButton = screen.getByRole('button', { name: 'Close navigation menu' });
+    await waitFor(() => expect(document.activeElement).toBe(closeButton));
+
+    const sidebarLinks = Array.from(openSidebar?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []);
+    const lastSidebarLink = sidebarLinks.at(-1);
+    const focusGuards = Array.from(openSidebar?.querySelectorAll<HTMLElement>('.sidebar__focus-guard') ?? []);
+
+    lastSidebarLink?.focus();
+    focusGuards[1]?.focus();
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton.focus();
+    focusGuards[0]?.focus();
+    expect(document.activeElement).toBe(lastSidebarLink);
+
+    fireEvent.click(closeButton);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    expect(sidebar?.getAttribute('aria-hidden')).toBe('true');
+    expect(sidebar?.hasAttribute('inert')).toBe(true);
   });
 
   it('renders agent list on the beasts page', async () => {
