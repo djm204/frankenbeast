@@ -9,6 +9,8 @@ import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
 import {
+  CHAT_SOCKET_PROTOCOL,
+  CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
   ChatSocketController,
   attachChatWebSocketServer,
 } from '../../../src/http/ws-chat-server.js';
@@ -84,12 +86,40 @@ describe('ws chat server', () => {
     const port = await listen(httpServer);
     const socket = new WebSocket(
       `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
-      ['franken.chat.v1', `franken.chat.token.${token}`],
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`],
     );
 
     await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
-    expect(socket.protocol).toBe('franken.chat.v1');
+    expect(socket.protocol).toBe(CHAT_SOCKET_PROTOCOL);
     expect(socket.url).not.toContain(token);
+
+    socket.close();
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not negotiate token pseudo-protocols when clients send them first', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
+      [`${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`, CHAT_SOCKET_PROTOCOL],
+    );
+
+    await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
+    expect(socket.protocol).toBe(CHAT_SOCKET_PROTOCOL);
+    expect(socket.protocol).not.toContain(token);
 
     socket.close();
     httpServer.close();
