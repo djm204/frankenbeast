@@ -61,10 +61,18 @@ describe('loadProxyOperatorToken', () => {
     expect(resolveFromSecretStore).toHaveBeenCalledWith(ROOT, '/tmp/custom-frankenbeast.json');
   });
 
-  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set', async () => {
+  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set in package env', async () => {
     const load = loaderFor({
       [ROOT]: {},
       [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
+    });
+    await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).rejects.toThrow(/must not be set/);
+  });
+
+  it('fails closed when browser-exposed VITE_BEAST_OPERATOR_TOKEN is set in repo-root env', async () => {
+    const load = loaderFor({
+      [ROOT]: { VITE_BEAST_OPERATOR_TOKEN: 'root-web-token' },
+      [PKG]: {},
     });
     await expect(loadProxyOperatorToken(load, 'production', ROOT, PKG, noSecretStoreToken)).rejects.toThrow(/must not be set/);
   });
