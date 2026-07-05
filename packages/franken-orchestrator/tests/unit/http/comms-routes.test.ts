@@ -128,6 +128,37 @@ describe('commsRoutes', () => {
     });
     expect(external.status).toBe(403);
     expect(await external.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
+
+    const trustedIpv6Loopback = await app.request('http://[::1]/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ipv6-ok' }),
+    });
+    expect(trustedIpv6Loopback.status).toBe(200);
+    expect(await trustedIpv6Loopback.json()).toEqual({ challenge: 'ipv6-ok' });
+  });
+
+  it('uses the trusted remote address instead of the client-controlled host for unsigned webhooks', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+
+    const spoofedHost = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-frankenbeast-remote-address': '203.0.113.10',
+      },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
+    });
+    expect(spoofedHost.status).toBe(403);
+    expect(await spoofedHost.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
   });
 
   it('throws when runtime is not provided', () => {

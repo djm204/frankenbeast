@@ -63,6 +63,36 @@ describe('startChatServer comms pass-through', () => {
     expect(opts).toHaveProperty('commsRuntime', commsRuntime);
   });
 
+  it('passes network security config to createChatApp so comms can read webhook policy', async () => {
+    let config = {
+      security: {
+        profile: 'permissive' as const,
+        webhookSignaturePolicy: 'local-dev-unsigned' as const,
+      },
+    };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-comms-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      commsConfig: { orchestrator: {}, channels: {} },
+      networkControl: {
+        root: '/tmp/project',
+        frankenbeastDir: '/tmp/project/.frankenbeast',
+        configFile: '/tmp/project/.frankenbeast/config.json',
+        getConfig: () => config,
+        setConfig: (next) => {
+          config = next as typeof config;
+        },
+      },
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts.securityConfig?.getSecurityConfig().webhookSignaturePolicy).toBe('local-dev-unsigned');
+  });
+
   it('creates a chat-runtime comms adapter when commsConfig is provided without a runtime', async () => {
     const commsConfig: CommsConfig = {
       orchestrator: {},

@@ -14,6 +14,8 @@ import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
 
 import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
 
+const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
+
 export interface CommsRoutesOptions {
   config: CommsConfig;
   runtime?: CommsRuntimePort;
@@ -43,7 +45,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   if (!verifySignature) {
     app.use('/webhooks/*', async (c, next) => {
-      if (!isLoopbackWebhookRequest(c.req.url)) {
+      if (!isLoopbackWebhookRequest(c.req.raw)) {
         return c.json({ error: 'Unsigned webhooks are only allowed on loopback hosts' }, 403);
       }
       return next();
@@ -118,9 +120,22 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   return app;
 }
 
-function isLoopbackWebhookRequest(url: string): boolean {
-  const hostname = new URL(url).hostname.toLowerCase();
-  return hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '::1';
+function isLoopbackWebhookRequest(request: Request): boolean {
+  const trustedRemoteAddress = request.headers.get(TRUSTED_REMOTE_ADDRESS_HEADER);
+  if (trustedRemoteAddress !== null) {
+    return isLoopbackAddress(trustedRemoteAddress);
+  }
+
+  // Unit tests call Hono directly and therefore do not have an IncomingMessage
+  // socket. In real Node HTTP traffic http-server-utils sets the trusted peer
+  // address header above, after overwriting any client-supplied value.
+  return isLoopbackAddress(new URL(request.url).hostname);
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '::ffff:127.0.0.1';
 }

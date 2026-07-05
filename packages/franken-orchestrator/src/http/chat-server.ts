@@ -23,6 +23,7 @@ import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
+import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -251,6 +252,9 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
       : undefined);
+  const securityConfig = options.networkControl
+    ? createNetworkSecurityConfigAdapter(options.networkControl)
+    : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -261,6 +265,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
+    ...(securityConfig ? { securityConfig } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
     ...(commsRuntime ? { commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
@@ -312,6 +317,38 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
       await closedServer;
+    },
+  };
+}
+
+function createNetworkSecurityConfigAdapter(networkControl: NonNullable<StartChatServerOptions['networkControl']>): {
+  getSecurityConfig: () => SecurityConfig;
+  setSecurityConfig: (config: Partial<SecurityConfig>) => void;
+} {
+  return {
+    getSecurityConfig: () => {
+      const security = networkControl.getConfig().security;
+      const overrides: Partial<Omit<SecurityConfig, 'profile'>> = {};
+      if (security?.injectionDetection !== undefined) overrides.injectionDetection = security.injectionDetection;
+      if (security?.piiMasking !== undefined) overrides.piiMasking = security.piiMasking;
+      if (security?.outputValidation !== undefined) overrides.outputValidation = security.outputValidation;
+      if (security?.webhookSignaturePolicy !== undefined) {
+        overrides.webhookSignaturePolicy = security.webhookSignaturePolicy;
+      }
+      if (security?.allowedDomains !== undefined) overrides.allowedDomains = security.allowedDomains;
+      if (security?.maxTokenBudget !== undefined) overrides.maxTokenBudget = security.maxTokenBudget;
+      if (security?.requireApproval !== undefined) overrides.requireApproval = security.requireApproval;
+      return resolveSecurityConfig(security?.profile ?? 'standard', overrides);
+    },
+    setSecurityConfig: (config) => {
+      const current = networkControl.getConfig();
+      networkControl.setConfig({
+        ...current,
+        security: {
+          ...current.security,
+          ...config,
+        },
+      });
     },
   };
 }
