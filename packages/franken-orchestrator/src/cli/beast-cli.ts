@@ -95,7 +95,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
   let ownsControl = false;
   const getControl = (): BeastControlClient => {
     if (!control) {
-      control = createBeastControlClient(paths);
+      control = createBeastControlClient(paths, services);
       ownsControl = true;
     }
     const activeControl = control;
