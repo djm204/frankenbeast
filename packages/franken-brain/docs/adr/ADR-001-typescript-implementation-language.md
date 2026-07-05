@@ -16,7 +16,7 @@ The module handles:
 
 ## Decision
 
-Use **TypeScript (strict mode)** as the sole implementation language, targeting Node.js `>=22.13.0 <23 || >=24.0.0`.
+Use **TypeScript (strict mode)** as the sole implementation language, targeting Node.js `>=22.13.0 <23 || >=24.0.0 <26`.
 
 - `tsconfig.json` with `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`
 - ESM modules (`"type": "module"` in `package.json`)

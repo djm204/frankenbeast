@@ -35,8 +35,9 @@ async function main(): Promise<void> {
   // Node version
   const [major, minor, patch] = process.versions.node.split('.').map(Number);
   const meetsMinimumNode =
-    (major === 22 && (minor! > 13 || (minor === 13 && patch! >= 0))) || major! >= 24;
-  check('Node.js >= 22.13.0 <23 || >=24.0.0', meetsMinimumNode, `v${process.versions.node}`);
+    (major === 22 && (minor! > 13 || (minor === 13 && patch! >= 0))) ||
+    (major! >= 24 && major! < 26);
+  check('Node.js >=22.13.0 <23 || >=24.0.0 <26', meetsMinimumNode, `v${process.versions.node}`);
 
   // Environment file
   const { existsSync } = await import('node:fs');

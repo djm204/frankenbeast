@@ -14,7 +14,7 @@ Beast mode (`fbeast mcp beast`) is provider-agnostic: `anthropic-api`, `codex-cl
 
 ## Prerequisites
 
-- Node.js `>=22.13.0 <23 || >=24.0.0` for package tasks and orchestrator/dashboard runtime workflows
+- Node.js `>=22.13.0 <23 || >=24.0.0 <26` for package tasks and orchestrator/dashboard runtime workflows
 - npm workspaces (installed at repo root)
 - At least one of: Claude Code CLI, Gemini CLI, or Codex CLI
 - Codex CLI (`codex --version`) — required for full-cycle integration tests

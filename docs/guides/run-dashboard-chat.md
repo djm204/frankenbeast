@@ -10,7 +10,7 @@ This guide starts the Frankenbeast dashboard chat with the real CLI-chat-compati
 
 ## Prerequisites
 
-- Node.js `>=22.13.0 <23 || >=24.0.0`
+- Node.js `>=22.13.0 <23 || >=24.0.0 <26`
 - `npm install` has already been run at the repo root
 - at least one supported CLI chat provider is configured locally
 
