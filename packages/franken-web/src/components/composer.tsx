@@ -4,26 +4,36 @@ import type { ConnectionStatus, SessionStatus } from '../hooks/use-chat-session'
 export interface ComposerProps {
   connectionStatus: ConnectionStatus;
   disabled: boolean;
-  onSend: (content: string) => void;
+  onSend: (content: string) => Promise<void> | void;
   status: SessionStatus;
 }
 
 export function Composer({ connectionStatus, disabled, onSend, status }: ComposerProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
 
-  function submitCurrentValue() {
+  async function submitCurrentValue() {
     const trimmed = value.trim();
-    if (!trimmed) {
+    if (!trimmed || isSending) {
       return;
     }
 
-    onSend(trimmed);
-    setValue('');
+    setError(null);
+    setIsSending(true);
+    try {
+      await onSend(trimmed);
+      setValue('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.');
+    } finally {
+      setIsSending(false);
+    }
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    submitCurrentValue();
+    void submitCurrentValue();
   }
 
   return (
@@ -37,7 +47,7 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
           onKeyDown={(event) => {
             if (event.key === 'Enter' && event.ctrlKey) {
               event.preventDefault();
-              submitCurrentValue();
+              void submitCurrentValue();
             }
           }}
           placeholder="Ask Frankenbeast to plan, explain, execute, or use slash commands like /run or /plan."
@@ -45,13 +55,21 @@ export function Composer({ connectionStatus, disabled, onSend, status }: Compose
           rows={3}
         />
       </label>
+      {error && (
+        <div className="composer__error" role="alert">
+          <span>{error}</span>
+          <button className="button button--secondary button--small" type="button" onClick={() => void submitCurrentValue()} disabled={disabled || isSending}>
+            Retry send
+          </button>
+        </div>
+      )}
       <div className="composer__footer">
         <p className="composer__status">
           <span>{connectionStatus}</span>
           <span>{status}</span>
         </p>
-        <button className="button button--primary" type="submit" disabled={disabled}>
-          Dispatch
+        <button className="button button--primary" type="submit" disabled={disabled || isSending}>
+          {isSending ? 'Dispatching…' : 'Dispatch'}
         </button>
       </div>
     </form>

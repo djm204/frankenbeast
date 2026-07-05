@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { Composer } from '../../src/components/composer.js';
 
 afterEach(cleanup);
@@ -16,15 +16,17 @@ describe('Composer', () => {
     expect(onSend).toHaveBeenCalledWith('hello');
   });
 
-  it('clears input after submit', () => {
-    const onSend = vi.fn();
+  it('clears input after submit', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
     render(<Composer onSend={onSend} disabled={false} connectionStatus="connected" status="idle" />);
 
     const input = screen.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'hello' } });
     fireEvent.submit(input.closest('form')!);
 
-    expect(input.value).toBe('');
+    await waitFor(() => {
+      expect(input.value).toBe('');
+    });
   });
 
   it('disables submit button when disabled prop is true', () => {
