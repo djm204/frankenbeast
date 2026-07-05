@@ -33,6 +33,7 @@ import {
   makeApprovalChannel,
   makeGovernorMemoryPort,
 } from './stubs.js';
+import { TEST_TOKEN_BUDGET } from './token-test-values.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export function createTestBeast(overrides: TestBeastOverrides = {}): TestBeast {
       };
       const cfg: LoopConfig = loopConfig ?? {
         maxIterations: 3,
-        tokenBudget: 100_000,
+        tokenBudget: TEST_TOKEN_BUDGET,
         consensusThreshold: 3,
         sessionId: 'session-001',
         taskId: 'task-001',

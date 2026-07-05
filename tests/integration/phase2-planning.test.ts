@@ -17,13 +17,14 @@ import {
   makeMemoryPort,
   makeObservabilityPort,
 } from '../helpers/stubs.js';
+import { TEST_TOKEN_BUDGET } from '../helpers/token-test-values.js';
 
 // ─── Critique Reviews Clean Code ────────────────────────────────────────────
 
 describe('Phase 2: Planning — Critique Pipeline', () => {
   const defaultLoopConfig: LoopConfig = {
     maxIterations: 3,
-    tokenBudget: 100_000,
+    tokenBudget: TEST_TOKEN_BUDGET,
     consensusThreshold: 3,
     sessionId: 'session-001',
     taskId: 'task-001',

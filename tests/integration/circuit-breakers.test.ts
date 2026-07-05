@@ -26,6 +26,12 @@ import {
   makeGuardrailsPort,
   makeObservabilityPort,
 } from '../helpers/stubs.js';
+import {
+  TEST_TOKEN_BUDGET,
+  TOKEN_OVERRUN_INPUT_TOKENS,
+  TOKEN_OVERRUN_OUTPUT_TOKENS,
+  TOKEN_OVERRUN_TOTAL_TOKENS,
+} from '../helpers/token-test-values.js';
 
 // ─── Max Iteration Breaker ──────────────────────────────────────────────────
 
@@ -47,7 +53,7 @@ describe('Circuit Breaker: MaxIteration (MOD-06)', () => {
 
     const config: LoopConfig = {
       maxIterations: 2,
-      tokenBudget: 100_000,
+      tokenBudget: TEST_TOKEN_BUDGET,
       consensusThreshold: 5,
       sessionId: 'session-001',
       taskId: 'task-001',
@@ -69,9 +75,9 @@ describe('Circuit Breaker: TokenBudget (MOD-06)', () => {
     // check directly (the old sync check()/checkAsync() split was removed).
     const observability: ObservabilityPort = {
       getTokenSpend: vi.fn(async () => ({
-        inputTokens: 80_000,
-        outputTokens: 30_000,
-        totalTokens: 110_000,
+        inputTokens: TOKEN_OVERRUN_INPUT_TOKENS,
+        outputTokens: TOKEN_OVERRUN_OUTPUT_TOKENS,
+        totalTokens: TOKEN_OVERRUN_TOTAL_TOKENS,
         estimatedCostUsd: 5.50,
       })),
     };
@@ -81,7 +87,7 @@ describe('Circuit Breaker: TokenBudget (MOD-06)', () => {
     const state = { iterationCount: 1, failureHistory: new Map<string, number>() };
     const config: LoopConfig = {
       maxIterations: 3,
-      tokenBudget: 100_000,
+      tokenBudget: TEST_TOKEN_BUDGET,
       consensusThreshold: 3,
       sessionId: 'session-001',
       taskId: 'task-001',
@@ -116,7 +122,7 @@ describe('Circuit Breaker: ConsensusFailure (MOD-06)', () => {
 
     const config: LoopConfig = {
       maxIterations: 5,
-      tokenBudget: 100_000,
+      tokenBudget: TEST_TOKEN_BUDGET,
       consensusThreshold: 2, // escalate after 2 failures of same category
       sessionId: 'session-001',
       taskId: 'task-001',
