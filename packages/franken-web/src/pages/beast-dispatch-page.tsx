@@ -45,8 +45,16 @@ function buildPromptControlId(definition: BeastCatalogEntry, prompt: BeastInterv
   return `${definition.id}-${prompt.key}-field`;
 }
 
+function buildPromptLabelId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
+  return `${definition.id}-${prompt.key}-label`;
+}
+
 function buildPromptErrorId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
   return `${definition.id}-${prompt.key}-error`;
+}
+
+function buildPromptHelpId(definition: BeastCatalogEntry, prompt: BeastInterviewPrompt): string {
+  return `${definition.id}-${prompt.key}-help`;
 }
 
 function isBrowserFakePath(value: string): boolean {
@@ -155,7 +163,6 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
   const [moduleToggles, setModuleToggles] = useState<ModuleTogglesState>({});
   const [executionModes, setExecutionModes] = useState<ExecutionModeState>({});
   const [errors, setErrors] = useState<FormErrors>({});
-  const pickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({});
 
   useEffect(() => {
@@ -286,13 +293,15 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
               <div className="beast-card__form">
                 {definition.interviewPrompts.map((prompt) => {
                   const inputId = buildPromptControlId(definition, prompt);
+                  const labelId = buildPromptLabelId(definition, prompt);
                   const errorId = buildPromptErrorId(definition, prompt);
+                  const helpId = buildPromptHelpId(definition, prompt);
                   const inputValue = forms[definition.id]?.[prompt.key] ?? '';
                   const error = errors[definition.id]?.[prompt.key];
 
                   return (
                     <label className="field-stack" htmlFor={inputId} key={prompt.key}>
-                      <span>{prompt.prompt}</span>
+                      <span id={labelId}>{prompt.prompt}</span>
                       {prompt.options && prompt.options.length > 0 ? (
                         <select
                           aria-describedby={error ? errorId : undefined}
@@ -314,42 +323,23 @@ export function BeastDispatchPage(props: BeastDispatchPageProps) {
                       ) : prompt.kind === 'directory' ? (
                         <div className="beast-path-picker">
                           <input
-                            aria-describedby={error ? errorId : undefined}
+                            aria-describedby={error ? `${helpId} ${errorId}` : helpId}
                             aria-invalid={error ? true : undefined}
+                            aria-labelledby={labelId}
                             className="field-control"
                             disabled={props.disabled}
                             id={inputId}
                             onChange={(event) => updateField(definition.id, prompt, event.target.value)}
-                            placeholder="path/to/chunks"
+                            placeholder="repo/path/to/directory"
                             ref={(element) => {
                               fieldRefs.current[`${definition.id}:${prompt.key}`] = element;
                             }}
                             type="text"
                             value={inputValue}
                           />
-                          <button
-                            className="button button--secondary button--compact"
-                            disabled={props.disabled}
-                            onClick={() => pickerRefs.current[`${definition.id}:${prompt.key}`]?.click()}
-                            type="button"
-                          >
-                            {`Choose directory for ${definition.label} ${prompt.key}`}
-                          </button>
-                          <input
-                            ref={(element) => {
-                              pickerRefs.current[`${definition.id}:${prompt.key}`] = element;
-                            }}
-                            aria-hidden="true"
-                            className="beast-path-picker__native"
-                            onChange={(event) => {
-                              const raw = event.target.value;
-                              if (raw) {
-                                updateField(definition.id, prompt, raw);
-                              }
-                            }}
-                            type="file"
-                            {...{ webkitdirectory: '' as unknown as undefined }}
-                          />
+                          <small className="field-hint" id={helpId}>
+                            Enter a repo-relative or server-accessible directory path, for example <code>tasks/chunks</code>.
+                          </small>
                         </div>
                       ) : (
                         <input
