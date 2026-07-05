@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
 
+const SHA256_HEX_REF = /^[a-f0-9]{64}$/;
+
 export class ReplayContentStore {
   private readonly dir: string;
 
@@ -14,7 +16,7 @@ export class ReplayContentStore {
   }
 
   put(content: string): string {
-    const ref = hashContent(content);
+    const ref = hashContent(content).replace(/^sha256:/, '');
     const path = this.blobPath(ref);
     if (!existsSync(path)) {
       writeFileSync(path, content, 'utf8');
@@ -35,6 +37,9 @@ export class ReplayContentStore {
   }
 
   private blobPath(ref: string): string {
-    return join(this.dir, ref.replace(/^sha256:/, ''));
+    if (!SHA256_HEX_REF.test(ref)) {
+      throw new Error('Replay content ref must be exactly 64 lowercase sha256 hex characters');
+    }
+    return join(this.dir, ref);
   }
 }
