@@ -83,18 +83,20 @@ describe('PiiMaskingMiddleware', () => {
   });
 
   it('masks database connection strings', () => {
+    const postgresConnection = `postgres://user:${['db', 'pass'].join('')}@db.example.com:5432/app`;
+    const mongoConnection = `mongodb+srv://admin:${['mongo', 'pass'].join('')}@cluster.example.com/db`;
     const redisConnection = `redis://:${['cache', 'pass'].join('')}@localhost:6379/0`;
     const result = mw.beforeRequest(
       makeRequest(
-        `primary=postgres://user:***@db.example.com:5432/app replica=mongodb+srv://admin:***@cluster.example.com/db cache=${redisConnection}`,
+        `primary=${postgresConnection} replica=${mongoConnection} cache=${redisConnection}`,
       ),
     );
     const content = result.messages[0]!.content as string;
     expect(content).toContain('primary=[CONNECTION_STRING]');
     expect(content).toContain('replica=[CONNECTION_STRING]');
     expect(content).toContain('cache=[CONNECTION_STRING]');
-    expect(content).not.toContain('postgres://user:***@db.example.com:5432/app');
-    expect(content).not.toContain('mongodb+srv://admin:***@cluster.example.com/db');
+    expect(content).not.toContain(postgresConnection);
+    expect(content).not.toContain(mongoConnection);
     expect(content).not.toContain(redisConnection);
   });
 
