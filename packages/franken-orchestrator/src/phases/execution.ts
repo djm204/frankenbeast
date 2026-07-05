@@ -27,6 +27,8 @@ import {
   type Task as RecoveryTask,
 } from 'franken-planner';
 
+export const NON_INTERACTIVE_HITL_REMEDY = 'HITL approval was rejected by the non-interactive fail-closed default. To explicitly allow required HITL gates in trusted CI/headless runs, set FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1; otherwise rerun in an interactive TTY and approve the prompt.';
+
 export class HitlRejectedError extends Error {
   constructor(
     public readonly taskId: string,
@@ -35,6 +37,14 @@ export class HitlRejectedError extends Error {
     super(`Task ${taskId} rejected by governor: ${reason}`);
     this.name = 'HitlRejectedError';
   }
+}
+
+function describeApprovalRejection(reason: string | undefined): string {
+  if (reason === 'defaultDecision') {
+    return NON_INTERACTIVE_HITL_REMEDY;
+  }
+
+  return reason ?? 'Rejected';
 }
 
 /**
@@ -743,13 +753,14 @@ async function executeTask(
       ctx.governorApproval = approval.decision === 'approved';
 
       if (approval.decision === 'rejected' || approval.decision === 'abort') {
+        const reason = describeApprovalRejection(approval.reason);
         ctx.circuitBreakerTripped = true;
-        ctx.addAudit('governor', 'task:rejected', { taskId: task.id, reason: approval.reason });
+        ctx.addAudit('governor', 'task:rejected', { taskId: task.id, reason });
         logger.warn('Execution: task rejected', {
           taskId: task.id,
-          reason: approval.reason,
+          reason,
         });
-        return { taskId: task.id, status: 'skipped', error: approval.reason ?? 'Rejected' };
+        return { taskId: task.id, status: 'skipped', error: reason };
       }
     }
 
