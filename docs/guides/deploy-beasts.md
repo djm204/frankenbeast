@@ -15,7 +15,7 @@ The dashboard talks to two local services when run through `frankenbeast network
 
 ## Prerequisites
 
-- Node.js >= 22 and repo dependencies installed (`npm install`).
+- Node.js `>=22.13.0 <23 || >=24.0.0` and repo dependencies installed (`npm install`).
 - At least one supported CLI provider works locally for chat/execution.
 - An operator token is configured so Beast control routes are enabled.
 - For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
