@@ -908,6 +908,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                     }
                   }).catch(() => undefined);
                 }}
+                resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`}
                 retryDisabled={status !== 'idle' && status !== 'error'}
                 showTypingIndicator={showTypingIndicator}
               />
@@ -923,7 +924,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
             <aside className="chat-page__rail">
               <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
-              <ActivityPane events={activity} />
+              <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
                 pending={Boolean(pendingApproval)}
                 approval={pendingApproval}

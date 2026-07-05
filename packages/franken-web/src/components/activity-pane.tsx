@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
 import type { ActivityEvent } from '../hooks/use-chat-session';
+import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface ActivityPaneProps {
   events: ActivityEvent[];
+  resetKey?: unknown;
 }
 
 type ActivitySeverity = 'info' | 'success' | 'warning' | 'error';
@@ -168,14 +169,11 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
   };
 }
 
-export function ActivityPane({ events }: ActivityPaneProps) {
-  const endRef = useRef<HTMLLIElement>(null);
-
-  useEffect(() => {
-    if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [events.length]);
+export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
+  const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll<HTMLOListElement, HTMLLIElement>(
+    events.length,
+    resetKey,
+  );
 
   return (
     <section className="rail-card" aria-label="Activity">
@@ -184,14 +182,13 @@ export function ActivityPane({ events }: ActivityPaneProps) {
         <h2>Runtime Events</h2>
       </div>
       {events.length === 0 && <p className="rail-card__empty">Waiting for execution events.</p>}
-      <ol className="activity-list" aria-label="Runtime activity timeline">
+      <ol ref={containerRef} className="activity-list" aria-label="Runtime activity timeline" onScroll={handleScroll}>
         {events.map((event, index) => {
           const viewModel = viewModelForActivity(event);
           const risk = riskLabel(event.data ?? {});
           return (
             <li
               key={`${event.type}-${event.timestamp}-${index}`}
-              ref={index === events.length - 1 ? endRef : undefined}
               className={`activity-event activity-event--${viewModel.severity}`}
             >
               <div className="activity-event__meta">
@@ -218,7 +215,13 @@ export function ActivityPane({ events }: ActivityPaneProps) {
             </li>
           );
         })}
+        {events.length > 0 && <li ref={endRef} className="activity-list__sentinel" aria-hidden="true" />}
       </ol>
+      {hasNewItems && (
+        <button className="scroll-jump-button" type="button" onClick={() => scrollToLatest()}>
+          New activity — jump to latest
+        </button>
+      )}
     </section>
   );
 }
