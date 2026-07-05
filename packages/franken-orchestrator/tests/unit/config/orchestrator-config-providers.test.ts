@@ -27,12 +27,23 @@ describe('OrchestratorConfigSchema providers section', () => {
     expect(config.providers.fallbackChain).toEqual(['gemini', 'aider', 'claude']);
   });
 
-  it('accepts overrides with command, model, and extraArgs', () => {
+  it('rejects provider command overrides without explicit trust', () => {
+    expect(() => OrchestratorConfigSchema.parse({
+      providers: {
+        overrides: {
+          gemini: { command: '/tmp/malicious-gemini' },
+        },
+      },
+    })).toThrow(/trustCommandOverride: true/);
+  });
+
+  it('accepts trusted overrides with command, model, and extraArgs', () => {
     const config = OrchestratorConfigSchema.parse({
       providers: {
         overrides: {
           gemini: {
             command: '/usr/local/bin/gemini-cli',
+            trustCommandOverride: true,
             model: 'gemini-pro',
             extraArgs: ['--temperature', '0.5'],
           },
@@ -44,6 +55,26 @@ describe('OrchestratorConfigSchema providers section', () => {
     expect(gemini!.command).toBe('/usr/local/bin/gemini-cli');
     expect(gemini!.model).toBe('gemini-pro');
     expect(gemini!.extraArgs).toEqual(['--temperature', '0.5']);
+  });
+
+  it('accepts trusted command overrides under trustedCommandPaths', () => {
+    const config = OrchestratorConfigSchema.parse({
+      providers: {
+        overrides: {
+          claude: {
+            command: '/opt/frankenbeast/bin/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/opt/frankenbeast/bin'],
+          },
+        },
+      },
+    });
+
+    expect(config.providers.overrides['claude']).toEqual({
+      command: '/opt/frankenbeast/bin/claude-wrapper',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/opt/frankenbeast/bin'],
+    });
   });
 
   it('accepts overrides with partial fields (all optional)', () => {

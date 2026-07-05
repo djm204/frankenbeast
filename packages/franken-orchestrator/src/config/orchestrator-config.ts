@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NetworkConfigSchema } from '../network/network-config.js';
+import { validateProviderCommandOverride } from './provider-command-override-policy.js';
 
 // Consolidation schemas (moved from run-config-v2.ts)
 
@@ -35,6 +36,8 @@ export const BrainConfigSchema = z.object({
 
 export const ProviderOverrideSchema = z.object({
   command: z.string().optional(),
+  trustCommandOverride: z.literal(true).optional(),
+  trustedCommandPaths: z.array(z.string()).optional(),
   model: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
 });
@@ -46,6 +49,16 @@ export const ProvidersConfigSchema = z.object({
   fallbackChain: z.array(z.string()).default(['claude', 'codex']),
   /** Per-provider overrides (command, model, extraArgs). */
   overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
+}).superRefine((providers, ctx) => {
+  for (const [name, override] of Object.entries(providers.overrides)) {
+    for (const message of validateProviderCommandOverride(name, override)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['overrides', name, 'command'],
+        message,
+      });
+    }
+  }
 });
 
 const MIN_TOTAL_TOKEN_BUDGET = 10_000;

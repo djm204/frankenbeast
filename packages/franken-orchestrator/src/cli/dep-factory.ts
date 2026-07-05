@@ -19,6 +19,7 @@ import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { bridgeToBeastConfig, bridgeToExistingDeps } from './dep-bridge.js';
 import { createBeastDeps, type ConsolidatedDeps } from './create-beast-deps.js';
+import { assertTrustedProviderCommandOverrides, type ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
 import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
 import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -42,7 +43,7 @@ export interface CliDepOptions {
   budget: number;
   provider: string;
   providers?: string[] | undefined;
-  providersConfig?: Record<string, { command?: string | undefined; model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -750,6 +751,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   clearSessionArtifacts(options, artifacts);
 
   const observer = await createObserverDeps(options, config, artifacts);
+  assertTrustedProviderCommandOverrides(options.providersConfig, { logger: observer.logger });
   let finalize = createObserverFinalize(observer);
 
   try {

@@ -69,6 +69,7 @@ describe('bridgeToBeastConfig()', () => {
         providersConfig: {
           aider: {
             command: '/opt/bin/aider',
+            trustCommandOverride: true,
             model: 'gpt-4o',
             extraArgs: ['--yes-always'],
           },
@@ -134,7 +135,7 @@ describe('bridgeToBeastConfig()', () => {
       const config = bridgeToBeastConfig(makeOptions({
         provider: 'claude',
         providersConfig: {
-          claude: { command: '/usr/local/bin/claude' },
+          claude: { command: '/usr/local/bin/claude', trustCommandOverride: true },
         },
       }));
       expect(config.providers).toEqual([
@@ -148,6 +149,7 @@ describe('bridgeToBeastConfig()', () => {
         providersConfig: {
           gemini: {
             command: '/opt/bin/gemini',
+            trustCommandOverride: true,
             model: 'gemini-2.5-pro',
             extraArgs: ['--debug'],
           },
@@ -205,7 +207,7 @@ describe('bridgeToBeastConfig()', () => {
       const config = bridgeToBeastConfig(makeOptions({
         provider: 'codex',
         providersConfig: {
-          claude: { command: '/opt/bin/claude', extraArgs: ['--print'] },
+          claude: { command: '/opt/bin/claude', trustCommandOverride: true, extraArgs: ['--print'] },
         },
         runConfig: {
           provider: 'gemini',
@@ -229,7 +231,7 @@ describe('bridgeToBeastConfig()', () => {
       const config = bridgeToBeastConfig(makeOptions({
         provider: 'aider',
         providersConfig: {
-          aider: { command: '/opt/bin/aider' },
+          aider: { command: '/opt/bin/aider', trustCommandOverride: true },
         },
         runConfig: { model: 'gpt-4o' },
       }));

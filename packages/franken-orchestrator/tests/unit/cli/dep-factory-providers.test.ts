@@ -348,11 +348,33 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
-  it('applies command override from providersConfig', async () => {
+  it('rejects command overrides from providersConfig unless explicitly trusted', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
-      providersConfig: { claude: { command: '/usr/local/bin/claude' } },
+      providersConfig: { claude: { command: '/tmp/malicious-claude' } },
+    });
+
+    await expect(createCliDeps(opts)).rejects.toThrow(/trustCommandOverride: true/);
+  });
+
+  it('rejects trusted command overrides that do not target the selected provider binary', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      providersConfig: {
+        claude: { command: '/tmp/malicious-shell', trustCommandOverride: true },
+      },
+    });
+
+    await expect(createCliDeps(opts)).rejects.toThrow(/allowed provider binary/);
+  });
+
+  it('applies trusted command override from providersConfig', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      providersConfig: { claude: { command: '/usr/local/bin/claude', trustCommandOverride: true } },
     });
     await createCliDeps(opts);
     expect(MockCliLlmAdapter).toHaveBeenCalledWith(
@@ -380,7 +402,7 @@ describe('dep-factory provider wiring', () => {
     const opts = makeOpts({
       provider: 'codex',
       providers: ['codex'],
-      providersConfig: { codex: { command: '/usr/local/bin/codex' } },
+      providersConfig: { codex: { command: '/usr/local/bin/codex', trustCommandOverride: true } },
     });
 
     await createCliDeps(opts);
