@@ -270,7 +270,9 @@ function spawnIteration(
       return;
     }
 
-    const cmd = config.command ?? provider.command;
+    const cmd = config.providerCommands?.[provider.name]
+      ?? (provider.name === config.provider ? config.command : undefined)
+      ?? provider.command;
     const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns, sessionContinue });
     const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;
     const args = provider.supportsStreamJson()

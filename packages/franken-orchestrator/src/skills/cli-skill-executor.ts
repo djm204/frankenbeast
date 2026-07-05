@@ -208,7 +208,7 @@ function runVerifyCommand(verifyCommand: string, cwd: string): void {
 
 type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<
   MartinLoopConfig,
-  'command' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
+  'command' | 'providerCommands' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
 >>;
 
 export class CliSkillExecutor {

@@ -32,6 +32,7 @@ export interface MartinLoopConfig {
   readonly maxTurns: number;
   readonly provider: string;
   readonly command?: string | undefined;
+  readonly providerCommands?: Readonly<Record<string, string>> | undefined;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;

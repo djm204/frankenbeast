@@ -397,6 +397,42 @@ describe('MartinLoop', () => {
     expect(onProviderSwitch).toHaveBeenCalledWith('claude', 'codex', 'spawn-error');
   });
 
+  it('does not reuse the primary command override when switching after spawn error', async () => {
+    queueMock({ error: Object.assign(new Error('spawn /custom/missing-claude ENOENT'), { code: 'ENOENT' }) });
+    queueMock({ stdout: 'Codex did it!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      command: '/custom/missing-claude',
+      providers: ['claude', 'codex'],
+      maxIterations: 1,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect((mockSpawn.mock.calls[0] as unknown[])[0]).toBe('/custom/missing-claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+  });
+
+  it('uses per-provider command overrides when switching after spawn error', async () => {
+    queueMock({ error: Object.assign(new Error('spawn /custom/missing-claude ENOENT'), { code: 'ENOENT' }) });
+    queueMock({ stdout: 'Codex did it!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      command: '/custom/missing-claude',
+      providerCommands: {
+        claude: '/custom/missing-claude',
+        codex: '/custom/codex',
+      },
+      providers: ['claude', 'codex'],
+      maxIterations: 1,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect((mockSpawn.mock.calls[0] as unknown[])[0]).toBe('/custom/missing-claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('/custom/codex');
+  });
+
   it('sleeps and retries the original provider when a rate-limited primary is followed by a missing fallback CLI', async () => {
     const sleepFn = vi.fn(async () => undefined);
     const onSleep = vi.fn();
@@ -515,6 +551,7 @@ describe('MartinLoop', () => {
       parseRetryAfter: () => undefined,
       filterEnv: (env) => ({ ...env }),
       supportsStreamJson: () => false,
+      defaultContextWindowTokens: () => 200_000,
     };
 
     const registry = new ProviderRegistry();
