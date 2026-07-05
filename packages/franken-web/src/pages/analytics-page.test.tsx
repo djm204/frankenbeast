@@ -101,6 +101,66 @@ describe('AnalyticsPage', () => {
     });
   });
 
+  it('marks summary metrics as updating instead of silently showing stale filter values', async () => {
+    const client = mockClient();
+    let resolveFilteredSummary!: (summary: Awaited<ReturnType<AnalyticsApiClient['fetchSummary']>>) => void;
+    let resolveFilteredSessions!: (sessions: Awaited<ReturnType<AnalyticsApiClient['fetchSessions']>>) => void;
+    vi.mocked(client.fetchSummary)
+      .mockResolvedValueOnce({
+        totalEvents: 3,
+        uniqueSessions: 2,
+        denialCount: 1,
+        errorCount: 1,
+        failureCount: 0,
+        securityDetectionCount: 1,
+        tokenTotals: { prompt: 100, completion: 50, total: 150 },
+        costTotals: { usd: 0.25 },
+      })
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFilteredSummary = resolve;
+      }));
+    vi.mocked(client.fetchSessions)
+      .mockResolvedValueOnce([
+        { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+      ])
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFilteredSessions = resolve;
+      }));
+
+    render(<AnalyticsPage client={client} />);
+
+    expect(await screen.findByText('Total Events')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText('Metrics last updated for Last 24h.')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Session'), { target: { value: 'session-a' } });
+
+    expect(screen.getByText('Updating metrics for Session session-a · Last 24h...')).toBeTruthy();
+    expect(screen.getByText('Showing previous metric values until refreshed.')).toBeTruthy();
+    expect(screen.getByLabelText('Analytics summary').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByText('3')).toBeTruthy();
+
+    resolveFilteredSummary({
+      totalEvents: 1,
+      uniqueSessions: 1,
+      denialCount: 0,
+      errorCount: 0,
+      failureCount: 0,
+      securityDetectionCount: 0,
+      tokenTotals: { prompt: 40, completion: 10, total: 50 },
+      costTotals: { usd: 0.1 },
+    });
+    resolveFilteredSessions([
+      { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 1, failureCount: 0 },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Analytics summary').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByText('Metrics last updated for Session session-a · Last 24h.')).toBeTruthy();
+    });
+  });
+
   it('navigates event pages and exposes disabled pagination states', async () => {
     const client = mockClient();
     let resolveSecondPage!: (page: AnalyticsEventPage) => void;

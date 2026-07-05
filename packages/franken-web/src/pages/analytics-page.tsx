@@ -47,6 +47,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
+  const [isOverviewLoading, setIsOverviewLoading] = useState(true);
+  const [overviewLastUpdatedFilter, setOverviewLastUpdatedFilter] = useState<string | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(true);
   const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
@@ -58,6 +60,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   useEffect(() => {
     let cancelled = false;
     setOverviewError(null);
+    setIsOverviewLoading(true);
+    const requestedFilterLabel = describeFilters(filters);
 
     void Promise.allSettled([
       client.fetchSummary(filters),
@@ -74,6 +78,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
         setSessions(sessionsResult.value);
       }
       setOverviewError(errors.length > 0 ? errors.join('; ') : null);
+      setOverviewLastUpdatedFilter(requestedFilterLabel);
+      setIsOverviewLoading(false);
     });
 
     return () => {
@@ -112,6 +118,15 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const canGoPrevious = currentPage > 1 && !isEventsLoading;
   const canGoNext = currentPage < totalPages && !isEventsLoading;
   const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
+  const currentFilterLabel = describeFilters(filters);
+  const hasStaleOverview = isOverviewLoading && (summary !== null || sessions.length > 0);
+  const overviewStatus = isOverviewLoading
+    ? hasStaleOverview
+      ? `Updating metrics for ${currentFilterLabel}...`
+      : `Loading metrics for ${currentFilterLabel}...`
+    : overviewLastUpdatedFilter
+      ? `Metrics last updated for ${overviewLastUpdatedFilter}.`
+      : null;
   const activityEvents = useMemo(
     () => events.filter((event) => event.outcome === 'approved' && event.source !== 'governor'),
     [events],
@@ -205,17 +220,30 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
       {loadError && <div className="analytics-alert">{loadError}</div>}
 
-      <section className="analytics-summary-grid" aria-label="Analytics summary">
-        <MetricCard label="Total Events" value={summary?.totalEvents ?? 0} />
-        <MetricCard label="Sessions" value={summary?.uniqueSessions ?? 0} />
-        <MetricCard label="Denials" value={summary?.denialCount ?? 0} tone="danger" />
-        <MetricCard label="Errors" value={(summary?.errorCount ?? 0) + (summary?.failureCount ?? 0)} tone="danger" />
-        <MetricCard label="Detections" value={summary?.securityDetectionCount ?? 0} tone="warning" />
-        <MetricCard label="Tokens" value={summary?.tokenTotals.total ?? 0} />
-        <MetricCard label="Cost" value={`$${(summary?.costTotals.usd ?? 0).toFixed(2)}`} />
+      <section className="analytics-summary-region" aria-busy={isOverviewLoading} aria-label="Analytics summary">
+        {overviewStatus && (
+          <div className="analytics-summary-status" role="status">
+            <span>{overviewStatus}</span>
+            {hasStaleOverview && <span>Showing previous metric values until refreshed.</span>}
+          </div>
+        )}
+        <div className="analytics-summary-grid">
+          <MetricCard label="Total Events" value={summary?.totalEvents ?? '—'} isStale={hasStaleOverview} />
+          <MetricCard label="Sessions" value={summary?.uniqueSessions ?? '—'} isStale={hasStaleOverview} />
+          <MetricCard label="Denials" value={summary?.denialCount ?? '—'} tone="danger" isStale={hasStaleOverview} />
+          <MetricCard
+            label="Errors"
+            value={summary ? summary.errorCount + summary.failureCount : '—'}
+            tone="danger"
+            isStale={hasStaleOverview}
+          />
+          <MetricCard label="Detections" value={summary?.securityDetectionCount ?? '—'} tone="warning" isStale={hasStaleOverview} />
+          <MetricCard label="Tokens" value={summary?.tokenTotals.total ?? '—'} isStale={hasStaleOverview} />
+          <MetricCard label="Cost" value={summary ? `$${summary.costTotals.usd.toFixed(2)}` : '—'} isStale={hasStaleOverview} />
+        </div>
       </section>
 
-      <section className="analytics-filter-bar" aria-label="Analytics filters">
+      <section className="analytics-filter-bar" aria-busy={isOverviewLoading} aria-label="Analytics filters">
         <label className="field-stack">
           <span>Session</span>
           <select
@@ -291,6 +319,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
             ))}
           </select>
         </label>
+
+        {isOverviewLoading && <div className="analytics-filter-status">Refreshing session options...</div>}
       </section>
 
       <section className="analytics-pagination" aria-label="Analytics pagination">
@@ -346,13 +376,34 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   );
 }
 
-function MetricCard({ label, value, tone }: { label: string; value: string | number; tone?: 'danger' | 'warning' }) {
+function MetricCard({
+  isStale = false,
+  label,
+  tone,
+  value,
+}: {
+  isStale?: boolean;
+  label: string;
+  value: string | number;
+  tone?: 'danger' | 'warning';
+}) {
   return (
-    <article className={`analytics-metric ${tone ? `analytics-metric--${tone}` : ''}`}>
+    <article className={`analytics-metric ${tone ? `analytics-metric--${tone}` : ''} ${isStale ? 'analytics-metric--stale' : ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {isStale && <small>Updating</small>}
     </article>
   );
+}
+
+function describeFilters(filters: AnalyticsFilters): string {
+  const parts: string[] = [];
+  if (filters.sessionId) parts.push(`Session ${filters.sessionId}`);
+  if (filters.toolQuery) parts.push(`Tool ${filters.toolQuery}`);
+  if (filters.outcome) parts.push(`Outcome ${filters.outcome}`);
+  const windowLabel = TIME_WINDOWS.find((window) => window.value === (filters.timeWindow ?? '24h'))?.label ?? filters.timeWindow ?? 'Last 24h';
+  parts.push(windowLabel);
+  return parts.join(' · ');
 }
 
 function AnalyticsTable({
