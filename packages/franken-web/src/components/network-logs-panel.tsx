@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface NetworkLogsPanelProps {
   logs: string[];
@@ -44,6 +44,7 @@ export function NetworkLogsPanel({
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
   const [wrapLines, setWrapLines] = useState(true);
   const [tailLogs, setTailLogs] = useState(true);
+  const logListRef = useRef<HTMLOListElement | null>(null);
 
   const loggableServices = services.filter((service) => !service.inProcess || service.hostServiceId);
   const parsedLogs = useMemo(() => logs.map((line, index) => ({ ...parseLogLine(line), index, line })), [logs]);
@@ -61,6 +62,22 @@ export function NetworkLogsPanel({
     ? `${logs.length} ${logs.length === 1 ? 'entry' : 'entries'}`
     : `${visibleLogs.length} of ${logs.length} entries`;
   const downloadName = `${selectedServiceId || 'network'}-network.log`;
+
+  useEffect(() => {
+    if (!tailLogs || !logListRef.current) {
+      return;
+    }
+
+    if (typeof logListRef.current.scrollTo === 'function') {
+      logListRef.current.scrollTo({
+        top: logListRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+      return;
+    }
+
+    logListRef.current.scrollTop = logListRef.current.scrollHeight;
+  }, [tailLogs, visibleText]);
 
   function copyVisibleLogs() {
     if (!visibleText) {
@@ -159,7 +176,11 @@ export function NetworkLogsPanel({
               </a>
             </div>
             {visibleLogs.length > 0 ? (
-              <ol className={`network-logs__lines${wrapLines ? ' network-logs__lines--wrap' : ''}${tailLogs ? ' network-logs__lines--tail' : ''}`} aria-label="Visible network logs">
+              <ol
+                ref={logListRef}
+                className={`network-logs__lines${wrapLines ? ' network-logs__lines--wrap' : ''}${tailLogs ? ' network-logs__lines--tail' : ''}`}
+                aria-label="Visible network logs"
+              >
                 {visibleLogs.map((log) => (
                   <li className={`network-logs__line network-logs__line--${log.level}`} key={`${log.index}:${log.line}`}>
                     <span className="network-logs__line-number">{log.index + 1}</span>

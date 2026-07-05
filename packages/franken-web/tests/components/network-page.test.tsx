@@ -246,6 +246,10 @@ describe('NetworkPage', () => {
   });
 
   it('upgrades network logs into a searchable operational viewer', () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollTo;
+
     render(
       <NetworkPage
         config={baseConfig}
@@ -270,6 +274,7 @@ describe('NetworkPage', () => {
     expect(screen.getByRole('button', { name: 'Copy visible logs' })).toBeDefined();
     expect(screen.getByRole('link', { name: 'Download visible logs' }).getAttribute('download')).toBe('chat-server-network.log');
     expect(screen.getByRole('button', { name: 'Tail live logs' }).getAttribute('aria-pressed')).toBe('true');
+    expect(scrollTo).toHaveBeenCalled();
     expect((screen.getByLabelText('Wrap log lines') as HTMLInputElement).checked).toBe(true);
 
     const errorLine = screen.getByText(/failed to bind port/).closest('li');
@@ -285,5 +290,7 @@ describe('NetworkPage', () => {
     fireEvent.change(screen.getByLabelText('Log level'), { target: { value: 'warn' } });
 
     expect(screen.getByText('No logs match the current search and level filters.')).toBeDefined();
+
+    HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 });
