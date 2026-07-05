@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "INTEGRATION=true vitest run --reporter=verbose",
-    "test:eval": "EVAL=true vitest run --reporter=verbose"
+    "test:eval": "EVAL=true vitest run --reporter=verbose",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

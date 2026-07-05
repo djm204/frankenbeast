@@ -29,7 +29,8 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "INTEGRATION=true vitest run",
     "test:e2e": "E2E=true vitest run",
-    "lint": "eslint src/ tests/"
+    "lint": "eslint src/ tests/",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "frankenbeast",
@@ -43,15 +44,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@franken/critique": "*",
-    "@franken/governor": "*",
-    "@franken/types": "*",
-    "@frankenbeast/observer": "*",
+    "@franken/critique": "0.6.9",
+    "@franken/governor": "0.5.7",
+    "@franken/types": "0.7.4",
+    "@frankenbeast/observer": "0.7.9",
     "@google/genai": "^1.46.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",
-    "franken-planner": "*",
-    "franken-brain": "*",
+    "franken-planner": "0.4.7",
+    "franken-brain": "0.6.5",
     "hono": "^4.12.27",
     "openai": "^6.32.0",
     "ws": "^8.21.0",

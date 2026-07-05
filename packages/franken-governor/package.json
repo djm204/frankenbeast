@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "INTEGRATION=true vitest run"
+    "test:integration": "INTEGRATION=true vitest run",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "frankenbeast",
@@ -30,7 +31,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@franken/types": "*",
+    "@franken/types": "0.7.4",
     "hono": "^4.12.27"
   },
   "devDependencies": {

@@ -15,7 +15,8 @@
     "test:watch": "vitest --reporter=verbose",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --reporter=verbose --config vitest.integration.config.ts",
-    "lint": "eslint src/ tests/"
+    "lint": "eslint src/ tests/",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [],
   "author": "",
@@ -29,7 +30,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "*",
+    "@franken/types": "0.7.4",
     "better-sqlite3": "^12.6.2"
   }
 }
