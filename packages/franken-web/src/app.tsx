@@ -1,10 +1,7 @@
 import { ChatShell } from './components/chat-shell';
+import { resolveBaseUrl } from './lib/resolve-base-url';
 
-export function resolveBaseUrl(
-  locationOrigin: string = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
-): string {
-  return locationOrigin;
-}
+export { resolveBaseUrl } from './lib/resolve-base-url';
 
 const BASE_URL = resolveBaseUrl();
 const PROJECT_ID = import.meta.env.VITE_PROJECT_ID as string | undefined ?? 'default';
