@@ -43,6 +43,59 @@ const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean
   { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
 ];
 
+function formatSessionCount(count: number): string {
+  return `${count} ${count === 1 ? 'message' : 'messages'}`;
+}
+
+function formatRelativeUpdatedTime(value: string): string {
+  const updatedAt = new Date(value).getTime();
+  if (!Number.isFinite(updatedAt)) {
+    return 'updated time unknown';
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - updatedAt) / 1000));
+  if (elapsedSeconds < 60) {
+    return 'updated just now';
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `updated ${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `updated ${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 30) {
+    return `updated ${elapsedDays}d ago`;
+  }
+
+  return `updated ${new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+function shortenSessionId(id: string): string {
+  if (id.length <= 14) {
+    return id;
+  }
+
+  return `${id.slice(0, 8)}…${id.slice(-4)}`;
+}
+
+function formatSessionOptionLabel(session: ChatSessionSummary): string {
+  const preview = session.preview.trim();
+  const details = [
+    session.state,
+    formatSessionCount(session.messageCount),
+    formatRelativeUpdatedTime(session.updatedAt),
+    shortenSessionId(session.id),
+  ];
+
+  return preview ? `${preview} — ${details.join(' · ')}` : details.join(' · ');
+}
+
 function routeFromHash(hash: string): RouteId {
   const candidate = hash.replace(/^#\/?/, '') as RouteId;
   return ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
@@ -191,6 +244,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
+  const [chatSessionsError, setChatSessionsError] = useState<string | null>(null);
+  const [chatSessionsRefreshNonce, setChatSessionsRefreshNonce] = useState(0);
   const [beastCatalog, setBeastCatalog] = useState<BeastCatalogEntry[]>([]);
   const [beastAgents, setBeastAgents] = useState<TrackedAgentSummary[]>([]);
   const [beastRuns, setBeastRuns] = useState<BeastRunSummary[]>([]);
@@ -278,22 +334,31 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   useEffect(() => {
     let cancelled = false;
+    setChatSessionsLoading(true);
+    setChatSessionsError(null);
+
     void chatClient.listSessions(projectId)
       .then((sessions) => {
         if (!cancelled) {
           setChatSessions(sessions);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setChatSessions([]);
+          setChatSessionsError(error instanceof Error ? error.message : 'Unable to load conversations.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setChatSessionsLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [chatClient, projectId, activeSessionId, sessionSeed]);
+  }, [chatClient, projectId, activeSessionId, sessionSeed, chatSessionsRefreshNonce]);
 
   useEffect(() => {
     beastAgentsRef.current = beastAgents;
@@ -671,8 +736,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   <label className="field-stack">
                     <span>Conversation</span>
                     <select
+                      aria-describedby="conversation-status"
                       aria-label="Conversation"
                       className="field-control"
+                      disabled={chatSessionsLoading}
                       onChange={(event) => {
                         const nextId = event.target.value.trim();
                         setSelectedSessionId(nextId || undefined);
@@ -682,11 +749,37 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                       <option value="">Current conversation</option>
                       {chatSessions.map((session) => (
                         <option key={session.id} value={session.id}>
-                          {session.preview ? `${session.id} · ${session.preview}` : session.id}
+                          {formatSessionOptionLabel(session)}
                         </option>
                       ))}
                     </select>
+                    {chatSessionsLoading ? (
+                      <small id="conversation-status" className="field-hint" role="status">
+                        Loading saved conversations…
+                      </small>
+                    ) : chatSessionsError ? (
+                      <small id="conversation-status" className="field-error" role="alert">
+                        Failed to load conversations: {chatSessionsError}
+                      </small>
+                    ) : chatSessions.length === 0 ? (
+                      <small id="conversation-status" className="field-hint">
+                        No saved conversations yet.
+                      </small>
+                    ) : (
+                      <small id="conversation-status" className="field-hint">
+                        {chatSessions.length} saved {chatSessions.length === 1 ? 'conversation' : 'conversations'} available.
+                      </small>
+                    )}
                   </label>
+                  {chatSessionsError ? (
+                    <button
+                      className="button button--secondary button--compact"
+                      onClick={() => setChatSessionsRefreshNonce((current) => current + 1)}
+                      type="button"
+                    >
+                      Retry conversations
+                    </button>
+                  ) : null}
                   <button
                     className="button button--secondary"
                     onClick={() => {
