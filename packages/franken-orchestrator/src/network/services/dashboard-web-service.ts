@@ -31,6 +31,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
       ],
       cwd: context.repoRoot,
       env: {
+        FRANKENBEAST_CONFIG_FILE: context.configFile ?? '',
         VITE_API_URL: '',
         VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
         VITE_BEAST_API_PROXY_TARGET: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,

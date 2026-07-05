@@ -59,12 +59,13 @@ that present no token or an incorrect token are rejected with `401` via
   control plane. Direct comms injection now requires the operator token,
   closing the webhook-signature bypass while preserving signed-webhook ingress.
 - Positive: No new runtime or auth scheme — reuses ADR-034 middleware and the
-  existing `VITE_BEAST_OPERATOR_TOKEN` / `FRANKENBEAST_BEAST_OPERATOR_TOKEN`
-  plumbing already wired through first-party clients.
-- Trade-off: First-party callers of the network/comms/security/skills/dashboard/
-  analytics APIs must send the operator token (`Authorization: Bearer <token>`
-  or `x-frankenbeast-operator-token`) once a token is configured. Frontend API
-  clients that previously omitted it must plumb it through.
+  existing `FRANKENBEAST_BEAST_OPERATOR_TOKEN` server-side plumbing. Browser
+  clients remain same-origin and do not receive the long-lived operator token.
+- Trade-off: Non-browser first-party callers of the network/comms/security/
+  skills/dashboard/analytics APIs must send the operator token
+  (`Authorization: Bearer <token>` or `x-frankenbeast-operator-token`) once a token
+  is configured. Vite dev browser requests rely on the server-side proxy to
+  attach the token.
 - Trade-off: Mirroring ADR-034, when no operator token is configured the gate
   is inactive; loopback/dev exposure relies on `startChatServer`'s server-level
   fail-closed check rather than per-route rejection.

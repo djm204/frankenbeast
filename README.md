@@ -380,14 +380,14 @@ npm --workspace @frankenbeast/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
-If you run the backend on a different port:
+If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_URL=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
 ```
 
-For Beast controls, set the operator token once in the repo root `.env` so both the server and dashboard see it:
+For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
 
 ```env
 FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
@@ -561,11 +561,11 @@ Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is
 
 ### Operator token setup
 
-`frankenbeast init` generates a strong random operator token and stores it in the backend. To wire the franken-web dashboard:
+`frankenbeast init` generates a strong random operator token and stores it in the backend. The franken-web dashboard must not receive that long-lived token in browser-readable `VITE_*` env. To wire local dashboard development:
 
 1. Run `frankenbeast init` — it prints the token once after generation.
-2. Copy the token into `packages/franken-web/.env.local` as `VITE_BEAST_OPERATOR_TOKEN=<token>`.
-3. The orchestrator resolves the same token from the secret store on startup — both sides must match.
+2. Keep the token server-side: use the configured secret store or set `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in a local, uncommitted env file.
+3. Run the dashboard through same-origin backend routes. In Vite dev mode, use `VITE_API_PROXY_TARGET`/`VITE_BEAST_API_PROXY_TARGET` so the Vite server attaches the token to proxy requests without exposing it to the browser bundle.
 
 ### Non-interactive / CI usage
 

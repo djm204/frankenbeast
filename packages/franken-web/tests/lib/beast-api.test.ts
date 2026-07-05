@@ -5,13 +5,13 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 describe('BeastApiClient', () => {
-  const client = new BeastApiClient('http://localhost:3000', 'operator-token');
+  const client = new BeastApiClient('http://localhost:3000');
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('loads the Beast catalog with operator auth', async () => {
+  it('loads the Beast catalog without browser operator auth', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -27,11 +27,10 @@ describe('BeastApiClient', () => {
       'http://localhost:3000/v1/beasts/catalog',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({
-          authorization: 'Bearer operator-token',
-        }),
       }),
     );
+    const init = mockFetch.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(init.headers).has('authorization')).toBe(false);
   });
 
   it('creates tracked agents and loads tracked agent detail', async () => {
@@ -263,9 +262,10 @@ describe('BeastApiClient', () => {
         'http://localhost:3000/v1/beasts/events/ticket',
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ authorization: 'Bearer operator-token' }),
         }),
       );
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      expect(new Headers(init.headers).has('authorization')).toBe(false);
       expect(MockEventSource).toHaveBeenCalledWith(
         'http://localhost:3000/v1/beasts/events/stream?ticket=sse-ticket',
       );
