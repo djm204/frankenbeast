@@ -76,7 +76,7 @@ describe('DashboardPage', () => {
     const toggle = await screen.findByRole('switch', { name: 'Enable shell' });
     fireEvent.click(toggle);
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Could not enable shell; the switch was rolled back. HTTP 500');
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not enable shell; the switch was restored to the latest confirmed dashboard state. HTTP 500');
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
     });
@@ -100,7 +100,7 @@ describe('DashboardPage', () => {
     render(<DashboardPage client={client} />);
     fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Could not save security profile strict; the previous profile was restored. HTTP 409');
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save security profile strict; the profile was restored to the latest confirmed dashboard state. HTTP 409');
     await waitFor(() => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('standard');
     });
@@ -152,5 +152,68 @@ describe('DashboardPage', () => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('permissive');
     });
     expect(screen.queryByText(/Could not save security profile strict/)).toBeNull();
+  });
+
+  it('keeps an SSE snapshot authoritative when the initial fetch fails late', async () => {
+    const initialFetch = deferred<DashboardSnapshot>();
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockReturnValue(initialFetch.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (snapshot: DashboardSnapshot) => void) => {
+        onSnapshot(snapshot);
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    expect(await screen.findByRole('switch', { name: 'Enable shell' })).toBeTruthy();
+
+    initialFetch.reject(new Error('HTTP 503'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Unable to load dashboard/)).toBeNull();
+      expect(screen.getByRole('switch', { name: 'Enable shell' })).toBeTruthy();
+    });
+  });
+
+  it('restores the last confirmed skill baseline when overlapping toggles both fail', async () => {
+    const firstToggle = deferred<void>();
+    const secondToggle = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(firstToggle.promise)
+        .mockReturnValueOnce(secondToggle.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+
+    secondToggle.reject(new Error('HTTP 500'));
+    firstToggle.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
+  it('restores the last confirmed security profile when overlapping saves both fail', async () => {
+    const firstSave = deferred<void>();
+    const secondSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(firstSave.promise)
+        .mockReturnValueOnce(secondSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+
+    secondSave.reject(new Error('HTTP 409'));
+    firstSave.reject(new Error('HTTP 409'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('standard');
+    });
   });
 });

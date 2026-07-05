@@ -3,7 +3,7 @@ import { useDashboardStore } from '../stores/dashboard-store';
 import { SkillCatalogBrowser } from '../components/skills/skill-catalog-browser';
 import { SecurityPanel } from '../components/security/security-panel';
 import { ProviderPanel } from '../components/providers/provider-panel';
-import type { DashboardApiClient } from '../lib/dashboard-api';
+import type { DashboardApiClient, DashboardSnapshot } from '../lib/dashboard-api';
 
 interface DashboardPageProps {
   client: DashboardApiClient;
@@ -39,14 +39,22 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const loadSequenceRef = useRef(0);
   const skillMutationSequenceRef = useRef<Record<string, number>>({});
   const securityMutationSequenceRef = useRef(0);
-  const skillsRef = useRef(skills);
-  const securityProfileRef = useRef(security?.profile);
+  const confirmedSnapshotRef = useRef<DashboardSnapshot | null>(null);
+  const confirmedSnapshotVersionRef = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillError, setSkillError] = useState<SkillMutationError | null>(null);
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
 
-  useEffect(() => { skillsRef.current = skills; }, [skills]);
-  useEffect(() => { securityProfileRef.current = security?.profile; }, [security?.profile]);
+  const applyConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
+    confirmedSnapshotRef.current = snapshot;
+    confirmedSnapshotVersionRef.current += 1;
+    setSnapshot(snapshot);
+  }, [setSnapshot]);
+
+  const restoreConfirmedSnapshot = useCallback(() => {
+    const confirmedSnapshot = confirmedSnapshotRef.current;
+    if (confirmedSnapshot) applyConfirmedSnapshot(confirmedSnapshot);
+  }, [applyConfirmedSnapshot]);
 
   const loadSnapshot = useCallback(() => {
     const sequence = loadSequenceRef.current + 1;
@@ -56,14 +64,15 @@ export function DashboardPage({ client }: DashboardPageProps) {
     client.fetchSnapshot()
       .then((snap) => {
         if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
-        setSnapshot(snap);
+        applyConfirmedSnapshot(snap);
       })
       .catch((error) => {
         if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
+        if (confirmedSnapshotRef.current) return;
         setLoadError(`Unable to load dashboard. ${describeError(error)}`);
         setLoading(false);
       });
-  }, [client, setLoading, setSnapshot]);
+  }, [applyConfirmedSnapshot, client, setLoading]);
 
   useEffect(() => {
     // Note: SSE snapshot events replace full store state. If the server pushes
@@ -75,7 +84,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     client.subscribeToDashboard((snap) => {
       if (!mountedRef.current) return;
       setLoadError(null);
-      setSnapshot(snap);
+      applyConfirmedSnapshot(snap);
     })
       .then((nextUnsub) => {
         if (!mountedRef.current) {
@@ -89,7 +98,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         setLoadError(`Unable to stream dashboard updates. ${describeError(error)}`);
       });
     return () => { mountedRef.current = false; unsub?.(); };
-  }, [client, loadSnapshot, setSnapshot]);
+  }, [applyConfirmedSnapshot, client, loadSnapshot]);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
     const sequence = (skillMutationSequenceRef.current[name] ?? 0) + 1;
@@ -98,31 +107,29 @@ export function DashboardPage({ client }: DashboardPageProps) {
     setSkillError(null);
     client.toggleSkill(name, enabled).catch((error) => {
       if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
-      const currentSkill = skillsRef.current.find((skill) => skill.name === name);
-      if (currentSkill?.enabled === enabled) toggleSkill(name);
+      restoreConfirmedSnapshot();
       setSkillError({
         name,
         enabled,
-        message: `Could not ${enabled ? 'enable' : 'disable'} ${name}; the switch was rolled back. ${describeError(error)}`,
+        message: `Could not ${enabled ? 'enable' : 'disable'} ${name}; the switch was restored to the latest confirmed dashboard state. ${describeError(error)}`,
       });
     });
-  }, [client, toggleSkill]);
+  }, [client, restoreConfirmedSnapshot, toggleSkill]);
 
   const handleSecurityProfileChange = useCallback((profile: string) => {
     const sequence = securityMutationSequenceRef.current + 1;
     securityMutationSequenceRef.current = sequence;
-    const previousProfile = securityProfileRef.current;
     setSecurityProfile(profile);
     setSecurityError(null);
     client.updateSecurityProfile(profile).catch((error) => {
       if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
-      if (previousProfile && securityProfileRef.current === profile) setSecurityProfile(previousProfile);
+      restoreConfirmedSnapshot();
       setSecurityError({
         profile,
-        message: `Could not save security profile ${profile}; the previous profile was restored. ${describeError(error)}`,
+        message: `Could not save security profile ${profile}; the profile was restored to the latest confirmed dashboard state. ${describeError(error)}`,
       });
     });
-  }, [client, setSecurityProfile]);
+  }, [client, restoreConfirmedSnapshot, setSecurityProfile]);
 
   if (loading) return <div className="dashboard-loading">Loading dashboard...</div>;
 
