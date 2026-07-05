@@ -213,7 +213,7 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
     [baseUrl, beastOperatorToken],
   );
   const beastClient = useMemo(
-    () => (beastOperatorToken ? new BeastApiClient(baseUrl, beastOperatorToken) : null),
+    () => new BeastApiClient(baseUrl, beastOperatorToken),
     [baseUrl, beastOperatorToken],
   );
 
@@ -269,15 +269,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
 
   useEffect(() => {
     if (route !== 'beasts') {
-      return;
-    }
-    if (!beastClient) {
-      setBeastError('Set VITE_BEAST_OPERATOR_TOKEN to use the secure Beast control API.');
-      setBeastCatalog([]);
-      setBeastAgents([]);
-      setBeastRuns([]);
-      setBeastContainerRuntime(undefined);
-      setBeastAgentDetail(null);
       return;
     }
     const client = beastClient;
@@ -713,7 +704,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               setBeastAgentDetail(null);
             }}
             onLaunch={async (config) => {
-              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
@@ -755,7 +745,6 @@ export function ChatShell({ baseUrl, beastOperatorToken, projectId, sessionId, v
               });
             }}
             onSaveAgentConfig={async (agentId, values) => {
-              if (!beastClient) throw new Error('Beast API not available. Check VITE_BEAST_OPERATOR_TOKEN.');
               setBeastError(null);
               await beastClient.patchAgentConfig(agentId, values);
               const detail = await beastClient.getAgent(agentId);

@@ -48,7 +48,7 @@ export type {
 export class BeastApiClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly operatorToken: string,
+    private readonly operatorToken?: string,
   ) {}
 
   async getCatalog(): Promise<BeastCatalogEntry[]> {
@@ -269,7 +269,9 @@ export class BeastApiClient {
 
   private async requestRaw<T>(path: string, init: RequestInit): Promise<T> {
     const headers = normalizeHeaders(init.headers);
-    headers.authorization = `Bearer ${this.operatorToken}`;
+    if (this.operatorToken) {
+      headers.authorization = `Bearer ${this.operatorToken}`;
+    }
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
@@ -283,7 +285,9 @@ export class BeastApiClient {
 
   private async requestVoid(path: string, init: RequestInit): Promise<void> {
     const headers = normalizeHeaders(init.headers);
-    headers.authorization = `Bearer ${this.operatorToken}`;
+    if (this.operatorToken) {
+      headers.authorization = `Bearer ${this.operatorToken}`;
+    }
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,

@@ -1,42 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
-import { loadBeastOperatorToken, type EnvLoader } from '../vite-env';
+import { describe, expect, it } from 'vitest';
+import { assertNoBundledOperatorTokenEnv } from '../vite-env';
 
-const ROOT = '/repo';
-const PKG = '/repo/packages/franken-web';
-
-/** Build a loader that returns a different env map per directory. */
-function loaderFor(byDir: Record<string, Record<string, string>>): EnvLoader {
-  return vi.fn((_mode: string, dir: string) => byDir[dir] ?? {});
-}
-
-describe('loadBeastOperatorToken', () => {
-  it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file', () => {
-    // Regression: the package-dir-only load missed the documented root .env.
-    const load = loaderFor({
-      [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
-      [PKG]: {},
-    });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
+describe('assertNoBundledOperatorTokenEnv', () => {
+  it('allows non-browser operator token env because it is not VITE-prefixed', () => {
+    expect(() => assertNoBundledOperatorTokenEnv({
+      FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'server-side-token',
+    })).not.toThrow();
   });
 
-  it('falls back to a package-level VITE_BEAST_OPERATOR_TOKEN override', () => {
-    const load = loaderFor({
-      [ROOT]: {},
-      [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
-    });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('web-token');
+  it('rejects VITE_BEAST_OPERATOR_TOKEN because Vite bundles VITE-prefixed env', () => {
+    expect(() => assertNoBundledOperatorTokenEnv({
+      VITE_BEAST_OPERATOR_TOKEN: 'browser-token',
+    })).toThrow(/VITE_\* variables are bundled into browser code/);
   });
 
-  it('prefers the root FRANKENBEAST token when both are present', () => {
-    const load = loaderFor({
-      [ROOT]: { FRANKENBEAST_BEAST_OPERATOR_TOKEN: 'root-token' },
-      [PKG]: { VITE_BEAST_OPERATOR_TOKEN: 'web-token' },
-    });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('root-token');
-  });
-
-  it('returns an empty string when no token is configured anywhere', () => {
-    const load = loaderFor({ [ROOT]: {}, [PKG]: {} });
-    expect(loadBeastOperatorToken(load, 'production', ROOT, PKG)).toBe('');
+  it('ignores empty VITE_BEAST_OPERATOR_TOKEN values', () => {
+    expect(() => assertNoBundledOperatorTokenEnv({
+      VITE_BEAST_OPERATOR_TOKEN: '   ',
+    })).not.toThrow();
   });
 });

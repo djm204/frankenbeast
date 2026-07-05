@@ -11,7 +11,7 @@ describe('BeastApiClient', () => {
     vi.clearAllMocks();
   });
 
-  it('loads the Beast catalog with operator auth', async () => {
+  it('loads the Beast catalog with operator auth when a token is explicitly provided', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -32,6 +32,19 @@ describe('BeastApiClient', () => {
         }),
       }),
     );
+  });
+
+  it('omits operator auth when no browser token is configured', async () => {
+    const sameOriginClient = new BeastApiClient('http://localhost:3000');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    });
+
+    await sameOriginClient.getCatalog();
+
+    const init = mockFetch.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(init.headers).get('authorization')).toBeNull();
   });
 
   it('creates tracked agents and loads tracked agent detail', async () => {

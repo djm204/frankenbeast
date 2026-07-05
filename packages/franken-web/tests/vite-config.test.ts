@@ -15,16 +15,14 @@ describe('vite dev proxy configuration', () => {
   });
 });
 
-describe('operator token bridge', () => {
-  it('bridges the resolved operator token into the client build', () => {
-    expect(CONFIG_SOURCE).toContain("'import.meta.env.VITE_BEAST_OPERATOR_TOKEN'");
+describe('operator token hardening', () => {
+  it('does not bridge an operator token into the client build', () => {
+    expect(CONFIG_SOURCE).not.toContain("'import.meta.env.VITE_BEAST_OPERATOR_TOKEN'");
+    expect(CONFIG_SOURCE).not.toContain('loadBeastOperatorToken');
+    expect(CONFIG_SOURCE).not.toContain("fileURLToPath(new URL('../../', import.meta.url))");
   });
 
-  it('resolves the token via the shared helper, reading from the repo root', () => {
-    // Resolution precedence is unit-tested in vite-env.test.ts; here we only
-    // assert the config delegates to the helper and passes the repo-root dir
-    // (so the documented root .env is read despite cwd = package dir).
-    expect(CONFIG_SOURCE).toContain('loadBeastOperatorToken(loadEnv, mode, repoRootDir, process.cwd())');
-    expect(CONFIG_SOURCE).toContain("fileURLToPath(new URL('../../', import.meta.url))");
+  it('fails startup when a VITE-prefixed operator token would be bundled', () => {
+    expect(CONFIG_SOURCE).toContain('assertNoBundledOperatorTokenEnv(env)');
   });
 });

@@ -29,18 +29,15 @@ hardening with TDD:
 - Generalize the existing beast operator-auth middleware into a shared
   `requireOperatorAuth` (`packages/franken-orchestrator/src/http/operator-auth.ts`).
   `createChatApp` applies it to `/v1/chat/*` whenever an operator token is
-  configured (explicit `operatorToken` or `beastControl.operatorToken` —
-  matching the existing `VITE_BEAST_OPERATOR_TOKEN` pattern franken-web
-  already uses for beast routes). `/health` stays public. `beast-auth.ts`
-  delegates to the shared helper.
+  configured (explicit `operatorToken` or `beastControl.operatorToken`).
+  `/health` stays public. `beast-auth.ts` delegates to the shared helper.
 - **Fail-closed startup**: `startChatServer` refuses to start when chat is
   *exposed* (managed-network mode OR non-loopback host) without an effective
   operator token. Loopback-only dev without a token remains allowed.
 - **First-party client plumbing**: `ChatApiClient` (franken-web) accepts an
-  operator token and sends `Authorization: Bearer …` on every `/v1/chat/*`
-  request — wired from `VITE_BEAST_OPERATOR_TOKEN` via `ChatShell`,
-  consistent with `BeastApiClient`. `network/chat-attach.ts` accepts an
-  operator token and presents it on remote session create; the CLI resolves
+  operator token and sends `Authorization: Bearer <token>` on every `/v1/chat/*`
+  request when a token is explicitly passed. `network/chat-attach.ts` accepts
+  an operator token and presents it on remote session create; the CLI resolves
   it via the same `resolveBeastOperatorToken` path as `chat-server`.
 - **Iteration history:** PR #296 Round-1 originally decoupled chat from the
   beast token to avoid breaking franken-web; Round-2 Codex review correctly
@@ -85,16 +82,12 @@ Commits: `9cb1259` (chat auth), `b984d2d` (non-interactive HITL),
 This chunk does not add OIDC, downscoped cloud-token issuance, or transport
 encryption (TLS/mTLS). Those remain separate future specs.
 
-**Browser static-token limitation.** franken-web carries
-`VITE_BEAST_OPERATOR_TOKEN` as a build-time env var that is therefore embedded
-in the client bundle. This is the *pre-existing*, repo-wide mechanism (already
-used by `BeastApiClient` for beast routes) — chat now follows the same pattern
-for consistency. Replacing the static token with short-lived, server-minted
-bootstrap credentials is a broader hardening initiative tracked separately;
-the present change closes the audited gap (chat requires a token in any
-exposed deployment) without introducing a new secret-exposure pattern. The
-chat session-token mechanism already exists for the WebSocket path;
-extending it to the HTTP bootstrap is the next natural step.
+**Browser static-token limitation removed.** franken-web no longer accepts
+`VITE_BEAST_OPERATOR_TOKEN` because Vite embeds `VITE_*` values in the client
+bundle. Operator credentials must remain in the orchestrator/server-side
+secret path; if the dashboard needs authenticated browser access, use a
+server-side proxy or short-lived server-minted bootstrap credentials rather
+than bundling the long-lived operator token.
 
 ## Alternatives Considered
 

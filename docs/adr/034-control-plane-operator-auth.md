@@ -59,8 +59,8 @@ that present no token or an incorrect token are rejected with `401` via
   control plane. Direct comms injection now requires the operator token,
   closing the webhook-signature bypass while preserving signed-webhook ingress.
 - Positive: No new runtime or auth scheme — reuses ADR-034 middleware and the
-  existing `VITE_BEAST_OPERATOR_TOKEN` / `FRANKENBEAST_BEAST_OPERATOR_TOKEN`
-  plumbing already wired through first-party clients.
+  existing server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` / secret-store
+  plumbing. Browser bundles must not carry the long-lived operator token.
 - Trade-off: First-party callers of the network/comms/security/skills/dashboard/
   analytics APIs must send the operator token (`Authorization: Bearer <token>`
   or `x-frankenbeast-operator-token`) once a token is configured. Frontend API

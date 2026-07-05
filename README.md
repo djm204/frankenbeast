@@ -561,11 +561,11 @@ Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is
 
 ### Operator token setup
 
-`frankenbeast init` generates a strong random operator token and stores it in the backend. To wire the franken-web dashboard:
+`frankenbeast init` generates a strong random operator token and stores it in the backend. Keep that token server-side for the franken-web dashboard:
 
 1. Run `frankenbeast init` — it prints the token once after generation.
-2. Copy the token into `packages/franken-web/.env.local` as `VITE_BEAST_OPERATOR_TOKEN=<token>`.
-3. The orchestrator resolves the same token from the secret store on startup — both sides must match.
+2. Do not copy the token into `packages/franken-web/.env.local` as a `VITE_*` variable; Vite bundles those values into browser code and franken-web now fails startup/build if `VITE_BEAST_OPERATOR_TOKEN` is set.
+3. The orchestrator resolves the token from the secret store or server-side env on startup.
 
 ### Non-interactive / CI usage
 

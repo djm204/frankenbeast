@@ -20,17 +20,16 @@ The dashboard talks to two local services when run through `frankenbeast network
 - An operator token is configured so Beast control routes are enabled.
 - For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
 
-Use the operator token already configured for the repo, or update the configured token first and then reuse that same value for the backend and frontend. In initialized repos, the backend may resolve `network.operatorTokenRef` from the configured secret store before it reads token environment variables, so exporting a throwaway value only for the dashboard can make browser requests fail with 401s.
+Use the operator token already configured for the repo, or update the configured token first and keep that value on the backend. In initialized repos, the backend may resolve `network.operatorTokenRef` from the configured secret store before it reads token environment variables, so exporting a throwaway value in the shell may not change the accepted token.
 
 For a new local-only setup without a stored token, set one shell variable and reuse it for both processes:
 
 ```bash
 export OPERATOR_TOKEN='dev-operator-token'
 export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
-export VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 ```
 
-`beasts-daemon` and `chat-server` also discover the token from the configured secret store, the repo `.env`, or `packages/franken-web/.env.local` using either `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or `VITE_BEAST_OPERATOR_TOKEN`.
+`beasts-daemon` and `chat-server` discover the token from the configured secret store, the repo `.env`, or server-side env using `FRANKENBEAST_BEAST_OPERATOR_TOKEN`. Do not set `VITE_BEAST_OPERATOR_TOKEN`; franken-web refuses to start when that browser-bundled variable is present.
 
 ## 1. Start the backend
 
@@ -68,8 +67,7 @@ If you bind to a non-loopback host or run in managed network mode, the server re
 In a second terminal:
 
 ```bash
-VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
-  npm --workspace @frankenbeast/web run dev:chat
+npm --workspace @frankenbeast/web run dev:chat
 ```
 
 If the backend is not on the local dev default `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests. Production deployments should use TLS-terminated `https://`/`wss://` endpoints; plain HTTP is only appropriate for isolated local development.
@@ -77,7 +75,6 @@ If the backend is not on the local dev default `http://127.0.0.1:3737` while you
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
 VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
-VITE_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
   npm --workspace @frankenbeast/web run dev
 ```
 
@@ -199,14 +196,14 @@ frankenbeast beasts delete <agent-id>
 
 ## Troubleshooting
 
-`The Beasts page says to set VITE_BEAST_OPERATOR_TOKEN`
+`franken-web refuses to start because VITE_BEAST_OPERATOR_TOKEN is set`
 
-- Start the frontend with `VITE_BEAST_OPERATOR_TOKEN` set.
-- Make sure the backend has the same token via `FRANKENBEAST_BEAST_OPERATOR_TOKEN`, `VITE_BEAST_OPERATOR_TOKEN`, `.env`, or `packages/franken-web/.env.local`.
+- Remove `VITE_BEAST_OPERATOR_TOKEN` from your shell and `packages/franken-web/.env*` files. Vite would bundle that value into browser code.
+- Keep the operator token in the orchestrator secret store, repo root `.env`, or server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` instead.
 
 `The catalog or agents fail with 401`
 
-- The frontend token and backend token differ. Use or update the configured operator token, then make the dashboard use that same token for chat, network, dashboard, and Beast routes; do not assume a dummy `VITE_BEAST_OPERATOR_TOKEN` overrides a stored backend token.
+- Check that the orchestrator resolved the expected server-side operator token and that dashboard requests are going through the same-origin/proxy path. Do not set a dummy `VITE_BEAST_OPERATOR_TOKEN`; franken-web blocks it before build/dev startup.
 
 `A dashboard launch fails validation for design-interview or martin-loop`
 
