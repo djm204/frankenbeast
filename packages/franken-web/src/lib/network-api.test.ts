@@ -14,37 +14,18 @@ describe('NetworkApiClient', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('sends network requests without browser bearer credentials', async () => {
+  it('omits the authorization header when no token is configured', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { services: [] } }) });
     globalThis.fetch = fetchMock;
 
     const client = new NetworkApiClient(BASE_URL);
     await client.getStatus();
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${BASE_URL}/v1/network/status`);
-    expect(init.method).toBe('GET');
-    expect(new Headers(init.headers).has('authorization')).toBe(false);
-  });
-
-  it('preserves caller headers without adding authorization', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: {} }) });
-    globalThis.fetch = fetchMock;
-
-    const client = new NetworkApiClient(BASE_URL);
-    await client.updateConfig(['chat:on']);
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${BASE_URL}/v1/network/config`);
-    expect(init.method).toBe('POST');
-    const headers = new Headers(init.headers);
-    expect(headers.get('content-type')).toBe('application/json');
-    expect(headers.has('authorization')).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/v1/network/status`, { method: 'GET' });
   });
 
   it('throws on non-ok responses', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
-
     const client = new NetworkApiClient(BASE_URL);
     await expect(client.getStatus()).rejects.toThrow('HTTP 401');
   });

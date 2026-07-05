@@ -14,7 +14,7 @@ A React-based single-page application (SPA) that provides a "Control Plane" for 
 
 ## Integration Details
 - **Backend**: Communicates with the `franken-orchestrator` HTTP server (default port 3737).
-- **Authentication**: Uses a shared `FRANKENBEAST_BEAST_OPERATOR_TOKEN` defined in the root `.env`.
+- **Authentication**: Browser clients call same-origin APIs without operator-token headers; the local Vite proxy/orchestrator injects the server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` for protected control-plane routes.
 - **Protocol**: Uses standard REST for agent management and WebSockets for the live chat feed.
 
 ## Key Components (src/)

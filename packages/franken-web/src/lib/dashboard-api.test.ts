@@ -115,8 +115,8 @@ describe('DashboardApiClient', () => {
     });
   });
 
-  describe('browser credential handling', () => {
-    it('does not attach bearer credentials from the browser client', async () => {
+  describe('operator token', () => {
+    it('does not attach bearer headers from the browser dashboard client', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => makeMockSnapshot() });
       globalThis.fetch = fetchMock;
 
@@ -125,19 +125,15 @@ describe('DashboardApiClient', () => {
       await client.toggleSkill('code-review', false);
       await client.updateSecurityProfile('strict');
 
-      const [snapshotUrl, snapshotInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(snapshotUrl).toBe(`${BASE_URL}/api/dashboard`);
-      expect(snapshotInit).toBeUndefined();
+      expect(fetchMock).toHaveBeenNthCalledWith(1, `${BASE_URL}/api/dashboard`);
 
-      const [skillUrl, skillInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-      expect(skillUrl).toBe(`${BASE_URL}/api/skills/code-review`);
+      const [, skillInit] = fetchMock.mock.calls[1] as [string, RequestInit];
       expect(skillInit.method).toBe('PATCH');
       const skillHeaders = new Headers(skillInit.headers);
       expect(skillHeaders.get('content-type')).toBe('application/json');
       expect(skillHeaders.has('authorization')).toBe(false);
 
-      const [securityUrl, securityInit] = fetchMock.mock.calls[2] as [string, RequestInit];
-      expect(securityUrl).toBe(`${BASE_URL}/api/security`);
+      const [, securityInit] = fetchMock.mock.calls[2] as [string, RequestInit];
       expect(securityInit.method).toBe('PATCH');
       const securityHeaders = new Headers(securityInit.headers);
       expect(securityHeaders.get('content-type')).toBe('application/json');

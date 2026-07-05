@@ -27,7 +27,9 @@ export interface DashboardSnapshot {
 }
 
 export class DashboardApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+  ) {}
 
   async fetchSnapshot(): Promise<DashboardSnapshot> {
     const res = await fetch(`${this.baseUrl}/api/dashboard`);
@@ -53,9 +55,13 @@ export class DashboardApiClient {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
-  // NOTE: EventSource cannot attach an Authorization header. Keep dashboard
-  // browser clients on same-origin/BFF routes; do not put long-lived operator
-  // credentials in URLs, headers, or bundle-visible env values.
+  // NOTE: EventSource cannot attach an Authorization header, so this stream is
+  // not yet usable behind the operator-token gate. The repo's SSE-compatible
+  // auth is the short-lived ticket pattern (SseConnectionTicketStore +
+  // `/v1/beasts/events/ticket`, see beast-sse-routes.ts), NOT the raw
+  // long-lived operator token in the URL (which would leak the secret into
+  // access logs). The dashboard page is not currently mounted in the live
+  // shell (not in ChatShell ROUTES); wire ticket-based auth here when it is.
   subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): () => void {
     // EventSource may be mocked as a plain function in tests; prefer browser
     // constructor semantics, then fall back to callable test doubles.

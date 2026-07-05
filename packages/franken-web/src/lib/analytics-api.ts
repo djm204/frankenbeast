@@ -63,7 +63,9 @@ export interface AnalyticsEventPage {
 }
 
 export class AnalyticsApiClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+  ) {}
 
   async fetchSummary(filters: AnalyticsFilters): Promise<AnalyticsSummary> {
     return this.fetchJson<AnalyticsSummary>(`/api/analytics/summary${queryString(filters)}`);
