@@ -10,11 +10,11 @@ describe('StepWorkflow', () => {
     useBeastStore.getState().resetWizard();
   });
 
-  it('renders 4 workflow cards', () => {
+  it('renders supported workflow cards', () => {
     render(<StepWorkflow />);
     expect(screen.getByText('Design Interview')).toBeTruthy();
     expect(screen.getByText('Chunk Design Doc')).toBeTruthy();
-    expect(screen.getByText('Issues Agent')).toBeTruthy();
+    expect(screen.queryByText('Issues Agent')).toBeNull();
     expect(screen.getByText('Run Chunked Project')).toBeTruthy();
   });
 
@@ -27,7 +27,8 @@ describe('StepWorkflow', () => {
   it('shows workflow-specific fields after selection', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
     render(<StepWorkflow />);
-    expect(screen.getByPlaceholderText(/topic|context/i)).toBeTruthy();
+    expect(screen.getByPlaceholderText(/design interview should produce/i)).toBeTruthy();
+    expect(screen.getByLabelText('Output Path')).toBeTruthy();
   });
 
   it('collects both required chunk-plan launch fields', () => {
