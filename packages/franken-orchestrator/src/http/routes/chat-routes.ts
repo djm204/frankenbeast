@@ -114,7 +114,11 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     session.transcript = result.transcript;
     session.state = result.state;
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
-      ? { description: result.pendingApprovalDescription, requestedAt: new Date().toISOString() }
+      ? {
+          description: result.pendingApprovalDescription,
+          requestedAt: new Date().toISOString(),
+          ...result.pendingApprovalContext,
+        }
       : null;
     session.beastContext = result.beastContext ?? null;
     session.updatedAt = new Date().toISOString();

@@ -159,6 +159,12 @@ describe('ChatRuntimeCommsAdapter', () => {
       displayMessages: [{ kind: 'approval', content: 'Run dangerous command?' }],
       events: [],
       pendingApproval: true,
+      pendingApprovalContext: {
+        tool: 'execution',
+        command: 'rm -rf /',
+        risk: 'Requires explicit approval before execution.',
+        sessionId: 'sess-1',
+      },
       pendingApprovalDescription: 'rm -rf /',
       state: 'pending_approval',
       tier: null,
@@ -182,6 +188,10 @@ describe('ChatRuntimeCommsAdapter', () => {
       expect.objectContaining({
         pendingApproval: expect.objectContaining({
           description: 'rm -rf /',
+          tool: 'execution',
+          command: 'rm -rf /',
+          risk: 'Requires explicit approval before execution.',
+          sessionId: 'sess-1',
           requestedAt: expect.any(String),
         }),
       }),

@@ -38,6 +38,8 @@ export interface UseChatSessionOptions {
 export interface UseChatSessionResult {
   activity: ActivityEvent[];
   approve: (approved: boolean) => Promise<void>;
+  approvalError: string | null;
+  approvalResolving: boolean;
   connectionStatus: ConnectionStatus;
   costUsd: number;
   messages: ChatMessage[];
@@ -95,6 +97,11 @@ type ServerSocketEvent =
     type: 'turn.approval.requested';
     description: string;
     timestamp: string;
+    tool?: string;
+    command?: string;
+    risk?: string;
+    affectedFiles?: string[];
+    sessionId?: string;
   }
   | {
     type: 'turn.approval.resolved';
@@ -225,6 +232,8 @@ function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): Cha
 
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalResolving, setApprovalResolving] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [costUsd, setCostUsd] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -247,6 +256,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingSendsRef = useRef<Map<string, PendingSend>>(new Map());
+  const approvalResolvingRef = useRef(false);
 
   function failPendingSend(messageId: string, error: Error) {
     const pending = pendingSendsRef.current.get(messageId);
@@ -266,12 +276,18 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
   }
 
+  function updateApprovalResolving(value: boolean): void {
+    approvalResolvingRef.current = value;
+    setApprovalResolving(value);
+  }
 
   useEffect(() => {
     let cancelled = false;
     const client = clientRef.current;
 
     setActivity([]);
+    setApprovalError(null);
+    updateApprovalResolving(false);
     setMessages([]);
     setPendingApproval(null);
     setShowTypingIndicator(false);
@@ -396,7 +412,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setPendingApproval({
             description: payload.description,
             requestedAt: payload.timestamp,
+            ...(payload.tool ? { tool: payload.tool } : {}),
+            ...(payload.command ? { command: payload.command } : {}),
+            ...(payload.risk ? { risk: payload.risk } : {}),
+            ...(payload.affectedFiles ? { affectedFiles: payload.affectedFiles } : {}),
+            ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
           });
+          setApprovalError(null);
+          updateApprovalResolving(false);
           setActivity((current) => [
             ...current,
             {
@@ -409,6 +432,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         case 'turn.approval.resolved':
           setPendingApproval(null);
+          setApprovalError(null);
+          updateApprovalResolving(false);
           setActivity((current) => [
             ...current,
             {
@@ -419,6 +444,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ]);
           return;
         case 'turn.error':
+          updateApprovalResolving(false);
+          setApprovalError(payload.message);
           setActivity((current) => [
             ...current,
             {
@@ -437,6 +464,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     socket.onerror = () => {
       failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
+      }
       setConnectionStatus('error');
       setStatus('error');
     };
@@ -444,6 +475,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     socket.onclose = () => {
       socketRef.current = null;
       failAllPendingSends(new Error('Connection closed before the server acknowledged the message.'));
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
+      }
       setConnectionStatus('disconnected');
       if (shouldReconnect) {
         setSocketGeneration((current) => current + 1);
@@ -529,10 +564,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
   async function approve(approved: boolean): Promise<void> {
     const socket = socketRef.current;
-    if (!sessionId) {
+    if (!sessionId || approvalResolvingRef.current) {
       return;
     }
 
+    setApprovalError(null);
+    updateApprovalResolving(true);
     setStatus('sending');
     if (!socket || socket.readyState !== 1) {
       try {
@@ -551,8 +588,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         ]);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
+        updateApprovalResolving(false);
+        setApprovalError(null);
         setStatus('idle');
-      } catch {
+      } catch (err) {
+        updateApprovalResolving(false);
+        setApprovalError(err instanceof Error ? err.message : 'Approval failed. Try again.');
         setStatus('error');
       }
       return;
@@ -567,6 +608,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   return {
     activity,
     approve,
+    approvalError,
+    approvalResolving,
     connectionStatus,
     costUsd,
     messages,

@@ -77,4 +77,67 @@ describe('ws chat server', () => {
 
     rmSync(TMP, { recursive: true, force: true });
   });
+
+  it('emits approval context for execution turns that require approval', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const engine = {
+      processTurn: vi.fn().mockResolvedValue({
+        tier: 'premium_execution',
+        newMessages: [],
+        outcome: {
+          kind: 'execute',
+          taskDescription: 'deploy staging',
+          approvalRequired: true,
+        },
+      }),
+    };
+    const runtime = new ChatRuntime({
+      engine: engine as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({
+        execute: vi.fn(),
+      }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'deploy staging',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.requested',
+      description: 'deploy staging',
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires explicit approval before execution.',
+      sessionId: session.id,
+    }));
+    expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
+      description: 'deploy staging',
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires explicit approval before execution.',
+      sessionId: session.id,
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
 });

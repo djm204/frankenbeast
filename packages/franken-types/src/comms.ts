@@ -38,6 +38,11 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     pendingApproval: z.object({
       description: z.string(),
       requestedAt: z.string(),
+      tool: z.string().optional(),
+      command: z.string().optional(),
+      risk: z.string().optional(),
+      affectedFiles: z.array(z.string()).optional(),
+      sessionId: z.string().optional(),
     }).nullable().optional(),
   }).strict(),
   z.object({
@@ -93,6 +98,11 @@ export const ServerSocketEventSchema = z.discriminatedUnion('type', [
     type: z.literal('turn.approval.requested'),
     description: z.string().min(1),
     timestamp: z.string(),
+    tool: z.string().optional(),
+    command: z.string().optional(),
+    risk: z.string().optional(),
+    affectedFiles: z.array(z.string()).optional(),
+    sessionId: z.string().optional(),
   }).strict(),
   z.object({
     type: z.literal('turn.approval.resolved'),

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createChatRuntime } from '../../../src/chat/chat-runtime-factory.js';
+import { ChatRuntime } from '../../../src/chat/runtime.js';
+import { TurnRunner } from '../../../src/chat/turn-runner.js';
 
 describe('chat runtime parity', () => {
   it('preserves CLI continuation semantics through the shared runtime factory', async () => {
@@ -62,5 +64,38 @@ describe('chat runtime parity', () => {
 
     expect(result.displayMessages[0]?.content).toBe('Nothing pending.');
     expect(result.pendingApproval).toBe(false);
+  });
+
+  it('returns approval context for execution turns requiring approval', async () => {
+    const runtime = new ChatRuntime({
+      engine: {
+        processTurn: vi.fn().mockResolvedValue({
+          tier: 'premium_execution',
+          newMessages: [],
+          outcome: {
+            kind: 'execute',
+            taskDescription: 'deploy staging',
+            approvalRequired: true,
+          },
+        }),
+      } as any,
+      turnRunner: new TurnRunner({ execute: vi.fn() }),
+    });
+
+    const result = await runtime.run('deploy staging', {
+      sessionId: 'session-1',
+      pendingApproval: false,
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(result.pendingApproval).toBe(true);
+    expect(result.pendingApprovalDescription).toBe('deploy staging');
+    expect(result.pendingApprovalContext).toEqual(expect.objectContaining({
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: expect.stringContaining('Requires explicit approval'),
+      sessionId: 'session-1',
+    }));
   });
 });
