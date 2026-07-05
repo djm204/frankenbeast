@@ -279,7 +279,7 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
       return;
     }
 
-    const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${apiTarget}/`);
+    const targetUrl = resolveProxyTargetUrl(apiTarget, requestUrl);
     const headers = { ...req.headers, host: targetUrl.host };
     if (options.operatorToken) {
       headers.authorization = `Bearer ${options.operatorToken}`;
