@@ -76,7 +76,7 @@ describe('shouldAttachOperatorAuth', () => {
     })).toBe(false);
   });
 
-  it('allows non-browser proxy traffic without an Origin header', () => {
-    expect(shouldAttachOperatorAuth({ host: '127.0.0.1:5173' })).toBe(true);
+  it('rejects unverifiable non-browser proxy traffic without Origin or Fetch Metadata', () => {
+    expect(shouldAttachOperatorAuth({ host: '127.0.0.1:5173' })).toBe(false);
   });
 });
