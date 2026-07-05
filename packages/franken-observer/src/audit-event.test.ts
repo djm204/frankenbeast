@@ -15,6 +15,12 @@ describe('createAuditEvent', () => {
     expect(event.inputHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
+  it('uses the shared content hash formatter', () => {
+    expect(hashContent('hello')).toBe(
+      'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    );
+  });
+
   it('computes SHA-256 hash for output', () => {
     const event = createAuditEvent('test', {}, {
       phase: 'p', provider: 'pr', output: 'result',

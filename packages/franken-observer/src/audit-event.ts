@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { hashContent } from './utils/crypto.js';
 
 export interface AuditEvent {
   eventId: string;
@@ -45,9 +46,7 @@ export function createAuditEvent(
   return event;
 }
 
-export function hashContent(content: string | Buffer): string {
-  return 'sha256:' + createHash('sha256').update(content).digest('hex');
-}
+export { hashContent };
 
 /**
  * Append-only, immutable audit trail.

@@ -12,6 +12,7 @@ describe('ReplayContentStore', () => {
     const ref = store.put('hello world');
 
     expect(ref).toBe(hashContent('hello world'));
+    expect(ref).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(store.get(ref)).toBe('hello world');
   });
 
