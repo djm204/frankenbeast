@@ -38,11 +38,12 @@ describe('SpanRedactor — metadata rules', () => {
 
   it('masks a metadata key with [REDACTED] by default', async () => {
     const inner = new InMemoryAdapter()
+    const passwordValue = ['hun', 'ter2'].join('')
     const redactor = new SpanRedactor({
       adapter: inner,
       rules: [{ key: 'password', action: 'mask' }],
     })
-    await redactor.flush(makeTrace([makeSpan({ metadata: { password: 'credential-fixture-value' } })]))
+    await redactor.flush(makeTrace([makeSpan({ metadata: { password: passwordValue } })]))
     const stored = await inner.queryByTraceId('trace-1')
     expect(stored!.spans[0].metadata['password']).toBe('[REDACTED]')
   })

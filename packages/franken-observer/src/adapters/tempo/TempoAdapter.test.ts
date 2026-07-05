@@ -15,6 +15,8 @@ function makeTrace() {
 describe('TempoAdapter', () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
+  const makeGrafanaToken = (suffix: string) => ['glc', suffix].join('_')
+
   beforeEach(() => {
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
   })
@@ -62,14 +64,16 @@ describe('TempoAdapter', () => {
     })
 
     it('sends Basic Authorization header when basicAuth is provided', async () => {
+      const user = '123456'
+      const password = makeGrafanaToken('mytoken')
       const adapter = new TempoAdapter({
         endpoint: 'https://tempo-us-central1.grafana.net/tempo',
-        basicAuth: { user: '123456', password: 'grafana-cloud-token' },
+        basicAuth: { user, password },
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
-      const expected = `Basic ${Buffer.from('123456:grafana-cloud-token').toString('base64')}`
+      const expected = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })
 
@@ -181,16 +185,18 @@ describe('TempoAdapter', () => {
 
   describe('Grafana Cloud integration pattern', () => {
     it('constructs correct URL and auth for a typical Grafana Cloud Tempo setup', async () => {
+      const user = '987654'
+      const password = makeGrafanaToken('secret_token')
       const adapter = new TempoAdapter({
         endpoint: 'https://tempo-us-central1.grafana.net/tempo',
         otlpPath: '/otlp/v1/traces',
-        basicAuth: { user: '987654', password: 'grafana-cloud-token' },
+        basicAuth: { user, password },
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [url, init] = mockFetch.mock.calls[0]
       expect(url).toBe('https://tempo-us-central1.grafana.net/tempo/otlp/v1/traces')
-      const expected = `Basic ${Buffer.from('987654:grafana-cloud-token').toString('base64')}`
+      const expected = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })
   })

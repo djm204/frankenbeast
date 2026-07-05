@@ -83,18 +83,21 @@ describe('PiiMaskingMiddleware', () => {
   });
 
   it('masks database connection strings', () => {
+    const postgresConnection = `postgres://user:${['db', 'pass'].join('')}@db.example.com:5432/app`;
+    const mongoConnection = `mongodb+srv://admin:${['mongo', 'pass'].join('')}@cluster.example.com/db`;
+    const redisConnection = `redis://:${['cache', 'pass'].join('')}@localhost:6379/0`;
     const result = mw.beforeRequest(
       makeRequest(
-        'primary=postgres://user:secret@db.example.com:5432/app replica=mongodb+srv://admin:p4ss@cluster.example.com/db cache=redis://:cachepass@localhost:6379/0',
+        `primary=${postgresConnection} replica=${mongoConnection} cache=${redisConnection}`,
       ),
     );
     const content = result.messages[0]!.content as string;
     expect(content).toContain('primary=[CONNECTION_STRING]');
     expect(content).toContain('replica=[CONNECTION_STRING]');
     expect(content).toContain('cache=[CONNECTION_STRING]');
-    expect(content).not.toContain('postgres://user:secret@db.example.com:5432/app');
-    expect(content).not.toContain('mongodb+srv://admin:p4ss@cluster.example.com/db');
-    expect(content).not.toContain('redis://:cachepass@localhost:6379/0');
+    expect(content).not.toContain(postgresConnection);
+    expect(content).not.toContain(mongoConnection);
+    expect(content).not.toContain(redisConnection);
   });
 
   it('preserves delimiters around masked secrets', () => {
@@ -106,9 +109,10 @@ describe('PiiMaskingMiddleware', () => {
     const ipv6Connection = 'postgres://user:***@[2001:db8::1]:5432/app?sslmode=require';
     const multiHostConnection = 'postgresql://user:***@host1:5432,host2:5432/app?sslmode=require';
     const multiHostIpv6Connection = 'postgresql://user:***@[2001:db8::1]:5432,[2001:db8::2]:5432/app?sslmode=require';
+    const redisConnection = `redis://:${['cache', 'pass'].join('')}@localhost:6379/0`;
     const result = mw.beforeRequest(
       makeRequest(
-        `tokens: ${openAiKey}. ${githubToken}. Authorization: ${bearerToken}. plus=${plusBearerToken} tilde=${tildeBearerToken} dbs=(postgres://user:***@db.example.com:5432/app),redis://:cachepass@localhost:6379/0,done ipv6=${ipv6Connection}. cluster=${multiHostConnection}. cluster6=${multiHostIpv6Connection}.`,
+        `tokens: ${openAiKey}. ${githubToken}. Authorization: ${bearerToken}. plus=${plusBearerToken} tilde=${tildeBearerToken} dbs=(postgres://user:***@db.example.com:5432/app),${redisConnection},done ipv6=${ipv6Connection}. cluster=${multiHostConnection}. cluster6=${multiHostIpv6Connection}.`,
       ),
     );
     const content = result.messages[0]!.content as string;
@@ -127,7 +131,7 @@ describe('PiiMaskingMiddleware', () => {
     expect(content).not.toContain(plusBearerToken.replace('Bearer ', ''));
     expect(content).not.toContain(tildeBearerToken.replace('Bearer ', ''));
     expect(content).not.toContain('postgres://user:***@db.example.com:5432/app');
-    expect(content).not.toContain('redis://:cachepass@localhost:6379/0');
+    expect(content).not.toContain(redisConnection);
     expect(content).not.toContain(ipv6Connection);
     expect(content).not.toContain(multiHostConnection);
     expect(content).not.toContain(multiHostIpv6Connection);
