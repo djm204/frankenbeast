@@ -43,7 +43,7 @@ The frontend uses same-origin API paths at runtime:
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
-If you use a non-default backend port in local development, `VITE_API_URL` also becomes the Vite `/v1/chat` proxy target so chat auth remains server-side:
+If you use a non-default backend port in local development, set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242

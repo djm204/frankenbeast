@@ -153,6 +153,21 @@ describe('ChatApiClient', () => {
   });
 
   describe('listSessions', () => {
+    it('lists sessions when configured with a relative same-origin proxy prefix', async () => {
+      const proxied = new ChatApiClient('/franken');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { sessions: [] } }),
+      });
+
+      await proxied.listSessions('proj-1');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${window.location.origin}/franken/v1/chat/sessions?projectId=proj-1`,
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
     it('loads session summaries with optional project filtering', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from '../operator-auth.js';
 
 function safeTokenCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -24,8 +25,22 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
   const { bus, ticketStore, operatorToken } = deps;
 
   app.post('/v1/beasts/events/ticket', (c) => {
-    const authHeader = c.req.header('Authorization');
-    if (!authHeader || !safeTokenCompare(authHeader, `Bearer ${operatorToken}`)) {
+    const headerToken = extractOperatorToken(c.req.header('Authorization'))
+      ?? c.req.header('x-frankenbeast-operator-token')
+      ?? undefined;
+    const cookieToken = extractOperatorTokenCookie(c.req.header('cookie'));
+    const provided = headerToken ?? cookieToken;
+
+    if (!headerToken && cookieToken && !isCookieOperatorAuthAllowed({
+      method: c.req.method,
+      origin: c.req.header('origin'),
+      requestUrl: c.req.url,
+      secFetchSite: c.req.header('sec-fetch-site'),
+    })) {
+      return c.json({ error: { code: 'FORBIDDEN', message: 'Cookie operator authentication requires a same-origin request' } }, 403);
+    }
+
+    if (!provided || !safeTokenCompare(provided, operatorToken)) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid bearer token' } }, 401);
     }
 

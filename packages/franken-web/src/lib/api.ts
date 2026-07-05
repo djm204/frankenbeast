@@ -92,7 +92,7 @@ export class ChatApiClient {
   }
 
   async listSessions(projectId?: string): Promise<ChatSessionSummary[]> {
-    const url = new URL('/v1/chat/sessions', this.baseUrl);
+    const url = new URL('/v1/chat/sessions', this.requestBaseUrl);
     if (projectId) {
       url.searchParams.set('projectId', projectId);
     }

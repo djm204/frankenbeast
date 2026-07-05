@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
-import { extractOperatorTokenCookie, requireOperatorAuth } from '../../../src/http/operator-auth.js';
+import { extractOperatorTokenCookie, isCookieOperatorAuthAllowed, requireOperatorAuth } from '../../../src/http/operator-auth.js';
 import { errorHandler } from '../../../src/http/middleware.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
@@ -18,10 +18,58 @@ describe('operator auth', () => {
       method: 'POST',
       headers: {
         cookie: 'frankenbeast_operator_token=op-secret',
+        origin: 'http://localhost',
       },
     });
 
     expect(res.status).toBe(200);
+  });
+
+  it('rejects unsafe cross-origin cookie-authenticated operator requests', async () => {
+    const app = new Hono();
+    app.use('/v1/network/*', requireOperatorAuth({ operatorToken: 'op-secret', security: new TransportSecurityService() }));
+    app.onError(errorHandler);
+    app.post('/v1/network/up', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/network/up', {
+      method: 'POST',
+      headers: {
+        cookie: 'frankenbeast_operator_token=op-secret',
+        origin: 'https://attacker.example',
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('accepts same-origin cookie-authenticated operator requests', async () => {
+    const app = new Hono();
+    app.use('/v1/network/*', requireOperatorAuth({ operatorToken: 'op-secret', security: new TransportSecurityService() }));
+    app.onError(errorHandler);
+    app.post('/v1/network/up', (c) => c.json({ ok: true }));
+
+    const res = await app.request('http://localhost/v1/network/up', {
+      method: 'POST',
+      headers: {
+        cookie: 'frankenbeast_operator_token=op-secret',
+        origin: 'http://localhost',
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('uses Sec-Fetch-Site as the cookie auth origin signal when present', () => {
+    expect(isCookieOperatorAuthAllowed({
+      method: 'POST',
+      requestUrl: 'http://localhost/v1/network/up',
+      secFetchSite: 'same-origin',
+    })).toBe(true);
+    expect(isCookieOperatorAuthAllowed({
+      method: 'POST',
+      requestUrl: 'http://localhost/v1/network/up',
+      secFetchSite: 'cross-site',
+    })).toBe(false);
   });
 
   it('still rejects unauthenticated protected chat routes', async () => {

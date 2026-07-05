@@ -69,6 +69,38 @@ describe('Beast SSE routes', () => {
     expect(typeof body.ticket).toBe('string');
   });
 
+  it('POST /v1/beasts/events/ticket accepts same-origin operator cookies', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const res = await ctx.app.request('http://localhost/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: {
+        cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
+        origin: 'http://localhost',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket).toBeDefined();
+  });
+
+  it('POST /v1/beasts/events/ticket rejects cross-origin operator cookies', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const res = await ctx.app.request('http://localhost/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: {
+        cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
+        origin: 'https://attacker.example',
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
   it('POST /v1/beasts/events/ticket rejects invalid bearer token', async () => {
     const ctx = createSseApp();
     ticketStore = ctx.ticketStore;
