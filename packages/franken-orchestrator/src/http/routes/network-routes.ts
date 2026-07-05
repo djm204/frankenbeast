@@ -32,6 +32,7 @@ export interface NetworkRoutesDeps {
   root: string;
   frankenbeastDir: string;
   configFile: string;
+  operatorToken?: string;
   getConfig(): OrchestratorConfig;
   setConfig(config: OrchestratorConfig): void;
 }
@@ -53,7 +54,13 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
   });
 }
 
-async function resolveOperatorToken(config: OrchestratorConfig, root: string): Promise<string | undefined> {
+async function resolveOperatorToken(
+  config: OrchestratorConfig,
+  root: string,
+  effectiveOperatorToken?: string,
+): Promise<string | undefined> {
+  if (effectiveOperatorToken?.trim()) return effectiveOperatorToken.trim();
+
   try {
     const secretStore = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
       projectRoot: root,
@@ -71,10 +78,10 @@ async function resolveOperatorToken(config: OrchestratorConfig, root: string): P
   return envToken || undefined;
 }
 
-async function resolveNetworkContext(config: OrchestratorConfig, root: string): Promise<NetworkRegistryContext> {
-  const operatorToken = await resolveOperatorToken(config, root);
+async function resolveNetworkContext(deps: NetworkRoutesDeps, config: OrchestratorConfig): Promise<NetworkRegistryContext> {
+  const operatorToken = await resolveOperatorToken(config, deps.root, deps.operatorToken);
   return {
-    repoRoot: root,
+    repoRoot: deps.root,
     ...(operatorToken ? { operatorToken } : {}),
   };
 }
@@ -103,7 +110,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/up', async (c) => {
     const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
-    const services = resolveNetworkServices(config, await resolveNetworkContext(config, deps.root));
+    const services = resolveNetworkServices(config, await resolveNetworkContext(deps, config));
     const state = await supervisor.up({
       services,
       detached: true,
@@ -124,7 +131,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(config, await resolveNetworkContext(config, deps.root)),
+      resolveNetworkServices(config, await resolveNetworkContext(deps, config)),
       body.target,
     );
     const state = await supervisor.up({
@@ -149,7 +156,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     await supervisor.stop(body.target);
     const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(config, await resolveNetworkContext(config, deps.root)),
+      resolveNetworkServices(config, await resolveNetworkContext(deps, config)),
       body.target,
     );
     const state = await supervisor.up({
