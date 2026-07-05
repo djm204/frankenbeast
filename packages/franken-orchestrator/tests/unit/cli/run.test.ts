@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, hasRunnablePlanChunks } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -301,29 +301,50 @@ describe('resolvePhases', () => {
 describe('missing run plan guidance', () => {
   it('formats an actionable first-run message for an empty plan directory', () => {
     expect(formatMissingRunPlanGuidance('/project/.fbeast/plans/plan-2026-03-08')).toBe(
-      'No plan found under /project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+      'No runnable plan chunks found under /project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
     );
   });
 
-  it('shows guidance only for run no-ops with no task results', () => {
+  it('preserves selected plan context in the remedy', () => {
+    expect(formatMissingRunPlanGuidance('/project/custom-chunks', {
+      planName: 'release-fix',
+      planDirOverride: '/project/custom-chunks',
+    })).toBe(
+      'No runnable plan chunks found under /project/custom-chunks. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file> --plan-name release-fix` first. If you intended to use this custom chunk directory, generate or copy numbered chunk files into it before rerunning.',
+    );
+  });
+
+  it('detects runnable chunks while ignoring plan metadata files', () => {
+    const root = join(tmpdir(), `frankenbeast-empty-plan-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, '00_PLAN.md'), '# plan metadata');
+    expect(hasRunnablePlanChunks(root)).toBe(false);
+
+    writeFileSync(join(root, '01_IMPLEMENT.md'), '# implementation chunk');
+    expect(hasRunnablePlanChunks(root)).toBe(true);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('shows guidance only for run when no runnable chunks exist', () => {
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run' },
-      { status: 'no-op', taskResults: [] },
+      false,
     )).toBe(true);
 
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'run' },
-      { status: 'no-op', taskResults: [{ taskId: 'impl:01' }] },
+      true,
     )).toBe(false);
 
     expect(shouldShowMissingRunPlanGuidance(
       { subcommand: 'plan' },
-      { status: 'no-op', taskResults: [] },
+      false,
     )).toBe(false);
 
     expect(shouldShowMissingRunPlanGuidance(
-      { subcommand: 'run' },
-      { status: 'completed', taskResults: [] },
+      { subcommand: 'run', resume: true },
+      false,
     )).toBe(false);
   });
 });
@@ -810,7 +831,7 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
-  it('prints actionable guidance when run exits no-op before any plan chunks exist', async () => {
+  it('prints actionable guidance before provider preflight when no plan chunks exist', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockParseArgs.mockReturnValue({
       subcommand: 'run',
@@ -843,13 +864,14 @@ describe('main() execution', () => {
       beastAction: undefined,
       beastTarget: undefined,
     });
-    mockSessionStart.mockResolvedValueOnce({ status: 'no-op', taskResults: [] });
 
     await main();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'No plan found under /mock/project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
+      'No runnable plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-08. Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.',
     );
+    expect(MockSession).not.toHaveBeenCalled();
+    expect(mockSessionStart).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });
 

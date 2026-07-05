@@ -108,18 +108,38 @@ export function resolvePhases(args: Partial<Pick<CliArgs, 'subcommand' | 'design
   return { entryPhase: 'interview' };
 }
 
-export function formatMissingRunPlanGuidance(planDir: string): string {
-  return 'No plan found under ' + planDir + '. '
-    + 'Run `frankenbeast interview` or `frankenbeast plan --design-doc <file>` first.';
+export function hasRunnablePlanChunks(planDir: string): boolean {
+  try {
+    return readdirSync(planDir).some((entry) => (
+      entry.endsWith('.md')
+        && !entry.startsWith('00_')
+        && /^\d{2}/.test(entry)
+    ));
+  } catch {
+    return false;
+  }
+}
+
+export function formatMissingRunPlanGuidance(
+  planDir: string,
+  options: { planName?: string | undefined; planDirOverride?: string | undefined } = {},
+): string {
+  const planCommand = options.planName
+    ? `frankenbeast plan --design-doc <file> --plan-name ${options.planName}`
+    : 'frankenbeast plan --design-doc <file>';
+  const customPlanDirHint = options.planDirOverride
+    ? ' If you intended to use this custom chunk directory, generate or copy numbered chunk files into it before rerunning.'
+    : '';
+  return 'No runnable plan chunks found under ' + planDir + '. '
+    + `Run \`frankenbeast interview\` or \`${planCommand}\` first.`
+    + customPlanDirHint;
 }
 
 export function shouldShowMissingRunPlanGuidance(
-  args: Partial<Pick<CliArgs, 'subcommand'>>,
-  result: { status?: string; taskResults?: readonly unknown[] | undefined } | undefined,
+  args: Partial<Pick<CliArgs, 'subcommand' | 'resume'>>,
+  hasChunks: boolean,
 ): boolean {
-  return args.subcommand === 'run'
-    && result?.status === 'no-op'
-    && (result.taskResults?.length ?? 0) === 0;
+  return args.subcommand === 'run' && !args.resume && !hasChunks;
 }
 
 export interface ResumeTarget {
@@ -959,6 +979,14 @@ export async function main(): Promise<void> {
   const provider = resolveSelectedProvider(args, config);
   const runConfig = loadRunConfigFromEnv();
   const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig);
+  const runPlanDir = planDirOverride ?? paths.plansDir;
+  if (shouldShowMissingRunPlanGuidance(args, hasRunnablePlanChunks(runPlanDir))) {
+    console.log(formatMissingRunPlanGuidance(runPlanDir, {
+      planName: args.planName,
+      planDirOverride,
+    }));
+    return;
+  }
   assertAnyProviderCliAvailable(
     preflightProvider,
     args.providers ?? config.providers.fallbackChain,
@@ -1011,10 +1039,6 @@ export async function main(): Promise<void> {
   }
 
   const result = await session.start();
-
-  if (shouldShowMissingRunPlanGuidance(args, result)) {
-    console.log(formatMissingRunPlanGuidance(planDirOverride ?? paths.plansDir));
-  }
 
   // `no-op` is a benign terminal status (empty or intentionally-skipped plan),
   // so it must exit successfully alongside `completed` — otherwise CI/scripts
