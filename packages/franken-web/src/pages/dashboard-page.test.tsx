@@ -664,6 +664,56 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('retains the retry alert for a failed latest skill toggle when an older toggle later succeeds', async () => {
+    const firstEnable = deferred<void>();
+    const secondDisable = deferred<void>();
+    const failedFinalEnable = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockReturnValueOnce(firstEnable.promise)
+        .mockReturnValueOnce(secondDisable.promise)
+        .mockReturnValueOnce(failedFinalEnable.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+
+    failedFinalEnable.reject(new Error('HTTP 500'));
+    secondDisable.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+      expect(screen.getByRole('button', { name: 'Retry enabling shell' })).toBeTruthy();
+    });
+  });
+
+  it('retains the retry alert for a failed latest security save when an older save later succeeds', async () => {
+    const firstStrictSave = deferred<void>();
+    const secondPermissiveSave = deferred<void>();
+    const failedFinalStrictSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockReturnValueOnce(firstStrictSave.promise)
+        .mockReturnValueOnce(secondPermissiveSave.promise)
+        .mockReturnValueOnce(failedFinalStrictSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'strict' } });
+
+    failedFinalStrictSave.reject(new Error('HTTP 409'));
+    secondPermissiveSave.resolve(undefined);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('permissive');
+      expect(screen.getByRole('button', { name: 'Retry saving strict' })).toBeTruthy();
+    });
+  });
+
   it('ignores snapshots from a superseded dashboard client subscription', async () => {
     let pushStaleSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
     const firstClient = mockClient({
