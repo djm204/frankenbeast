@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { TelegramUpdateSchema } from './telegram-schemas.js';
 import { decodeTelegramCallbackData } from './telegram-adapter.js';
+import { redactTelegramBotTokenUrls } from '../../../security/telegram-redaction.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
 
@@ -78,11 +79,17 @@ export function telegramRouter(options: TelegramRouterOptions) {
       }
 
       // Acknowledge callback query
-      await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      const targetUrl = `https://api.telegram.org/bot${botToken}/answerCallbackQuery`;
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ callback_query_id: query.id }),
       });
+      if (!response.ok) {
+        const error = redactTelegramBotTokenUrls(await response.text());
+        const redactedUrl = redactTelegramBotTokenUrls(targetUrl);
+        throw new Error(`Telegram API error: ${response.status} ${redactedUrl} ${error}`);
+      }
     }
 
     return c.json({ ok: true });

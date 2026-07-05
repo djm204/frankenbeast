@@ -45,4 +45,33 @@ describe('TelegramAdapter', () => {
     expect(body.reply_markup.inline_keyboard[0][0].text).toBe('Approve');
     expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe('fb:session-123:approve');
   });
+
+  it('redacts bot tokens from Telegram API error messages and rendered outbound URLs', async () => {
+    const token = '123456789:AAExampleTelegramBotTokenSecretValue';
+    const adapter = new TelegramAdapter({ token });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => `upstream failed for https://api.telegram.org/bot${token}/sendMessage`,
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello telegram',
+      status: 'reply',
+      metadata: { chatId: '12345' },
+    })).rejects.toThrow('https://api.telegram.org/bot[REDACTED]/sendMessage');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => `upstream failed for https://api.telegram.org/bot${token}/sendMessage`,
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello telegram',
+      status: 'reply',
+      metadata: { chatId: '12345' },
+    })).rejects.not.toThrow(token);
+  });
 });
