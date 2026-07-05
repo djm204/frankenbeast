@@ -221,15 +221,38 @@ describe('AnalyticsPage', () => {
     });
   });
 
-  it('opens a read-only drawer with raw details when a row is selected', async () => {
+  it('opens a read-only drawer from a visible event details action', async () => {
     const client = mockClient();
 
     render(<AnalyticsPage client={client} />);
-    fireEvent.click(await screen.findByText('Denied destructive command'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open details for Denied destructive command' }));
 
     expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeTruthy();
     expect(screen.getByText('"decision": "denied"')).toBeTruthy();
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
+  });
+
+  it('lets keyboard users open event details with the event action', async () => {
+    const client = mockClient();
+
+    render(<AnalyticsPage client={client} />);
+    const detailsAction = await screen.findByRole('button', { name: 'Open details for Denied destructive command' });
+
+    detailsAction.focus();
+    expect(document.activeElement).toBe(detailsAction);
+    fireEvent.click(detailsAction);
+
+    expect(await screen.findByRole('dialog', { name: 'Analytics event detail' })).toBeTruthy();
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(closeButton);
+    });
+    expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
+
+    fireEvent.click(closeButton);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(detailsAction);
+    });
   });
 
   it('keeps successful analytics sections visible when one endpoint fails', async () => {

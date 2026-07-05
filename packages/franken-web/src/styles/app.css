@@ -1257,12 +1257,34 @@ button {
   font-weight: 650;
 }
 
-.analytics-table tbody tr {
-  cursor: pointer;
+.analytics-table tbody tr:hover,
+.analytics-table tbody tr:focus-within {
+  background: rgba(134, 228, 95, 0.08);
 }
 
-.analytics-table tbody tr:hover {
-  background: rgba(134, 228, 95, 0.08);
+.analytics-table__details-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(134, 228, 95, 0.35);
+  border-radius: 999px;
+  background: rgba(134, 228, 95, 0.12);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.analytics-table__details-button:hover,
+.analytics-table__details-button:focus-visible {
+  border-color: rgba(134, 228, 95, 0.75);
+  background: rgba(134, 228, 95, 0.2);
+  outline: 2px solid rgba(134, 228, 95, 0.45);
+  outline-offset: 2px;
 }
 
 .analytics-table td {
