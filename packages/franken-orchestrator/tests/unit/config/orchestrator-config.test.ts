@@ -132,5 +132,15 @@ describe('OrchestratorConfig', () => {
       expect(result.maxCritiqueIterations).toBe(1);
       expect(result.minCritiqueScore).toBe(0);
     });
+
+    it('applies network plaintext endpoint validation to the full orchestrator config', () => {
+      expect(() => OrchestratorConfigSchema.parse({
+        chat: { enabled: false, host: '0.0.0.0' },
+      })).toThrow(/loopback-only/);
+
+      expect(() => OrchestratorConfigSchema.parse({
+        comms: { slack: { enabled: true }, orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+      })).toThrow(/wss:\/\//);
+    });
   });
 });

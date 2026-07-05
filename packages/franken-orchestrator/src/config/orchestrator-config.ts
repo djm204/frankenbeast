@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { NetworkConfigSchema } from '../network/network-config.js';
+import { NetworkConfigFieldsSchema, validateNetworkConfig } from '../network/network-config.js';
 import { validateProviderCommandOverride } from './provider-command-override-policy.js';
 
 // Consolidation schemas (moved from run-config-v2.ts)
@@ -135,8 +135,10 @@ const BaseOrchestratorConfigSchema = z.object({
 });
 
 export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(
-  NetworkConfigSchema.shape,
+  NetworkConfigFieldsSchema.shape,
 ).superRefine((config, ctx) => {
+  validateNetworkConfig(config, ctx);
+
   config.consolidatedProviders?.forEach((provider, index) => {
     if (!provider.type.endsWith('-cli') || !provider.cliPath) return;
     for (const message of validateProviderCommandOverride(provider.type, {

@@ -52,6 +52,7 @@ import { startBeastDaemon } from '../http/beast-daemon-server.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
 import { TransportSecurityService } from '../http/security/transport-security.js';
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
+import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -267,13 +268,12 @@ export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): stri
   }
 
   const { host, port } = config.dashboard;
-  const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  const origins = [`http://${originHost}:${port}`];
+  const origins = [localPlaintextOrSecureEndpoint(host, port)];
   if (host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0.0.0.0') {
-    origins.push(`http://localhost:${port}`);
+    origins.push(localPlaintextOrSecureEndpoint('localhost', port));
   }
   if (host === '0.0.0.0') {
-    origins.push(`http://127.0.0.1:${port}`);
+    origins.push(localPlaintextOrSecureEndpoint('127.0.0.1', port));
   }
   return origins;
 }
@@ -753,7 +753,12 @@ export async function main(): Promise<void> {
         dbPath: join(paths.frankenbeastDir, 'beast.db'),
       });
       const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
-      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL;
+      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL
+        ? assertLocalPlaintextOrSecureHttpUrl(
+            process.env.FRANKENBEAST_BEAST_DAEMON_URL,
+            'FRANKENBEAST_BEAST_DAEMON_URL',
+          )
+        : undefined;
       const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
         ? createBeastServices({
             beastsDb: join(paths.frankenbeastDir, 'beast.db'),

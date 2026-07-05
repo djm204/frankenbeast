@@ -1,4 +1,5 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
+import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureHealthUrl } from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 function hasEnabledChannels(config: OrchestratorConfig): boolean {
@@ -31,8 +32,8 @@ export const commsGatewayService: NetworkServiceDefinition = {
   buildRuntimeConfig: (config: OrchestratorConfig) => ({
     host: config.chat.host,
     port: config.chat.port,
-    url: `http://${config.chat.host}:${config.chat.port}`,
-    healthUrl: `http://${config.chat.host}:${config.chat.port}/comms/health`,
+    url: localPlaintextOrSecureEndpoint(config.chat.host, config.chat.port),
+    healthUrl: localPlaintextOrSecureHealthUrl(config.chat.host, config.chat.port, '/comms/health'),
     orchestratorWsUrl: config.comms.orchestratorWsUrl,
     channels: {
       slack: config.comms.slack.enabled,

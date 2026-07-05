@@ -558,26 +558,26 @@ describe('resolveDashboardAllowedOrigins', () => {
     } as never)).toEqual(['http://[::1]:5173', 'http://localhost:5173']);
   });
 
-  it('adds usable loopback aliases for wildcard dashboard binds', () => {
-    expect(resolveDashboardAllowedOrigins({
+  it('rejects wildcard dashboard binds when deriving browser origins', () => {
+    expect(() => resolveDashboardAllowedOrigins({
       dashboard: {
         enabled: true,
         host: '0.0.0.0',
         port: 5173,
         apiUrl: 'http://127.0.0.1:3737',
       },
-    } as never)).toEqual(['http://0.0.0.0:5173', 'http://localhost:5173', 'http://127.0.0.1:5173']);
+    } as never)).toThrow(/loopback-only/);
   });
 
-  it('does not add a localhost alias for non-loopback dashboard hosts', () => {
-    expect(resolveDashboardAllowedOrigins({
+  it('rejects non-loopback dashboard hosts when deriving browser origins', () => {
+    expect(() => resolveDashboardAllowedOrigins({
       dashboard: {
         enabled: true,
         host: 'dashboard.example.com',
         port: 5173,
         apiUrl: 'http://127.0.0.1:3737',
       },
-    } as never)).toEqual(['http://dashboard.example.com:5173']);
+    } as never)).toThrow(/loopback-only/);
   });
 });
 
@@ -1396,6 +1396,44 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
       beastControl: expect.anything(),
     }));
+  });
+
+  it('rejects non-loopback plaintext explicit beast daemon URLs before proxying', async () => {
+    process.env.FRANKENBEAST_BEAST_DAEMON_URL = 'http://internal-service:4050';
+    mockParseArgs.mockReturnValue({
+      subcommand: 'chat-server',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    } as never);
+
+    await expect(main()).rejects.toThrow(/FRANKENBEAST_BEAST_DAEMON_URL must use https:\/\//i);
+    expect(mockStartChatServer).not.toHaveBeenCalled();
   });
 
   it('dispatches beasts-daemon without creating a Session or REPL', async () => {

@@ -32,7 +32,9 @@ export async function handleHonoHttpRequest(app: Hono, request: IncomingMessage,
 
 function toRequest(request: IncomingMessage): Request {
   const host = request.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`;
-  const url = new URL(request.url ?? '/', `http://${host}`);
+  const baseUrl = new URL('http://localhost');
+  baseUrl.host = host;
+  const url = new URL(request.url ?? '/', baseUrl);
   const method = request.method ?? 'GET';
   const headers = new Headers();
   const abortController = new AbortController();

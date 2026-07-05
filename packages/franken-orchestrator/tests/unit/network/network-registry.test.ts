@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
+import { NetworkConfigSchema } from '../../../src/network/network-config.js';
 import { createNetworkRegistry, filterNetworkServices, resolveNetworkServices } from '../../../src/network/network-registry.js';
 
 describe('network-registry', () => {
@@ -102,6 +103,58 @@ describe('network-registry', () => {
     expect(services.map((service) => service.id)).toEqual(['beasts-daemon', 'chat-server', 'dashboard-web']);
   });
 
+  it('rejects non-loopback plaintext dashboard and comms endpoints', () => {
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'http://internal-service:3737' },
+    })).toThrow(/https:\/\//);
+
+    expect(() => NetworkConfigSchema.parse({
+      comms: { enabled: true, orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+    })).toThrow(/wss:\/\//);
+
+    expect(() => NetworkConfigSchema.parse({
+      comms: { slack: { enabled: true }, orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws' },
+    })).toThrow(/wss:\/\//);
+
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'http://127.attacker.example:3737' },
+    })).toThrow(/https:\/\//);
+
+    expect(NetworkConfigSchema.parse({
+      dashboard: { apiUrl: 'https://internal-service:3737' },
+      comms: { orchestratorWsUrl: 'wss://internal-service:3737/v1/chat/ws' },
+    }).dashboard.apiUrl).toBe('https://internal-service:3737');
+  });
+
+  it('rejects non-loopback managed service hosts', () => {
+    expect(() => NetworkConfigSchema.parse({
+      dashboard: { host: 'dashboard.example.com' },
+    })).toThrow(/loopback-only/);
+
+    expect(() => NetworkConfigSchema.parse({
+      beastsDaemon: { host: '0.0.0.0' },
+    })).toThrow(/loopback-only/);
+
+    expect(() => NetworkConfigSchema.parse({
+      chat: { host: '0.0.0.0' },
+    })).toThrow(/loopback-only/);
+  });
+
+  it('does not validate disabled service endpoint settings', () => {
+    expect(NetworkConfigSchema.parse({
+      dashboard: {
+        enabled: false,
+        host: '0.0.0.0',
+        apiUrl: 'http://internal-service:3737',
+      },
+      comms: {
+        enabled: false,
+        host: '0.0.0.0',
+        orchestratorWsUrl: 'ws://internal-service:3737/v1/chat/ws',
+      },
+    }).dashboard.enabled).toBe(false);
+  });
+
   it('projects runtime config for each service', () => {
     const config = defaultConfig();
     config.chat.port = 4242;
@@ -139,6 +192,15 @@ describe('network-registry', () => {
         },
       },
     });
+  });
+
+  it('refuses to project managed services on non-loopback hosts', () => {
+    const config = defaultConfig();
+    config.dashboard.host = 'dashboard.example.com';
+    config.dashboard.apiUrl = 'https://api.example.com';
+    config.beastsDaemon.host = 'beast.example.com';
+
+    expect(() => resolveNetworkServices(config, context)).toThrow(/loopback-only/);
   });
 
   it('forwards an explicit config path to spawned chat servers', () => {

@@ -1,4 +1,9 @@
 import type { OrchestratorConfig } from '../../config/orchestrator-config.js';
+import {
+  localPlaintextOrSecureEndpoint,
+  localPlaintextOrSecureHealthUrl,
+  localPlaintextOrSecureWebSocketUrl,
+} from '../network-url.js';
 import type { NetworkServiceDefinition } from '../network-registry.js';
 
 export const chatServerService: NetworkServiceDefinition = {
@@ -13,9 +18,9 @@ export const chatServerService: NetworkServiceDefinition = {
   buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.chat.host,
     port: config.chat.port,
-    url: `http://${config.chat.host}:${config.chat.port}`,
-    healthUrl: `http://${config.chat.host}:${config.chat.port}/health`,
-    wsUrl: `ws://${config.chat.host}:${config.chat.port}/v1/chat/ws`,
+    url: localPlaintextOrSecureEndpoint(config.chat.host, config.chat.port),
+    healthUrl: localPlaintextOrSecureHealthUrl(config.chat.host, config.chat.port),
+    wsUrl: localPlaintextOrSecureWebSocketUrl(config.chat.host, config.chat.port, '/v1/chat/ws'),
     serviceIdentity: 'chat-server',
     suppressManagedBanner: true,
     model: config.chat.model,
@@ -38,7 +43,10 @@ export const chatServerService: NetworkServiceDefinition = {
       cwd: context.repoRoot,
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
-        FRANKENBEAST_BEAST_DAEMON_URL: `http://${config.beastsDaemon.host}:${config.beastsDaemon.port}`,
+        FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(
+          config.beastsDaemon.host,
+          config.beastsDaemon.port,
+        ),
       },
     },
   }),

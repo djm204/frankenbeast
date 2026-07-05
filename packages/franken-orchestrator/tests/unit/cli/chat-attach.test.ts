@@ -90,4 +90,26 @@ describe('resolveManagedChatAttachment', () => {
 
     expect(attachment).toBeUndefined();
   });
+
+  it('rejects persisted non-loopback plaintext chat URLs before healthcheck', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-chat-attach-'));
+    const frankenbeastDir = join(workDir, '.fbeast');
+    await mkdir(join(frankenbeastDir, 'network'), { recursive: true });
+    await writeFile(join(frankenbeastDir, 'network', 'state.json'), JSON.stringify({
+      services: [
+        {
+          id: 'chat-server',
+          url: 'http://internal-service:3737',
+        },
+      ],
+    }));
+
+    await expect(resolveManagedChatAttachment({
+      config: defaultConfig(),
+      frankenbeastDir,
+      fetchImpl: async () => {
+        throw new Error('healthcheck should not run for rejected persisted URL');
+      },
+    })).rejects.toThrow(/https:\/\//);
+  });
 });

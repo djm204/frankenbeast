@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadProxyOperatorToken, type EnvLoader } from '../vite-env';
+import { assertSecureProxyTarget, loadProxyOperatorToken, type EnvLoader } from '../vite-env';
 
 const ROOT = '/repo';
 const PKG = '/repo/packages/franken-web';
@@ -10,6 +10,24 @@ function loaderFor(byDir: Record<string, Record<string, string>>): EnvLoader {
 }
 
 const noSecretStoreToken = async () => '';
+
+describe('assertSecureProxyTarget', () => {
+  it('allows HTTPS proxy targets', () => {
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'https://api.example.com')).not.toThrow();
+  });
+
+  it('allows loopback HTTP targets for local development only', () => {
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://127.0.0.1:3737')).not.toThrow();
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://localhost:3737')).not.toThrow();
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://[::1]:3737')).not.toThrow();
+  });
+
+  it('rejects non-loopback plain HTTP proxy targets', () => {
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://internal-service')).toThrow(/https:\/\//);
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://127.attacker.example:3737')).toThrow(/https:\/\//);
+    expect(() => assertSecureProxyTarget('VITE_API_PROXY_TARGET', 'http://0.0.0.0:3737')).toThrow(/https:\/\//);
+  });
+});
 
 describe('loadProxyOperatorToken', () => {
   it('reads FRANKENBEAST_BEAST_OPERATOR_TOKEN from the repo-root env file for the server proxy', async () => {
