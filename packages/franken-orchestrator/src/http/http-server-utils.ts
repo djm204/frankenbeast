@@ -2,6 +2,7 @@ import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Hono } from 'hono';
+import { redactTelegramBotTokenUrls } from '../security/telegram-redaction.js';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3737;
@@ -26,7 +27,7 @@ export async function handleHonoHttpRequest(app: Hono, request: IncomingMessage,
     await pipeline(Readable.fromWeb(honoResponse.body as unknown as import('node:stream/web').ReadableStream), response);
   } catch (error) {
     response.statusCode = 500;
-    response.end(error instanceof Error ? error.message : 'Internal Server Error');
+    response.end(error instanceof Error ? redactTelegramBotTokenUrls(error.message) : 'Internal Server Error');
   }
 }
 

@@ -4,6 +4,7 @@ import type {
   ChannelCapabilities,
   ChannelType
 } from '../../core/types.js';
+import { redactTelegramBotTokenUrls } from '../../../security/telegram-redaction.js';
 
 export interface TelegramAdapterOptions {
   token: string;
@@ -51,8 +52,9 @@ export class TelegramAdapter implements ChannelAdapter {
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
     const chatId = (message.metadata?.chatId as string) || 'unknown';
     const body = this.formatPayload(sessionId, chatId, message);
+    const targetUrl = `https://api.telegram.org/bot${this.token}/sendMessage`;
 
-    const response = await fetch(`https://api.telegram.org/bot${this.token}/sendMessage`, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -61,8 +63,9 @@ export class TelegramAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Telegram API error: ${response.status} ${error}`);
+      const error = redactTelegramBotTokenUrls(await response.text());
+      const redactedUrl = redactTelegramBotTokenUrls(targetUrl);
+      throw new Error(`Telegram API error: ${response.status} ${redactedUrl} ${error}`);
     }
   }
 
