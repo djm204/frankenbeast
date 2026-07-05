@@ -163,6 +163,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                 <FormSection title="Skills"><StepSkills /></FormSection>
                 <FormSection title="Prompts"><StepPrompts /></FormSection>
                 <FormSection title="Git"><StepGit /></FormSection>
+                <FormSection title="Review"><StepReview /></FormSection>
               </div>
             )}
           </div>
