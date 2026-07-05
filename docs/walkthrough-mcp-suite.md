@@ -6,7 +6,7 @@ fbeast works with any MCP-compatible AI assistant client. Currently supported:
 |--------|-----------|-------|
 | Claude Code | `.claude/` | ✅ PreToolUse / PostToolUse (generated shell scripts) |
 | Gemini CLI | `.gemini/` | ✅ BeforeTool / AfterTool (shell scripts) |
-| Codex CLI | `codex mcp add` | ✅ PreToolUse / PostToolUse (shell scripts) |
+| Codex CLI | `.codex/config.toml` (written directly) | ✅ PreToolUse / PostToolUse (shell scripts) |
 
 Beast mode (`fbeast mcp beast`) is provider-agnostic: `anthropic-api`, `codex-cli`, `claude-cli`.
 
@@ -249,7 +249,7 @@ Only two tools in its tool list:
 ### Usage pattern
 
 1. Agent calls `search_tools` to find a tool by name (e.g., "tools for memory")
-2. Returns matching lightweight tool metadata (name and short description)
+2. Returns matching tool metadata — name, description, and full input schema (so the agent can call the tool without a second lookup)
 3. Agent calls `execute_tool` with the tool name and arguments
 4. Proxy server dispatches to the appropriate handler and returns the result
 
@@ -271,8 +271,11 @@ Once installed, Claude Code has access to these tools:
 | `fbeast_memory_forget` | memory | Delete a working memory entry |
 | `fbeast_plan_decompose` | planner | Break a task into a DAG of steps |
 | `fbeast_plan_status` | planner | Get current plan status |
+| `fbeast_plan_validate` | planner | Check a stored plan for issues (cycles, missing deps) |
 | `fbeast_critique_evaluate` | critique | Score output quality (0–1), suggest improvements |
+| `fbeast_critique_compare` | critique | Compare two outputs against the same criteria |
 | `fbeast_firewall_scan` | firewall | Scan input for prompt injection |
+| `fbeast_firewall_scan_file` | firewall | Scan a file on disk for prompt injection |
 | `fbeast_observer_log` | observer | Log a tool call event to the audit trail |
 | `fbeast_observer_log_cost` | observer | Record LLM token usage and cost for a call |
 | `fbeast_observer_cost` | observer | Get cost summary by model |
@@ -340,7 +343,6 @@ All MCP servers, hooks, and beast runs share `.fbeast/beast.db` (WAL mode,
 | `governor_log` | governor adapter (`fbeast-governor`), pre-tool hook |
 | `firewall_log` | firewall adapter (`fbeast-firewall`) |
 | `plans` | planner adapter (`fbeast-planner`) |
-| `skill_state` | skills adapter (`fbeast-skills`) |
 | `beast_runs` | `SQLiteBeastRepository` (beast mode) |
 | `beast_run_attempts` | `SQLiteBeastRepository` |
 | `beast_run_events` | `SQLiteBeastRepository` |
