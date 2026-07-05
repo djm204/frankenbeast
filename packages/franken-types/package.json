@@ -14,7 +14,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
     "zod": "^3.25.76"

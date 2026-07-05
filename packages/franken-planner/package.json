@@ -19,10 +19,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:ci": "vitest run --coverage"
+    "test:ci": "vitest run --coverage",
+    "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "*"
+    "@franken/types": "0.7.4"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
