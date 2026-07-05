@@ -82,6 +82,54 @@ describe('commsRoutes', () => {
     expect(res.status).toBe(404);
   });
 
+  it('requires webhook signatures by default even when the security profile is permissive elsewhere', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+    });
+
+    const res = await app.request('/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Missing security headers' });
+  });
+
+  it('allows unsigned webhooks only for the explicit loopback development policy', async () => {
+    const app = commsRoutes({
+      config: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+        },
+      }),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+
+    const local = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(local.status).toBe(200);
+    expect(await local.json()).toEqual({ challenge: 'ok' });
+
+    const external = await app.request('https://example.com/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(external.status).toBe(403);
+    expect(await external.json()).toEqual({ error: 'Unsigned webhooks are only allowed on loopback hosts' });
+  });
+
   it('throws when runtime is not provided', () => {
     expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });

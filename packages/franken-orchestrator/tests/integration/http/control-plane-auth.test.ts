@@ -206,5 +206,44 @@ describe('control-plane operator auth', () => {
       const bodyText = await res.text();
       expect(bodyText).not.toContain('Operator authentication is required');
     });
+
+    it('keeps webhook signatures required for permissive security profiles unless an explicit local override is set', async () => {
+      let networkConfig = defaultConfig();
+      const app = createChatApp({
+        sessionStoreDir: join(TMP, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('hello') },
+        projectName: 'control-plane-auth',
+        operatorToken: OPERATOR_TOKEN,
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => networkConfig,
+          setConfig: (next) => {
+            networkConfig = next;
+          },
+        },
+        commsConfig: {
+          orchestrator: {},
+          channels: {
+            slack: { enabled: true, token: 'xoxb-test', signingSecret: 'secret' },
+          },
+        } as CommsConfig,
+        commsRuntime: mockCommsRuntime(),
+        securityConfig: {
+          getSecurityConfig: () => resolveSecurityConfig('permissive'),
+          setSecurityConfig: vi.fn(),
+        },
+      });
+
+      const res = await app.request('/webhooks/slack/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+      });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'Missing security headers' });
+    });
   });
 });

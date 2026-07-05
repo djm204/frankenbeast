@@ -27,6 +27,7 @@ export const SecurityConfigInputSchema = z.object({
   injectionDetection: z.boolean().optional(),
   piiMasking: z.boolean().optional(),
   outputValidation: z.boolean().optional(),
+  webhookSignaturePolicy: z.enum(['required', 'local-dev-unsigned']).optional(),
   allowedDomains: z.array(z.string()).optional(),
   maxTokenBudget: z.number().positive().optional(),
   requireApproval: z.enum(['all', 'destructive', 'none']).optional(),

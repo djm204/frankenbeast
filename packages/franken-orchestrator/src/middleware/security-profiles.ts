@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MiddlewareChain, type LlmMiddleware } from './llm-middleware.js';
+import { MiddlewareChain } from './llm-middleware.js';
 import { InjectionDetectionMiddleware } from './injection-detection.js';
 import { PiiMaskingMiddleware } from './pii-masking.js';
 import { OutputValidationMiddleware } from './output-validation.js';
@@ -7,6 +7,7 @@ import { CustomRuleMiddleware } from './custom-rule.js';
 import { DomainAllowlistMiddleware } from './domain-allowlist.js';
 
 export type SecurityProfile = 'strict' | 'standard' | 'permissive';
+export type WebhookSignaturePolicy = 'required' | 'local-dev-unsigned';
 
 export interface SecurityRule {
   name: string;
@@ -20,6 +21,7 @@ export interface SecurityConfig {
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
+  webhookSignaturePolicy: WebhookSignaturePolicy;
   allowedDomains?: string[];
   maxTokenBudget?: number;
   requireApproval: 'all' | 'destructive' | 'none';
@@ -31,6 +33,7 @@ export const SecurityConfigSchema = z.object({
   injectionDetection: z.boolean(),
   piiMasking: z.boolean(),
   outputValidation: z.boolean(),
+  webhookSignaturePolicy: z.enum(['required', 'local-dev-unsigned']),
   allowedDomains: z.array(z.string()).optional(),
   maxTokenBudget: z.number().positive().optional(),
   requireApproval: z.enum(['all', 'destructive', 'none']),
@@ -52,6 +55,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: true,
     piiMasking: true,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     allowedDomains: [],
     requireApproval: 'all',
   },
@@ -60,6 +64,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: true,
     piiMasking: true,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     requireApproval: 'destructive',
   },
   permissive: {
@@ -67,6 +72,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: false,
     piiMasking: false,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     requireApproval: 'none',
   },
 };

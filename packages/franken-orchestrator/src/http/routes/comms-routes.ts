@@ -12,12 +12,12 @@ import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.
 import type { CommsConfig } from '../../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
 
-import type { SecurityProfile } from '../../middleware/security-profiles.js';
+import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
 
 export interface CommsRoutesOptions {
   config: CommsConfig;
   runtime?: CommsRuntimePort;
-  securityProfile?: SecurityProfile;
+  webhookSignaturePolicy?: WebhookSignaturePolicy;
 }
 
 export function commsRoutes(options: CommsRoutesOptions): Hono {
@@ -32,13 +32,23 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   const gateway = new ChatGateway(runtime);
-  const verifySignature = options.securityProfile !== 'permissive';
+  const webhookSignaturePolicy = options.webhookSignaturePolicy ?? 'required';
+  const verifySignature = webhookSignaturePolicy === 'required';
 
   if (!verifySignature) {
-    console.warn('[comms] Webhook signature verification disabled (security profile: permissive)');
+    console.warn('[comms] Webhook signature verification disabled for loopback-only local development');
   }
 
   const app = new Hono();
+
+  if (!verifySignature) {
+    app.use('/webhooks/*', async (c, next) => {
+      if (!isLoopbackWebhookRequest(c.req.url)) {
+        return c.json({ error: 'Unsigned webhooks are only allowed on loopback hosts' }, 403);
+      }
+      return next();
+    });
+  }
 
   app.get('/comms/health', (c) => c.json({ status: 'ok' }));
 
@@ -106,4 +116,11 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   });
 
   return app;
+}
+
+function isLoopbackWebhookRequest(url: string): boolean {
+  const hostname = new URL(url).hostname.toLowerCase();
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1';
 }

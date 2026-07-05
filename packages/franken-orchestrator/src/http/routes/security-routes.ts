@@ -19,6 +19,7 @@ export function createSecurityRoutes(deps: {
       config.injectionDetection !== defaults.injectionDetection ||
       config.piiMasking !== defaults.piiMasking ||
       config.outputValidation !== defaults.outputValidation ||
+      config.webhookSignaturePolicy !== defaults.webhookSignaturePolicy ||
       config.requireApproval !== defaults.requireApproval;
     return c.json({ ...config, isCustomized });
   });

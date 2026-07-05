@@ -25,6 +25,28 @@ describe('OrchestratorConfig', () => {
       expect(result.enableHeartbeat).toBe(false); // secure default preserved
     });
 
+    it('accepts explicit local-only webhook signature override in security config', () => {
+      const result = OrchestratorConfigSchema.parse({
+        security: {
+          profile: 'permissive',
+          webhookSignaturePolicy: 'local-dev-unsigned',
+        },
+      });
+
+      expect(result.security?.profile).toBe('permissive');
+      expect(result.security?.webhookSignaturePolicy).toBe('local-dev-unsigned');
+    });
+
+    it('rejects invalid webhook signature policies', () => {
+      const result = OrchestratorConfigSchema.safeParse({
+        security: {
+          webhookSignaturePolicy: 'disabled',
+        },
+      });
+
+      expect(result.success).toBe(false);
+    });
+
     it('rejects out-of-range critique iterations', () => {
       expect(() =>
         OrchestratorConfigSchema.parse({ maxCritiqueIterations: 0 }),
