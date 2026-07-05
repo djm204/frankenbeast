@@ -5,6 +5,28 @@ export interface ActivityPaneProps {
   events: ActivityEvent[];
 }
 
+function summarizeActivity(event: ActivityEvent): string {
+  const data = event.data ?? {};
+  const message = typeof data.message === 'string' ? data.message : undefined;
+  const code = typeof data.code === 'string' ? data.code : undefined;
+  const description = typeof data.description === 'string' ? data.description : undefined;
+
+  if (event.type === 'turn.error') {
+    return [code, message ?? 'Turn failed'].filter(Boolean).join(': ');
+  }
+  if (event.type === 'turn.approval.requested') {
+    return description ? `Approval requested: ${description}` : 'Approval requested.';
+  }
+  if (event.type === 'turn.approval.resolved') {
+    return data.approved === true ? 'Approval granted.' : 'Approval rejected.';
+  }
+  if (message) {
+    return message;
+  }
+
+  return 'Open details to inspect runtime event data.';
+}
+
 export function ActivityPane({ events }: ActivityPaneProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -25,7 +47,11 @@ export function ActivityPane({ events }: ActivityPaneProps) {
         {events.map((event, index) => (
           <article key={`${event.type}-${event.timestamp}-${index}`} className="activity-event">
             <strong className="activity-event__type">{event.type}</strong>
-            <span className="activity-event__summary">{JSON.stringify(event.data ?? {})}</span>
+            <span className="activity-event__summary">{summarizeActivity(event)}</span>
+            <details className="activity-event__details">
+              <summary>Raw event details</summary>
+              <pre>{JSON.stringify(event.data ?? {}, null, 2)}</pre>
+            </details>
           </article>
         ))}
         <div ref={endRef} />

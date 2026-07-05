@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import brandMark from '../../../../assets/img/frankenbeast-github-logo-478x72.png';
-import { useChatSession } from '../hooks/use-chat-session';
+import { useChatSession, type ChatErrorBanner } from '../hooks/use-chat-session';
 import { TranscriptPane } from './transcript-pane';
 import { Composer } from './composer';
 import { ActivityPane } from './activity-pane';
@@ -57,6 +57,42 @@ function PlaceholderPage({ routeId }: { routeId: Exclude<RouteId, 'chat'> }) {
       <h1>{route.label}</h1>
       <p>{route.summary}</p>
       <span>Chat is the only live section in this first Frankenbeast dashboard cut.</span>
+    </section>
+  );
+}
+
+function ChatErrorBanners({
+  banners = [],
+  onDismiss = () => undefined,
+  onRetry = () => undefined,
+}: {
+  banners?: ChatErrorBanner[];
+  onDismiss?: (id: string) => void;
+  onRetry?: (id: string) => void;
+}) {
+  if (banners.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="chat-alerts" aria-label="Chat errors" aria-live="assertive">
+      {banners.map((banner) => (
+        <article key={banner.id} className="chat-alert" role="alert">
+          <div className="chat-alert__body">
+            <p className="eyebrow">{banner.code ?? 'chat_error'}</p>
+            <h2>{banner.title}</h2>
+            <p>{banner.message}</p>
+          </div>
+          <div className="chat-alert__actions">
+            <button className="button button--secondary" type="button" onClick={() => onRetry(banner.id)}>
+              {banner.actionLabel}
+            </button>
+            <button className="button button--ghost" type="button" onClick={() => onDismiss(banner.id)}>
+              Dismiss
+            </button>
+          </div>
+        </article>
+      ))}
     </section>
   );
 }
@@ -186,9 +222,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     approve,
     connectionStatus,
     costUsd,
+    dismissError,
+    errorBanners,
     messages,
     pendingApproval,
     projectId: activeProjectId,
+    retryError,
     send,
     sessionId: activeSessionId,
     showTypingIndicator,
@@ -658,6 +697,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 </div>
               </section>
 
+              <ChatErrorBanners banners={errorBanners} onDismiss={dismissError} onRetry={retryError} />
               <TranscriptPane messages={messages} showTypingIndicator={showTypingIndicator} />
               <Composer
                 connectionStatus={connectionStatus}
