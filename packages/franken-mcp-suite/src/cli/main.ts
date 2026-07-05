@@ -6,6 +6,7 @@ import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
+const FRANKENBEAST_INSTALL_HELP = "install franken-orchestrator with 'npm install -g franken-orchestrator'";
 
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
@@ -27,7 +28,7 @@ function passthrough(): never {
   if (result.error) {
     const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
     if (isNotFound) {
-      console.error("frankenbeast: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'");
+      console.error(`frankenbeast: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
     } else {
       console.error(`frankenbeast: ${result.error.message}`);
     }
@@ -102,11 +103,14 @@ switch (subcommand) {
           const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
           throw new Error(
             isNotFound
-              ? `${cmd}: binary not found — install franken-orchestrator or run 'npm link --workspace=franken-orchestrator'`
+              ? `${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`
               : `${cmd} failed: ${result.error.message}`,
           );
         }
         if (result.status !== 0) {
+          if (process.platform === 'win32' && result.status === 1) {
+            throw new Error(`${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
+          }
           throw new Error(
             result.signal
               ? `${cmd} killed by signal ${result.signal}`

@@ -133,4 +133,19 @@ describe('runBeastMode', () => {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(raw.mode).toBe('beast');
   });
+
+  it('prints standalone install guidance when the frankenbeast handoff binary is missing', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const deps = makeDeps(root, { exec: vi.fn().mockRejectedValue(new Error('frankenbeast: binary not found')) });
+    const mockLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await runBeastMode([], deps);
+
+    const message = mockLog.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('npm install -g franken-orchestrator');
+    expect(message).toContain('frankenbeast beasts catalog');
+    expect(message).not.toContain('npm link --workspace=franken-orchestrator');
+    mockLog.mockRestore();
+  });
 });

@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const originalArgv = process.argv;
+const tmpDirs: string[] = [];
+
+function tmpDir(): string {
+  const dir = join(tmpdir(), `fbeast-main-${randomUUID()}`);
+  mkdirSync(dir, { recursive: true });
+  tmpDirs.push(dir);
+  return dir;
+}
 
 describe('fbeast main CLI', () => {
   afterEach(() => {
@@ -9,6 +21,9 @@ describe('fbeast main CLI', () => {
     vi.resetModules();
     vi.doUnmock('./init.js');
     vi.doUnmock('./uninstall.js');
+    for (const dir of tmpDirs.splice(0)) {
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('passes explicit uninstall client into uninstall execution', async () => {
@@ -160,6 +175,31 @@ describe('fbeast main CLI', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     mockError.mockRestore();
     mockExit.mockRestore();
+  });
+
+  it('maps Windows mcp beast handoff exit status to standalone install help', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir());
+    const mockSpawnSync = vi.fn().mockReturnValue({ status: 1, signal: null, error: undefined });
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'beast'];
+
+    const mockLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await import('./main.js');
+
+    const message = mockLog.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      'frankenbeast',
+      ['beasts', 'catalog'],
+      expect.objectContaining({ stdio: 'inherit', shell: true }),
+    );
+    expect(message).toContain('npm install -g franken-orchestrator');
+    expect(message).not.toContain('npm link --workspace=franken-orchestrator');
+    mockLog.mockRestore();
+    cwdSpy.mockRestore();
+    platformSpy.mockRestore();
   });
 
   it('propagates signal termination from passthrough commands', async () => {
