@@ -37,7 +37,7 @@ export { WebhookNotifier } from './notify/WebhookNotifier.js'
 export { TraceServer } from './ui/TraceServer.js'
 export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 
-export type { ExportAdapter } from './export/ExportAdapter.js'
+export type { ExportAdapter, TraceSummary } from './export/ExportAdapter.js'
 export type { MultiAdapterOptions } from './adapters/multi/MultiAdapter.js'
 export type { BatchAdapterOptions } from './adapters/batch/BatchAdapter.js'
 export type { SamplerStrategy, SamplingAdapterOptions, RateLimitedSamplerOptions } from './sampling/TraceSampler.js'

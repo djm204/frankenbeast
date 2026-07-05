@@ -210,6 +210,45 @@ describe('SQLiteAdapter', () => {
     })
   })
 
+  describe('listTraceSummaries()', () => {
+    it('returns trace summaries with span counts without parsing span payloads', async () => {
+      const trace = TraceContext.createTrace('summary goal')
+      const first = TraceContext.startSpan(trace, { name: 'first' })
+      SpanLifecycle.setMetadata(first, { expensive: 'payload' })
+      TraceContext.endSpan(first)
+      const second = TraceContext.startSpan(trace, { name: 'second' })
+      SpanLifecycle.addThoughtBlock(second, 'private reasoning')
+      TraceContext.endSpan(second)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      const raw = new Database(dbPath)
+      raw.prepare('UPDATE spans SET metadata = ?, thoughtBlocks = ? WHERE traceId = ?')
+        .run('not valid json', 'also not valid json', trace.id)
+      raw.close()
+
+      const summaries = await (adapter as SQLiteAdapter & {
+        listTraceSummaries: () => Promise<Array<{ id: string; goal: string; status: string; spanCount: number; startedAt: number }>>
+      }).listTraceSummaries()
+
+      expect(summaries).toEqual([
+        { id: trace.id, goal: 'summary goal', status: 'completed', spanCount: 2, startedAt: trace.startedAt },
+      ])
+    })
+
+    it('creates a composite index for trace detail span ordering', () => {
+      const raw = new Database(dbPath)
+      const indexes = raw.prepare("PRAGMA index_list('spans')").all() as Array<{ name: string }>
+      const columns = indexes.map(index => ({
+        name: index.name,
+        columns: (raw.prepare(`PRAGMA index_info('${index.name}')`).all() as Array<{ name: string }>).map(row => row.name),
+      }))
+      raw.close()
+
+      expect(columns).toContainEqual({ name: 'idx_spans_traceId_startedAt', columns: ['traceId', 'startedAt'] })
+    })
+  })
+
   describe('concurrent sequential writes', () => {
     it('handles 20 traces written in rapid succession without corruption', async () => {
       const traces = Array.from({ length: 20 }, (_, i) => {

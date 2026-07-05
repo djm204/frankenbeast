@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import type { Trace, Span } from '../../core/types.js'
-import type { ExportAdapter } from '../../export/ExportAdapter.js'
+import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import {
   CREATE_TABLES,
@@ -9,6 +9,7 @@ import {
   SELECT_TRACE,
   SELECT_SPANS,
   SELECT_ALL_TRACE_IDS,
+  SELECT_TRACE_SUMMARIES,
 } from './schema.js'
 
 interface TraceRow {
@@ -31,6 +32,14 @@ interface SpanRow {
   errorMessage: string | null
   metadata: string
   thoughtBlocks: string
+}
+
+interface TraceSummaryRow {
+  id: string
+  goal: string
+  status: string
+  startedAt: number
+  spanCount: number
 }
 
 /**
@@ -130,6 +139,17 @@ export class SQLiteAdapter implements ExportAdapter {
   async listTraceIds(): Promise<string[]> {
     const rows = this.db.prepare(SELECT_ALL_TRACE_IDS).all() as { id: string }[]
     return rows.map(r => r.id)
+  }
+
+  async listTraceSummaries(): Promise<TraceSummary[]> {
+    const rows = this.db.prepare(SELECT_TRACE_SUMMARIES).all() as TraceSummaryRow[]
+    return rows.map(row => ({
+      id: row.id,
+      goal: row.goal,
+      status: row.status as Trace['status'],
+      spanCount: row.spanCount,
+      startedAt: row.startedAt,
+    }))
   }
 
   /** Release the DB connection. Call when shutting down. */

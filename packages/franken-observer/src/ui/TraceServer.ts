@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse, Server } from 'node:http'
-import type { ExportAdapter } from '../export/ExportAdapter.js'
+import type { ExportAdapter, TraceSummary } from '../export/ExportAdapter.js'
 import type { Trace } from '../core/types.js'
 
 export interface TraceServerOptions {
@@ -78,15 +78,7 @@ export class TraceServer {
       }
 
       if (path === '/api/traces') {
-        const ids = await this.adapter.listTraceIds()
-        const all = await Promise.all(ids.map(id => this.adapter.queryByTraceId(id)))
-        const traces = (all.filter(Boolean) as Trace[]).map(t => ({
-          id: t.id,
-          goal: t.goal,
-          status: t.status,
-          spanCount: t.spans.length,
-          startedAt: t.startedAt,
-        }))
+        const traces = await this.listTraceSummaries()
         json(res, 200, { traces })
         return
       }
@@ -114,6 +106,22 @@ export class TraceServer {
     } catch (err) {
       json(res, 500, { error: 'internal server error' })
     }
+  }
+
+  private async listTraceSummaries(): Promise<TraceSummary[]> {
+    if (this.adapter.listTraceSummaries) {
+      return this.adapter.listTraceSummaries()
+    }
+
+    const ids = await this.adapter.listTraceIds()
+    const all = await Promise.all(ids.map(id => this.adapter.queryByTraceId(id)))
+    return (all.filter(Boolean) as Trace[]).map(t => ({
+      id: t.id,
+      goal: t.goal,
+      status: t.status,
+      spanCount: t.spans.length,
+      startedAt: t.startedAt,
+    }))
   }
 }
 
