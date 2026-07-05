@@ -408,6 +408,16 @@ describe('CliSkillExecutor', () => {
       }));
     });
 
+    it('preserves harden stage defaults for generated harden recovery tasks', async () => {
+      await createAndExecute('cli:01_types', makeSkillInput(), {}, undefined, 'fix-harden:01_types-attempt-1');
+
+      expect(martin.run).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'fix-harden:01_types-attempt-1',
+        chunkId: '01_types',
+        promiseTag: 'HARDEN_01_types_DONE',
+      }));
+    });
+
     it('passes chunk session services and task metadata into MartinLoop', async () => {
       const sessionStore = makeStubSessionStore();
       const snapshotStore = makeStubSnapshotStore();

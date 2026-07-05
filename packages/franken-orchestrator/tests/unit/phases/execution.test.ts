@@ -419,12 +419,517 @@ describe('runExecution', () => {
     expect(outcomes[0]!.status).toBe('failure');
     expect(outcomes[0]!.error).toContain('boom');
     expect(memory.recordTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
+      expect.objectContaining({ taskId: 't1', outcome: 'failure', summary: 'boom' }),
     );
     expect(c.errorContext).toHaveLength(1);
     expect(c.errorContext![0]).toBeInstanceOf(Error);
     expect(c.errorContext![0]!.message).toBe('boom');
     expect(c.circuitBreakerTripped).toBe(true);
+    expect(c.audit.find(a => a.action === 'recovery:failed')).toBeDefined();
+  });
+
+  it('does not seed known-error recovery from the current failure trace', async () => {
+    const knownErrors: string[] = [];
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => {
+        throw new Error('brand new runtime blowup');
+      }),
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({ adrs: [], knownErrors, rules: [] })),
+      recordTrace: vi.fn(async (trace) => {
+        if (trace.outcome === 'failure') {
+          knownErrors.push(`${trace.summary} => retry current failure`);
+        }
+      }),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'explode once', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes).toEqual([{ taskId: 't1', status: 'failure', error: 'brand new runtime blowup' }]);
+    expect(skills.execute).toHaveBeenCalledTimes(1);
+    expect(c.audit.find(a => a.action === 'recovery:failed')).toBeDefined();
+    expect(c.audit.find(a => a.action === 'recovery:injected')).toBeUndefined();
+  });
+
+  it('injects a fix-it task and retries when a failed task matches a known error', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['[previous-task] disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.status)).toEqual(['success', 'success']);
+    expect(outcomes[0]!.taskId).toBe('fix-t1-attempt-1');
+    expect(outcomes[0]!.output).toBe('fix-output');
+    expect(outcomes[1]).toEqual({ taskId: 't1', status: 'success', output: 'retry-output' });
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['alpha', 'alpha', 'alpha']);
+    expect(c.plan?.tasks).toEqual([
+      { id: 'fix-t1-attempt-1', objective: 'free temporary files before retrying', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: ['fix-t1-attempt-1'] },
+    ]);
+    expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
+    expect(c.circuitBreakerTripped).toBe(false);
+  });
+
+  it('does not requeue terminal skipped tasks when recovery rebuilds the graph', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn((id: string) => id === 'alpha'),
+      execute,
+      getAvailableSkills: vi.fn(() => [{ id: 'hitl', name: 'HITL', requiresHitl: true }]),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => ({ decision: 'rejected', reason: 'nope' })),
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 'needs-human', objective: 'ask human', requiredSkills: ['hitl'], dependsOn: [] },
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['needs-human', 'fix-t1-attempt-1', 't1']);
+    expect(governor.requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(c.circuitBreakerTripped).toBe(true);
+  });
+
+  it('continues recovered attempts after resuming a plan with prior fix-it tasks', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 'fix-t1-attempt-1', objective: 'prior fix', requiredSkills: [], dependsOn: [] },
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: ['fix-t1-attempt-1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 'fix-t1-attempt-2', 't1']);
+    expect(c.plan?.tasks.some(task => task.id === 'fix-t1-attempt-2')).toBe(true);
+    expect(c.audit.find(a => a.action === 'recovery:injected')?.detail).toEqual(
+      expect.objectContaining({ failedTaskId: 't1', attempt: 2 }),
+    );
+  });
+
+  it('does not recursively recover generated fix-it task failures', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockRejectedValueOnce(new Error('disk full while applying fix'));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes).toEqual([
+      { taskId: 'fix-t1-attempt-1', status: 'failure', error: 'disk full while applying fix' },
+      { taskId: 't1', status: 'skipped', error: 'Unmet dependencies' },
+    ]);
+    expect(c.plan?.tasks.some(task => task.id.startsWith('fix-fix-'))).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists recovered plan tasks so resume keeps injected dependencies', async () => {
+    const firstCheckpointEntries = new Set<string>();
+    const recoveryOutputs = new Map<string, unknown>();
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => firstCheckpointEntries.has(key)),
+      write: vi.fn((key: string) => { firstCheckpointEntries.add(key); }),
+      readAll: vi.fn(() => new Set(firstCheckpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      writeTaskOutput: vi.fn((taskId: string, output: unknown) => { recoveryOutputs.set(taskId, output); }),
+      readTaskOutput: vi.fn((taskId: string) => ({ found: recoveryOutputs.has(taskId), output: recoveryOutputs.get(taskId) })),
+    };
+    const firstExecute = vi
+      .fn()
+      .mockResolvedValueOnce({ output: 'dep-output', tokensUsed: 1 })
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['alpha'], dependsOn: ['t1'] },
+    ]);
+
+    await runExecution(c, makeSkills({ hasSkill: vi.fn(() => true), execute: firstExecute }), makeGovernor(), memory, makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect([...firstCheckpointEntries].some(entry => entry.startsWith('recovery-task-v2:'))).toBe(true);
+    expect([...firstCheckpointEntries].every(entry => entry.length < 4096)).toBe(true);
+    firstCheckpointEntries.delete('t2:done');
+
+    const secondInputs: SkillInput[] = [];
+    const checkpointOutputs = new Map<string, unknown>([
+      ['t1', 'dep-output'],
+      ['fix-t2-attempt-1', 'fix-output'],
+    ]);
+    const resumeCheckpoint = {
+      ...checkpoint,
+      has: vi.fn((key: string) => firstCheckpointEntries.has(key) || key === 't1:done' || key === 'fix-t2-attempt-1:done'),
+      readAll: vi.fn(() => new Set([...firstCheckpointEntries, 't1:done', 'fix-t2-attempt-1:done'])),
+      readTaskOutput: vi.fn((taskId: string) => {
+        if (checkpointOutputs.has(taskId)) {
+          return { found: true, output: checkpointOutputs.get(taskId) };
+        }
+        return { found: recoveryOutputs.has(taskId), output: recoveryOutputs.get(taskId) };
+      }),
+      write: vi.fn((key: string) => { firstCheckpointEntries.add(key); }),
+    };
+    const secondExecute = vi.fn(async (_skillId: string, input: SkillInput) => {
+      secondInputs.push(input);
+      return { output: 'resume-output', tokensUsed: 1 };
+    });
+    const resumed = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['alpha'], dependsOn: ['t1'] },
+    ]);
+
+    await runExecution(resumed, makeSkills({ hasSkill: vi.fn(() => true), execute: secondExecute }), makeGovernor(), memory, makeObserver(), undefined, undefined, undefined, resumeCheckpoint);
+
+    expect(secondInputs[0]!.dependencyOutputs.get('t1')).toBe('dep-output');
+    expect(secondInputs[0]!.dependencyOutputs.get('fix-t2-attempt-1')).toBe('fix-output');
+  });
+
+  it('does not persist unchanged tasks with stripped missing dependencies during recovery', async () => {
+    const checkpointEntries = new Set<string>();
+    const recoveryOutputs = new Map<string, unknown>();
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => checkpointEntries.has(key)),
+      write: vi.fn((key: string) => { checkpointEntries.add(key); }),
+      readAll: vi.fn(() => new Set(checkpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      writeTaskOutput: vi.fn((taskId: string, output: unknown) => { recoveryOutputs.set(taskId, output); }),
+      readTaskOutput: vi.fn((taskId: string) => ({ found: recoveryOutputs.has(taskId), output: recoveryOutputs.get(taskId) })),
+    };
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 'orphan', objective: 'blocked forever', requiredSkills: ['alpha'], dependsOn: ['missing'] },
+    ]);
+
+    await runExecution(c, makeSkills({ hasSkill: vi.fn(() => true), execute }), makeGovernor(), memory, makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect([...recoveryOutputs.values()]).not.toContainEqual(expect.objectContaining({ id: 'orphan', dependsOn: [] }));
+
+    const resumed = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 'orphan', objective: 'blocked forever', requiredSkills: ['alpha'], dependsOn: ['missing'] },
+    ]);
+    const resumeOutcomes = await runExecution(resumed, makeSkills(), makeGovernor(), memory, makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect(resumeOutcomes.at(-1)).toEqual({ taskId: 'orphan', status: 'skipped', error: 'Unmet dependencies' });
+  });
+
+  it('keeps recovery checkpoint markers compact for long task objectives', async () => {
+    const checkpointEntries = new Set<string>();
+    const recoveryOutputs = new Map<string, unknown>();
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => checkpointEntries.has(key)),
+      write: vi.fn((key: string) => {
+        if (key.length > 4096) throw new Error('Invalid checkpoint key');
+        checkpointEntries.add(key);
+      }),
+      readAll: vi.fn(() => new Set(checkpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      writeTaskOutput: vi.fn((taskId: string, output: unknown) => { recoveryOutputs.set(taskId, output); }),
+      readTaskOutput: vi.fn((taskId: string) => ({ found: recoveryOutputs.has(taskId), output: recoveryOutputs.get(taskId) })),
+    };
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: `write artifact ${'x'.repeat(8000)}`, requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, makeSkills({ hasSkill: vi.fn(() => true), execute }), makeGovernor(), memory, makeObserver(), undefined, undefined, undefined, checkpoint);
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1']);
+    expect([...checkpointEntries].every(entry => entry.length < 4096)).toBe(true);
+    expect([...recoveryOutputs.values()].some(output => (output as { id?: string }).id === 't1')).toBe(true);
+  });
+
+  it('escalates unknown recovery errors through the governor', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => {
+        throw new Error('novel runtime failure');
+      }),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async (_request) => ({ decision: 'rejected' as const, reason: 'needs operator triage' })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'unknown work', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    await runExecution(c, skills, governor, makeMemory(), makeObserver());
+
+    expect(governor.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 't1',
+      requiresHitl: true,
+      summary: expect.stringContaining('novel runtime failure'),
+    }));
+    expect(c.audit.find(a => a.action === 'recovery:unknown-error-escalated')).toBeDefined();
+  });
+
+  it('falls back to the original failure when unknown-error HITL escalation throws', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => {
+        throw new Error('novel runtime failure');
+      }),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => {
+        throw new Error('approval channel unavailable');
+      }),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'unknown work', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, makeMemory(), makeObserver());
+
+    expect(outcomes).toEqual([{ taskId: 't1', status: 'failure', error: 'novel runtime failure' }]);
+    expect(c.audit.find(a => a.action === 'recovery:unknown-error-escalation-failed')?.detail).toEqual(
+      expect.objectContaining({ taskId: 't1', error: 'approval channel unavailable' }),
+    );
+  });
+
+  it('recovers a known-error task even when unrelated tasks have missing dependencies', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn((id: string) => id === 'alpha'),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 'orphan', objective: 'blocked forever', requiredSkills: ['alpha'], dependsOn: ['missing'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1', 'orphan']);
+    expect(outcomes.at(-1)).toEqual({ taskId: 'orphan', status: 'skipped', error: 'Unmet dependencies' });
+    expect(c.audit.find(a => a.action === 'recovery:injected')).toBeDefined();
+  });
+
+  it('preserves original dependency outputs when retrying a recovered task', async () => {
+    const retryInputs: SkillInput[] = [];
+    let secondAttempts = 0;
+    const execute = vi.fn(async (_skillId: string, input: SkillInput): Promise<SkillResult> => {
+      if (input.objective === 'first') {
+        return { output: 'dep-output', tokensUsed: 1 };
+      }
+      if (input.objective === 'second') {
+        secondAttempts += 1;
+        retryInputs.push(input);
+        if (secondAttempts === 1) {
+          throw new Error('disk full while writing artifact');
+        }
+        return { output: 'retry-output', tokensUsed: 1 };
+      }
+      return { output: 'fix-output', tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['alpha'], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 'fix-t2-attempt-1', 't2']);
+    expect(retryInputs[1]!.dependencyOutputs?.get('t1')).toBe('dep-output');
+    expect(retryInputs[1]!.dependencyOutputs?.get('fix-t2-attempt-1')).toBe('fix-output');
+  });
+
+  it('does not duplicate recovered tasks when refresh returns the current recovered plan', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full while writing artifact'))
+      .mockResolvedValueOnce({ output: 'fix-output', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'retry-output', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(
+      c,
+      skills,
+      makeGovernor(),
+      memory,
+      makeObserver(),
+      undefined,
+      makeLogger(),
+      undefined,
+      undefined,
+      async () => c.plan?.tasks ?? [],
+    );
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['fix-t1-attempt-1', 't1']);
+  });
+
+  it('does not requeue terminal failures when another task recovers later', async () => {
+    const execute = vi.fn(async (_skillId: string, input: SkillInput): Promise<SkillResult> => {
+      if (input.objective === 'unknown failure') {
+        throw new Error('unknown boom');
+      }
+      if (input.objective === 'recoverable') {
+        if (!execute.mock.calls.slice(0, -1).some(call => call[1]?.objective === 'recoverable')) {
+          throw new Error('disk full while writing artifact');
+        }
+        return { output: 'retry-output', tokensUsed: 1 };
+      }
+      return { output: 'fix-output', tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'unknown failure', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'recoverable', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 'fix-t2-attempt-1', 't2']);
+    expect(outcomes[0]).toEqual({ taskId: 't1', status: 'failure', error: 'unknown boom' });
+    expect(execute.mock.calls.filter(call => call[1]?.objective === 'unknown failure')).toHaveLength(1);
   });
 
   // ── CLI skill routing tests ──

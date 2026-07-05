@@ -348,7 +348,7 @@ export class CliSkillExecutor {
     const preMartinUntrackedFiles = this.untrackedFilesFromStatus(preMartinStatus);
 
     // Build martin config with defaults from input when not explicitly provided
-    const isImpl = taskId ? !taskId.startsWith('harden:') : true;
+    const isImpl = taskId ? !this.isHardenTaskId(taskId) : true;
     const executionStage = isImpl ? 'impl' : 'harden';
     const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
     const martinDefaults: MartinLoopConfig = {
@@ -712,7 +712,18 @@ export class CliSkillExecutor {
     return mergeResult;
   }
 
+  private isHardenTaskId(taskId: string): boolean {
+    return taskId.startsWith('harden:') || taskId.startsWith('fix-harden:');
+  }
+
   private extractChunkId(skillId: string): string {
+    if (skillId.startsWith('fix-harden:')) {
+      return skillId.slice('fix-harden:'.length).replace(/-attempt-\d+$/u, '');
+    }
+    if (skillId.startsWith('fix-impl:')) {
+      return skillId.slice('fix-impl:'.length).replace(/-attempt-\d+$/u, '');
+    }
+
     const parts = skillId.split(':').filter(Boolean);
     if (parts.length === 0) return skillId;
 
