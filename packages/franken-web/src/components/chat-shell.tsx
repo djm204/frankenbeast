@@ -952,7 +952,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             }}
             onRestart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
-              return client.restart(serviceId).then(() => client.getStatus()).then(setNetworkStatus);
+              return client.restart(serviceId).then(() => {
+                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+              });
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
@@ -995,11 +997,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             }}
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
-              return client.start(serviceId).then(() => client.getStatus()).then(setNetworkStatus);
+              return client.start(serviceId).then(() => {
+                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+              });
             }}
             onStop={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
-              return client.stop(serviceId).then(() => client.getStatus()).then(setNetworkStatus);
+              return client.stop(serviceId).then(() => {
+                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+              });
             }}
             selectedLogServiceId={selectedNetworkLogServiceId}
             services={networkStatus.services}

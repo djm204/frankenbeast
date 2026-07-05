@@ -601,10 +601,34 @@ describe('ChatShell', () => {
 
     await waitFor(() => {
       expect(mockNetworkStart).toHaveBeenCalledWith('chat-server');
-      expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('running')).toBeDefined();
       expect(screen.getByText('Started chat-server.')).toBeDefined();
     });
+    await waitFor(() => {
+      expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('running')).toBeDefined();
+    });
+  });
+
+  it('keeps service action success feedback when the follow-up status refresh fails', async () => {
+    window.location.hash = '#/network';
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockRejectedValueOnce(new Error('status endpoint unavailable'));
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+
+    await waitFor(() => {
+      expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
+      expect(screen.getByText('Restarted chat-server.')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    await waitFor(() => expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2));
   });
 
   it('shows connection and session status in the top bar', () => {
