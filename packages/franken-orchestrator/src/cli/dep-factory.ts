@@ -340,9 +340,9 @@ function createLlmDeps(
 ): LlmDeps {
   const resolvedProvider = stack.registry.get(config.provider);
   const override = options.providersConfig?.[config.provider];
-  const observerDeps = config.enableTracing
-    ? (observer.observerBridge.observerDeps as never)
-    : undefined;
+  const observerDeps = (config.enableTracing
+    ? observer.observerBridge.observerDeps
+    : observer.observerBridge.disabledObserverDeps) as never;
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? options.paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
@@ -372,7 +372,7 @@ function createLlmDeps(
     workId: `session:${artifacts.planName}`,
     stablePrefix: 'surface:cli',
     workPrefix: `plan:${artifacts.planName}`,
-    ...(observerDeps ? { observer: observerDeps } : {}),
+    observer: observerDeps,
   });
 
   return { cliLlmAdapter, cachedLlm };

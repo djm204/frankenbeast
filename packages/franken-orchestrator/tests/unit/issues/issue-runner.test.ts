@@ -253,6 +253,18 @@ describe('IssueRunner', () => {
       expect(mockRun).toHaveBeenCalled();
     });
 
+    it('passes tracing opt-in through to issue-specific BeastLoop runs', async () => {
+      const issues = [makeIssue({ number: 7 })];
+      const triages = [makeTriage(7)];
+      const config = makeConfig({ issues, triageResults: triages, enableTracing: true });
+
+      await runner.run(config);
+
+      expect(mockLoopConstructions[0]?.config).toEqual(expect.objectContaining({
+        enableTracing: true,
+      }));
+    });
+
     it('registers executable one-shot cli skills in BeastLoop deps', async () => {
       const issues = [makeIssue({ number: 7 })];
       const triages = [makeTriage(7)];
