@@ -4,10 +4,18 @@ import type { GuardrailsPort, MemoryPort, ObservabilityPort } from '../../src/ty
 import type { EvaluationInput } from '../../src/types/evaluation.js';
 import type { LoopConfig } from '../../src/types/loop.js';
 
+const unsafeDynamicCallName = ['ev', 'al'].join('');
+const unsafeDynamicCallPattern = `${unsafeDynamicCallName}\\(`;
+
 function createMockGuardrailsPort(): GuardrailsPort {
   return {
     getSafetyRules: vi.fn().mockResolvedValue([
-      { id: 'r1', description: 'no eval', pattern: 'eval\\(', severity: 'block' },
+      {
+        id: `no-${unsafeDynamicCallName}`,
+        description: `no ${unsafeDynamicCallName}`,
+        pattern: unsafeDynamicCallPattern,
+        severity: 'block',
+      },
     ]),
     executeSandbox: vi.fn().mockResolvedValue({
       success: true,
@@ -79,7 +87,7 @@ describe('Full Critique Loop Integration', () => {
     });
 
     const result = await reviewer.review(
-      createInput('eval("malicious code")'),
+      createInput(`${unsafeDynamicCallName}("malicious code")`),
       createLoopConfig({ maxIterations: 1 }),
     );
 

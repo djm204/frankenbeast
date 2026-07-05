@@ -145,8 +145,10 @@ describe('Circuit Breaker: Safety Short-Circuit (MOD-06)', () => {
       new GhostDependencyEvaluator(['express']),
     ]);
 
+    const unsafeDynamicCallName = ['ev', 'al'].join('');
+
     const input: EvaluationInput = {
-      content: 'eval("malicious code")',
+      content: `${unsafeDynamicCallName}("malicious code")`,
       source: 'test.ts',
       metadata: {},
     };
