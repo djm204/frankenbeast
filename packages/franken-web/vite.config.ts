@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { loadProxyOperatorToken } from './vite-env';
+import { assertNoBrowserOperatorToken, loadProxyEnv, loadProxyOperatorToken } from './vite-env';
 
 type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
 
@@ -21,6 +21,10 @@ function isLoopbackRemoteAddress(address: string | undefined): boolean {
 }
 
 function isSameOriginProxyRequest(req: IncomingMessage): boolean {
+  if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+    return false;
+  }
+
   const fetchSite = req.headers['sec-fetch-site'];
   const fetchSiteValue = Array.isArray(fetchSite) ? fetchSite[0] : fetchSite;
   if (fetchSiteValue && !['none', 'same-origin'].includes(fetchSiteValue)) {
@@ -77,6 +81,7 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
 
 export default defineConfig(async ({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  assertNoBrowserOperatorToken(loadProxyEnv(loadEnv, mode, repoRootDir, process.cwd()));
   const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
   const proxyOperatorToken = command === 'serve'
