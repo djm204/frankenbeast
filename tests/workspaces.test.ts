@@ -60,21 +60,23 @@ describe('npm workspaces configuration', () => {
     it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const declaredDependencies = {
-          ...pkg.dependencies,
-          ...pkg.devDependencies,
-          ...pkg.optionalDependencies,
-          ...pkg.peerDependencies,
-        };
+        for (const dependencySection of [
+          'dependencies',
+          'devDependencies',
+          'optionalDependencies',
+          'peerDependencies',
+        ]) {
+          const dependencies = pkg[dependencySection] ?? {};
 
-        for (const dependencyName of ['vitest', '@vitest/coverage-v8']) {
-          const version = declaredDependencies[dependencyName];
-          if (version === undefined) continue;
+          for (const dependencyName of ['vitest', '@vitest/coverage-v8']) {
+            const version = dependencies[dependencyName];
+            if (version === undefined) continue;
 
-          expect(
-            isAtLeast(version, minimumVitest),
-            `${dependencyName} in ${path} must stay >= ${minimumVitest}`,
-          ).toBe(true);
+            expect(
+              isAtLeast(version, minimumVitest),
+              `${dependencyName} in ${path} ${dependencySection} must stay >= ${minimumVitest}`,
+            ).toBe(true);
+          }
         }
       }
     });
