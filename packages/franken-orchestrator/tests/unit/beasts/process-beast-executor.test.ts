@@ -703,6 +703,53 @@ describe('ProcessBeastExecutor', () => {
       });
     });
 
+    it('redacts secrets from failed attempt stderr tails in repository events and eventBus publishes', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
+      const run = createTestRun(repo);
+
+      await executor.start(run, martinLoopDefinition);
+      const [, callbacks] = supervisor.spawn.mock.calls[0];
+      const cb = callbacks as ProcessCallbacks;
+
+      cb.onStderr('api_key=sk-live-secret-value password=hunter2');
+      cb.onStderr('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.abc1234567890secret');
+      cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
+      cb.onExit(1, null);
+
+      const failEvent = repo.listEvents(run.id).find((e) => e.type === 'attempt.failed');
+      expect(failEvent).toBeDefined();
+      expect(failEvent!.payload).toMatchObject({
+        exitCode: 1,
+        lastStderrLines: [
+          'api_key=[REDACTED] password=[REDACTED]',
+          'jwt [REDACTED]',
+          'posting to [REDACTED]',
+        ],
+      });
+      const serializedPersistedEvent = JSON.stringify(failEvent);
+      expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPersistedEvent).not.toContain('hunter2');
+      expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
+      expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
+
+      const publishedFailure = publishSpy.mock.calls
+        .map(([event]) => event)
+        .find((event) => event.type === 'run.event' && event.data.event.type === 'attempt.failed');
+      expect(publishedFailure).toBeDefined();
+      expect(publishedFailure!.data.event.payload).toMatchObject(failEvent!.payload);
+      const serializedPublishedEvent = JSON.stringify(publishedFailure);
+      expect(serializedPublishedEvent).not.toContain('sk-live-secret-value');
+      expect(serializedPublishedEvent).not.toContain('hunter2');
+      expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
+      expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
+    });
+
     it('marks attempt as failed on signal kill', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

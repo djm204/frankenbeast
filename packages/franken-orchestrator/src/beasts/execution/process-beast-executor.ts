@@ -9,6 +9,27 @@ import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
+const REDACTED_SECRET = '[REDACTED]';
+
+function redactFailureStderrLine(line: string): string {
+  return line
+    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, `$1${REDACTED_SECRET}`)
+    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, REDACTED_SECRET)
+    .replace(
+      /(\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url)\b\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      `$1${REDACTED_SECRET}`,
+    )
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
+    .replace(
+      /https?:\/\/[^\s'"`<>]*(?:hooks\.slack\.com\/services|discord(?:app)?\.com\/api\/webhooks|webhook)[^\s'"`<>]*/gi,
+      REDACTED_SECRET,
+    );
+}
+
+function redactFailureStderrTail(stderrTail: readonly string[]): string[] {
+  return stderrTail.map(redactFailureStderrLine);
+}
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   if (!config) return {};
@@ -407,6 +428,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const durationMs = attemptRecord?.startedAt
       ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
       : undefined;
+    const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail) : [];
     const exitEvent = {
       attemptId,
       type: eventType,
@@ -414,7 +436,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         exitCode: code,
         signal,
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(code !== 0 ? { lastStderrLines: stderrTail, summary: `Process exited with code ${code}` } : {}),
+        ...(code !== 0 ? { lastStderrLines: redactedStderrTail, summary: `Process exited with code ${code}` } : {}),
       },
       createdAt: finishedAt,
     };
