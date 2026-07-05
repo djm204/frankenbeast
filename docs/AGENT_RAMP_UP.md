@@ -19,7 +19,7 @@ Implemented and enforced (verify before relying on legacy docs that say otherwis
 - **ADR-031** — consolidation: no standalone firewall/skills/heartbeat/mcp packages; capabilities live in `franken-orchestrator` and `@fbeast/mcp-suite` (workspace has since grown back to 10 packages).
 - **ADR-033 (beast-run-resume)** — fail-closed dep assembly; cold runs clear checkpoints; `--resume` fails fast without one.
 - **ADR-033 (hook-failclosed-payload)** — pre-tool hooks forward command text via `FBEAST_TOOL_CONTEXT` and deny on empty/unparseable tool names.
-- **ADR-036 (both)** — safety modules fail closed (`FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the only opt-out); sandboxed container execution via `ContainerBeastExecutor`/`DockerSupervisor`.
+- **ADR-036 (both)** — safety modules fail closed (`FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the only opt-out); sandboxed container execution via `ContainerBeastExecutor` (a `ProcessSupervisor` whose spawn spec is rewritten to a docker invocation by `toDockerSpec`).
 - **ADR-037** — durable audit + replay capture; phase snapshots require `config.stateDir` (the CLI always sets it).
 - **ADR-038** — central MCP governance gate in dispatch.
 
