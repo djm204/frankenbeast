@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './dashboard-page';
 import type { DashboardApiClient, DashboardSnapshot } from '../lib/dashboard-api';
@@ -293,6 +293,11 @@ describe('DashboardPage', () => {
     fireEvent.click(await screen.findByRole('switch', { name: 'Disable shell' }));
 
     successfulEnable.resolve(undefined);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+
     failedDisable.reject(new Error('HTTP 500'));
 
     await waitFor(() => {
@@ -375,6 +380,108 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
+  it('retries a failed skill mutation toward the requested state without flipping current server state', async () => {
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockRejectedValueOnce(new Error('HTTP 500'))
+        .mockResolvedValueOnce(undefined),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    expect(await screen.findByRole('button', { name: 'Retry enabling shell' })).toBeTruthy();
+
+    act(() => {
+      useDashboardStore.getState().setSkillEnabled('shell', true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry enabling shell' }));
+
+    await waitFor(() => {
+      expect(client.toggleSkill).toHaveBeenLastCalledWith('shell', true);
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  it('ignores stale mutation failures from a previous dashboard client', async () => {
+    const staleToggle = deferred<void>();
+    const firstClient = mockClient({
+      toggleSkill: vi.fn().mockReturnValue(staleToggle.promise),
+    });
+    const nextClient = mockClient();
+    const { rerender } = render(<DashboardPage client={firstClient} />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    rerender(<DashboardPage client={nextClient} />);
+    await screen.findByRole('switch', { name: 'Enable shell' });
+
+    staleToggle.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not enable shell/)).toBeNull();
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+    });
+  });
+
+  it('preserves newer snapshot fields when rolling back one failed skill mutation', async () => {
+    const failedShellToggle = deferred<void>();
+    let pushSnapshot!: (snapshot: DashboardSnapshot) => void;
+    const multiSkillSnapshot: DashboardSnapshot = {
+      ...snapshot,
+      skills: [
+        { name: 'shell', enabled: false, hasContext: false, mcpServerCount: 0 },
+        { name: 'github', enabled: false, hasContext: false, mcpServerCount: 0 },
+      ],
+    };
+    const client = mockClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(multiSkillSnapshot),
+      toggleSkill: vi.fn().mockReturnValue(failedShellToggle.promise),
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    pushSnapshot({
+      ...multiSkillSnapshot,
+      skills: [
+        { name: 'shell', enabled: false, hasContext: false, mcpServerCount: 0 },
+        { name: 'github', enabled: true, hasContext: false, mcpServerCount: 0 },
+      ],
+    });
+
+    failedShellToggle.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Enable shell' }).getAttribute('aria-checked')).toBe('false');
+      expect(screen.getByRole('switch', { name: 'Disable github' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  it('ignores snapshots from a superseded dashboard client subscription', async () => {
+    let pushStaleSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
+    const firstClient = mockClient({
+      subscribeToDashboard: vi.fn((onSnapshot: (nextSnapshot: DashboardSnapshot) => void) => {
+        pushStaleSnapshot = onSnapshot;
+        return () => undefined;
+      }),
+    });
+    const nextClient = mockClient();
+    const { rerender } = render(<DashboardPage client={firstClient} />);
+
+    expect(await screen.findByRole('switch', { name: 'Enable shell' })).toBeTruthy();
+    rerender(<DashboardPage client={nextClient} />);
+    await screen.findByRole('switch', { name: 'Enable shell' });
+
+    pushStaleSnapshot({ ...snapshot, security: { ...snapshot.security, profile: 'strict' } });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('standard');
     });
   });
 });
