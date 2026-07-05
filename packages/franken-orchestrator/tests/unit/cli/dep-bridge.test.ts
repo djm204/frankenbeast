@@ -305,6 +305,27 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.security?.profile).toBe('strict');
     });
 
+    it('passes webhook policy and custom rules through config.security', () => {
+      const customRules = [
+        { name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' },
+      ];
+      const orchestratorConfig = {
+        security: {
+          profile: 'standard',
+          webhookSignaturePolicy: 'local-dev-unsigned',
+          customRules,
+        },
+      } as any;
+
+      const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
+
+      expect(config.security).toEqual(expect.objectContaining({
+        profile: 'standard',
+        webhookSignaturePolicy: 'local-dev-unsigned',
+        customRules,
+      }));
+    });
+
     it('uses config.brain.dbPath when provided', () => {
       const orchestratorConfig = { brain: { dbPath: '/custom/brain.db' } } as any;
       const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);

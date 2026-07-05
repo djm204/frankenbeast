@@ -60,6 +60,7 @@ export interface UseChatSessionResult {
   projectId: string;
   retryError: (id: string) => Promise<string | undefined>;
   retryMessage: (messageId: string) => Promise<void>;
+  reconnect: () => void;
   send: (content: string) => Promise<void>;
   sessionId: string | null;
   showTypingIndicator: boolean;
@@ -832,6 +833,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     messages,
     pendingApproval,
     projectId,
+    reconnect: refreshSession,
     retryError,
     retryMessage,
     send,

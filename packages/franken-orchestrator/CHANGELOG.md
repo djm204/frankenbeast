@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.39.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.1...franken-orchestrator-v0.39.0) (2026-07-05)
+
+
+### Features
+
+* **orchestrator:** isolate beast processes in git worktrees ([efbe11e](https://github.com/djm204/frankenbeast/commit/efbe11e86fa032f2f1b360b954cea8a20a8bd8ba)), closes [#494](https://github.com/djm204/frankenbeast/issues/494)
+* **orchestrator:** wire execution recovery loop ([#553](https://github.com/djm204/frankenbeast/issues/553)) ([099067f](https://github.com/djm204/frankenbeast/commit/099067faa067414763b83376501fd87722ef0da9))
+
+
+### Bug Fixes
+
+* **config:** harden insecure defaults ([5abc7f9](https://github.com/djm204/frankenbeast/commit/5abc7f9c51477706ab6246116d44116645b363af)), closes [#522](https://github.com/djm204/frankenbeast/issues/522)
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+* **orchestrator:** gate provider command overrides ([#664](https://github.com/djm204/frankenbeast/issues/664)) ([b785bb9](https://github.com/djm204/frankenbeast/commit/b785bb92c3a462f27886b1e7190a30cf2e97092d)), closes [#590](https://github.com/djm204/frankenbeast/issues/590)
+* **orchestrator:** harden verify command execution ([6a4c95e](https://github.com/djm204/frankenbeast/commit/6a4c95ef1f5d6e298bc4fde5ce8f5fad1cd81913)), closes [#521](https://github.com/djm204/frankenbeast/issues/521)
+* **orchestrator:** preserve MCP tool HITL metadata ([#552](https://github.com/djm204/frankenbeast/issues/552)) ([2008c70](https://github.com/djm204/frankenbeast/commit/2008c707c9297958c498ba3cc30cb898c1a46018))
+* **security:** constrain chunk-plan design doc path ([#719](https://github.com/djm204/frankenbeast/issues/719)) ([45b25d9](https://github.com/djm204/frankenbeast/commit/45b25d9cc6ecb6403726b9e4c80eefab2a9f1a2e))
+* **security:** decouple webhook signature policy ([#712](https://github.com/djm204/frankenbeast/issues/712)) ([5d6f127](https://github.com/djm204/frankenbeast/commit/5d6f1277b110fda6a2f708427844a026b45c2d4e))
+* **security:** fail closed for unsigned exposed webhooks ([ed740eb](https://github.com/djm204/frankenbeast/commit/ed740eb4f87ce3b04210721c777b21b950ab5212)), closes [#611](https://github.com/djm204/frankenbeast/issues/611)
+* **security:** gate MCP health checks on trust ([a7968ee](https://github.com/djm204/frankenbeast/commit/a7968eee878d30f8428928bedbfc1d86bebb8560))
+* **security:** harden Hono CORS handling ([00a0d2b](https://github.com/djm204/frankenbeast/commit/00a0d2bbcb66121d343b3b3143c4253765a84ffe)), closes [#583](https://github.com/djm204/frankenbeast/issues/583)
+* **security:** redact Beast failure stderr tails ([#714](https://github.com/djm204/frankenbeast/issues/714)) ([99f4e73](https://github.com/djm204/frankenbeast/commit/99f4e73437b6f8222eb6f8d59ea359c3f2c8a969))
+* **security:** redact Beast startup log lines ([#716](https://github.com/djm204/frankenbeast/issues/716)) ([d7cf39c](https://github.com/djm204/frankenbeast/commit/d7cf39cd0c7ea2101c458fa81dde69bc347267bf)), closes [#600](https://github.com/djm204/frankenbeast/issues/600)
+* **web:** improve approval pending UX ([397aad6](https://github.com/djm204/frankenbeast/commit/397aad66ed038e7329447866e54c327c73952e3b)), closes [#654](https://github.com/djm204/frankenbeast/issues/654)
+* **web:** keep chat bearer auth server-side ([#667](https://github.com/djm204/frankenbeast/issues/667)) ([6356ecf](https://github.com/djm204/frankenbeast/commit/6356ecf582e3238ea478b9daa698cdad9e7f6342))
+* **web:** keep control-plane operator token server-side ([#666](https://github.com/djm204/frankenbeast/issues/666)) ([d201851](https://github.com/djm204/frankenbeast/commit/d201851f14b35d1388acf4ecf67b872d719559fb))
+* **web:** remove operator token from frontend bundle ([fc1b8f5](https://github.com/djm204/frankenbeast/commit/fc1b8f5f7874488440b5755d4f71e8d6dd0774f1)), closes [#566](https://github.com/djm204/frankenbeast/issues/566)
+
 ## [0.38.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.0...franken-orchestrator-v0.38.1) (2026-07-04)
 
 

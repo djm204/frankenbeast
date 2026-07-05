@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MiddlewareChain, type LlmMiddleware } from './llm-middleware.js';
+import { MiddlewareChain } from './llm-middleware.js';
 import { InjectionDetectionMiddleware } from './injection-detection.js';
 import { PiiMaskingMiddleware } from './pii-masking.js';
 import { OutputValidationMiddleware } from './output-validation.js';
@@ -7,6 +7,7 @@ import { CustomRuleMiddleware } from './custom-rule.js';
 import { DomainAllowlistMiddleware } from './domain-allowlist.js';
 
 export type SecurityProfile = 'strict' | 'standard' | 'permissive';
+export type WebhookSignaturePolicy = 'required' | 'local-dev-unsigned';
 
 export interface SecurityRule {
   name: string;
@@ -20,17 +21,28 @@ export interface SecurityConfig {
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
+  webhookSignaturePolicy: WebhookSignaturePolicy;
   allowedDomains?: string[];
   maxTokenBudget?: number;
   requireApproval: 'all' | 'destructive' | 'none';
   customRules?: SecurityRule[];
 }
 
+const RegexPatternSchema = z.string().min(1).refine((pattern) => {
+  try {
+    new RegExp(pattern, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'pattern must be a valid regular expression' });
+
 export const SecurityConfigSchema = z.object({
   profile: z.enum(['strict', 'standard', 'permissive']),
   injectionDetection: z.boolean(),
   piiMasking: z.boolean(),
   outputValidation: z.boolean(),
+  webhookSignaturePolicy: z.enum(['required', 'local-dev-unsigned']),
   allowedDomains: z.array(z.string()).optional(),
   maxTokenBudget: z.number().positive().optional(),
   requireApproval: z.enum(['all', 'destructive', 'none']),
@@ -38,7 +50,7 @@ export const SecurityConfigSchema = z.object({
     .array(
       z.object({
         name: z.string().min(1),
-        pattern: z.string().min(1),
+        pattern: RegexPatternSchema,
         action: z.enum(['block', 'warn', 'log']),
         target: z.enum(['request', 'response', 'both']),
       }),
@@ -52,6 +64,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: true,
     piiMasking: true,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     allowedDomains: [],
     requireApproval: 'all',
   },
@@ -60,6 +73,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: true,
     piiMasking: true,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     requireApproval: 'destructive',
   },
   permissive: {
@@ -67,6 +81,7 @@ export const PROFILE_DEFAULTS: Record<SecurityProfile, SecurityConfig> = {
     injectionDetection: false,
     piiMasking: false,
     outputValidation: true,
+    webhookSignaturePolicy: 'required',
     requireApproval: 'none',
   },
 };

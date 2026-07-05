@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { McpConfig } from '@franken/types';
 import { SkillHealthChecker } from '../../../src/skills/skill-health-checker.js';
 
-vi.mock('node:child_process', () => {
-  const { EventEmitter } = require('node:events');
+vi.mock('node:child_process', async () => {
+  const { EventEmitter } = await import('node:events');
   return {
     spawn: vi.fn(() => {
       const proc = Object.assign(new EventEmitter(), {
@@ -23,30 +23,56 @@ vi.mock('node:child_process', () => {
 describe('SkillHealthChecker', () => {
   const checker = new SkillHealthChecker();
 
-  it('returns connected when server exits cleanly', async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not spawn manifest commands without explicit trust', async () => {
+    const { spawn } = await import('node:child_process');
     const config: McpConfig = {
       mcpServers: {
         github: { command: 'echo', args: ['ok'] },
       },
     };
+
     const result = await checker.getStatus('github', config);
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.name).toBe('github');
+    expect(result.status).toBe('unknown');
+    expect(result.serverStatuses).toEqual([
+      {
+        serverName: 'github',
+        status: 'unknown',
+        error: 'MCP health check command was not executed because the skill is not trusted',
+      },
+    ]);
+  });
+
+  it('returns connected when a trusted server exits cleanly', async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { command: 'echo', args: ['ok'] },
+      },
+    };
+    const result = await checker.getStatus('github', config, { trustMcpServerCommands: true });
     expect(result.name).toBe('github');
     expect(result.status).toBe('connected');
     expect(result.serverStatuses).toHaveLength(1);
   });
 
-  it('handles multiple servers', async () => {
+  it('handles multiple trusted servers', async () => {
     const config: McpConfig = {
       mcpServers: {
         a: { command: 'echo' },
         b: { command: 'echo' },
       },
     };
-    const result = await checker.getStatus('multi', config);
+    const result = await checker.getStatus('multi', config, { trustMcpServerCommands: true });
     expect(result.serverStatuses).toHaveLength(2);
   });
 
-  it('returns error when spawn fails', async () => {
+  it('returns error when trusted spawn fails', async () => {
     const { spawn } = await import('node:child_process');
     const { EventEmitter } = await import('node:events');
     (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
@@ -63,7 +89,7 @@ describe('SkillHealthChecker', () => {
     const config: McpConfig = {
       mcpServers: { bad: { command: 'nonexistent' } },
     };
-    const result = await checker.getStatus('bad', config);
+    const result = await checker.getStatus('bad', config, { trustMcpServerCommands: true });
     expect(result.status).toBe('error');
   });
 });

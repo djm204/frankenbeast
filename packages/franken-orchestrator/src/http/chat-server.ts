@@ -1,7 +1,8 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
@@ -23,6 +24,7 @@ import type { ProviderRegistry } from '../providers/provider-registry.js';
 import type { DashboardRouteDeps } from './routes/dashboard-routes.js';
 import type { AnalyticsRouteDeps } from './routes/analytics-routes.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
+import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -183,6 +185,31 @@ function createCommsRuntimeAdapter(
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
+function enabledSignedExternalWebhookChannels(commsConfig: CommsConfig | undefined): string[] {
+  if (!commsConfig) {
+    return [];
+  }
+
+  const channels = commsConfig.channels;
+  const enabledChannels: string[] = [];
+  if (channels.slack?.enabled && channels.slack.token && channels.slack.signingSecret) {
+    enabledChannels.push('slack');
+  }
+  if (channels.discord?.enabled && channels.discord.token && channels.discord.publicKey) {
+    enabledChannels.push('discord');
+  }
+  if (
+    channels.whatsapp?.enabled
+    && channels.whatsapp.accessToken
+    && channels.whatsapp.phoneNumberId
+    && channels.whatsapp.appSecret
+    && channels.whatsapp.verifyToken
+  ) {
+    enabledChannels.push('whatsapp');
+  }
+  return enabledChannels;
+}
+
 export async function startChatServer(options: StartChatServerOptions): Promise<ChatServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
@@ -220,6 +247,20 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       `Refusing to start chat-server on ${host} without an operator token: `
       + 'set FRANKENBEAST_BEAST_OPERATOR_TOKEN (or pass operatorToken/beastControl) '
       + 'or bind to a loopback host. Pass allowUnauthenticatedChatForTests in tests.',
+    );
+  }
+  const securityConfig = options.networkControl
+    ? createNetworkSecurityConfigAdapter(options.networkControl)
+    : undefined;
+  const webhookSignaturePolicy = securityConfig?.getSecurityConfig().webhookSignaturePolicy ?? 'required';
+  const unsignedExternalWebhookChannels = webhookSignaturePolicy === 'local-dev-unsigned'
+    ? enabledSignedExternalWebhookChannels(options.commsConfig)
+    : [];
+  if (isExposed && unsignedExternalWebhookChannels.length > 0) {
+    throw new Error(
+      `Refusing to start chat-server on ${host} with unsigned external webhooks enabled: `
+      + `${unsignedExternalWebhookChannels.join(', ')} webhooks require signature verification when the listener is exposed. `
+      + 'Set security.webhookSignaturePolicy to "required" or bind to a loopback-only local-dev host.',
     );
   }
   const tokenSecret = createSessionTokenSecret();
@@ -261,6 +302,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(options.beastControl ? { beastControl: options.beastControl } : {}),
     ...(options.networkControl ? { networkControl: options.networkControl } : {}),
+    ...(securityConfig ? { securityConfig } : {}),
     ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
     ...(commsRuntime ? { commsRuntime } : {}),
     ...(options.skillManager ? { skillManager: options.skillManager } : {}),
@@ -312,6 +354,42 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
       await closedServer;
+    },
+  };
+}
+
+function createNetworkSecurityConfigAdapter(networkControl: NonNullable<StartChatServerOptions['networkControl']>): {
+  getSecurityConfig: () => SecurityConfig;
+  setSecurityConfig: (config: Partial<SecurityConfig>) => void;
+} {
+  return {
+    getSecurityConfig: () => {
+      const security = networkControl.getConfig().security;
+      const overrides: Partial<Omit<SecurityConfig, 'profile'>> = {};
+      if (security?.injectionDetection !== undefined) overrides.injectionDetection = security.injectionDetection;
+      if (security?.piiMasking !== undefined) overrides.piiMasking = security.piiMasking;
+      if (security?.outputValidation !== undefined) overrides.outputValidation = security.outputValidation;
+      if (security?.webhookSignaturePolicy !== undefined) {
+        overrides.webhookSignaturePolicy = security.webhookSignaturePolicy;
+      }
+      if (security?.allowedDomains !== undefined) overrides.allowedDomains = security.allowedDomains;
+      if (security?.maxTokenBudget !== undefined) overrides.maxTokenBudget = security.maxTokenBudget;
+      if (security?.requireApproval !== undefined) overrides.requireApproval = security.requireApproval;
+      if (security?.customRules !== undefined) overrides.customRules = security.customRules;
+      return resolveSecurityConfig(security?.profile ?? 'standard', overrides);
+    },
+    setSecurityConfig: (config) => {
+      const current = networkControl.getConfig();
+      const next = {
+        ...current,
+        security: {
+          ...current.security,
+          ...config,
+        },
+      };
+      networkControl.setConfig(next);
+      mkdirSync(dirname(networkControl.configFile), { recursive: true });
+      writeFileSync(networkControl.configFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
     },
   };
 }

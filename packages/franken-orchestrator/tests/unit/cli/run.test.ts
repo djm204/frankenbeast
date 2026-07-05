@@ -1001,6 +1001,43 @@ describe('main() execution', () => {
 
   it('dispatches chat-server without creating a Session or REPL', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(loadConfig).mockResolvedValueOnce({
+      maxCritiqueIterations: 3,
+      maxDurationMs: 600_000,
+      enableTracing: false,
+      enableHeartbeat: false,
+      minCritiqueScore: 0.7,
+      maxTotalTokens: 100_000,
+      providers: { default: 'gemini', fallbackChain: [], overrides: {} },
+      security: {
+        profile: 'permissive',
+        webhookSignaturePolicy: 'local-dev-unsigned',
+        customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
+      },
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: {
+        enabled: false,
+        host: '127.0.0.1',
+        port: 3200,
+        orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+        slack: { enabled: false },
+        discord: { enabled: false },
+        telegram: { enabled: false },
+        whatsapp: { enabled: false },
+      },
+    } as any);
+    mockCreateCliDeps.mockResolvedValueOnce({
+      deps: {},
+      cliLlmAdapter: { name: 'chat-adapter' },
+      observerBridge: {},
+      logger: {},
+      finalize: mockFinalize,
+      skillManager: {},
+      providerRegistry: { getProviders: vi.fn(() => []) },
+    } as any);
     mockParseArgs.mockReturnValue({
       subcommand: 'chat-server',
       networkAction: undefined,
@@ -1050,6 +1087,12 @@ describe('main() execution', () => {
       beastControl: expect.objectContaining({
         operatorToken: 'dashboard-operator-token',
       }),
+    }));
+    const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
+    expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({
+      profile: 'permissive',
+      webhookSignaturePolicy: 'local-dev-unsigned',
+      customRules: [{ name: 'no-secrets', pattern: 'secret', action: 'block', target: 'request' }],
     }));
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));

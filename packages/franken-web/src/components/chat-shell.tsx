@@ -230,6 +230,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     messages,
     pendingApproval,
     projectId: activeProjectId,
+    reconnect,
     retryError,
     retryMessage,
     send,
@@ -735,6 +736,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
+                onReconnect={reconnect}
                 onSend={send}
                 status={status}
               />

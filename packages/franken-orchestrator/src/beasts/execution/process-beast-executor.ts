@@ -9,6 +9,32 @@ import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
+const REDACTED_SECRET = '[REDACTED]';
+
+function redactBeastLogLine(line: string): string {
+  return line
+    .replace(/((?:"|')?authorization(?:"|')?\s*:\s*(?:"|')?(?:bearer|basic|bot)\s+)[^\s"',;}]+/gi, `$1${REDACTED_SECRET}`)
+    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, `$1${REDACTED_SECRET}`)
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, REDACTED_SECRET)
+    .replace(/\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}\b/gi, REDACTED_SECRET)
+    .replace(/\b(?:gh[opusr])_[A-Za-z0-9_.-]{20,}\b/gi, REDACTED_SECRET)
+    .replace(/\bsk-[A-Za-z0-9_-]{15,}[A-Za-z0-9_-]\b/g, REDACTED_SECRET)
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, REDACTED_SECRET)
+    .replace(/\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]\b/gi, REDACTED_SECRET)
+    .replace(
+      /((?:"|')?\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url|[a-z0-9]*(?:token|secret|password|apikey|accesskey|webhookurl))\b(?:"|')?\s*[=:]\s*)((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*')|[^\s,;}]+)/gi,
+      `$1${REDACTED_SECRET}`,
+    )
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]*:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
+    .replace(
+      /https?:\/\/[^\s'"`<>]*(?:hooks\.slack\.com\/services|discord(?:app)?\.com\/api\/webhooks|webhook)[^\s'"`<>]*/gi,
+      REDACTED_SECRET,
+    );
+}
+
+function redactFailureStderrTail(stderrTail: readonly string[]): string[] {
+  return stderrTail.map(redactBeastLogLine);
+}
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   if (!config) return {};
@@ -158,29 +184,31 @@ export class ProcessBeastExecutor implements BeastExecutor {
     try {
       handle = await this.supervisor.spawn(spawnedSpec, {
         onStdout: (line) => {
+          const redactedLine = redactBeastLogLine(line);
           if (attemptId) {
             const createdAt = new Date().toISOString();
-            void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
+            void this.logs.append(run.id, attemptId, 'stdout', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
+              data: { runId: run.id, attemptId, stream: 'stdout', line: redactedLine, createdAt },
             });
           } else {
-            earlyStdoutLines.push(line);
+            earlyStdoutLines.push(redactedLine);
           }
         },
         onStderr: (line) => {
-          stderrTail.push(line);
+          const redactedLine = redactBeastLogLine(line);
+          stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
             const createdAt = new Date().toISOString();
-            void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
+            void this.logs.append(run.id, attemptId, 'stderr', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
+              data: { runId: run.id, attemptId, stream: 'stderr', line: redactedLine, createdAt },
             });
           } else {
-            earlyStderrLines.push(line);
+            earlyStderrLines.push(redactedLine);
           }
         },
         onExit: (code, signal) => {
@@ -407,6 +435,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const durationMs = attemptRecord?.startedAt
       ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
       : undefined;
+    const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail) : [];
     const exitEvent = {
       attemptId,
       type: eventType,
@@ -414,7 +443,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         exitCode: code,
         signal,
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(code !== 0 ? { lastStderrLines: stderrTail, summary: `Process exited with code ${code}` } : {}),
+        ...(code !== 0 ? { lastStderrLines: redactedStderrTail, summary: `Process exited with code ${code}` } : {}),
       },
       createdAt: finishedAt,
     };

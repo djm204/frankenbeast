@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.7](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.6...franken-planner-v0.4.7) (2026-07-05)
+
+
+### Bug Fixes
+
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+
 ## [0.4.6](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.5...franken-planner-v0.4.6) (2026-07-04)
 
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.41.0](https://github.com/djm204/frankenbeast/compare/v0.40.5...v0.41.0) (2026-07-05)
+
+
+### Features
+
+* **orchestrator:** wire execution recovery loop ([#553](https://github.com/djm204/frankenbeast/issues/553)) ([099067f](https://github.com/djm204/frankenbeast/commit/099067faa067414763b83376501fd87722ef0da9))
+
+
+### Bug Fixes
+
+* **config:** harden insecure defaults ([5abc7f9](https://github.com/djm204/frankenbeast/commit/5abc7f9c51477706ab6246116d44116645b363af)), closes [#522](https://github.com/djm204/frankenbeast/issues/522)
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+* **governor:** construct real trigger contexts and make denied decisions reachable ([#581](https://github.com/djm204/frankenbeast/issues/581)) ([0b638eb](https://github.com/djm204/frankenbeast/commit/0b638ebe42776b13360c45b4d07f4fd9088d2747)), closes [#490](https://github.com/djm204/frankenbeast/issues/490) [#491](https://github.com/djm204/frankenbeast/issues/491)
+* **security:** enforce safe ws dependency floor ([#717](https://github.com/djm204/frankenbeast/issues/717)) ([2f07779](https://github.com/djm204/frankenbeast/commit/2f077799694440aae0fcb32f1ea0e4af1915f7d7))
+* **security:** harden Hono CORS handling ([00a0d2b](https://github.com/djm204/frankenbeast/commit/00a0d2bbcb66121d343b3b3143c4253765a84ffe)), closes [#583](https://github.com/djm204/frankenbeast/issues/583)
+* **web:** add recoverable app shell error state ([#663](https://github.com/djm204/frankenbeast/issues/663)) ([5bd7a9b](https://github.com/djm204/frankenbeast/commit/5bd7a9be1ddf3aacc3ed91edd38cc2846d7f8314))
+* **web:** announce create agent launch state ([#693](https://github.com/djm204/frankenbeast/issues/693)) ([d9bfb7d](https://github.com/djm204/frankenbeast/commit/d9bfb7d187afc2c1eca628c64df7dac76efd6b75))
+* **web:** associate beast dispatch errors with fields ([e3bd5dc](https://github.com/djm204/frankenbeast/commit/e3bd5dc27d964736dfcf4fffc0c8afdc00d74b22)), closes [#659](https://github.com/djm204/frankenbeast/issues/659)
+* **web:** confirm destructive beast actions ([#705](https://github.com/djm204/frankenbeast/issues/705)) ([fca2e3e](https://github.com/djm204/frankenbeast/commit/fca2e3e44441405faff987f9849a425f97861d7f))
+* **web:** explain disabled composer states ([#710](https://github.com/djm204/frankenbeast/issues/710)) ([79a2d0d](https://github.com/djm204/frankenbeast/commit/79a2d0dd724b5d075d45ec57ebd7534e2365fe80))
+* **web:** guard disabled composer submissions ([39ffec9](https://github.com/djm204/frankenbeast/commit/39ffec9f5238b527a02473733d9a199eb1ae257e)), closes [#651](https://github.com/djm204/frankenbeast/issues/651)
+* **web:** improve approval pending UX ([397aad6](https://github.com/djm204/frankenbeast/commit/397aad66ed038e7329447866e54c327c73952e3b)), closes [#654](https://github.com/djm204/frankenbeast/issues/654)
+* **web:** keep chat bearer auth server-side ([#667](https://github.com/djm204/frankenbeast/issues/667)) ([6356ecf](https://github.com/djm204/frankenbeast/commit/6356ecf582e3238ea478b9daa698cdad9e7f6342))
+* **web:** keep control-plane operator token server-side ([#666](https://github.com/djm204/frankenbeast/issues/666)) ([d201851](https://github.com/djm204/frankenbeast/commit/d201851f14b35d1388acf4ecf67b872d719559fb))
+* **web:** make analytics events keyboard-accessible ([d14911f](https://github.com/djm204/frankenbeast/commit/d14911f3c7d0e6c278c030b67f87c38efa00df91)), closes [#631](https://github.com/djm204/frankenbeast/issues/631)
+* **web:** remove duplicate review launch action ([d1b559c](https://github.com/djm204/frankenbeast/commit/d1b559ccd45078ef4385e62b571c7dada4dab358)), closes [#662](https://github.com/djm204/frankenbeast/issues/662)
+* **web:** remove operator token from frontend bundle ([fc1b8f5](https://github.com/djm204/frankenbeast/commit/fc1b8f5f7874488440b5755d4f71e8d6dd0774f1)), closes [#566](https://github.com/djm204/frankenbeast/issues/566)
+* **web:** show actionable chat error banners ([#695](https://github.com/djm204/frankenbeast/issues/695)) ([b2a48c6](https://github.com/djm204/frankenbeast/commit/b2a48c6af4578a0df264336c90b7e5ea333ca115))
+* **web:** validate create agent wizard steps ([#706](https://github.com/djm204/frankenbeast/issues/706)) ([54869bb](https://github.com/djm204/frankenbeast/commit/54869bb0a52715a53621a08c478aad0032f43a57))
+
+
+### Documentation
+
+* clarify unwired beast loop architecture ([#550](https://github.com/djm204/frankenbeast/issues/550)) ([dc4f523](https://github.com/djm204/frankenbeast/commit/dc4f523338ee193c7126c00327f4551b5450e924))
+* reconcile PROGRESS, issue index, audits, and .env.example with reality ([#646](https://github.com/djm204/frankenbeast/issues/646)) ([fc817f5](https://github.com/djm204/frankenbeast/commit/fc817f57bfc7e6cd474638bf1fb9afccd6544083))
+* record create agent wizard validation lesson ([#709](https://github.com/djm204/frankenbeast/issues/709)) ([430b4da](https://github.com/djm204/frankenbeast/commit/430b4dac4a788cc7ea54bba663aab8d80975867f))
+
+
+### Tests
+
+* **security:** guard Vitest toolchain floor ([d0f5ef3](https://github.com/djm204/frankenbeast/commit/d0f5ef3361a9fbe4695a430f7a250456118ad0b7)), closes [#582](https://github.com/djm204/frankenbeast/issues/582)
+
 ## [0.40.5](https://github.com/djm204/frankenbeast/compare/v0.40.4...v0.40.5) (2026-07-04)
 
 
