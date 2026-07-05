@@ -120,16 +120,14 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
 
           {/* Footer */}
           <div className="flex flex-col gap-3 px-8 py-5 border-t border-beast-border shrink-0">
-            {launching && !launchError && (
-              <div
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                className="sr-only"
-              >
-                Launching agent. Please wait.
-              </div>
-            )}
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {launching ? 'Launching agent. Please wait.' : ''}
+            </div>
             {launchError && (
               <div
                 role="alert"
