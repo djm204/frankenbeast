@@ -216,4 +216,66 @@ describe('DashboardPage', () => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('standard');
     });
   });
+
+  it('preserves a successful skill toggle as the confirmed rollback baseline', async () => {
+    const failedDisable = deferred<void>();
+    const client = mockClient({
+      toggleSkill: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockReturnValueOnce(failedDisable.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Disable shell' }));
+    failedDisable.reject(new Error('HTTP 500'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Disable shell' }).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  it('preserves a successful profile save as the confirmed rollback baseline', async () => {
+    const failedPermissiveSave = deferred<void>();
+    const client = mockClient({
+      updateSecurityProfile: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockReturnValueOnce(failedPermissiveSave.promise),
+    });
+
+    render(<DashboardPage client={client} />);
+    fireEvent.change(await screen.findByLabelText('Profile:'), { target: { value: 'strict' } });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+    });
+
+    fireEvent.change(screen.getByLabelText('Profile:'), { target: { value: 'permissive' } });
+    failedPermissiveSave.reject(new Error('HTTP 409'));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+    });
+  });
+
+  it('leaves the populated dashboard usable when a refresh fails after confirmed data exists', async () => {
+    const initialClient = mockClient();
+    const refreshedClient = mockClient({ fetchSnapshot: vi.fn().mockRejectedValue(new Error('HTTP 503')) });
+    const { rerender } = render(<DashboardPage client={initialClient} />);
+
+    expect(await screen.findByRole('switch', { name: 'Enable shell' })).toBeTruthy();
+
+    rerender(<DashboardPage client={refreshedClient} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Loading dashboard...')).toBeNull();
+      expect(screen.getByRole('switch', { name: 'Enable shell' })).toBeTruthy();
+    });
+    expect(screen.queryByText(/Unable to load dashboard/)).toBeNull();
+  });
 });

@@ -56,6 +56,26 @@ export function DashboardPage({ client }: DashboardPageProps) {
     if (confirmedSnapshot) applyConfirmedSnapshot(confirmedSnapshot);
   }, [applyConfirmedSnapshot]);
 
+  const confirmSkillState = useCallback((name: string, enabled: boolean) => {
+    const confirmedSnapshot = confirmedSnapshotRef.current;
+    if (!confirmedSnapshot) return;
+    applyConfirmedSnapshot({
+      ...confirmedSnapshot,
+      skills: confirmedSnapshot.skills.map((skill) => (
+        skill.name === name ? { ...skill, enabled } : skill
+      )),
+    });
+  }, [applyConfirmedSnapshot]);
+
+  const confirmSecurityProfile = useCallback((profile: string) => {
+    const confirmedSnapshot = confirmedSnapshotRef.current;
+    if (!confirmedSnapshot) return;
+    applyConfirmedSnapshot({
+      ...confirmedSnapshot,
+      security: { ...confirmedSnapshot.security, profile },
+    });
+  }, [applyConfirmedSnapshot]);
+
   const loadSnapshot = useCallback(() => {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
@@ -68,7 +88,10 @@ export function DashboardPage({ client }: DashboardPageProps) {
       })
       .catch((error) => {
         if (!mountedRef.current || loadSequenceRef.current !== sequence) return;
-        if (confirmedSnapshotRef.current) return;
+        if (confirmedSnapshotRef.current) {
+          setLoading(false);
+          return;
+        }
         setLoadError(`Unable to load dashboard. ${describeError(error)}`);
         setLoading(false);
       });
@@ -105,31 +128,41 @@ export function DashboardPage({ client }: DashboardPageProps) {
     skillMutationSequenceRef.current[name] = sequence;
     toggleSkill(name);
     setSkillError(null);
-    client.toggleSkill(name, enabled).catch((error) => {
-      if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
-      restoreConfirmedSnapshot();
-      setSkillError({
-        name,
-        enabled,
-        message: `Could not ${enabled ? 'enable' : 'disable'} ${name}; the switch was restored to the latest confirmed dashboard state. ${describeError(error)}`,
+    client.toggleSkill(name, enabled)
+      .then(() => {
+        if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
+        confirmSkillState(name, enabled);
+      })
+      .catch((error) => {
+        if (!mountedRef.current || skillMutationSequenceRef.current[name] !== sequence) return;
+        restoreConfirmedSnapshot();
+        setSkillError({
+          name,
+          enabled,
+          message: `Could not ${enabled ? 'enable' : 'disable'} ${name}; the switch was restored to the latest confirmed dashboard state. ${describeError(error)}`,
+        });
       });
-    });
-  }, [client, restoreConfirmedSnapshot, toggleSkill]);
+  }, [client, confirmSkillState, restoreConfirmedSnapshot, toggleSkill]);
 
   const handleSecurityProfileChange = useCallback((profile: string) => {
     const sequence = securityMutationSequenceRef.current + 1;
     securityMutationSequenceRef.current = sequence;
     setSecurityProfile(profile);
     setSecurityError(null);
-    client.updateSecurityProfile(profile).catch((error) => {
-      if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
-      restoreConfirmedSnapshot();
-      setSecurityError({
-        profile,
-        message: `Could not save security profile ${profile}; the profile was restored to the latest confirmed dashboard state. ${describeError(error)}`,
+    client.updateSecurityProfile(profile)
+      .then(() => {
+        if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
+        confirmSecurityProfile(profile);
+      })
+      .catch((error) => {
+        if (!mountedRef.current || securityMutationSequenceRef.current !== sequence) return;
+        restoreConfirmedSnapshot();
+        setSecurityError({
+          profile,
+          message: `Could not save security profile ${profile}; the profile was restored to the latest confirmed dashboard state. ${describeError(error)}`,
+        });
       });
-    });
-  }, [client, restoreConfirmedSnapshot, setSecurityProfile]);
+  }, [client, confirmSecurityProfile, restoreConfirmedSnapshot, setSecurityProfile]);
 
   if (loading) return <div className="dashboard-loading">Loading dashboard...</div>;
 
