@@ -342,6 +342,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setApprovalError(null);
     updateApprovalResolving(false);
     setMessages([]);
+    lastMessageRef.current = null;
     setSessionId(null);
     setSocketToken(null);
     setPendingApproval(null);
@@ -531,11 +532,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
               timestamp: payload.timestamp,
             },
           ]);
-          const sessionRecoveryCodes = new Set(['NO_SESSION', 'NOT_FOUND']);
+          const missingSessionCanRefresh = payload.code === 'NO_SESSION';
           const canRetryMessage = Boolean(lastMessageRef.current)
             && payload.code !== 'INVALID_EVENT'
-            && !sessionRecoveryCodes.has(payload.code);
-          const action = sessionRecoveryCodes.has(payload.code)
+            && payload.code !== 'NO_SESSION'
+            && payload.code !== 'NOT_FOUND';
+          const action = missingSessionCanRefresh
             ? 'retry-session'
             : canRetryMessage ? 'retry-message' : 'dismiss';
           addErrorBanner(makeBanner(

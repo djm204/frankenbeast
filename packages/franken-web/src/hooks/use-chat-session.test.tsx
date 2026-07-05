@@ -255,6 +255,38 @@ describe('useChatSession error banners', () => {
     });
   });
 
+  it('does not retry messages or refresh sessions that the server reports as not found', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+    });
+    await act(async () => {
+      await result.current.send('hello');
+    });
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.error',
+          code: 'NOT_FOUND',
+          message: 'Chat session was not found.',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.errorBanners[0]).toMatchObject({
+      code: 'NOT_FOUND',
+      actionLabel: 'Dismiss',
+    });
+  });
+
   it('reconnects when the browser returns online after an offline close', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
     vi.stubGlobal('WebSocket', MockWebSocket);
