@@ -244,4 +244,53 @@ describe('NetworkPage', () => {
     expect(screen.queryByRole('option', { name: 'orphan-in-process (running)' })).toBeNull();
     expect(screen.getByRole('option', { name: 'comms-gateway (running)' })).toBeDefined();
   });
+
+  it('upgrades network logs into a searchable operational viewer', () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollTo;
+
+    render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[
+          '2026-07-05T07:00:00Z INFO chat-server ready',
+          '2026-07-05T07:01:00Z ERROR failed to bind port',
+          'WARN retrying connection to dashboard',
+        ]}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onSelectLogService={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        selectedLogServiceId="chat-server"
+        services={[{ id: 'chat-server', status: 'running' }]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByText('3 entries')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Copy visible logs' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Download visible logs' }).getAttribute('download')).toBe('chat-server-network.log');
+    expect(screen.getByRole('button', { name: 'Tail live logs' }).getAttribute('aria-pressed')).toBe('true');
+    expect(scrollTo).toHaveBeenCalled();
+    expect((screen.getByLabelText('Wrap log lines') as HTMLInputElement).checked).toBe(true);
+
+    const errorLine = screen.getByText(/failed to bind port/).closest('li');
+    expect(errorLine?.getAttribute('class')).toContain('network-logs__line--error');
+    expect(errorLine?.querySelector('time')?.getAttribute('dateTime')).toBe('2026-07-05T07:01:00Z');
+
+    fireEvent.change(screen.getByLabelText('Search logs'), { target: { value: 'failed' } });
+
+    expect(screen.getByText('1 of 3 entries')).toBeDefined();
+    expect(screen.getByText(/failed to bind port/)).toBeDefined();
+    expect(screen.queryByText(/chat-server ready/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Log level'), { target: { value: 'warn' } });
+
+    expect(screen.getByText('No logs match the current search and level filters.')).toBeDefined();
+
+    HTMLElement.prototype.scrollTo = originalScrollTo;
+  });
 });

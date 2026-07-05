@@ -742,6 +742,123 @@ button {
   font-size: 1.05rem;
 }
 
+.network-logs__header,
+.network-logs__toolbar,
+.network-logs__line,
+.network-logs__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.network-logs__header,
+.network-logs__toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.network-logs__count {
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.network-logs__list,
+.network-logs__viewer {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.network-logs__search {
+  flex: 1 1 12rem;
+}
+
+.network-logs__level {
+  flex: 0 0 8.5rem;
+}
+
+.network-logs__toggle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.network-logs__lines {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 24rem;
+  margin: 0;
+  padding: 0.55rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.95rem;
+  background: rgba(0, 0, 0, 0.18);
+  list-style: none;
+}
+
+.network-logs__lines--tail {
+  scroll-behavior: smooth;
+}
+
+.network-logs__line {
+  align-items: flex-start;
+  padding: 0.45rem 0.55rem;
+  border-left: 3px solid var(--border);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.025);
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.network-logs__line code {
+  min-width: 0;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.network-logs__lines--wrap .network-logs__line code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.network-logs__line-number,
+.network-logs__badge,
+.network-logs__line time {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+}
+
+.network-logs__badge {
+  min-width: 4.8rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.network-logs__line--info {
+  border-left-color: #7dd3fc;
+}
+
+.network-logs__line--warn {
+  border-left-color: #fbbf24;
+}
+
+.network-logs__line--error,
+.network-logs__line--fatal {
+  border-left-color: var(--danger);
+}
+
+.network-logs__line--debug,
+.network-logs__line--trace {
+  border-left-color: var(--accent);
+}
+
 .cost-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
