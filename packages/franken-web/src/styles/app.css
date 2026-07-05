@@ -838,6 +838,56 @@ button {
   margin-bottom: 0.9rem;
 }
 
+.approval-card__details {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 0.9rem;
+}
+
+.approval-card__detail {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.approval-card__detail dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.approval-card__detail dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.approval-card__file-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.approval-card__status,
+.approval-card__error {
+  margin: 0 0 0.9rem;
+  font-size: 0.9rem;
+}
+
+.approval-card__status {
+  color: var(--text-muted);
+}
+
+.approval-card__error {
+  color: var(--danger);
+}
+
 .approval-card__actions {
   display: flex;
   gap: 0.75rem;

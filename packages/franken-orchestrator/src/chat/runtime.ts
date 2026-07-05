@@ -4,6 +4,9 @@ import type { ChatBeastContext, ExecuteOutcome, TranscriptMessage, TurnOutcome }
 import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
+import type { PendingApproval } from '@franken/types';
+
+type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'>;
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -35,6 +38,7 @@ export interface ChatRuntimeResult {
   displayMessages: ChatDisplayMessage[];
   events: TurnEvent[];
   pendingApproval: boolean;
+  pendingApprovalContext?: PendingApprovalContext;
   pendingApprovalDescription?: string;
   providerContext?: {
     provider: string;
@@ -255,6 +259,12 @@ export class ChatRuntime {
   ): Promise<ChatRuntimeResult> {
     const runResult = await this.turnRunner.run(outcome, { sessionId: state.sessionId });
     const pendingApproval = runResult.status === 'pending_approval';
+    const pendingApprovalContext: PendingApprovalContext = {
+      tool: 'execution',
+      command: outcome.taskDescription,
+      risk: 'Requires explicit approval before execution.',
+      sessionId: state.sessionId,
+    };
     const displayKind = pendingApproval ? 'approval' : 'execution';
     const content = pendingApproval
       ? `approval required: ${outcome.taskDescription}`
@@ -270,6 +280,7 @@ export class ChatRuntime {
       {
         events: runResult.events,
         outcome,
+        ...(pendingApproval ? { pendingApprovalContext } : {}),
         ...(pendingApproval ? { pendingApprovalDescription: outcome.taskDescription } : {}),
         state: stateFromRunResult(runResult),
         tier,
@@ -285,6 +296,7 @@ export class ChatRuntime {
       events?: TurnEvent[];
       beastContext?: ChatBeastContext | null | undefined;
       outcome?: TurnOutcome;
+      pendingApprovalContext?: PendingApprovalContext;
       pendingApprovalDescription?: string;
       state?: string;
       tier?: string | null;
@@ -297,6 +309,9 @@ export class ChatRuntime {
       displayMessages,
       events: extra?.events ?? [],
       pendingApproval: state.pendingApproval,
+      ...(extra?.pendingApprovalContext !== undefined
+        ? { pendingApprovalContext: extra.pendingApprovalContext }
+        : {}),
       ...(extra?.pendingApprovalDescription !== undefined
         ? { pendingApprovalDescription: extra.pendingApprovalDescription }
         : {}),
