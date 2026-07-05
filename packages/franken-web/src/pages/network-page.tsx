@@ -13,9 +13,9 @@ interface NetworkPageProps {
   logsError?: string | null;
   config: NetworkConfigResponse;
   onRefresh(): void;
-  onStart(serviceId: string): void;
-  onStop(serviceId: string): void;
-  onRestart(serviceId: string): void;
+  onStart(serviceId: string): Promise<void> | void;
+  onStop(serviceId: string): Promise<void> | void;
+  onRestart(serviceId: string): Promise<void> | void;
   onSaveConfig(assignments: string[]): Promise<void> | void;
   onSelectLogService(serviceId: string): void;
 }

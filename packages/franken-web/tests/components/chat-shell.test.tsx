@@ -160,6 +160,9 @@ const mockNetworkGetConfig = vi.fn().mockResolvedValue({
   chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
 });
 const mockNetworkGetLogs = vi.fn().mockResolvedValue({ logs: ['chat log line'] });
+const mockNetworkStart = vi.fn().mockResolvedValue(undefined);
+const mockNetworkStop = vi.fn().mockResolvedValue(undefined);
+const mockNetworkRestart = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
@@ -250,10 +253,20 @@ vi.mock('../../src/lib/beast-api.js', () => ({
 }));
 
 vi.mock('../../src/lib/network-api.js', () => ({
-  NetworkApiClient: vi.fn(function (this: { getStatus: ReturnType<typeof vi.fn>; getConfig: ReturnType<typeof vi.fn>; getLogs: ReturnType<typeof vi.fn> }) {
+  NetworkApiClient: vi.fn(function (this: {
+    getStatus: ReturnType<typeof vi.fn>;
+    getConfig: ReturnType<typeof vi.fn>;
+    getLogs: ReturnType<typeof vi.fn>;
+    start: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    restart: ReturnType<typeof vi.fn>;
+  }) {
     this.getStatus = mockNetworkGetStatus;
     this.getConfig = mockNetworkGetConfig;
     this.getLogs = mockNetworkGetLogs;
+    this.start = mockNetworkStart;
+    this.stop = mockNetworkStop;
+    this.restart = mockNetworkRestart;
   }),
 }));
 
@@ -360,6 +373,12 @@ afterEach(() => {
   });
   mockNetworkGetLogs.mockReset();
   mockNetworkGetLogs.mockResolvedValue({ logs: ['chat log line'] });
+  mockNetworkStart.mockReset();
+  mockNetworkStart.mockResolvedValue(undefined);
+  mockNetworkStop.mockReset();
+  mockNetworkStop.mockResolvedValue(undefined);
+  mockNetworkRestart.mockReset();
+  mockNetworkRestart.mockResolvedValue(undefined);
   mockGetRun.mockReset();
   mockGetRun.mockResolvedValue({
     run: {
@@ -534,6 +553,82 @@ describe('ChatShell', () => {
       expect(screen.queryByText('current log line')).toBeNull();
       expect(screen.getByRole('alert').textContent).toContain('log endpoint failed');
     });
+  });
+
+  it('shows pending and failure feedback for network service actions', async () => {
+    window.location.hash = '#/network';
+    let rejectStart!: (error: Error) => void;
+    mockNetworkStart.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectStart = reject;
+    }));
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start chat-server' });
+
+    fireEvent.click(startButton);
+    fireEvent.click(startButton);
+
+    expect(mockNetworkStart).toHaveBeenCalledTimes(1);
+    expect(startButton).toHaveProperty('disabled', true);
+    expect(screen.getByText('Starting chat-server…')).toBeDefined();
+
+    rejectStart(new Error('service manager unreachable'));
+
+    await waitFor(() => {
+      expect(startButton).toHaveProperty('disabled', false);
+      expect(screen.getByRole('alert').textContent).toContain('Unable to start chat-server: service manager unreachable');
+    });
+  });
+
+  it('shows success feedback and refreshes status after network service actions complete', async () => {
+    window.location.hash = '#/network';
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'stopped' }],
+      })
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start chat-server' }));
+
+    await waitFor(() => {
+      expect(mockNetworkStart).toHaveBeenCalledWith('chat-server');
+      expect(screen.getByText('Started chat-server.')).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('running')).toBeDefined();
+    });
+  });
+
+  it('keeps service action success feedback when the follow-up status refresh fails', async () => {
+    window.location.hash = '#/network';
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockRejectedValueOnce(new Error('status endpoint unavailable'));
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+
+    await waitFor(() => {
+      expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
+      expect(screen.getByText('Restarted chat-server.')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    await waitFor(() => expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2));
   });
 
   it('shows connection and session status in the top bar', () => {
