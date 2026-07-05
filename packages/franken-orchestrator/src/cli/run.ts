@@ -366,6 +366,75 @@ async function readEnvValueFromFile(filePath: string, key: string): Promise<stri
   }
 }
 
+function defaultBeastsDaemonPidFile(root: string): string {
+  return join(root, '.frankenbeast', 'beasts-daemon.pid');
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+async function hasLiveBeastsDaemon(root: string): Promise<boolean> {
+  try {
+    const raw = await readFile(defaultBeastsDaemonPidFile(root), 'utf8');
+    const pid = Number.parseInt(raw.trim(), 10);
+    return Number.isFinite(pid) && pid > 0 && isPidAlive(pid);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function isHealthyBeastsDaemonEndpoint(baseUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl}/health`);
+    if (!response.ok) {
+      return false;
+    }
+    const body: unknown = await response.json();
+    if (!body || typeof body !== 'object') {
+      return false;
+    }
+    const record = body as Record<string, unknown>;
+    return record.ok === true && record.service === 'beasts-daemon';
+  } catch {
+    return false;
+  }
+}
+
+async function resolveDetectedBeastsDaemonUrl(
+  root: string,
+  config: OrchestratorConfig,
+  logger: BeastLogger,
+): Promise<string | undefined> {
+  if (!await hasLiveBeastsDaemon(root)) {
+    return undefined;
+  }
+  const candidateUrl = localPlaintextOrSecureEndpoint(config.beastsDaemon.host, config.beastsDaemon.port);
+  if (await isHealthyBeastsDaemonEndpoint(candidateUrl)) {
+    logger.info(
+      `Detected a live beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
+      + `chat-server will proxy Beast control routes to ${candidateUrl}.`,
+      'beasts-daemon',
+    );
+    return candidateUrl;
+  }
+  logger.warn(
+    `Ignoring live-looking beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)} because `
+    + `${candidateUrl}/health did not identify a reachable beasts-daemon; `
+    + 'chat-server will keep standalone in-process Beast services.',
+    'beasts-daemon',
+  );
+  return undefined;
+}
+
 async function resolveCommsSecret(root: string, ref: string | undefined, secretStore: ISecretStore | undefined): Promise<string | undefined> {
   if (!ref?.trim()) {
     return undefined;
@@ -759,7 +828,11 @@ export async function main(): Promise<void> {
             'FRANKENBEAST_BEAST_DAEMON_URL',
           )
         : undefined;
-      const localBeastServices = beastOperatorToken && !explicitBeastDaemonUrl
+      const detectedBeastDaemonUrl = !explicitBeastDaemonUrl && beastOperatorToken
+        ? await resolveDetectedBeastsDaemonUrl(root, config, logger)
+        : undefined;
+      const beastDaemonUrl = explicitBeastDaemonUrl ?? detectedBeastDaemonUrl;
+      const localBeastServices = beastOperatorToken && !beastDaemonUrl
         ? createBeastServices({
             beastsDb: join(paths.frankenbeastDir, 'beast.db'),
             beastLogsDir: paths.beastLogsDir,
@@ -787,10 +860,10 @@ export async function main(): Promise<void> {
               disposeBeastControl: localBeastServices.dispose,
             }
           : {}),
-        ...(beastOperatorToken && explicitBeastDaemonUrl
+        ...(beastOperatorToken && beastDaemonUrl
           ? {
               beastDaemon: {
-                baseUrl: explicitBeastDaemonUrl,
+                baseUrl: beastDaemonUrl,
                 operatorToken: beastOperatorToken,
               },
             }
