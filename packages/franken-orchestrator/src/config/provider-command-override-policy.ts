@@ -1,4 +1,4 @@
-import { basename, isAbsolute, normalize, sep } from 'node:path';
+import { basename, isAbsolute, normalize, parse, sep } from 'node:path';
 
 export interface ProviderCommandOverridePolicyConfig {
   readonly command?: string | undefined;
@@ -34,9 +34,19 @@ function isTrustedPath(command: string, trustedPaths: readonly string[] | undefi
   const normalizedCommand = normalize(command);
   return trustedPaths.some((entry) => {
     if (!isAbsolute(entry)) return false;
-    const normalizedEntry = normalize(entry);
+    const normalizedEntry = normalizeTrustedDirectory(entry);
     return normalizedCommand === normalizedEntry || normalizedCommand.startsWith(`${normalizedEntry}${sep}`);
   });
+}
+
+function normalizeTrustedDirectory(entry: string): string {
+  const normalized = normalize(entry);
+  const root = parse(normalized).root;
+  let trimmed = normalized;
+  while (trimmed.length > root.length && trimmed.endsWith(sep)) {
+    trimmed = trimmed.slice(0, -sep.length);
+  }
+  return trimmed;
 }
 
 export function validateProviderCommandOverride(
@@ -73,8 +83,18 @@ export function assertTrustedProviderCommandOverrides(
 ): void {
   if (!overrides) return;
 
+  assertTrustedProviderCommandOverrideEntries(Object.entries(overrides), options);
+}
+
+export function assertTrustedProviderCommandOverrideEntries(
+  overrides: Iterable<readonly [string, ProviderCommandOverridePolicyConfig]>,
+  options?: { readonly logger?: ProviderCommandOverrideAuditLogger | undefined },
+): void {
+  const entries = Array.from(overrides);
+  if (entries.length === 0) return;
+
   const issues: string[] = [];
-  for (const [provider, override] of Object.entries(overrides)) {
+  for (const [provider, override] of entries) {
     issues.push(...validateProviderCommandOverride(provider, override));
     const command = override.command ?? override.cliPath;
     if (command && override.trustCommandOverride === true) {

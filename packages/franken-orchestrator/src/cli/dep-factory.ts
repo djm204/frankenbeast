@@ -19,7 +19,7 @@ import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { bridgeToBeastConfig, bridgeToExistingDeps } from './dep-bridge.js';
 import { createBeastDeps, type ConsolidatedDeps } from './create-beast-deps.js';
-import { assertTrustedProviderCommandOverrides, type ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
+import { assertTrustedProviderCommandOverrideEntries, assertTrustedProviderCommandOverrides, type ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
 import { GovernorPortAdapter } from '../adapters/governor-adapter.js';
 import type { GovernorPortAdapterDeps } from '../adapters/governor-adapter.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -36,6 +36,7 @@ import type {
 } from '../deps.js';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
+import type { ProviderConfig } from '../providers/provider-config.js';
 
 export interface CliDepOptions {
   paths: ProjectPaths;
@@ -229,6 +230,18 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
       governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
     },
   };
+}
+
+function consolidatedProviderCommandOverrides(
+  providers: readonly ProviderConfig[] | undefined,
+): Array<readonly [string, ProviderCommandOverridePolicyConfig]> {
+  return providers
+    ?.filter((provider) => provider.type.endsWith('-cli') && Boolean(provider.cliPath))
+    .map((provider) => [provider.type, {
+      cliPath: provider.cliPath,
+      trustCommandOverride: provider.trustCommandOverride,
+      trustedCommandPaths: provider.trustedCommandPaths,
+    }] as const) ?? [];
 }
 
 function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
@@ -753,6 +766,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   const observer = await createObserverDeps(options, config, artifacts);
   assertTrustedProviderCommandOverrides(options.providersConfig, { logger: observer.logger });
+  assertTrustedProviderCommandOverrideEntries(
+    consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders),
+    { logger: observer.logger },
+  );
   let finalize = createObserverFinalize(observer);
 
   try {

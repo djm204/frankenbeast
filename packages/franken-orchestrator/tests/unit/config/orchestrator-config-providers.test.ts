@@ -87,6 +87,42 @@ describe('OrchestratorConfigSchema providers section', () => {
     });
   });
 
+  it('accepts trusted command overrides when trustedCommandPaths has a trailing slash', () => {
+    const config = OrchestratorConfigSchema.parse({
+      providers: {
+        overrides: {
+          claude: {
+            command: '/opt/frankenbeast/bin/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/opt/frankenbeast/bin/'],
+          },
+        },
+      },
+    });
+
+    expect(config.providers.overrides['claude']).toEqual({
+      command: '/opt/frankenbeast/bin/claude-wrapper',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/opt/frankenbeast/bin/'],
+    });
+  });
+
+  it('accepts consolidated CLI provider cliPath overrides when trustedCommandPaths has a trailing slash', () => {
+    const config = OrchestratorConfigSchema.parse({
+      consolidatedProviders: [
+        {
+          name: 'local-claude',
+          type: 'claude-cli',
+          cliPath: '/opt/frankenbeast/bin/claude-wrapper',
+          trustCommandOverride: true,
+          trustedCommandPaths: ['/opt/frankenbeast/bin/'],
+        },
+      ],
+    });
+
+    expect(config.consolidatedProviders?.[0]?.trustedCommandPaths).toEqual(['/opt/frankenbeast/bin/']);
+  });
+
   it('accepts overrides with partial fields (all optional)', () => {
     const config = OrchestratorConfigSchema.parse({
       providers: {
