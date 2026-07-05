@@ -1,28 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const exec = (cmd: string) =>
   execSync(cmd, { cwd: ROOT, encoding: 'utf8' }).trim();
 
-const ALL_PACKAGES = [
-  'franken-brain',
-  'franken-critique',
-  'franken-governor',
-  'franken-observer',
-  'franken-orchestrator',
-  'franken-planner',
-  'franken-types',
-  'franken-web',
-] as const;
+const ALL_PACKAGES = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && existsSync(resolve(ROOT, 'packages', entry.name, 'package.json')))
+  .map((entry) => entry.name)
+  .sort();
 
 describe('Chunk 10: full verification pass', () => {
   describe('build', () => {
-    it('turbo run build succeeds for all 8 packages', () => {
+    it('turbo run build succeeds for all workspace packages', () => {
       const output = exec('npx turbo run build 2>&1');
-      expect(output).toContain('8 successful, 8 total');
+      expect(output).toContain(`${ALL_PACKAGES.length} successful, ${ALL_PACKAGES.length} total`);
     });
   });
 

@@ -412,7 +412,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Rerunning against an existing `.fbeast/.build/.checkpoint` file can skip completed tasks. The `--resume` flag is parsed by the CLI, but it is not yet wired as a distinct resume mode.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `--resume` to preserve existing checkpoint data and continue an interrupted run; when no checkpoint exists, `--resume` fails fast instead of silently behaving like a cold run.
 
 ### Subcommands
 
