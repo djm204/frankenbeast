@@ -4,6 +4,7 @@ import { request as httpsRequest } from 'node:https';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseDotenv } from 'dotenv';
 import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
 import { createSecretStore } from '../network/secret-store.js';
 
@@ -47,6 +48,10 @@ function isReservedBackendPath(pathname: string): boolean {
   return RESERVED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
+function isPublicWebhookPath(pathname: string): boolean {
+  return pathname === '/webhooks' || pathname.startsWith('/webhooks/');
+}
+
 function normalizeBaseUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
@@ -85,11 +90,11 @@ async function createProxyResponse(
   if (!apiTarget || !isReservedBackendPath(sourceUrl.pathname)) {
     return undefined;
   }
-  if (options.operatorToken && !isSameOriginProxyRequest(request)) {
+  if (options.operatorToken && !isPublicWebhookPath(sourceUrl.pathname) && !isSameOriginProxyRequest(request)) {
     return response('Forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   }
 
-  const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, `${apiTarget}/`);
+  const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
   headers.delete('host');
   if (options.operatorToken) {
@@ -105,6 +110,14 @@ async function createProxyResponse(
     init.body = await request.arrayBuffer();
   }
   return fetch(targetUrl, init);
+}
+
+function resolveProxyTargetUrl(apiTarget: string, sourceUrl: URL): URL {
+  const targetBase = new URL(`${apiTarget}/`);
+  const basePath = targetBase.pathname.replace(/\/+$/, '');
+  targetBase.pathname = `${basePath}${sourceUrl.pathname}`.replace(/\/+/g, '/');
+  targetBase.search = sourceUrl.search;
+  return targetBase;
 }
 
 function resolveSafeAssetPath(staticDir: string, pathname: string): string | undefined {
@@ -143,6 +156,14 @@ export async function createDashboardStaticResponse(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') {
+    const indexPath = resolveSafeAssetPath(staticDir, '/index.html');
+    const index = indexPath ? await readStaticFile(indexPath) : undefined;
+    if (!index) {
+      return response(JSON.stringify({ service: SERVICE_IDENTITY, ok: false, reason: 'dashboard-build-missing' }), {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
     return response(JSON.stringify({ service: SERVICE_IDENTITY, ok: true }), {
       status: 200,
       headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -195,6 +216,14 @@ function headersFromIncoming(headers: IncomingHttpHeaders): Headers {
   return result;
 }
 
+function requestBaseUrlFromIncoming(headers: IncomingHttpHeaders, host: string): string {
+  const forwardedProto = Array.isArray(headers['x-forwarded-proto'])
+    ? headers['x-forwarded-proto'][0]
+    : headers['x-forwarded-proto'];
+  const protocol = forwardedProto?.split(',')[0]?.trim().toLowerCase() === 'https' ? 'https:' : LOCAL_HTTP_PROTOCOL;
+  return `${protocol}//${host}`;
+}
+
 async function readIncomingBody(req: IncomingMessage): Promise<Buffer | undefined> {
   if (req.method === 'GET' || req.method === 'HEAD') {
     return undefined;
@@ -208,7 +237,11 @@ async function readIncomingBody(req: IncomingMessage): Promise<Buffer | undefine
 
 async function writeWebResponse(staticResponse: Response, method: string | undefined, res: ServerResponse): Promise<void> {
   res.statusCode = staticResponse.status;
-  staticResponse.headers.forEach((value, key) => res.setHeader(key, value));
+  staticResponse.headers.forEach((value, key) => {
+    if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'content-length') {
+      res.setHeader(key, value);
+    }
+  });
   if (method === 'HEAD' || !staticResponse.body) {
     res.end();
     return;
@@ -234,7 +267,7 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   server.on('upgrade', (req, socket, head) => {
     const apiTarget = normalizeBaseUrl(options.apiTarget);
     const host = req.headers.host ?? `${options.host}:${options.port}`;
-    const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
+    const requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
     if (!apiTarget || !isReservedBackendPath(requestUrl.pathname)) {
       sendUpgradeFailure(socket, 404, 'Not Found');
       return;
@@ -310,7 +343,7 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
         if (req.method) {
           requestInit.method = req.method;
         }
-        const requestUrl = new URL(req.url ?? '/', `${LOCAL_HTTP_PROTOCOL}//${host}`);
+        const requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
         const request = new Request(requestUrl, requestInit);
         const staticResponse = await createDashboardStaticResponse(request, options.staticDir, options);
         await writeWebResponse(staticResponse, req.method, res);
@@ -338,6 +371,15 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
   return server;
 }
 
+async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | undefined> {
+  try {
+    const parsed = parseDotenv(await readFile(filePath, 'utf8'));
+    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveDashboardOperatorToken(): Promise<string | undefined> {
   const configPath = process.env.FRANKENBEAST_CONFIG_FILE || process.env.FRANKENBEAST_CONFIG_PATH;
   if (configPath) {
@@ -354,11 +396,14 @@ async function resolveDashboardOperatorToken(): Promise<string | undefined> {
         if (token?.trim()) return token.trim();
       }
     } catch {
-      // Secret-store resolution is best-effort here; fall back to direct env wiring below.
+      // Secret-store resolution is best-effort here; fall back to direct env/file wiring below.
     }
   }
 
-  return process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim() || undefined;
+  const envToken = process.env.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim();
+  if (envToken) return envToken;
+  return await readOperatorTokenFromEnvFile(join(process.cwd(), '.env'))
+    ?? await readOperatorTokenFromEnvFile(join(process.cwd(), 'packages', 'franken-web', '.env.local'));
 }
 
 async function parseCliArgs(argv: string[]): Promise<DashboardStaticServerOptions> {
