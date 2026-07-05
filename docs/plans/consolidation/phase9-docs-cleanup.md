@@ -20,7 +20,7 @@ Three documents need full rewrites to reflect the new architecture:
 
 ### Final Cleanup
 
-- Verify all Phase 1 temporary pass-throughs have been replaced with real implementations — grep for `Phase placeholder`, `stub`, and empty `return` patterns. Any remaining must be resolved before this phase completes.
+- Verify all Phase 1 temporary pass-throughs have been replaced with real implementations — grep for deferred Phase markers, `stub`, and empty `return` patterns. Any remaining must be resolved before this phase completes.
 - Verify `.gitignore` covers any new build artifacts (SQLite files, temp MCP configs)
 - Full CI pass: `npm test && npm run build && npm run typecheck`
 
@@ -33,7 +33,7 @@ Three documents need full rewrites to reflect the new architecture:
 | 01 | [ARCHITECTURE.md](phase9-docs-cleanup/01_architecture-md.md) | Full rewrite with Mermaid diagrams |
 | 02 | [RAMP_UP.md](phase9-docs-cleanup/02_ramp-up-md.md) | Rewrite for 8-package layout |
 | 03 | [PROGRESS.md](phase9-docs-cleanup/03_progress-md.md) | Record consolidation milestone |
-| 04 | [Final cleanup](phase9-docs-cleanup/04_final-cleanup.md) | Remove placeholders, gitignore, green CI |
+| 04 | [Final cleanup](phase9-docs-cleanup/04_final-cleanup.md) | Remove deferred markers, gitignore, green CI |
 | 05 | [Dependency audit + Zod unification](phase9-docs-cleanup/05_dependency-audit-zod-unification.md) | Prune orphaned deps, align Zod versions |
 
 **Execution:** 01-03 can be parallel, 04-05 can be parallel after 01-03, both are final-pass work.

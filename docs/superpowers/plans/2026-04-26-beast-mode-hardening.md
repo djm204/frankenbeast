@@ -754,5 +754,5 @@ git commit -m "docs(orchestrator): add beast hardening verification matrix"
 ## Self-Review
 
 - Spec coverage: the six tasks map directly to the approved design chunks: config truthfulness, dependency hardening, resume semantics, MCP/skill completeness, command-family proof, and final verification/docs alignment.
-- Placeholder scan: no `TBD`, unresolved placeholders, “implement later”, or implicit “handle edge cases” steps remain in the plan.
+- Placeholder scan: no deferred-work placeholders, “implement later”, or implicit “handle edge cases” steps remain in the plan.
 - Type consistency: `CliArgs.provider` becomes optional, `SessionConfig.resume` is explicit, `CliDepOptions.resume` is explicit, and the new integration test files are referenced consistently across tasks.

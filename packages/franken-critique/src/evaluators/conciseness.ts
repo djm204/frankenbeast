@@ -13,7 +13,7 @@ const UNRESOLVED_COMMENT_MARKERS = [
   ['HA', 'CK'].join(''),
   ['X', 'XX'].join(''),
 ] as const;
-const UNRESOLVED_MARKER_PATTERN = new RegExp(
+const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
   'gi',
 );
@@ -36,7 +36,7 @@ export class ConcisenessEvaluator implements Evaluator {
     const findings: EvaluationFinding[] = [];
 
     this.checkCommentRatio(input.content, findings);
-    this.checkUnresolvedMarkerComments(input.content, findings);
+    this.checkTodoComments(input.content, findings);
 
     const score = Math.max(0, 1 - findings.length * 0.2);
 
@@ -75,17 +75,17 @@ export class ConcisenessEvaluator implements Evaluator {
     }
   }
 
-  private checkUnresolvedMarkerComments(
+  private checkTodoComments(
     content: string,
     findings: EvaluationFinding[],
   ): void {
-    const matches = [...content.matchAll(UNRESOLVED_MARKER_PATTERN)];
+    const matches = [...content.matchAll(UNRESOLVED_COMMENT_PATTERN)];
     if (matches.length > 0) {
       const labels = matches.map((m) => m[1]).join(', ');
       findings.push({
         message: `Found ${matches.length} unresolved marker comment(s): ${labels}. Address or track these as issues.`,
         severity: 'info',
-        suggestion: 'Resolve unresolved markers or convert them to tracked issues',
+        suggestion: 'Resolve deferred-work items or convert them to tracked issues',
       });
     }
   }

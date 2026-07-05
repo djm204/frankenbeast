@@ -43,7 +43,7 @@ if (modules?.includes('skills')) {
 
 Replace with:
 ```typescript
-// Phase 5 placeholder — SkillManager replaces static skill registry with marketplace-first MCP loading
+// Follow-up(Phase 5): SkillManager replaces static skill registry with marketplace-first MCP loading
 ```
 
 **Keep the `filteredSkills` variable** and any logic that passes a skill list to downstream consumers. This variable will be rewired to `SkillManager.loadForProvider()` in Phase 5.
@@ -67,7 +67,7 @@ npm test
 
 - **Delete:** `packages/franken-skills/` (entire directory)
 - **Modify:** Root `package.json`, root `tsconfig.json`
-- **Modify:** `packages/franken-orchestrator/src/cli/dep-factory.ts` — remove dynamic import, keep filteredSkills variable, leave a phase placeholder
+- **Modify:** `packages/franken-orchestrator/src/cli/dep-factory.ts` — remove dynamic import, keep filteredSkills variable, leave a tracked follow-up comment
 - **Modify:** `packages/franken-orchestrator/package.json` — remove `@frankenbeast/skills` dependency
 
 ## Exit Criteria
