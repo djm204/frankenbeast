@@ -227,7 +227,11 @@ export class ChatSocketController {
     session.transcript = result.transcript;
     session.state = result.state;
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
-      ? { description: result.pendingApprovalDescription, requestedAt: nowIso() }
+      ? {
+          description: result.pendingApprovalDescription,
+          requestedAt: nowIso(),
+          ...result.pendingApprovalContext,
+        }
       : null;
     session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
