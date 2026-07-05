@@ -9,6 +9,7 @@ interface DashboardStore {
 
   setSnapshot: (snapshot: { skills: DashboardSkill[]; security: DashboardSecurity; providers: DashboardProvider[] }) => void;
   toggleSkill: (name: string) => void;
+  setSkillEnabled: (name: string, enabled: boolean) => void;
   setSecurityProfile: (profile: string) => void;
   setLoading: (loading: boolean) => void;
   reset: () => void;
@@ -36,6 +37,13 @@ export const useDashboardStore = create<DashboardStore>()((set) => ({
     set((s) => ({
       skills: s.skills.map((sk) =>
         sk.name === name ? { ...sk, enabled: !sk.enabled } : sk,
+      ),
+    })),
+
+  setSkillEnabled: (name, enabled) =>
+    set((s) => ({
+      skills: s.skills.map((sk) =>
+        sk.name === name ? { ...sk, enabled } : sk,
       ),
     })),
 

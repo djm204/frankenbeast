@@ -1434,6 +1434,23 @@ button {
   color: #ffd0ca;
 }
 
+.dashboard-alerts {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dashboard-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.dashboard-alert button {
+  flex: none;
+}
+
 .analytics-summary-region {
   display: grid;
   gap: 0.75rem;
