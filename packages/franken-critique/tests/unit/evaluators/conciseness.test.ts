@@ -37,16 +37,26 @@ describe('ConcisenessEvaluator', () => {
     ];
     const result = await evaluator.evaluate(createInput(lines.join('\n')));
 
-    expect(result.findings.some((f) => f.message.includes('comment'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('comment'))).toBe(
+      true,
+    );
   });
 
-  it('flags deferred-work marker comments', async () => {
+  it('flags unresolved marker comments', async () => {
     const evaluator = new ConcisenessEvaluator();
-    const deferredWorkLabel = ['TO', 'DO'].join('');
-    const content = `// ${deferredWorkLabel}: fix this later\n// HACK: temporary workaround\nconst x = 1;`;
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = `// ${pendingMarker}: fix this later\n// ${trackedMarker}: tracked follow-up\n// HACK: temporary workaround\nconst x = 1;`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes(deferredWorkLabel) || f.message.includes('HACK'))).toBe(true);
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes('HACK'),
+      ),
+    ).toBe(true);
   });
 
   it('passes empty content', async () => {

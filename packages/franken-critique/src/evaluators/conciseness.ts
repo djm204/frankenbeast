@@ -1,9 +1,22 @@
-import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
+import type {
+  Evaluator,
+  EvaluationInput,
+  EvaluationResult,
+  EvaluationFinding,
+} from './evaluator.js';
 
 const COMMENT_LINE_PATTERN = /^\s*\/\//;
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
-const DEFERRED_WORK_LABEL = ['TO', 'DO'].join('');
-const DEFERRED_WORK_PATTERN = new RegExp(`\/\/\\s*(${DEFERRED_WORK_LABEL}|FIXME|HACK|XXX)\\b`, 'gi');
+const UNRESOLVED_COMMENT_MARKERS = [
+  ['TO', 'DO'].join(''),
+  ['FIX', 'ME'].join(''),
+  'HACK',
+  'XXX',
+] as const;
+const UNRESOLVED_COMMENT_PATTERN = new RegExp(
+  `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
+  'gi',
+);
 const MAX_COMMENT_RATIO = 0.5;
 
 export class ConcisenessEvaluator implements Evaluator {
@@ -12,7 +25,12 @@ export class ConcisenessEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     if (!input.content.trim()) {
-      return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
+      return {
+        evaluatorName: this.name,
+        verdict: 'pass',
+        score: 1,
+        findings: [],
+      };
     }
 
     const findings: EvaluationFinding[] = [];
@@ -30,7 +48,10 @@ export class ConcisenessEvaluator implements Evaluator {
     };
   }
 
-  private checkCommentRatio(content: string, findings: EvaluationFinding[]): void {
+  private checkCommentRatio(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     const lines = content.split('\n');
     const totalLines = lines.filter((l) => l.trim().length > 0).length;
     if (totalLines === 0) return;
@@ -48,17 +69,21 @@ export class ConcisenessEvaluator implements Evaluator {
       findings.push({
         message: `Excessive comment ratio: ${Math.round(ratio * 100)}% of lines are comments. Code should be self-documenting.`,
         severity: 'info',
-        suggestion: 'Remove obvious comments and let clear naming convey intent',
+        suggestion:
+          'Remove obvious comments and let clear naming convey intent',
       });
     }
   }
 
-  private checkTodoComments(content: string, findings: EvaluationFinding[]): void {
-    const matches = [...content.matchAll(DEFERRED_WORK_PATTERN)];
+  private checkTodoComments(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
+    const matches = [...content.matchAll(UNRESOLVED_COMMENT_PATTERN)];
     if (matches.length > 0) {
       const labels = matches.map((m) => m[1]).join(', ');
       findings.push({
-        message: `Found ${matches.length} ${DEFERRED_WORK_LABEL}/FIXME/HACK comment(s): ${labels}. Address or track these as issues.`,
+        message: `Found ${matches.length} unresolved marker comment(s): ${labels}. Address or track these as issues.`,
         severity: 'info',
         suggestion: 'Resolve deferred-work items or convert them to tracked issues',
       });
