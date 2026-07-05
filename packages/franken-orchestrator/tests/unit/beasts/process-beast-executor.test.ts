@@ -707,6 +707,7 @@ describe('ProcessBeastExecutor', () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
+      const appendSpy = vi.spyOn(logs, 'append');
       const eventBus = new BeastEventBus();
       const publishSpy = vi.spyOn(eventBus, 'publish');
       const supervisor = createSupervisorMock();
@@ -720,15 +721,19 @@ describe('ProcessBeastExecutor', () => {
       const standaloneOpenAiKey = `sk-${'standaloneproviderkey1234567890'}`;
       const githubToken = `ghp_${'abcdefghijklmnopqrstuvwxyz123456'}`;
       const slackToken = ['xoxb', '123456789012', '123456789012', 'abcdefghijklmnopqrstuvwxyz'].join('-');
+      const geminiToken = `AIza${'abcdefghijklmnopqrstuvwxyz123456789'}`;
 
       cb.onStderr('api_key=sk-live-secret-value password=hunter2');
       cb.onStderr('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz CLIENT_SECRET=client-secret-value');
       cb.onStderr('Authorization: Bot discord-bot-token-value');
       cb.onStderr(`Invalid API key: ${standaloneOpenAiKey} and ${githubToken}`);
       cb.onStderr(`Slack token ${slackToken}`);
+      cb.onStderr(`Google token ${geminiToken}`);
+      cb.onStderr('{"password":"json-password","client_secret":"json-secret","botToken":"camel-token"}');
       cb.onStderr('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.abc1234567890secret');
       cb.onStderr('posting to https://hooks.slack.com/services/T000/B000/secret-webhook-token');
       cb.onExit(1, null);
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       const failEvent = repo.listEvents(run.id).find((e) => e.type === 'attempt.failed');
       expect(failEvent).toBeDefined();
@@ -740,10 +745,25 @@ describe('ProcessBeastExecutor', () => {
           'Authorization: Bot [REDACTED]',
           'Invalid API key: [REDACTED] and [REDACTED]',
           'Slack token [REDACTED]',
+          'Google token [REDACTED]',
+          '{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}',
           'jwt [REDACTED]',
           'posting to [REDACTED]',
         ],
       });
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        expect.any(String),
+        'stderr',
+        'api_key=[REDACTED] password=[REDACTED]',
+        expect.any(String),
+      );
+      const publishedLogLines = publishSpy.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type === 'run.log' && event.data.stream === 'stderr')
+        .map((event) => event.data.line);
+      expect(publishedLogLines).toContain('api_key=[REDACTED] password=[REDACTED]');
+      expect(publishedLogLines).toContain('{"password":[REDACTED],"client_secret":[REDACTED],"botToken":[REDACTED]}');
       const serializedPersistedEvent = JSON.stringify(failEvent);
       expect(serializedPersistedEvent).not.toContain('sk-live-secret-value');
       expect(serializedPersistedEvent).not.toContain('hunter2');
@@ -752,6 +772,10 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPersistedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPersistedEvent).not.toContain(githubToken);
       expect(serializedPersistedEvent).not.toContain(slackToken);
+      expect(serializedPersistedEvent).not.toContain(geminiToken);
+      expect(serializedPersistedEvent).not.toContain('json-password');
+      expect(serializedPersistedEvent).not.toContain('json-secret');
+      expect(serializedPersistedEvent).not.toContain('camel-token');
       expect(serializedPersistedEvent).not.toContain('abc1234567890secret');
       expect(serializedPersistedEvent).not.toContain('secret-webhook-token');
 
@@ -771,6 +795,10 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPublishedEvent).not.toContain(standaloneOpenAiKey);
       expect(serializedPublishedEvent).not.toContain(githubToken);
       expect(serializedPublishedEvent).not.toContain(slackToken);
+      expect(serializedPublishedEvent).not.toContain(geminiToken);
+      expect(serializedPublishedEvent).not.toContain('json-password');
+      expect(serializedPublishedEvent).not.toContain('json-secret');
+      expect(serializedPublishedEvent).not.toContain('camel-token');
       expect(serializedPublishedEvent).not.toContain('abc1234567890secret');
       expect(serializedPublishedEvent).not.toContain('secret-webhook-token');
     });

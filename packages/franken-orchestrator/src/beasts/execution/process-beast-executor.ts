@@ -19,9 +19,10 @@ function redactFailureStderrLine(line: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9]{8,}_[A-Za-z0-9]{20,}_[A-Za-z0-9]{40,}\b/gi, REDACTED_SECRET)
     .replace(/\b(?:gh[opusr])_[A-Za-z0-9_.-]{20,}\b/gi, REDACTED_SECRET)
     .replace(/\bsk-[A-Za-z0-9_-]{15,}[A-Za-z0-9_-]\b/g, REDACTED_SECRET)
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, REDACTED_SECRET)
     .replace(/\bxoxb-(?:\d{10,}-){2}[A-Za-z0-9-]{19,}[A-Za-z0-9]\b/gi, REDACTED_SECRET)
     .replace(
-      /(\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url)\b\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      /((?:"|')?\b(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?key|webhook[_-]?url|[a-z0-9]*(?:token|secret|password|apikey|accesskey|webhookurl))\b(?:"|')?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/gi,
       `$1${REDACTED_SECRET}`,
     )
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, `$1${REDACTED_SECRET}$2`)
@@ -195,17 +196,18 @@ export class ProcessBeastExecutor implements BeastExecutor {
           }
         },
         onStderr: (line) => {
-          stderrTail.push(line);
+          const redactedLine = redactFailureStderrLine(line);
+          stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
             const createdAt = new Date().toISOString();
-            void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
+            void this.logs.append(run.id, attemptId, 'stderr', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
-              data: { runId: run.id, attemptId, stream: 'stderr', line, createdAt },
+              data: { runId: run.id, attemptId, stream: 'stderr', line: redactedLine, createdAt },
             });
           } else {
-            earlyStderrLines.push(line);
+            earlyStderrLines.push(redactedLine);
           }
         },
         onExit: (code, signal) => {
