@@ -167,7 +167,7 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
     };
 
     // 9. Run the full BeastLoop pipeline
-    const loop = new BeastLoop(deps);
+    const loop = new BeastLoop(deps, { enableTracing: true });
     const result = await loop.run(input);
 
     // ── Assertions ──

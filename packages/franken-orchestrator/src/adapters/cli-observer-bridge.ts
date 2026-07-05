@@ -120,6 +120,37 @@ export class CliObserverBridge implements IObserverModule {
     };
   }
 
+  get disabledObserverDeps(): ObserverDeps {
+    const trace = {
+      id: this.activeSessionId ?? 'tracing-disabled',
+      sessionId: this.activeSessionId ?? 'tracing-disabled',
+      spans: [],
+    } as unknown as Trace;
+
+    return {
+      trace,
+      counter: this.counter,
+      costCalc: this.costCalc,
+      breaker: this.breaker,
+      loopDetector: this.loopDet,
+      estimateContextWindow: (input) => this.estimateContextWindow(input),
+      startSpan: (_t: Trace, opts: { name: string; parentSpanId?: string }) => ({
+        id: `tracing-disabled:${opts.name}`,
+        name: opts.name,
+      }) as unknown as Span,
+      endSpan: () => {},
+      recordTokenUsage: (_span: Span, usage: { promptTokens: number; completionTokens: number; model?: string }, counter?: TokenCounter) => {
+        (counter ?? this.counter).record({
+          model: usage.model ?? 'unknown',
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+        });
+      },
+      setMetadata: () => {},
+      recordReplay: (record) => this.recordReplay(record),
+    };
+  }
+
   recordReplay(record: ReplayCaptureRecord): void {
     if (!this.replayStore) {
       return;

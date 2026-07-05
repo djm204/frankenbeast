@@ -3,7 +3,7 @@ import { basename, resolve, join } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
-import { CliSkillExecutor } from '../skills/cli-skill-executor.js';
+import { CliSkillExecutor, type ObserverDeps } from '../skills/cli-skill-executor.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
@@ -165,6 +165,7 @@ interface EffectiveCliConfig {
   prCreation?: 'auto' | 'manual' | 'disabled' | undefined;
   mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
   skills?: string[] | undefined;
+  enableTracing: boolean;
   modules: {
     memory: boolean;
     planner: boolean;
@@ -221,6 +222,7 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
     prCreation: options.runConfig?.gitConfig?.prCreation,
     mergeStrategy: options.runConfig?.gitConfig?.mergeStrategy,
     skills: options.runConfig?.skills,
+    enableTracing: options.orchestratorConfig?.enableTracing ?? false,
     modules: {
       memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
       planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
@@ -281,7 +283,9 @@ async function createObserverDeps(
   const replayStore = new ReplayContentStore(replayAuditRoot);
   const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
   const runSessionId = options.runSessionId ?? `cli-session-${Date.now()}`;
-  observerBridge.startTrace(runSessionId);
+  if (config.enableTracing) {
+    observerBridge.startTrace(runSessionId);
+  }
   const traceViewerHandle = options.verbose
     ? await setupTraceViewer(options.paths.tracesDb, logger)
     : null;
@@ -336,6 +340,9 @@ function createLlmDeps(
 ): LlmDeps {
   const resolvedProvider = stack.registry.get(config.provider);
   const override = options.providersConfig?.[config.provider];
+  const observerDeps = config.enableTracing
+    ? (observer.observerBridge.observerDeps as never)
+    : undefined;
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? options.paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
@@ -351,7 +358,7 @@ function createLlmDeps(
 
   new AdapterLlmClient(
     cliLlmAdapter,
-    observer.observerBridge.observerDeps as never,
+    observerDeps,
     config.provider,
   );
 
@@ -365,7 +372,7 @@ function createLlmDeps(
     workId: `session:${artifacts.planName}`,
     stablePrefix: 'surface:cli',
     workPrefix: `plan:${artifacts.planName}`,
-    observer: observer.observerBridge.observerDeps as never,
+    ...(observerDeps ? { observer: observerDeps } : {}),
   });
 
   return { cliLlmAdapter, cachedLlm };
@@ -564,10 +571,13 @@ function createCliExecutorDeps(
     : undefined;
 
   const override = options.providersConfig?.[config.provider];
+  const executorObserverDeps: ObserverDeps = config.enableTracing
+    ? observer.observerBridge.observerDeps
+    : observer.observerBridge.disabledObserverDeps;
   const cliExecutor = new CliSkillExecutor(
     stack.martin,
     stack.gitIso,
-    observer.observerBridge.observerDeps,
+    executorObserverDeps,
     'npx tsc --noEmit',
     commitMessageFn,
     observer.logger,
