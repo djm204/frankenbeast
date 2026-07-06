@@ -437,6 +437,30 @@ describe('dep-factory provider wiring', () => {
     expect(result.deps.cliExecutor).toBeDefined();
   }, 10_000);
 
+  it('passes the CLI logger into PrCreator commit message generation', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { BeastLogger } = await import('../../../src/logging/beast-logger.js');
+    const { PrCreator } = await import('../../../src/closure/pr-creator.js');
+    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+
+    await createCliDeps(makeOpts({ noPr: false }));
+
+    const cliExecutorCalls = (CliSkillExecutor as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const commitMessageFn = cliExecutorCalls.at(-1)?.[4] as (diffStat: string, objective: string) => Promise<string | null>;
+    const prCreatorResults = (PrCreator as unknown as { mock: { results: Array<{ value: { generateCommitMessage: ReturnType<typeof vi.fn> } }> } }).mock.results;
+    const prCreator = prCreatorResults.at(-1)?.value;
+    const loggerInstances = (BeastLogger as unknown as { mock: { instances: unknown[] } }).mock.instances;
+    const logger = loggerInstances.at(-1);
+
+    await commitMessageFn(' src/auth.ts | 1 +', 'fix auth');
+
+    expect(prCreator?.generateCommitMessage).toHaveBeenCalledWith(
+      ' src/auth.ts | 1 +',
+      'fix auth',
+      logger,
+    );
+  }, 10_000);
+
   it('wires disabled observer deps to cached LLM when tracing is disabled', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     await createCliDeps(makeOpts({ orchestratorConfig: { enableTracing: false } as never }));
