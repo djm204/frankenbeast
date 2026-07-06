@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -790,6 +790,7 @@ describe('ProcessBeastExecutor', () => {
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      const originalUmask = process.umask(0o000);
       let capturedCallbacks: ProcessCallbacks | undefined;
       const supervisor = {
         spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
@@ -802,12 +803,20 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
       const run = createTestRun(repo);
 
-      await executor.start(run, martinLoopDefinition);
+      try {
+        mkdirSync(runConfigDir, { recursive: true });
+        chmodSync(runConfigDir, 0o777);
+        await executor.start(run, martinLoopDefinition);
+      } finally {
+        process.umask(originalUmask);
+      }
 
       const [spawnedSpec] = supervisor.spawn.mock.calls[0];
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
       expect(existsSync(configPath)).toBe(true);
+      expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
 
       capturedCallbacks!.onExit(0, null);
 
