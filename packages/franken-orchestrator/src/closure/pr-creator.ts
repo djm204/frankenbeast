@@ -5,6 +5,28 @@ import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
 
+export interface PrCreationRequiredActionErrorOptions {
+  readonly message: string;
+  readonly action: string;
+  readonly branch?: string | undefined;
+  readonly details?: unknown | undefined;
+}
+
+export class PrCreationRequiredActionError extends Error {
+  readonly action: string;
+  readonly branch?: string | undefined;
+  readonly details?: unknown | undefined;
+
+  constructor(options: PrCreationRequiredActionErrorOptions) {
+    super(options.message);
+    this.name = 'PrCreationRequiredActionError';
+    this.action = options.action;
+    this.branch = options.branch;
+    this.details = options.details;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export interface PrCreatorConfig {
   readonly targetBranch: string;
   readonly disabled: boolean;
@@ -281,7 +303,11 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to create PR', this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' }));
+      const failure = this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' });
+      if (isGhAuthFailure(error, failure)) {
+        throw buildGhAuthRequiredAction(branch, failure);
+      }
+      logger?.error('PrCreator: failed to create PR', failure);
       return null;
     }
   }
@@ -320,9 +346,13 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to list PRs', this.commandFailure('gh', 'gh pr list', error, {
+      const failure = this.commandFailure('gh', 'gh pr list', error, {
         rawCommand: formatCommand('gh', args),
-      }));
+      });
+      if (isGhAuthFailure(error, failure)) {
+        throw buildGhAuthRequiredAction(branch, failure);
+      }
+      logger?.error('PrCreator: failed to list PRs', failure);
       return null;
     }
   }
@@ -610,6 +640,34 @@ function formatCommand(command: string, args: readonly string[]): string {
 function isGhMissing(error: unknown): boolean {
   const message = stringifyError(error);
   return message.includes('gh: command not found') || message.includes('ENOENT') || message.includes('not found');
+}
+
+const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|to get started with github cli/i;
+
+function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: string }): boolean {
+  const text = [
+    stringifyError(error),
+    failure.stderr ?? '',
+    failure.stdout ?? '',
+    readErrorText((error as { stderr?: unknown }).stderr),
+    readErrorText((error as { stdout?: unknown }).stdout),
+  ].filter(Boolean).join('\n');
+  return GH_AUTH_FAILURE_RE.test(text);
+}
+
+function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreationRequiredActionError {
+  return new PrCreationRequiredActionError({
+    message: `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`,
+    action: 'Run `gh auth login`, then retry PR creation for the pushed branch.',
+    branch,
+    details,
+  });
+}
+
+function readErrorText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8');
+  return '';
 }
 
 function stringifyError(error: unknown): string {

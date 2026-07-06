@@ -515,6 +515,9 @@ export class Session {
         ? statusBadge('neutral')
         : statusBadge(result.status === 'completed');
     printLine(`  ${A.dim}Status:${A.reset}    ${statusDisplay}`);
+    if (result.error) {
+      printLine(`  ${A.dim}Warning:${A.reset}   ${result.error.message}`);
+    }
     if (result.taskResults?.length) {
       printLine(`\n  ${A.dim}Chunks:${A.reset}`);
       for (const t of result.taskResults) {

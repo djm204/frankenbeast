@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PrCreator } from '../../src/closure/pr-creator.js';
+import { PrCreationRequiredActionError, PrCreator } from '../../src/closure/pr-creator.js';
 import type { BeastResult, TaskOutcome } from '../../src/types.js';
 
 interface ExecCall {
@@ -230,6 +230,33 @@ describe('PrCreator argv subprocess safety', () => {
     expect(create!.args.slice(0, 4)).toEqual(['pr', 'create', '--base', 'release/v1.0+stable']);
   });
 
+  it('surfaces gh authentication failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/auth-warning\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'To get started with GitHub CLI, please run: gh auth login';
+        error.status = 4;
+        throw error;
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('gh auth login'),
+      branch: 'feature/auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
   // Argument-injection and invalid-ref guards must still hold.
   it.each([
     '-evil',
@@ -243,7 +270,7 @@ describe('PrCreator argv subprocess safety', () => {
     '/foo',
     'foo//bar',
     'foo.lock',
-  ])('refuses to run for invalid/unsafe ref %s', async (branch) => {
+  ])('refuses to run for invalid/unsafe ref %s', async (branch: string) => {
     const { exec, calls } = makeExecRecorder(branch);
     const creator = new PrCreator(
       { targetBranch: 'main', disabled: false, remote: 'origin' },

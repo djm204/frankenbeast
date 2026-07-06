@@ -4,6 +4,7 @@ import { BeastContext } from '../../../src/context/franken-context.js';
 import { makeObserver, makeHeartbeat, makeLogger } from '../../helpers/stubs.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import type { TaskOutcome } from '../../../src/types.js';
+import { PrCreationRequiredActionError } from '../../../src/closure/pr-creator.js';
 
 function ctx(): BeastContext {
   const c = new BeastContext('proj', 'sess', 'input');
@@ -158,6 +159,36 @@ describe('runClosure', () => {
 
     expect(c.audit.some(a => a.action === 'tokenSpend:collected')).toBe(true);
     expect(c.audit.some(a => a.action === 'pulse:complete')).toBe(true);
+  });
+
+  it('fails the run when PR creation requires user action after successful tasks', async () => {
+    const logger = makeLogger();
+    const prCreator = {
+      create: vi.fn(async () => {
+        throw new PrCreationRequiredActionError({
+          message: 'PR not created: run `gh auth login`; branch feature/auth-warning is pushed.',
+          action: 'run `gh auth login` and retry PR creation',
+          branch: 'feature/auth-warning',
+        });
+      }),
+    };
+
+    const result = await runClosure(
+      ctx(),
+      makeObserver(),
+      makeHeartbeat(),
+      defaultConfig(),
+      successOutcomes,
+      logger,
+      prCreator as never,
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.error?.message).toContain('gh auth login');
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Closure: PR creation requires user action',
+      expect.objectContaining({ branch: 'feature/auth-warning' }),
+    );
   });
 
   it('logs token spend and heartbeat result', async () => {
