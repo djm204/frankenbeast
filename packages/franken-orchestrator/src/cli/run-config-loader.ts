@@ -30,6 +30,7 @@ export const GitConfigSchema = z.object({
   baseBranch: z.string().optional(),
   branchPattern: z.string().optional(),
   prCreation: z.enum(['auto', 'manual', 'disabled']).optional(),
+  disableBranding: z.boolean().optional(),
   mergeStrategy: z.enum(['merge', 'squash', 'rebase']).optional(),
 }).strict();
 
