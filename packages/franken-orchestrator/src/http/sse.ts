@@ -25,7 +25,7 @@ export function createSseHandler(deps: SseHandlerDeps) {
       );
     }
 
-    if (operatorToken && !hasValidStreamCredential(c, operatorToken, ticketStore)) {
+    if (operatorToken && !hasValidStreamCredential(c, operatorToken, id, ticketStore)) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
 
@@ -82,8 +82,14 @@ export function createSseHandler(deps: SseHandlerDeps) {
 function hasValidStreamCredential(
   c: Context,
   operatorToken: string,
+  sessionId: string,
   ticketStore: SseConnectionTicketStore | undefined,
 ): boolean {
+  const ticket = c.req.query('ticket');
+  if (ticket) {
+    return Boolean(ticketStore && ticketStore.validate(ticket, operatorToken, sessionId));
+  }
+
   const headerToken = extractOperatorToken(c.req.header('authorization'))
     ?? c.req.header('x-frankenbeast-operator-token')
     ?? undefined;
@@ -102,8 +108,7 @@ function hasValidStreamCredential(
     return true;
   }
 
-  const ticket = c.req.query('ticket');
-  return Boolean(ticketStore && ticket && ticketStore.validate(ticket, operatorToken));
+  return false;
 }
 
 function safeTokenCompare(a: string, b: string): boolean {

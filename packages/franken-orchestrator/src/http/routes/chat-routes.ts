@@ -155,7 +155,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     if (!streamTicketStore) {
       return c.json({ error: { code: 'UNAVAILABLE', message: 'Chat stream tickets are not configured' } }, 503);
     }
-    return c.json({ ticket: streamTicketStore.issue(operatorToken) });
+    return c.json({ ticket: streamTicketStore.issue(operatorToken, id) });
   });
 
   // SSE stream

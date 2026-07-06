@@ -97,4 +97,27 @@ describe('chat SSE stream ticket authentication', () => {
     const reuseResponse = await app.request(`/v1/chat/sessions/${sessionId}/stream?${new URLSearchParams({ ticket })}`);
     expect(reuseResponse.status).toBe(401);
   });
+
+  it('scopes one-shot stream tickets to the session that minted them', async () => {
+    const app = createApp(sessionStoreDir);
+    const firstSessionId = await createSession(app);
+    const secondSessionId = await createSession(app);
+
+    const ticketResponse = await app.request(`/v1/chat/sessions/${firstSessionId}/stream/ticket`, {
+      method: 'POST',
+      headers: AUTH_HEADER,
+    });
+    expect(ticketResponse.status).toBe(200);
+    const { ticket } = await ticketResponse.json() as { ticket: string };
+
+    const wrongSessionResponse = await app.request(
+      `/v1/chat/sessions/${secondSessionId}/stream?${new URLSearchParams({ ticket })}`,
+    );
+    expect(wrongSessionResponse.status).toBe(401);
+
+    const consumedResponse = await app.request(
+      `/v1/chat/sessions/${firstSessionId}/stream?${new URLSearchParams({ ticket })}`,
+    );
+    expect(consumedResponse.status).toBe(401);
+  });
 });
