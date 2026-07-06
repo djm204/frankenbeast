@@ -816,6 +816,27 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('keeps mutation failure alerts when retrying the dashboard stream', async () => {
+    const client = mockClient({
+      subscribeToDashboard: vi.fn()
+        .mockRejectedValueOnce(new Error('SSE unavailable'))
+        .mockResolvedValueOnce(() => undefined),
+      toggleSkill: vi.fn().mockRejectedValue(new Error('HTTP 500')),
+    });
+
+    render(<DashboardPage client={client} />);
+    await screen.findByRole('alert');
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable shell' }));
+    expect(await screen.findByRole('button', { name: 'Retry enabling shell' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading dashboard' }));
+
+    await waitFor(() => {
+      expect(client.subscribeToDashboard).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('button', { name: 'Retry enabling shell' })).toBeTruthy();
+    });
+  });
+
   it('closes a stream subscription that resolves after it has been superseded', async () => {
     const staleSubscription = deferred<() => void>();
     const unsubscribeStale = vi.fn();
