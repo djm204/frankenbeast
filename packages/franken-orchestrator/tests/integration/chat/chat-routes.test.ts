@@ -590,6 +590,72 @@ describe('Chat HTTP Routes', () => {
     expect(session.pendingApproval).toBeNull();
   });
 
+  it('POST /v1/chat/sessions/:id/approve runs the pending command for HTTP fallback approvals', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-http-pending-command',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: {
+        description: 'Deploy staging',
+        requestedAt: now,
+        tool: 'execution',
+        command: 'deploy staging',
+        sessionId: 'chat-http-pending-command',
+      },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'execution' as const, content: 'Done' }],
+        events: [{ type: 'complete' as const, sessionId: session.id, data: { status: 'success' } }],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'premium_execution',
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.state).toBe('approved');
+    expect(runtime.run).toHaveBeenCalledWith('/run deploy staging', expect.objectContaining({
+      pendingApproval: true,
+      sessionId: session.id,
+    }));
+    expect(sessionStore.save).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'approved',
+      pendingApproval: null,
+    }));
+    expect(session.state).toBe('approved');
+    expect(session.pendingApproval).toBeNull();
+  });
+
   it('POST /v1/chat/sessions/:id/approve does not downgrade approved sessions when runtime reports active', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { approvalRuntimeInput } from '../../chat/approval-input.js';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import type { ChatRuntime } from '../../chat/runtime.js';
@@ -178,9 +179,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     }
 
     if (approved) {
-      const result = await runtime.run('/approve', {
+      const pendingApproval = session.pendingApproval ?? null;
+      const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+      const runtimeInput = approvalRuntimeInput(pendingApproval);
+      session.pendingApproval = null;
+      session.state = 'approved';
+      session.updatedAt = new Date().toISOString();
+      sessionStore.save(session);
+
+      const result = await runtime.run(runtimeInput, {
         sessionId: session.id,
-        pendingApproval: Boolean(session.pendingApproval) || session.state === 'pending_approval',
+        pendingApproval: wasPendingApproval,
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),

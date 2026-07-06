@@ -2,6 +2,7 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { approvalRuntimeInput } from '../chat/approval-input.js';
 import { ChatRuntime } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
@@ -313,16 +314,22 @@ export class ChatSocketController {
       return;
     }
 
-    const approvedAction = session.pendingApproval?.command ?? session.pendingApproval?.description;
-    const result = await this.runtime.run(approvedAction ? `/run ${approvedAction}` : '/approve', {
+    const pendingApproval = session.pendingApproval ?? null;
+    const runtimeInput = approvalRuntimeInput(pendingApproval);
+    session.pendingApproval = null;
+    session.state = 'approved';
+    session.updatedAt = nowIso();
+    this.sessionStore.save(session);
+
+    const result = await this.runtime.run(runtimeInput, {
       sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
+      pendingApproval: Boolean(pendingApproval),
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
     });
     session.pendingApproval = null;
-    session.state = result.state;
+    session.state = result.state === 'active' ? 'approved' : result.state;
     session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);

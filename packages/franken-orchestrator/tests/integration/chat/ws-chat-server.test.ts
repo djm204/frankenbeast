@@ -321,6 +321,75 @@ describe('ws chat server', () => {
       type: 'turn.execution.complete',
       data: { status: 'success' },
     }));
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not execute the same approved action twice for duplicate approval frames', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    let finishExecution!: () => void;
+    const executionStarted = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await executionStarted;
+      return {
+        status: 'success',
+        summary: 'Done',
+        filesChanged: [],
+        testsRun: 0,
+        errors: [],
+      };
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const first = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    const second = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    finishExecution();
+    await Promise.all([first, second]);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const executionStarts = sent
+      .map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'turn.execution.start');
+    expect(executionStarts).toHaveLength(1);
 
     rmSync(TMP, { recursive: true, force: true });
   });
