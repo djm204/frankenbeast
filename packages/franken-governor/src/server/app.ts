@@ -44,6 +44,8 @@ type GovernorSignatureVerificationResult =
   | { ok: true }
   | { ok: false; reason: 'missing' | 'malformed' | 'invalid' };
 
+type ParsedJsonBody = Record<string, unknown>;
+
 function normalizeGovernorSignature(signature: string): Buffer | null {
   const trimmed = signature.trim();
   if (!trimmed.toLowerCase().startsWith(GOVERNOR_SIGNATURE_PREFIX)) {
@@ -78,6 +80,19 @@ function verifyGovernorSignature(
   }
 
   return { ok: true };
+}
+
+function parseJsonBody(rawBody: Buffer): ParsedJsonBody | null {
+  if (rawBody.length === 0) return {};
+
+  try {
+    const parsed: unknown = JSON.parse(rawBody.toString('utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as ParsedJsonBody)
+      : {};
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -143,9 +158,42 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
   // POST /v1/approval/request — submit an approval request
   app.post('/v1/approval/request', async (c) => {
-    const body = await c.req.json();
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
 
-    if (!body.requestId || !body.taskId || !body.summary) {
+    // Approval requests create actionable human-approval state, so authenticate
+    // them the same way approval responses are authenticated. Tests may opt in
+    // to unsigned requests explicitly, but production fails closed.
+    if (!options.signingSecret) {
+      if (!options.allowUnsignedApprovalsForTests) {
+        return c.json({ error: { message: 'Signing secret required for approval requests' } }, 401);
+      }
+    } else {
+      const verification = verifyGovernorSignature(
+        c.req.header('x-governor-signature'),
+        rawBody,
+        options.signingSecret,
+      );
+      if (!verification.ok && verification.reason === 'missing') {
+        return c.json({ error: { message: 'Missing signature' } }, 401);
+      }
+      if (!verification.ok && verification.reason === 'malformed') {
+        return c.json({ error: { message: 'Malformed signature' } }, 401);
+      }
+      if (!verification.ok) {
+        return c.json({ error: { message: 'Invalid signature' } }, 401);
+      }
+    }
+
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
+
+    if (
+      typeof body.requestId !== 'string' || body.requestId.length === 0
+      || typeof body.taskId !== 'string' || body.taskId.length === 0
+      || typeof body.summary !== 'string' || body.summary.length === 0
+    ) {
       return c.json(
         { error: { message: 'Missing required fields: requestId, taskId, summary' } },
         400,
@@ -164,10 +212,8 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());
-    let body: { requestId?: string; decision?: string; respondedBy?: string; feedback?: string };
-    try {
-      body = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf8')) : {};
-    } catch {
+    const body = parseJsonBody(rawBody);
+    if (!body) {
       return c.json({ error: { message: 'Malformed JSON body' } }, 400);
     }
 
@@ -194,7 +240,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       }
     }
 
-    if (!body.requestId || !body.decision) {
+    if (typeof body.requestId !== 'string' || typeof body.decision !== 'string') {
       return c.json(
         { error: { message: 'Missing required fields: requestId, decision' } },
         400,
