@@ -381,4 +381,69 @@ describe('PrCreator issue reference integration', () => {
       );
     });
   });
+
+  describe('LLM fallback error logging', () => {
+    it('warns when commit message generation catches an LLM error', async () => {
+      const llm = { complete: vi.fn().mockRejectedValue(new Error('llm unavailable')) };
+      const logger = makeLogger();
+      const creator = new PrCreator(
+        { targetBranch: 'main', disabled: false, remote: 'origin' },
+        vi.fn(),
+        llm,
+      );
+
+      const result = await creator.generateCommitMessage(
+        ' src/auth.ts | 10 ++++',
+        'fix authentication null check',
+        logger,
+      );
+
+      expect(result).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'PrCreator: generateCommitMessage failed',
+        expect.objectContaining({ error: 'llm unavailable' }),
+      );
+    });
+
+    it('warns when PR description generation catches an LLM error', async () => {
+      const llm = { complete: vi.fn().mockRejectedValue(new Error('llm unavailable')) };
+      const logger = makeLogger();
+      const creator = new PrCreator(
+        { targetBranch: 'main', disabled: false, remote: 'origin' },
+        vi.fn(),
+        llm,
+      );
+
+      const result = await creator.generatePrDescription(
+        'abc1234 fix(auth): patch null check',
+        ' src/auth.ts | 10 ++++',
+        baseResult,
+        undefined,
+        undefined,
+        logger,
+      );
+
+      expect(result).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'PrCreator: generatePrDescription failed',
+        expect.objectContaining({ error: 'llm unavailable' }),
+      );
+    });
+
+    it('warns when the LLM PR generation wrapper catches an unexpected error', async () => {
+      const llm = { complete: vi.fn().mockResolvedValue('TITLE: fix(auth): ok\nBODY:\nok') };
+      const exec = mockExec();
+      const logger = makeLogger();
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+      vi.spyOn(creator, 'generatePrDescription').mockRejectedValueOnce(new Error('parser exploded'));
+
+      const result = await creator.create(baseResult, logger);
+
+      expect(result?.url).toBe('https://example.com/pr/42');
+      expect(logger.warn).toHaveBeenCalledWith(
+        'PrCreator: tryGeneratePrFromLlm failed',
+        expect.objectContaining({ error: 'parser exploded' }),
+      );
+    });
+  });
 });
