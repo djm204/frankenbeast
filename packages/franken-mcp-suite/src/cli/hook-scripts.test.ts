@@ -164,6 +164,64 @@ function runScript(
   });
 }
 
+function singleQuoteShell(value: string): string {
+  return `'${value.split("'").join("'\\''")}'`;
+}
+
+describe('Hook script shell path escaping', () => {
+  const tempRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of tempRoots) {
+      if (existsSync(root)) {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+    tempRoots.length = 0;
+  });
+
+  it('writes DB_PATH as a shell-safe single-quoted literal for every client', () => {
+    const root = join(tmpdir(), `fbeast-hook-scripts-quote-${randomUUID()}-\'special`);
+    mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+
+    for (const client of ['codex', 'claude', 'gemini'] as const) {
+      const dbPath = client === 'codex' ? join(root, '.fbeast', 'beast.db') : join('.fbeast', 'beast.db');
+      const expectedDbPath = singleQuoteShell(dbPath);
+      const { preTool, postTool } = writeHookScripts(root, client);
+      const scriptContent = [readFileSync(preTool, 'utf8'), readFileSync(postTool, 'utf8')].join('\n');
+
+      expect(scriptContent).toContain(`DB_PATH=${expectedDbPath}`);
+      expect(scriptContent).not.toContain(`DB_PATH=${JSON.stringify(dbPath)}`);
+      expect(scriptContent).not.toContain(`DB_PATH=${dbPath}`);
+    }
+  });
+
+  it('keeps shell metacharacters in root paths from executing as command substitutions', () => {
+    const marker = join(tmpdir(), `fbeast-hook-path-injection-${randomUUID()}`);
+    const root = join(tmpdir(), `fbeast-hook-scripts-$(touch ${marker})-${randomUUID()}`);
+    const expected = `${join(root, '.fbeast', 'beast.db')}`;
+
+    if (existsSync(marker)) {
+      rmSync(marker);
+    }
+
+    mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'exec_command',
+      session_id: 'sess-1',
+      tool_input: {},
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(marker), `unexpected command-substitution side effect in script: ${expected}`).toBe(false);
+  });
+});
+
 describe('Codex hook scripts', () => {
   const tempRoots: string[] = [];
 
@@ -236,7 +294,7 @@ describe('Codex hook scripts', () => {
     // would both false-positive on diff text and persist secrets in governor_log.
     const result = runScript(preTool, {
       tool_name: 'apply_patch',
-      tool_input: { command: '*** Begin Patch\n+ rm -rf / and SECRET_TOKEN=abc\n*** End Patch' },
+      tool_input: { command: '*** Begin Patch\n rm -rf / and SECRET_TOKEN=abc\n*** End Patch' },
       session_id: 'sess-1',
     }, binDir);
 
@@ -637,8 +695,8 @@ describe('Claude Code hook scripts', () => {
     tempRoots.push(root);
     const { preTool, postTool } = writeHookScripts(root, 'claude');
 
-    expect(readFileSync(preTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
-    expect(readFileSync(postTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(preTool, 'utf8')).toContain(`DB_PATH=${singleQuoteShell(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(postTool, 'utf8')).toContain(`DB_PATH=${singleQuoteShell(join('.fbeast', 'beast.db'))}`);
     expect(readFileSync(preTool, 'utf8')).not.toContain(root);
     expect(readFileSync(postTool, 'utf8')).not.toContain(root);
   });
