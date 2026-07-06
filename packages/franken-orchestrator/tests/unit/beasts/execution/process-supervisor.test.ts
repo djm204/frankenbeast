@@ -83,6 +83,24 @@ describe('ProcessSupervisor', () => {
       expect(callbacks.onStdout).toHaveBeenCalledWith('line2');
     });
 
+    it('streams carriage-return terminated stdout updates separately', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: '/bin/sh',
+        args: ['-c', 'printf "step1\\rstep2\\rdone\\n"'],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalled();
+      }, { timeout: 5000 });
+
+      expect(callbacks.onStdout).toHaveBeenCalledWith('step1');
+      expect(callbacks.onStdout).toHaveBeenCalledWith('step2');
+      expect(callbacks.onStdout).toHaveBeenCalledWith('done');
+    });
+
     it('captures stderr lines via onStderr callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({

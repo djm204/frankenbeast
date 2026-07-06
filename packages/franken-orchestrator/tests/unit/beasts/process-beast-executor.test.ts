@@ -467,6 +467,49 @@ describe('ProcessBeastExecutor', () => {
     });
   });
 
+  it('clears operator-stop bookkeeping when stop dispatch fails', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let capturedCallbacks: ProcessCallbacks | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+        capturedCallbacks = callbacks as ProcessCallbacks;
+        return { pid: 777 };
+      }),
+      stop: vi.fn(async () => {
+        throw new Error('stop dispatch failed');
+      }),
+      kill: vi.fn(async () => {}),
+    };
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { defaultStopTimeoutMs: 100 });
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Implement the stop button',
+        chunkDirectory: '/tmp/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+    await expect(executor.stop(run.id, attempt.id)).rejects.toThrow('stop dispatch failed');
+
+    capturedCallbacks?.onExit(0, null);
+
+    expect(repo.getAttempt(attempt.id)).toMatchObject({
+      status: 'completed',
+    });
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'completed',
+    });
+  });
+
   describe('onRunStatusChange callback', () => {
     it('accepts optional onRunStatusChange as 4th constructor argument', () => {
       const repo = {} as SQLiteBeastRepository;

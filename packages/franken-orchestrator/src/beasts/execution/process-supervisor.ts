@@ -129,7 +129,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       stream.setEncoding('utf8');
       stream.on('data', (chunk: string | Buffer) => {
         buffer += chunk.toString();
-        const lines = buffer.split(/\r?\n/u);
+        const lines = buffer.split(/\r\n|[\n\r]/u);
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           onLine(line);

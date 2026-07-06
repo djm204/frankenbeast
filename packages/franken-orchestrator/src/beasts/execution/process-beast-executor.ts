@@ -418,7 +418,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       this.stoppingAttempts.add(attemptId);
-      await this.supervisor.stop(attempt.pid);
+      try {
+        await this.supervisor.stop(attempt.pid);
+      } catch (error) {
+        this.exitPromises.delete(attemptId);
+        this.stoppingAttempts.delete(attemptId);
+        throw error;
+      }
 
       {
         let timer: ReturnType<typeof setTimeout>;
