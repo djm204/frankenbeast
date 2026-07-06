@@ -117,5 +117,6 @@ describe('ChatShell route heading', () => {
     expect(screen.queryByRole('heading', { level: 1, name: 'default' })).toBeNull();
     expect(screen.getByText('Project: default')).toBeTruthy();
     expect(screen.getByText('Service controls')).toBeTruthy();
+    expect(screen.queryByText('Chat is the only live section in this first Frankenbeast dashboard cut.')).toBeNull();
   });
 });

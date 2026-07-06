@@ -119,7 +119,6 @@ function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
       <p className="eyebrow">Dashboard Module</p>
       <h2>{route.label}</h2>
       <p>{route.summary}</p>
-      <span>Chat is the only live section in this first Frankenbeast dashboard cut.</span>
     </section>
   );
 }
