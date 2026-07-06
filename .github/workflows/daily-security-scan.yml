@@ -1,0 +1,222 @@
+name: Daily Deterministic Security Scan
+
+# Deterministic SAST + secret + dependency scan, run daily BEFORE the
+# LLM audit routine (which runs ~15:07 UTC) so its findings are already
+# on record and the LLM can dedup against them.
+#
+# Design notes:
+# - Tools are version-pinned for repeatability. First-party GitHub actions
+#   are tag-pinned; SHA-pinning them is a recommended hardening follow-up.
+# - SARIF upload to code scanning is best-effort (continue-on-error) so the
+#   workflow still works on repos without GitHub Advanced Security; findings
+#   are always captured as build artifacts and as deduped rolling issues.
+# - Issue filing is idempotent: one rolling issue per category (label
+#   `ci-scan`), updated in place, so a daily cadence produces near-zero noise.
+
+on:
+  schedule:
+    # 13:13 UTC = 08:13 America/Winnipeg (CDT) / 07:13 (CST). ~2h before the
+    # LLM audit at 15:07 UTC. Off-minute avoids GitHub's top-of-hour backlog.
+    - cron: '13 13 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write   # upload SARIF to code scanning (best-effort)
+  issues: write            # file/update deduped summary issues
+
+concurrency:
+  group: daily-security-scan
+  cancel-in-progress: false
+
+env:
+  SEMGREP_VERSION: '1.90.0'
+  GITLEAKS_VERSION: '8.21.2'
+
+jobs:
+  scan:
+    name: SAST + secrets + dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── Semgrep SAST ─────────────────────────────────────────────────────
+      - name: Run Semgrep
+        run: |
+          python -m pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          # Tokenless public rulesets. --error is NOT set: we never fail the
+          # job on findings; findings are reported via SARIF + issues instead.
+          semgrep scan \
+            --config p/security-audit \
+            --config p/secrets \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --sarif --output semgrep.sarif \
+            --timeout 300 --metrics off || true
+
+      - name: Upload Semgrep SARIF to code scanning
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      # ── Gitleaks secret scan ─────────────────────────────────────────────
+      - name: Run Gitleaks
+        run: |
+          curl -sSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks
+          chmod +x gitleaks
+          # Scan the current tree (not full history). Never fail the job.
+          ./gitleaks detect \
+            --source . --no-git \
+            --report-format sarif --report-path gitleaks.sarif \
+            --redact --exit-code 0 || true
+
+      - name: Upload Gitleaks SARIF to code scanning
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+      # ── Dependency audit ─────────────────────────────────────────────────
+      - name: Run npm audit
+        run: |
+          # Reads package-lock.json directly; no install needed.
+          npm audit --audit-level=high --json > audit.json || true
+
+      # ── Persist all raw reports ──────────────────────────────────────────
+      - name: Upload scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-reports
+          path: |
+            semgrep.sarif
+            gitleaks.sarif
+            audit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ── File/update deduped rolling issues ───────────────────────────────
+      - name: File deduped issues for high-severity findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create ci-scan --repo "$REPO" --color 5319e7 \
+            --description "Filed by the deterministic daily CI scan" 2>/dev/null || true
+
+          # upsert_issue <title-prefix> <label-csv> <full-title> <body-file>
+          # Finds an open ci-scan issue whose title starts with <title-prefix>;
+          # updates it in place if found, otherwise creates it. One rolling
+          # issue per category => near-zero daily noise.
+          upsert_issue() {
+            local prefix="$1" labels="$2" title="$3" bodyfile="$4"
+            local num
+            num=$(gh issue list --repo "$REPO" --state open --label ci-scan \
+                    --search "$prefix in:title" --json number,title \
+                    --jq "[.[] | select(.title | startswith(\"$prefix\"))][0].number // empty")
+            if [ -n "$num" ]; then
+              gh issue edit "$num" --repo "$REPO" --title "$title" --body-file "$bodyfile"
+              echo "updated #$num: $title"
+            else
+              gh issue create --repo "$REPO" --title "$title" \
+                --label "$labels" --body-file "$bodyfile"
+              echo "created: $title"
+            fi
+          }
+
+          footer=$'\n\n---\n🤖 Filed automatically by the daily deterministic security scan. Detail in the run artifacts: '"$RUN_URL"
+
+          # ── Secrets (gitleaks) — P0 ──
+          SECRETS=$(jq '[.runs[]?.results[]?] | length' gitleaks.sarif 2>/dev/null || echo 0)
+          if [ "${SECRETS:-0}" -gt 0 ]; then
+            {
+              echo "## Finding"
+              echo "Gitleaks flagged **$SECRETS** potential secret(s) in the current tree."
+              echo
+              echo "## Evidence"
+              echo "Rule IDs and (redacted) locations from this run:"
+              echo '```'
+              jq -r '.runs[]?.results[]? | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' gitleaks.sarif 2>/dev/null | sort -u | head -50
+              echo '```'
+              echo
+              echo "## Impact"
+              echo "A committed secret can be extracted from the repo and used to access the corresponding service. Treat every hit as live until proven a test fixture."
+              echo
+              echo "## Suggested fix"
+              echo "Triage each hit: if real, rotate the credential and purge it (and its history) then move it to a secret store; if a false positive, add a scoped allowlist entry to a gitleaks config."
+              echo "$footer"
+            } > secrets_body.md
+            upsert_issue "security: gitleaks detected" "ci-scan,security,P0" \
+              "security: gitleaks detected $SECRETS potential secret(s)" secrets_body.md
+          fi
+
+          # ── Semgrep ERROR-severity findings — P1/P2 ──
+          SG_ERR=$(jq '[.runs[]?.results[]? | select((.level // "warning") == "error")] | length' semgrep.sarif 2>/dev/null || echo 0)
+          if [ "${SG_ERR:-0}" -gt 0 ]; then
+            {
+              echo "## Finding"
+              echo "Semgrep flagged **$SG_ERR** high-severity (error-level) finding(s) across the security-audit / secrets / js / ts / nodejs rulesets."
+              echo
+              echo "## Evidence"
+              echo "Top rules and locations from this run:"
+              echo '```'
+              jq -r '.runs[]?.results[]? | select((.level // "warning") == "error") | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' semgrep.sarif 2>/dev/null | sort | uniq -c | sort -rn | head -50
+              echo '```'
+              echo
+              echo "## Impact"
+              echo "Error-level Semgrep rules cover injection, unsafe deserialization, path traversal, weak crypto, and similar exploitable patterns. Each should be reviewed against the code path."
+              echo
+              echo "## Suggested fix"
+              echo "Review each rule hit in context; fix genuine issues, or add a scoped \`# nosemgrep: <ruleId>\` with justification for intentional patterns. Full SARIF is in the run artifacts (and the Security tab if code scanning is enabled)."
+              echo "$footer"
+            } > semgrep_body.md
+            upsert_issue "security: semgrep flagged" "ci-scan,security,P1" \
+              "security: semgrep flagged $SG_ERR high-severity finding(s)" semgrep_body.md
+          fi
+
+          # ── npm audit high/critical — P1 ──
+          CRIT=$(jq '.metadata.vulnerabilities.critical // 0' audit.json 2>/dev/null || echo 0)
+          HIGH=$(jq '.metadata.vulnerabilities.high // 0' audit.json 2>/dev/null || echo 0)
+          if [ "$((CRIT + HIGH))" -gt 0 ]; then
+            {
+              echo "## Finding"
+              echo "\`npm audit\` reports **$CRIT critical** and **$HIGH high** advisories in the dependency tree."
+              echo
+              echo "## Evidence"
+              echo "Advisories from this run:"
+              echo '```'
+              jq -r '.vulnerabilities // {} | to_entries[] | select(.value.severity == "critical" or .value.severity == "high") | "\(.value.severity)\t\(.key)\t\(.value.via | if type=="array" then (map(if type=="object" then .title else . end) | join("; ")) else . end)"' audit.json 2>/dev/null | head -60
+              echo '```'
+              echo
+              echo "## Impact"
+              echo "High/critical advisories are exploitable in the versions currently locked in package-lock.json."
+              echo
+              echo "## Suggested fix"
+              echo "Run \`npm audit fix\` where safe, or bump the offending packages manually and re-lock. For transitive-only advisories, use overrides. Coordinate with existing dependency-upgrade issues before duplicating."
+              echo "$footer"
+            } > audit_body.md
+            upsert_issue "security(deps): npm audit reports" "ci-scan,security,P1" \
+              "security(deps): npm audit reports $CRIT critical / $HIGH high advisories" audit_body.md
+          fi
+
+          echo "scan issue-filing complete: secrets=$SECRETS semgrep_err=$SG_ERR npm_crit=$CRIT npm_high=$HIGH"
