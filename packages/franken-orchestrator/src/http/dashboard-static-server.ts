@@ -371,33 +371,35 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   });
 }
 
-function runOptionalBuild(options: DashboardStaticServerOptions): Promise<void> {
+function startOptionalBuild(options: DashboardStaticServerOptions): DashboardBuildStatus {
   if (!options.buildCommand) {
-    return Promise.resolve();
+    return { state: 'ready' };
   }
-  return new Promise((resolveBuild, rejectBuild) => {
-    const child = spawn(options.buildCommand as string, options.buildArgs ?? [], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: 'inherit',
-    });
-    child.once('error', rejectBuild);
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolveBuild();
-        return;
-      }
-      const message = signal
-        ? `Dashboard build command terminated by signal ${signal}`
-        : `Dashboard build command exited with status ${code ?? 'unknown'}`;
-      rejectBuild(new Error(message));
-    });
+  const status: DashboardBuildStatus = { state: 'building' };
+  const child = spawn(options.buildCommand, options.buildArgs ?? [], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'inherit',
   });
+  child.once('error', (error) => {
+    Object.assign(status, { state: 'failed', message: error.message });
+  });
+  child.once('exit', (code, signal) => {
+    if (code === 0) {
+      Object.assign(status, { state: 'ready' });
+      return;
+    }
+    const message = signal
+      ? `Dashboard build command terminated by signal ${signal}`
+      : `Dashboard build command exited with status ${code ?? 'unknown'}`;
+    Object.assign(status, { state: 'failed', message });
+    console.error(message);
+  });
+  return status;
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
-  await runOptionalBuild(options);
-  const buildStatus: DashboardBuildStatus = { state: 'ready' };
+  const buildStatus = startOptionalBuild(options);
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
     const abortController = new AbortController();
@@ -450,7 +452,9 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
 async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | undefined> {
   try {
     const parsed = parseDotenv(await readFile(filePath, 'utf8'));
-    return (parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? parsed.VITE_BEAST_OPERATOR_TOKEN)?.trim() || undefined;
+    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim()
+      || parsed.VITE_BEAST_OPERATOR_TOKEN?.trim()
+      || undefined;
   } catch {
     return undefined;
   }
