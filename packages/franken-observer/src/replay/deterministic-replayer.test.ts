@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ReplayContentStore } from './replay-content-store.js';
 import { DeterministicReplayer } from './deterministic-replayer.js';
 import type { ReplayRecord } from './replay-record.js';
+
+function corruptReplayBlob(baseDir: string, ref: string, replacement: string): void {
+  writeFileSync(join(baseDir, 'blobs', ref), replacement, 'utf8');
+}
 
 describe('DeterministicReplayer', () => {
   it('replays a saved llm.response without calling a live provider', () => {
@@ -23,7 +27,7 @@ describe('DeterministicReplayer', () => {
     const root = mkdtempSync(join(tmpdir(), 'replay-'));
     const store = new ReplayContentStore(root);
     const ref = store.put('x');
-    store.__corruptForTest(ref, 'y');
+    corruptReplayBlob(root, ref, 'y');
     const replayer = new DeterministicReplayer(store);
 
     expect(() => replayer.replayLlmResponse(
