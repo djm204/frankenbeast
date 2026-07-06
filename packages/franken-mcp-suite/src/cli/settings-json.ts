@@ -1,0 +1,179 @@
+import { closeSync, fsyncSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+export function parseJsonObjectWithComments(content: string): Record<string, unknown> {
+  const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(content));
+  if (!isRecord(parsed)) {
+    throw new Error('settings.json must contain a JSON object');
+  }
+  return parsed;
+}
+
+export function readSettingsJson(content: string): Record<string, unknown> {
+  return parseJsonObjectWithComments(content);
+}
+
+export function writeJsonFileAtomic(path: string, value: unknown): void {
+  const content = JSON.stringify(value, null, 2) + '\n';
+  const dir = dirname(path);
+  const tempPath = join(dir, `.${basename(path)}.tmp-${process.pid}-${randomUUID()}`);
+
+  try {
+    writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+    fsyncFile(tempPath);
+    renameSync(tempPath, path);
+    fsyncDirectory(dir);
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stripJsonCommentsAndTrailingCommas(content: string): string {
+  let output = '';
+  let inString = false;
+  let escaping = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i]!;
+    const next = content[i + 1];
+
+    if (inLineComment) {
+      if (char === '\n' || char === '\r') {
+        inLineComment = false;
+        output += char;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === '*' && next === '/') {
+        inBlockComment = false;
+        i += 1;
+      } else if (char === '\n' || char === '\r') {
+        output += char;
+      } else {
+        output += ' ';
+      }
+      continue;
+    }
+
+    if (inString) {
+      output += char;
+      if (escaping) {
+        escaping = false;
+      } else if (char === '\\') {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      inBlockComment = true;
+      output += ' ';
+      i += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return removeTrailingCommas(output);
+}
+
+function removeTrailingCommas(content: string): string {
+  let output = '';
+  let inString = false;
+  let escaping = false;
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i]!;
+
+    if (inString) {
+      output += char;
+      if (escaping) {
+        escaping = false;
+      } else if (char === '\\') {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === ',') {
+      const nextSignificant = findNextSignificantChar(content, i + 1);
+      if (nextSignificant === '}' || nextSignificant === ']') {
+        continue;
+      }
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function findNextSignificantChar(content: string, start: number): string | undefined {
+  for (let i = start; i < content.length; i += 1) {
+    const char = content[i]!;
+    if (!/\s/.test(char)) return char;
+  }
+  return undefined;
+}
+
+function fsyncFile(path: string): void {
+  const fd = openSync(path, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDirectory(path: string): void {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    fsyncSync(fd);
+  } catch (error) {
+    if (!isUnsupportedDirectoryFsync(error)) throw error;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function isUnsupportedDirectoryFsync(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: string }).code !== undefined
+    && ['EINVAL', 'EISDIR', 'EPERM', 'ENOTSUP'].includes((error as { code: string }).code);
+}
