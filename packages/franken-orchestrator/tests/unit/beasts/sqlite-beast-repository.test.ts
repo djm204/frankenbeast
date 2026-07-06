@@ -69,6 +69,40 @@ describe('SQLiteBeastRepository', () => {
     });
   });
 
+  it('rolls back attempt insertion when the paired run update fails', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const run = repo.createRun({
+      definitionId: 'chunk-plan',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { chunkSize: 3 },
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const originalUpdateRun = repo.updateRun.bind(repo);
+    repo.updateRun = (() => {
+      throw new Error('simulated run update failure');
+    }) as SQLiteBeastRepository['updateRun'];
+
+    expect(() => repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 101,
+      startedAt: '2026-03-10T00:01:00.000Z',
+      executorMetadata: { backend: 'process' },
+    })).toThrow('simulated run update failure');
+
+    repo.updateRun = originalUpdateRun;
+    expect(repo.listAttempts(run.id)).toEqual([]);
+    const storedRun = repo.getRun(run.id);
+    expect(storedRun).toMatchObject({
+      attemptCount: 0,
+      status: 'queued',
+    });
+    expect(storedRun).not.toHaveProperty('currentAttemptId');
+  });
+
   it('appends ordered run events and updates terminal status', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

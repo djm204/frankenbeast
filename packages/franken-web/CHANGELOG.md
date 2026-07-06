@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.0...franken-web-v0.2.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+* **web:** wire beast prompt file picker selection ([#815](https://github.com/djm204/frankenbeast/issues/815)) ([b283987](https://github.com/djm204/frankenbeast/commit/b283987264c3c5716c813c78c23c5fa8f65a9bad))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.5 to 0.7.6
+
 ## [0.2.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.1.0...franken-web-v0.2.0) (2026-07-06)
 
 

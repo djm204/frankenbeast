@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.11](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.10...franken-critique-v0.6.11) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.5 to 0.7.6
+
 ## [0.6.10](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.9...franken-critique-v0.6.10) (2026-07-06)
 
 

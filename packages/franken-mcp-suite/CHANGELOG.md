@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.0...franken-mcp-suite-v0.2.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.5 to 0.7.6
+    * @franken/brain bumped from 0.6.6 to 0.7.0
+    * @franken/critique bumped from 0.6.10 to 0.6.11
+    * @franken/governor bumped from 0.5.8 to 0.5.9
+    * @franken/observer bumped from 0.7.10 to 0.7.11
+    * @franken/orchestrator bumped from 0.39.1 to 0.40.0
+    * @franken/planner bumped from 0.4.8 to 0.4.9
+
 ## [0.2.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.1.0...franken-mcp-suite-v0.2.0) (2026-07-06)
 
 

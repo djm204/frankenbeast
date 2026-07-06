@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.11](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.10...franken-observer-v0.7.11) (2026-07-06)
+
+
+### Bug Fixes
+
+* **observer:** remove replay test mutator from production class ([#820](https://github.com/djm204/frankenbeast/issues/820)) ([f00094b](https://github.com/djm204/frankenbeast/commit/f00094b1464c0d80fdefa545f56e35bb084ce0d4))
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
 ## [0.7.10](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.9...franken-observer-v0.7.10) (2026-07-06)
 
 
