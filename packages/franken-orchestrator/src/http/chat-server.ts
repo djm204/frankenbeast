@@ -28,6 +28,7 @@ import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } fr
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
+import type { ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -61,6 +62,7 @@ export interface StartChatServerOptions {
   dashboardDeps?: DashboardRouteDeps;
   analyticsDeps?: AnalyticsRouteDeps;
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
+  chatRateLimit?: ChatRateLimitOptions;
 }
 
 export interface ChatServerHandle {
@@ -317,6 +319,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
     ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
+    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
@@ -329,6 +332,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     sessionStore,
     tokenSecret,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
   });
 
   await new Promise<void>((resolve, reject) => {

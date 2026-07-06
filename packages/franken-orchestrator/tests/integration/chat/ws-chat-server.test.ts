@@ -604,4 +604,45 @@ describe('ws chat server', () => {
 
     rmSync(TMP, { recursive: true, force: true });
   });
+
+  it('rate limits websocket message turns before invoking runtime', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn(),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimit: { windowMs: 60_000, max: 0 },
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'run expensive work',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).not.toHaveBeenCalled();
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
 });

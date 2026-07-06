@@ -30,6 +30,7 @@ import { createSkillRoutes } from './routes/skill-routes.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -69,6 +70,8 @@ export interface ChatAppOptions {
   chatStreamTicketStore?: SseConnectionTicketStore;
   /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
+  /** Per-session/principal limiter for chat REST turns and approval mutations. */
+  chatRateLimit?: ChatRateLimitOptions;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -129,6 +132,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
   const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
+  const chatRateLimiter = createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
 
   const app = new Hono();
   app.use('*', requestId);
@@ -213,6 +217,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     turnRunner: runtimeBundle.turnRunner,
     operatorToken: effectiveOperatorToken,
     streamTicketStore: chatStreamTicketStore,
+    chatRateLimiter,
     issueSocketToken: (sessionId) => issueSessionToken({
       expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,

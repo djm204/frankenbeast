@@ -16,6 +16,8 @@ import type {
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+import { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -38,6 +40,7 @@ export interface ChatRoutesDeps {
   issueSocketToken: (sessionId: string) => string;
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
+  chatRateLimiter: InMemoryRateLimiter;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -56,8 +59,24 @@ function sessionResponse(
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore, chatRateLimiter } = deps;
   const app = new Hono();
+
+  function enforceChatRateLimit(
+    sessionId: string,
+    action: 'message' | 'approval',
+    headers: { authorization?: string | undefined; forwardedFor?: string | undefined },
+  ): void {
+    const result = chatRateLimiter.take(chatClientKey({
+      sessionId,
+      action,
+      authorization: headers.authorization,
+      forwardedFor: headers.forwardedFor,
+    }));
+    if (!result.allowed) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
+  }
 
   // Health check
   app.get('/health', (c) => {
@@ -105,6 +124,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
+    enforceChatRateLimit(session.id, 'message', {
+      authorization: c.req.header('authorization'),
+      forwardedFor: c.req.header('x-forwarded-for'),
+    });
 
     const result = await runtime.run(content, {
       sessionId: session.id,
@@ -173,6 +196,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
+    enforceChatRateLimit(session.id, 'approval', {
+      authorization: c.req.header('authorization'),
+      forwardedFor: c.req.header('x-forwarded-for'),
+    });
 
     if (!session.pendingApproval && session.state !== 'pending_approval') {
       return c.json({ data: { id: session.id, approved, state: session.state } });

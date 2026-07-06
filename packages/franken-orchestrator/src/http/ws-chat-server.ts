@@ -16,6 +16,8 @@ import {
   type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
+import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
+import { chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -24,6 +26,7 @@ export interface ChatSocketPeer {
 
 interface ConnectionState {
   sessionId: string;
+  socketToken: string | null;
 }
 
 export interface ChatSocketControllerOptions {
@@ -32,6 +35,7 @@ export interface ChatSocketControllerOptions {
   sessionStore: ISessionStore;
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
+  chatRateLimit?: ChatRateLimitOptions;
 }
 
 export interface ChatSocketConnectRequest {
@@ -85,9 +89,10 @@ function messageIdFromSession(session: ChatSession): string {
 function createPeerState(
   peer: ChatSocketPeer,
   sessionId: string,
+  socketToken: string | null,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId };
+  const state = { sessionId, socketToken };
   controller.connections.set(peer, state);
   return state;
 }
@@ -99,6 +104,7 @@ export class ChatSocketController {
   private readonly sessionStore: ISessionStore;
   private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
+  private readonly chatRateLimiter: InMemoryRateLimiter;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
@@ -106,6 +112,7 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
+    this.chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -149,7 +156,7 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, this);
+    createPeerState(peer, request.sessionId, request.token, this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -207,6 +214,9 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
+        if (!this.takeChatRateLimit(peer, connection, 'message')) {
+          return;
+        }
         await this.handleMessageSend(
           peer,
           session,
@@ -216,6 +226,9 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
+        if (!this.takeChatRateLimit(peer, connection, 'approval')) {
+          return;
+        }
         await this.handleApproval(peer, session, event.approved);
         return;
       case 'message.read':
@@ -320,6 +333,28 @@ export class ChatSocketController {
         timestamp: nowIso(),
       });
     }
+  }
+
+  private takeChatRateLimit(
+    peer: ChatSocketPeer,
+    connection: ConnectionState,
+    action: 'message' | 'approval',
+  ): boolean {
+    const result = this.chatRateLimiter.take(chatClientKey({
+      sessionId: connection.sessionId,
+      action,
+      socketToken: connection.socketToken,
+    }));
+    if (result.allowed) {
+      return true;
+    }
+    this.emit(peer, {
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'Rate limit exceeded',
+      timestamp: nowIso(),
+    });
+    return false;
   }
 
   private async handleApproval(

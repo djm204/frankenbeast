@@ -261,6 +261,49 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.state).toBe('active');
   });
 
+  it('rate limits chat message turns before invoking runtime', async () => {
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const first = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
+      body: JSON.stringify({ content: 'first' }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
+      body: JSON.stringify({ content: 'second' }),
+    });
+    expect(second.status).toBe(429);
+    expect(await second.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+  });
+
   it('runs a Beast interview in chat and dispatches a persisted Beast run', async () => {
     const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
     const logStore = new BeastLogStore(join(TMP, 'beast-logs'));
@@ -496,6 +539,60 @@ describe('Chat HTTP Routes', () => {
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.state).toBe('approved');
     expect(sessionBody.data.pendingApproval).toBeNull();
+  });
+
+  it('rate limits chat approvals before mutating approval state', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-rate-limited-approval',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: { description: 'Deploy?', requestedAt: now },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'approval' as const, content: 'Approved.' }],
+        events: [],
+        pendingApproval: false,
+        state: 'approved',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      chatRateLimit: { windowMs: 60_000, max: 0 },
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer op-token' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(session.state).toBe('pending_approval');
+    expect(session.pendingApproval).toEqual({ description: 'Deploy?', requestedAt: now });
   });
 
   it('POST /v1/chat/sessions/:id/approve is idempotent when no approval is pending', async () => {
