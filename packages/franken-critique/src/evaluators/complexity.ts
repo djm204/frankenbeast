@@ -170,9 +170,9 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   if (previousIndex === -1) return false;
 
   const previous = content[previousIndex] ?? '';
-  if (previousIndex < start - 1) return false;
   if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
+  if (previousIndex < start - 1) return false;
   if (/[\w$)\]]/.test(previous)) return true;
 
   return isRegexKeywordPrefix(content, previousIndex);
@@ -349,7 +349,7 @@ function isLikelyStatementBlockEnd(
         const previousIndex = findPreviousRegexLookbehindIndex(content, i);
         if (previousIndex === -1) return true;
         const previous = content[previousIndex] ?? '';
-        return previous === ')' || previous === '>' || previous === ':';
+        return previous === ')' || previous === ':';
       }
     }
   }
