@@ -37,7 +37,7 @@ function stripIgnoredBraceSyntax(content: string): string {
     const char = content[i];
     const next = content[i + 1];
 
-    if (char === '/' && next === '/' && content[i - 1] !== ':') {
+    if (char === '/' && next === '/' && !isUrlSchemeSlash(content, i)) {
       const end = findLineEnd(content, i + 2);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
@@ -69,6 +69,17 @@ function stripIgnoredBraceSyntax(content: string): string {
     }
 
     if (char === '`') {
+      const inlineCodeEnd = findInlineMarkdownCodeEnd(content, i);
+      if (inlineCodeEnd !== -1 && !isLikelyTemplateLiteralStart(content, i)) {
+        sanitized += maskIgnored(content, i, i + 1);
+        sanitized += stripIgnoredBraceSyntax(
+          content.slice(i + 1, inlineCodeEnd - 1),
+        );
+        sanitized += maskIgnored(content, inlineCodeEnd - 1, inlineCodeEnd);
+        i = inlineCodeEnd - 1;
+        continue;
+      }
+
       const masked = maskTemplateLiteral(content, i);
       sanitized += masked.content;
       i = masked.end - 1;
@@ -97,6 +108,18 @@ function findLineEnd(content: string, start: number): number {
   return newline === -1 ? content.length : newline;
 }
 
+function isUrlSchemeSlash(content: string, slashIndex: number): boolean {
+  if (content[slashIndex - 1] !== ':') return false;
+
+  let schemeStart = slashIndex - 2;
+  while (schemeStart >= 0 && /[A-Za-z]/.test(content[schemeStart] ?? '')) {
+    schemeStart--;
+  }
+
+  const scheme = content.slice(schemeStart + 1, slashIndex - 1).toLowerCase();
+  return /^(?:https?|ftp|file)$/.test(scheme);
+}
+
 function findBlockCommentEnd(content: string, start: number): number {
   const end = content.indexOf('*/', start);
   return end === -1 ? content.length : end + 2;
@@ -108,6 +131,7 @@ function findQuotedStringEnd(
   quote: string,
 ): number {
   for (let i = start + 1; i < content.length; i++) {
+    if (content[i] === '\n') return i;
     if (content[i] === '\\') {
       i++;
       continue;
@@ -131,6 +155,26 @@ function isLikelyQuotedStringStart(
   const next = content[start + 1] ?? '';
 
   return !(/[A-Za-z0-9]/.test(previous) && /[A-Za-z]/.test(next));
+}
+
+function findInlineMarkdownCodeEnd(content: string, start: number): number {
+  for (let i = start + 1; i < content.length; i++) {
+    if (content[i] === '\n') return -1;
+    if (content[i] === '`') return i + 1;
+  }
+
+  return -1;
+}
+
+function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
+  const previousIndex = findPreviousRegexLookbehindIndex(content, start);
+  if (previousIndex === -1) return false;
+
+  const previous = content[previousIndex] ?? '';
+  if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
+  if (previous === '>' && content[previousIndex - 1] === '=') return true;
+
+  return isRegexKeywordPrefix(content, previousIndex);
 }
 
 function findTemplateLiteralEnd(content: string, start: number): number {
@@ -201,7 +245,7 @@ function readTemplateExpression(
     const char = content[i];
     const next = content[i + 1];
 
-    if (char === '/' && next === '/' && content[i - 1] !== ':') {
+    if (char === '/' && next === '/' && !isUrlSchemeSlash(content, i)) {
       i = findLineEnd(content, i + 2) - 1;
       continue;
     }
@@ -266,6 +310,8 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
 
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
 
+  if (previous === '}') return true;
+
   if (previous === '[') return true;
 
   if (previous === '!') {
@@ -287,6 +333,9 @@ function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
   while (start >= 0 && /[\w$]/.test(content[start] ?? '')) start--;
 
   const word = content.slice(start + 1, endIndex + 1);
+  const beforeWord = content[start] ?? '';
+  if (beforeWord === '.' || /[\w$]/.test(beforeWord)) return false;
+
   return /^(?:return|throw|case|delete|typeof|void|in|of|yield|await|else)$/.test(
     word,
   );
@@ -344,7 +393,7 @@ function findLineCommentStart(line: string): number {
       continue;
     }
 
-    if (char === '/' && next === '/' && line[i - 1] !== ':') return i;
+    if (char === '/' && next === '/' && !isUrlSchemeSlash(line, i)) return i;
   }
 
   return -1;

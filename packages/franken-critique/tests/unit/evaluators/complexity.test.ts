@@ -316,6 +316,56 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not mask Markdown inline code as template literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `Refactor \`if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }\``;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat regex-prefix words on properties as keywords', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const r = obj.return / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('still treats line comments after labels as comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `label:// {{{{{{`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside regex literals after block statements', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `if (ok) {} /[{][{][{][{][{]/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('stops unterminated quoted strings at line breaks', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `users'\nif (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
