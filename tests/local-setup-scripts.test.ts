@@ -60,9 +60,10 @@ describe('local setup scripts', () => {
     const compose = read('docker-compose.yml');
     const tempoConfig = read('tempo.yaml');
 
-    expect(compose).toContain('image: chromadb/chroma:1.3.5');
-    expect(compose).toContain('image: grafana/grafana:12.3.0');
-    expect(compose).toContain('image: grafana/tempo:2.9.0');
+    expect(compose).toContain('image: chromadb/chroma:1.3.7');
+    expect(compose).toContain('- chromadb-data:/data');
+    expect(compose).toContain('image: grafana/grafana:12.3.8');
+    expect(compose).toContain('image: grafana/tempo:2.9.3');
     expect(compose).not.toContain(':latest');
     expect(compose).toContain('- ./tempo.yaml:/etc/tempo.yaml:ro');
     expect(compose).toContain("command: ['-config.file=/etc/tempo.yaml']");
