@@ -58,6 +58,26 @@ describe('chat SSE stream ticket authentication', () => {
     await response.body?.cancel();
   });
 
+  it('returns the same auth failure for missing sessions before session lookup', async () => {
+    const app = createApp(sessionStoreDir);
+
+    const response = await app.request('/v1/chat/sessions/not-a-real-session/stream?ticket=bogus');
+
+    expect(response.status).toBe(401);
+  });
+
+  it('preserves bearer authentication for non-browser stream callers', async () => {
+    const app = createApp(sessionStoreDir);
+    const sessionId = await createSession(app);
+
+    const response = await app.request(`/v1/chat/sessions/${sessionId}/stream`, {
+      headers: AUTH_HEADER,
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  });
+
   it('accepts a one-shot query ticket for browser EventSource streams without bearer headers', async () => {
     const app = createApp(sessionStoreDir);
     const sessionId = await createSession(app);

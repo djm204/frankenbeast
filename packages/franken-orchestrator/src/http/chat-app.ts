@@ -65,6 +65,8 @@ export interface ChatAppOptions {
   dashboardDeps?: DashboardRouteDeps;
   /** Read-only observer/governor/cost analytics aggregation. */
   analyticsDeps?: AnalyticsRouteDeps;
+  /** Optional owner-managed ticket store for browser EventSource chat streams. */
+  chatStreamTicketStore?: SseConnectionTicketStore;
   /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
@@ -125,7 +127,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       });
   const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
-  const chatStreamTicketStore = new SseConnectionTicketStore();
+  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
+  const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
 
   const app = new Hono();
   app.use('*', requestId);
@@ -143,7 +146,6 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   // (franken-web ChatApiClient, network/chat-attach) plumb the token through.
   // `startChatServer` separately fails closed when chat is exposed without a
   // token (managed mode or non-loopback host).
-  const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const operatorSecurity = opts.beastControl?.security ?? transportSecurity;
   // Gate the chat plane and every sensitive control-plane route group behind the
   // same operator token whenever one is configured. Each group mutates process
@@ -185,7 +187,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     });
     app.use('/v1/chat', requireAuth());
     app.use('/v1/chat/*', async (c, next) => {
-      if (isChatSessionStreamPath(new URL(c.req.url).pathname)) {
+      if (isChatSessionStreamPath(new URL(c.req.url).pathname) && c.req.query('ticket')) {
         await next();
         return;
       }
