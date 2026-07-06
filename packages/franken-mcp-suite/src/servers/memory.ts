@@ -20,7 +20,7 @@ export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpSer
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Search query (substring match on key and value)' },
-          type: { type: 'string', description: 'Filter by type: working, episodic, recovery', enum: ['working', 'episodic', 'recovery'] },
+          type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
           limit: { type: 'string', description: 'Max results (default 20)' },
         },
         required: ['query'],
@@ -43,13 +43,13 @@ export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpSer
     },
     {
       name: 'fbeast_memory_store',
-      description: 'Store a memory entry. Working/recovery memory updates by key; episodic memory appends an event.',
+      description: 'Store a memory entry. Working memory updates by key; episodic memory appends an event.',
       inputSchema: {
         type: 'object',
         properties: {
           key: { type: 'string', description: 'Unique key for this memory entry' },
           value: { type: 'string', description: 'Content to store' },
-          type: { type: 'string', description: 'Memory type: working, episodic, or recovery', enum: ['working', 'episodic', 'recovery'] },
+          type: { type: 'string', description: 'Memory type: working or episodic', enum: ['working', 'episodic'] },
         },
         required: ['key', 'value', 'type'],
       },

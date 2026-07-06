@@ -26,8 +26,20 @@ export interface BrainAdapter {
   forget(key: string): Promise<boolean>;
 }
 
+const SUPPORTED_MEMORY_TYPES = ['working', 'episodic'] as const;
+
+type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
+
 export function createBrainAdapter(dbPath: string): BrainAdapter {
   const brain = new SqliteBrain(dbPath);
+
+  const resolveMemoryType = (type: string | undefined): SupportedMemoryType | undefined => {
+    if (type === undefined) return undefined;
+    if (SUPPORTED_MEMORY_TYPES.includes(type as SupportedMemoryType)) {
+      return type as SupportedMemoryType;
+    }
+    throw new Error(`Unsupported memory type: ${type}. Supported types: ${SUPPORTED_MEMORY_TYPES.join(', ')}`);
+  };
 
   // Rehydrate working memory from SQLite so entries survive process restarts.
   // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
@@ -37,7 +49,11 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     const rows = readDb.prepare('SELECT key, value FROM working_memory').all() as Array<{ key: string; value: string }>;
     const snap: Record<string, unknown> = {};
     for (const row of rows) {
-      try { snap[row.key] = JSON.parse(row.value); } catch { snap[row.key] = row.value; }
+      try {
+        snap[row.key] = JSON.parse(row.value);
+      } catch {
+        snap[row.key] = row.value;
+      }
     }
     if (Object.keys(snap).length > 0) {
       brain.working.restore(snap);
@@ -50,10 +66,11 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
   return {
     async query(input) {
+      const memoryType = resolveMemoryType(input.type);
       const results: BrainMemoryEntry[] = [];
 
       // Search episodic memory
-      if (!input.type || input.type === 'episodic') {
+      if (!memoryType || memoryType === 'episodic') {
         const events = brain.episodic.recall(input.query, input.limit ?? 20);
         for (const event of events) {
           results.push({
@@ -66,7 +83,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       }
 
       // Search working memory
-      if (!input.type || input.type !== 'episodic') {
+      if (!memoryType || memoryType === 'working') {
         const snapshot = brain.working.snapshot();
         const query = input.query.toLowerCase();
         for (const [key, value] of Object.entries(snapshot)) {
@@ -81,7 +98,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     },
 
     async store(input) {
-      if (input.type === 'episodic') {
+      const memoryType = resolveMemoryType(input.type);
+
+      if (memoryType === 'episodic') {
         brain.episodic.record({
           type: 'success',
           summary: `${input.key}: ${input.value}`,
