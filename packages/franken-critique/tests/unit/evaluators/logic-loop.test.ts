@@ -263,6 +263,15 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('recursion');
   });
 
+  it('does not mask division after contextual keyword-like identifiers', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { const of = 1; of / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('ignores keywords inside template interpolation strings while fallback scanning', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = 'while (true) { log(`${({ value: "break }" })}`); doWork(); not javascript';

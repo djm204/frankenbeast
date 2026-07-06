@@ -104,6 +104,26 @@ const REGEX_PREFIX_KEYWORDS = new Set([
   'await',
 ]);
 
+const CONTEXTUAL_REGEX_PREFIX_KEYWORDS = new Set(['await', 'yield', 'of']);
+
+function previousToken(code: string, beforeIndex: number): string | null {
+  let cursor = beforeIndex;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  const end = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  return end === cursor + 1 ? null : code.slice(cursor + 1, end);
+}
+
+function contextualKeywordCanPrefixRegex(code: string, tokenStart: number): boolean {
+  let cursor = tokenStart - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  if (cursor < 0) return false;
+  if ('([=,:!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const previous = previousToken(code, cursor);
+  return previous != null && REGEX_PREFIX_KEYWORDS.has(previous);
+}
+
 function isRegexLiteralStart(code: string, index: number): boolean {
   let cursor = index - 1;
   while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
@@ -116,7 +136,11 @@ function isRegexLiteralStart(code: string, index: number): boolean {
   if (tokenEnd === cursor + 1 || code[cursor] === '.') return false;
 
   const token = code.slice(cursor + 1, tokenEnd);
-  return REGEX_PREFIX_KEYWORDS.has(token) && hasKeywordBoundary(code, token, cursor + 1);
+  if (!REGEX_PREFIX_KEYWORDS.has(token)) return false;
+  if (CONTEXTUAL_REGEX_PREFIX_KEYWORDS.has(token)) {
+    return contextualKeywordCanPrefixRegex(code, cursor + 1);
+  }
+  return true;
 }
 
 function scanQuotedRange(code: string, index: number, ranges: Range[]): number {
