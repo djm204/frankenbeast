@@ -156,6 +156,23 @@ describe('CritiqueLoop', () => {
     expect(result.iterations).toHaveLength(1);
   });
 
+  it('tracks failure history across iterations without mutating the public readonly contract', async () => {
+    const observedFailures: number[] = [];
+    const breaker: CircuitBreaker = {
+      name: 'failure-history-observer',
+      check: vi.fn().mockImplementation(async (state: LoopState) => {
+        observedFailures.push(state.failureHistory.get('mock') ?? 0);
+        return { tripped: false };
+      }),
+    };
+
+    const loop = new CritiqueLoop(createFailingPipeline(), [breaker]);
+    const result = await loop.run(createInput('bad code'), createConfig({ maxIterations: 2 }));
+
+    expect(result.verdict).toBe('fail');
+    expect(observedFailures).toEqual([0, 1]);
+  });
+
   it('re-checks spend breakers after the terminal iteration (post phase)', async () => {
     // A phase:'both' breaker that is under budget before the iteration but trips
     // once the iteration's spend is recorded. Without the post-iteration check a

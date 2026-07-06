@@ -11,6 +11,10 @@ import type { EscalationRequest } from '../types/contracts.js';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
 import { hasReachedMaxIterations } from './iteration-limit.js';
 
+interface InternalLoopState extends LoopState {
+  failureHistory: Map<string, number>;
+}
+
 export class CritiqueLoop {
   private readonly pipeline: CritiquePipeline;
   private readonly breakers: readonly CircuitBreaker[];
@@ -21,7 +25,7 @@ export class CritiqueLoop {
   }
 
   async run(input: EvaluationInput, config: LoopConfig): Promise<CritiqueLoopResult> {
-    const state: LoopState = {
+    const state: InternalLoopState = {
       iterationCount: 0,
       iterations: [],
       failureHistory: new Map(),
@@ -60,7 +64,7 @@ export class CritiqueLoop {
       for (const result of critiqueResult.results) {
         if (result.verdict === 'fail') {
           const current = state.failureHistory.get(result.evaluatorName) ?? 0;
-          (state.failureHistory as Map<string, number>).set(result.evaluatorName, current + 1);
+          state.failureHistory.set(result.evaluatorName, current + 1);
         }
       }
 
