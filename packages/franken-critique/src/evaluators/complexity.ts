@@ -37,7 +37,7 @@ function stripIgnoredBraceSyntax(content: string): string {
     const char = content[i];
     const next = content[i + 1];
 
-    if (char === '/' && next === '/') {
+    if (char === '/' && next === '/' && content[i - 1] !== ':') {
       const end = findLineEnd(content, i + 2);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
@@ -130,7 +130,7 @@ function isLikelyQuotedStringStart(
   const previous = content[start - 1] ?? '';
   const next = content[start + 1] ?? '';
 
-  return !(/[A-Za-z]/.test(previous) && /[A-Za-z]/.test(next));
+  return !(/[A-Za-z0-9]/.test(previous) && /[A-Za-z]/.test(next));
 }
 
 function findTemplateLiteralEnd(content: string, start: number): number {
@@ -201,7 +201,7 @@ function readTemplateExpression(
     const char = content[i];
     const next = content[i + 1];
 
-    if (char === '/' && next === '/') {
+    if (char === '/' && next === '/' && content[i - 1] !== ':') {
       i = findLineEnd(content, i + 2) - 1;
       continue;
     }
@@ -263,6 +263,8 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
   if (previous === ')' && isControlHeaderPrefix(content, previousIndex)) {
     return true;
   }
+
+  if (previous === '>' && content[previousIndex - 1] === '=') return true;
 
   if (previous === '[') return true;
 
@@ -342,7 +344,7 @@ function findLineCommentStart(line: string): number {
       continue;
     }
 
-    if (char === '/' && next === '/') return i;
+    if (char === '/' && next === '/' && line[i - 1] !== ':') return i;
   }
 
   return -1;
