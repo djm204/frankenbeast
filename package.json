@@ -23,6 +23,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "acorn": "^8.17.0",
     "better-sqlite3": "^12.6.2",
     "sharp": "^0.34.5",
     "turbo": "^2.10.3",
