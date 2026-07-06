@@ -18,6 +18,7 @@ import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
 import { chatClientKey } from '../chat-rate-limit.js';
+import { extractOperatorTokenCookie } from '../operator-auth.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -65,13 +66,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   function enforceChatRateLimit(
     sessionId: string,
     action: 'message' | 'approval',
-    headers: { authorization?: string | undefined; forwardedFor?: string | undefined },
+    headers: {
+      authorization?: string | undefined;
+      operatorToken?: string | undefined;
+      cookie?: string | undefined;
+      remoteAddress?: string | undefined;
+    },
   ): void {
     const result = chatRateLimiter.take(chatClientKey({
       sessionId,
       action,
       authorization: headers.authorization,
-      forwardedFor: headers.forwardedFor,
+      operatorToken: headers.operatorToken,
+      cookie: extractOperatorTokenCookie(headers.cookie),
+      remoteAddress: headers.remoteAddress,
     }));
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
@@ -126,7 +134,9 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const session = getSessionOrThrow(sessionStore, id);
     enforceChatRateLimit(session.id, 'message', {
       authorization: c.req.header('authorization'),
-      forwardedFor: c.req.header('x-forwarded-for'),
+      operatorToken: c.req.header('x-frankenbeast-operator-token'),
+      cookie: c.req.header('cookie'),
+      remoteAddress: c.req.header('x-frankenbeast-remote-address'),
     });
 
     const result = await runtime.run(content, {
@@ -196,14 +206,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
-    enforceChatRateLimit(session.id, 'approval', {
-      authorization: c.req.header('authorization'),
-      forwardedFor: c.req.header('x-forwarded-for'),
-    });
 
     if (!session.pendingApproval && session.state !== 'pending_approval') {
       return c.json({ data: { id: session.id, approved, state: session.state } });
     }
+
+    enforceChatRateLimit(session.id, 'approval', {
+      authorization: c.req.header('authorization'),
+      operatorToken: c.req.header('x-frankenbeast-operator-token'),
+      cookie: c.req.header('cookie'),
+      remoteAddress: c.req.header('x-frankenbeast-remote-address'),
+    });
 
     let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
     if (approved) {

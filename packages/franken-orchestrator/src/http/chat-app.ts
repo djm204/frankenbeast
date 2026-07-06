@@ -31,6 +31,7 @@ import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboa
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
 import { createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -72,6 +73,7 @@ export interface ChatAppOptions {
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
   /** Per-session/principal limiter for chat REST turns and approval mutations. */
   chatRateLimit?: ChatRateLimitOptions;
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -132,7 +134,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
   const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
-  const chatRateLimiter = createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+  const chatRateLimiter = opts.chatRateLimiter
+    ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
 
   const app = new Hono();
   app.use('*', requestId);

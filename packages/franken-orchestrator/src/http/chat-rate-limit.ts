@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
 
 export type ChatRateLimitOptions = BeastRateLimitOptions;
@@ -15,21 +16,30 @@ export function chatClientKey(parts: {
   readonly sessionId: string;
   readonly action: 'message' | 'approval';
   readonly authorization?: string | undefined;
-  readonly forwardedFor?: string | undefined;
+  readonly operatorToken?: string | undefined;
+  readonly cookie?: string | undefined;
   readonly remoteAddress?: string | undefined;
-  readonly socketToken?: string | null | undefined;
+  readonly principal?: string | undefined;
 }): string {
-  const principal = parts.authorization?.trim()
-    || parts.socketToken?.trim()
-    || firstForwardedFor(parts.forwardedFor)
-    || parts.remoteAddress?.trim()
+  const principal = parts.principal?.trim()
+    || credentialPrincipal('bearer', parts.authorization)
+    || credentialPrincipal('operator', parts.operatorToken)
+    || credentialPrincipal('cookie', parts.cookie)
+    || addressPrincipal(parts.remoteAddress)
     || 'anonymous';
   return `chat:${parts.action}:${parts.sessionId}:${principal}`;
 }
 
-function firstForwardedFor(value: string | undefined): string | undefined {
-  return value
-    ?.split(',')
-    .map((part) => part.trim())
-    .find(Boolean);
+function credentialPrincipal(kind: string, value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? `${kind}:${digest(trimmed)}` : undefined;
+}
+
+function addressPrincipal(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? `remote:${trimmed}` : undefined;
+}
+
+function digest(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

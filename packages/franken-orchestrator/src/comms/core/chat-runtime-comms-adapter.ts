@@ -5,6 +5,8 @@ import type {
 } from './comms-runtime-port.js';
 import type { OutboundMessageStatus } from './types.js';
 import type { ChatRuntime, ChatRuntimeState } from '../../chat/runtime.js';
+import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey } from '../../http/chat-rate-limit.js';
 
 export interface CommsSessionStore {
   load(id: string): Promise<CommsSession | null>;
@@ -20,6 +22,10 @@ export interface CommsSession {
   beastContext?: unknown;
   routingMetadata?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export interface ChatRuntimeCommsAdapterOptions {
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 function normalizeRoutingMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -43,6 +49,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
   constructor(
     private readonly runtime: ChatRuntime,
     private readonly sessionStore: CommsSessionStore,
+    private readonly options: ChatRuntimeCommsAdapterOptions = {},
   ) {}
 
   async processInbound(
@@ -54,6 +61,17 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       session = await this.sessionStore.create(input.sessionId, {
         channelType: input.channelType,
       });
+    }
+
+    if (this.options.chatRateLimiter && !this.options.chatRateLimiter.take(chatClientKey({
+      sessionId: input.sessionId,
+      action: 'message',
+      principal: `${input.channelType}:${input.externalUserId}`,
+    })).allowed) {
+      return {
+        text: 'Rate limit exceeded. Please wait before sending another chat message.',
+        status: 'reply',
+      };
     }
 
     // Build runtime state

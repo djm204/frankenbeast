@@ -28,7 +28,8 @@ import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } fr
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
-import type { ChatRateLimitOptions } from './chat-rate-limit.js';
+import { createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -104,6 +105,7 @@ function createCommsRuntimeAdapter(
   sessionStore: ISessionStore,
   sessionStoreDir: string,
   projectName: string,
+  chatRateLimiter?: InMemoryRateLimiter,
 ): CommsRuntimePort {
   const toStoredSessionId = (id: string): string => encodeURIComponent(id);
   return new ChatRuntimeCommsAdapter(runtime, {
@@ -186,7 +188,7 @@ function createCommsRuntimeAdapter(
       };
       sessionStore.save(session);
     },
-  });
+  }, { ...(chatRateLimiter ? { chatRateLimiter } : {}) });
 }
 
 function enabledSignedExternalWebhookChannels(commsConfig: CommsConfig | undefined): string[] {
@@ -272,6 +274,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   }
   const tokenSecret = createSessionTokenSecret();
   const sessionStore = resolveChatServerSessionStore(options);
+  const chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? options.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const runtime = createChatRuntime({
     chatLlm: options.llm,
     projectName: options.projectName,
@@ -297,7 +300,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   });
   const commsRuntime = options.commsRuntime
     ?? (options.commsConfig
-      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
+      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName, chatRateLimiter)
       : undefined);
   const chatStreamTicketStore = effectiveOperatorToken ? new SseConnectionTicketStore() : undefined;
   const app = createChatApp({
@@ -320,6 +323,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+    chatRateLimiter,
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
@@ -333,6 +337,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     tokenSecret,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+    chatRateLimiter,
   });
 
   await new Promise<void>((resolve, reject) => {

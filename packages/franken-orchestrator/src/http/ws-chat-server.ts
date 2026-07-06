@@ -26,7 +26,7 @@ export interface ChatSocketPeer {
 
 interface ConnectionState {
   sessionId: string;
-  socketToken: string | null;
+  remoteAddress?: string | undefined;
 }
 
 export interface ChatSocketControllerOptions {
@@ -36,12 +36,14 @@ export interface ChatSocketControllerOptions {
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
   chatRateLimit?: ChatRateLimitOptions;
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 export interface ChatSocketConnectRequest {
   origin: string | null;
   sessionId: string;
   token: string | null;
+  remoteAddress?: string | undefined;
 }
 
 export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOptions {
@@ -89,10 +91,10 @@ function messageIdFromSession(session: ChatSession): string {
 function createPeerState(
   peer: ChatSocketPeer,
   sessionId: string,
-  socketToken: string | null,
+  remoteAddress: string | undefined,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId, socketToken };
+  const state = { sessionId, remoteAddress };
   controller.connections.set(peer, state);
   return state;
 }
@@ -112,7 +114,7 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
-    this.chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+    this.chatRateLimiter = options.chatRateLimiter ?? createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -156,7 +158,7 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, request.token, this);
+    createPeerState(peer, request.sessionId, request.remoteAddress, this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -226,7 +228,7 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
-        if (!this.takeChatRateLimit(peer, connection, 'approval')) {
+        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection, 'approval')) {
           return;
         }
         await this.handleApproval(peer, session, event.approved);
@@ -343,7 +345,7 @@ export class ChatSocketController {
     const result = this.chatRateLimiter.take(chatClientKey({
       sessionId: connection.sessionId,
       action,
-      socketToken: connection.socketToken,
+      remoteAddress: connection.remoteAddress,
     }));
     if (result.allowed) {
       return true;
@@ -529,6 +531,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
       origin: requestOrigin(request),
       sessionId,
       token,
+      remoteAddress: request.socket.remoteAddress,
     });
     if (!auth.ok) {
       closeUnauthorized(socket, auth.status);
@@ -542,6 +545,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
         origin: requestOrigin(request),
         sessionId,
         token,
+        remoteAddress: request.socket.remoteAddress,
       });
       if (!result.ok) {
         ws.close();
