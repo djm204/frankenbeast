@@ -21,6 +21,9 @@ import type { BeastContainerRuntimeStatus } from '../../lib/beast-api';
 
 const STEP_LABELS = [...WIZARD_SECTION_LABELS];
 
+import { useEffect } from 'react';
+import type { BeastCatalogEntry } from '../../lib/beast-api';
+
 interface WizardDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -28,9 +31,10 @@ interface WizardDialogProps {
   containerRuntime?: BeastContainerRuntimeStatus;
   launching?: boolean;
   launchError?: string | null;
+  catalog?: BeastCatalogEntry[];
 }
 
-export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, launching, launchError }: WizardDialogProps) {
+export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, launching, launchError, catalog }: WizardDialogProps) {
   const {
     wizardStep,
     highestCompleted,
@@ -40,9 +44,21 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
     setWizardStep,
     toggleWizardMode,
     stepValues,
+    setStepValues,
     setValidationErrors,
     clearValidationErrors,
   } = useBeastStore();
+
+  // Initialize prompt text from backend catalog if provided
+  useEffect(() => {
+    if (catalog && catalog.length > 0) {
+      const firstPrompt = catalog[0].interviewPrompts?.[0]?.prompt;
+      if (firstPrompt && (!stepValues[5] || !(stepValues[5] as any).promptText)) {
+        setStepValues(5, { ...(stepValues[5] ?? {}), promptText: firstPrompt });
+      }
+    }
+  }, [catalog, stepValues, setStepValues]);
+
 
   const isLastStep = wizardStep === STEP_LABELS.length - 1;
   const isFirstStep = wizardStep === 0;

@@ -37,6 +37,7 @@ export function BeastsPage({
   agents,
   agentDetail,
   runs,
+  catalog,
   containerRuntime,
   disabled,
   error,
@@ -129,6 +130,7 @@ export function BeastsPage({
         containerRuntime={containerRuntime}
         launching={launching}
         launchError={launchError}
+        catalog={catalog}
       />
     </main>
   );
