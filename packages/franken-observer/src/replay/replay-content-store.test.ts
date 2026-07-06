@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ReplayContentStore } from './replay-content-store.js';
@@ -50,6 +50,20 @@ describe('ReplayContentStore', () => {
 
     for (const invalidRef of invalidRefs) {
       expect(() => store.get(invalidRef)).toThrow(/exactly 64 lowercase sha256 hex/i);
+    }
+  });
+
+  it('rejects a blobs directory symlink that escapes the replay base directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const outside = mkdtempSync(join(tmpdir(), 'replay-outside-'));
+    symlinkSync(outside, join(root, 'blobs'), 'dir');
+
+    try {
+      expect(() => new ReplayContentStore(root)).toThrow(/replayBlobsDir resolves outside base directory/i);
+      expect(existsSync(join(outside, hashContent('secret')))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });

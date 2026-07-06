@@ -1,7 +1,8 @@
 import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { resolveContainedPath } from '@franken/types'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 
@@ -16,11 +17,6 @@ function traceIdHashForFilename(value: string): string {
 
 function timestampForFilename(timestamp: number): string {
   return Number.isFinite(timestamp) ? String(Math.trunc(timestamp)) : 'invalid-timestamp'
-}
-
-function isInsideDirectory(baseDir: string, targetPath: string): boolean {
-  const relativePath = relative(baseDir, targetPath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
 async function writeNewReportFile(filePath: string, content: string): Promise<void> {
@@ -119,12 +115,7 @@ without reaching a terminal condition. Possible causes:
 
     try {
       await fs.mkdir(this.outputDir, { recursive: true })
-      const outputDir = await fs.realpath(this.outputDir)
-      writeFilePath = resolve(outputDir, filename)
-
-      if (!isInsideDirectory(outputDir, writeFilePath)) {
-        throw new Error(`Resolved post-mortem path escapes output directory: ${writeFilePath}`)
-      }
+      writeFilePath = resolveContainedPath(this.outputDir, filename, 'postMortemPath')
 
       await writeNewReportFile(writeFilePath, content)
       return configuredFilePath

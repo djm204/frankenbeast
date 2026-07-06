@@ -96,6 +96,9 @@ export {
 // Web/API contract DTOs
 export * from './api-contracts.js';
 
+// Path containment helpers
+export { resolveContainedExistingPath, resolveContainedPath } from './path-containment.js';
+
 // Skill schemas
 export type { McpConfig, SkillInfo, SkillToolManifest } from './skill.js';
 export {
