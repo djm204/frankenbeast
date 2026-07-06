@@ -17,6 +17,7 @@ interface RunInteractiveInitOptions {
   configFile: string;
   stateStore: FileInitStateStore;
   io: InterviewIO;
+  baseConfig?: OrchestratorConfig | undefined;
   secretStore?: ISecretStore | undefined;
 }
 
@@ -41,7 +42,7 @@ async function saveConfig(configFile: string, config: OrchestratorConfig): Promi
 
 export async function runInteractiveInit(options: RunInteractiveInitOptions): Promise<InitEngineResult> {
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = await loadExistingConfig(options.configFile);
+  const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile);
   const result = await runInitWizard({
     io: options.io,
     initialState,
@@ -79,7 +80,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   }
 
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = await loadExistingConfig(options.configFile);
+  const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile);
   const scope = verification.issues.flatMap((issue) => {
     switch (issue.code) {
       case 'slack-incomplete':

@@ -68,6 +68,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       configFile: options.paths.configFile,
       stateStore,
       io: options.io,
+      baseConfig: options.config,
       secretStore,
     });
     options.print(
@@ -79,6 +80,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     configFile: options.paths.configFile,
     stateStore,
     io: options.io,
+    baseConfig: options.config,
     secretStore,
   });
 

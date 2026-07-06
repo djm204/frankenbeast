@@ -558,10 +558,12 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
-```json
-{ "network": { "secureBackend": "1password" } }
+```bash
+frankenbeast init --backend 1password
+# or
+frankenbeast init --backend bitwarden
 ```
-Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+You can also set the backend in `.fbeast/config.json` with `{ "network": { "secureBackend": "1password" } }` before running `frankenbeast init`. For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
