@@ -4,7 +4,12 @@ import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
-import { createBeastWorktree, removeBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
+import {
+  createBeastWorktree,
+  removeBeastWorktree,
+  type BeastWorktreeAllocation,
+  type GitWorktreeIsolationConfig,
+} from './git-worktree-isolation.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -174,6 +179,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly stoppingAttempts = new Set<string>();
   private readonly configFilePaths = new Map<string, string>();
+  private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
 
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -193,6 +199,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
           processSpec.cwd,
         )
       : undefined;
+    if (worktree) {
+      this.worktreeAllocations.set(run.id, worktree);
+    }
     const isolatedConfigSnapshot = worktree
       ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
       : run.configSnapshot;
@@ -310,14 +319,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       // Clean up config file and worktree allocation written before spawn
-      const configPath = this.configFilePaths.get(run.id);
-      if (configPath) {
-        try { unlinkSync(configPath); } catch { /* already removed */ }
-        this.configFilePaths.delete(run.id);
-      }
-      if (worktree?.created) {
-        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
-      }
+      this.cleanupRunResources(run.id);
 
       this.options.eventBus?.publish({
         type: 'run.status',
@@ -477,11 +479,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         exitEntry.resolve();
       }
       // Still clean up config file
-      const configPath = this.configFilePaths.get(runId);
-      if (configPath) {
-        try { unlinkSync(configPath); } catch { /* already removed */ }
-        this.configFilePaths.delete(runId);
-      }
+      this.cleanupRunResources(runId);
       return;
     }
 
@@ -493,11 +491,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         this.exitPromises.delete(attemptId);
         exitEntry.resolve();
       }
-      const configPath = this.configFilePaths.get(runId);
-      if (configPath) {
-        try { unlinkSync(configPath); } catch { /* already removed */ }
-        this.configFilePaths.delete(runId);
-      }
+      this.cleanupRunResources(runId);
       return;
     }
 
@@ -547,12 +541,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       exitEntry.resolve();
     }
 
-    // Clean up config file
-    const configPath = this.configFilePaths.get(runId);
-    if (configPath) {
-      try { unlinkSync(configPath); } catch { /* already removed */ }
-      this.configFilePaths.delete(runId);
-    }
+    this.cleanupRunResources(runId);
 
     this.options.eventBus?.publish({
       type: 'run.status',
@@ -568,6 +557,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
       throw new Error(`Unknown Beast attempt: ${attemptId}`);
     }
     return attempt;
+  }
+
+  private cleanupRunResources(runId: string): void {
+    const configPath = this.configFilePaths.get(runId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.configFilePaths.delete(runId);
+    }
+
+    const worktree = this.worktreeAllocations.get(runId);
+    if (worktree) {
+      try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
+      finally { this.worktreeAllocations.delete(runId); }
+    }
   }
 
   private finishAttempt(
@@ -603,6 +606,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.log',
       data: { runId, attemptId: attempt.id, stream: 'stderr', line: stopReason, createdAt: finishedAt },
     });
+
+    this.cleanupRunResources(runId);
 
     this.options.eventBus?.publish({
       type: 'run.status',
