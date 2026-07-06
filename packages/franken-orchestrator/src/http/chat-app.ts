@@ -91,6 +91,10 @@ function credentialedCorsForAllowedOrigins(allowedOrigins: Set<string>): Middlew
   };
 }
 
+function isChatSessionStreamPath(pathname: string): boolean {
+  return /^\/v1\/chat\/sessions\/[^/]+\/stream$/.test(pathname);
+}
+
 export function createChatApp(opts: ChatAppOptions): Hono {
   const sessionStore = opts.sessionStore
     ?? new FileSessionStore(required(opts.sessionStoreDir, 'sessionStoreDir'));
@@ -121,6 +125,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       });
   const sessionTokenSecret = opts.sessionTokenSecret ?? createSessionTokenSecret();
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
+  const chatStreamTicketStore = new SseConnectionTicketStore();
 
   const app = new Hono();
   app.use('*', requestId);
@@ -178,8 +183,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       }
       return requireAuth()(c, next);
     });
+    app.use('/v1/chat', requireAuth());
+    app.use('/v1/chat/*', async (c, next) => {
+      if (isChatSessionStreamPath(new URL(c.req.url).pathname)) {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     for (const base of [
-      '/v1/chat',
       '/v1/network',
       '/v1/comms',
       '/api/security',
@@ -197,6 +209,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     engine: runtimeBundle.engine,
     runtime: runtimeBundle.runtime,
     turnRunner: runtimeBundle.turnRunner,
+    operatorToken: effectiveOperatorToken,
+    streamTicketStore: chatStreamTicketStore,
     issueSocketToken: (sessionId) => issueSessionToken({
       secret: sessionTokenSecret,
       sessionId,

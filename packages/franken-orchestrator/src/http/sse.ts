@@ -2,14 +2,17 @@ import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { TurnRunner, TurnEvent } from '../chat/turn-runner.js';
+import type { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 
 export interface SseHandlerDeps {
   sessionStore: ISessionStore;
   turnRunner: TurnRunner;
+  operatorToken?: string | undefined;
+  ticketStore?: SseConnectionTicketStore | undefined;
 }
 
 export function createSseHandler(deps: SseHandlerDeps) {
-  const { sessionStore, turnRunner } = deps;
+  const { sessionStore, turnRunner, operatorToken, ticketStore } = deps;
 
   return async (c: Context) => {
     const id = c.req.param('id');
@@ -25,6 +28,13 @@ export function createSseHandler(deps: SseHandlerDeps) {
         { error: { code: 'NOT_FOUND', message: `Session '${id}' not found` } },
         404,
       );
+    }
+
+    if (operatorToken) {
+      const ticket = c.req.query('ticket');
+      if (!ticketStore || !ticket || !ticketStore.validate(ticket, operatorToken)) {
+        return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
+      }
     }
 
     return streamSSE(c, async (stream) => {
