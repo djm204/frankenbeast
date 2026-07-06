@@ -203,6 +203,29 @@ describe('PostMortemGenerator', () => {
       }
     })
 
+    it('does not follow a symlink at the report file path', async () => {
+      const parentDir = join(tmpdir(), `pm-leaf-symlink-parent-${randomUUID()}`)
+      const reportsDir = join(parentDir, 'reports')
+      const outsidePath = join(parentDir, 'outside.md')
+      const trace = makeTraceWithId('symlink-target')
+      const signal = makeSignal(trace.id)
+      const expectedReportPath = join(reportsDir, `post-mortem-symlink-target-${signal.timestamp}.md`)
+
+      mkdirSync(reportsDir, { recursive: true })
+      writeFileSync(outsidePath, 'do not overwrite')
+      symlinkSync(outsidePath, expectedReportPath)
+
+      try {
+        const gen = new PostMortemGenerator({ outputDir: reportsDir })
+        const filePath = await gen.generate(trace, signal)
+
+        expect(filePath).toBeNull()
+        expect(readFileSync(outsidePath, 'utf-8')).toBe('do not overwrite')
+      } finally {
+        rmSync(parentDir, { recursive: true, force: true })
+      }
+    })
+
     it('preserves configured relative outputDir in the returned path', async () => {
       const relativeOutputDir = `.pm-relative-${randomUUID()}`
 

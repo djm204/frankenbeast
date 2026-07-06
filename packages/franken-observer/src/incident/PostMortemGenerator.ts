@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Trace } from '../core/types.js'
@@ -39,6 +40,20 @@ function safeFilenameComponent(value: string): string {
 function isInsideDirectory(baseDir: string, targetPath: string): boolean {
   const relativePath = relative(baseDir, targetPath)
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+}
+
+async function writeNewReportFile(filePath: string, content: string): Promise<void> {
+  const fileHandle = await fs.open(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o600,
+  )
+
+  try {
+    await fileHandle.writeFile(content, 'utf-8')
+  } finally {
+    await fileHandle.close()
+  }
 }
 
 /**
@@ -128,7 +143,7 @@ without reaching a terminal condition. Possible causes:
         throw new Error(`Resolved post-mortem path escapes output directory: ${writeFilePath}`)
       }
 
-      await fs.writeFile(writeFilePath, content, 'utf-8')
+      await writeNewReportFile(writeFilePath, content)
       return configuredFilePath
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
