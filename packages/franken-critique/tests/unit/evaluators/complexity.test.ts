@@ -578,6 +578,72 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('keeps colon-prefixed quoted prose snippets visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `Problem: "if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }"`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps colon-prefixed Markdown inline code visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'Refactor: `if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat additional URI schemes as line comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `See postgres://host and redis://host before if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces inside keyword-prefixed string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const imports = `import tpl from "{{{{{{";`;
+    const cases = `switch (kind) { case "{{{{{{": return 1; }`;
+
+    await expect(evaluator.evaluate(createInput(imports))).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+    await expect(evaluator.evaluate(createInput(cases))).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('keeps prose paths after of visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `Example of /tmp before if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);

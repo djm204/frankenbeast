@@ -125,7 +125,13 @@ function isUrlSchemeSlash(content: string, slashIndex: number): boolean {
   }
 
   const scheme = content.slice(schemeStart + 1, slashIndex - 1).toLowerCase();
-  return /^(?:https?|ftp|file|s3|gs|ssh|git|wss?)$/.test(scheme);
+  if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return false;
+
+  const lineStart = content.lastIndexOf('\n', schemeStart + 1) + 1;
+  const atLineStart = content.slice(lineStart, schemeStart + 1).trim() === '';
+  if (!atLineStart) return true;
+
+  return /^(?:https?|ftp|file|s3|gs|ssh|git|wss?|postgres|redis)$/.test(scheme);
 }
 
 function findBlockCommentEnd(content: string, start: number): number {
@@ -194,9 +200,10 @@ function isLikelyQuotedStringStart(
   }
 
   const previousToken = content[previousIndex] ?? '';
-  if ('=([{,:!+-*?/&|^~<>'.includes(previousToken)) return true;
+  if (previousToken === ':') return isSourceColonPrefix(content, previousIndex);
+  if ('=([{,!+-*?/&|^~<>'.includes(previousToken)) return true;
   if (previousToken === '>' && content[previousIndex - 1] === '=') return true;
-  if (isTemplateKeywordPrefix(content, previousIndex)) return true;
+  if (isStringKeywordPrefix(content, previousIndex)) return true;
   if (previousIndex < start - 1) return false;
 
   return false;
@@ -220,7 +227,8 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   }
 
   const previous = content[previousIndex] ?? '';
-  if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
+  if (previous === ':') return isSourceColonPrefix(content, previousIndex);
+  if ('=([{,!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
   if (isTemplateKeywordPrefix(content, previousIndex)) return true;
   if (previousIndex < start - 1) {
@@ -407,7 +415,7 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
 
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
 
-  return isRegexKeywordPrefix(content, previousIndex);
+  return isRegexKeywordPrefix(content, previousIndex, slashIndex);
 }
 
 function isLikelyStatementBlockEnd(
@@ -462,16 +470,59 @@ function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
   return /^(?:return|throw|yield|await)$/.test(word ?? '');
 }
 
-function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
+function isStringKeywordPrefix(content: string, endIndex: number): boolean {
+  const word = keywordBefore(content, endIndex);
+  return /^(?:return|throw|yield|await|from|case|default)$/.test(word ?? '');
+}
+
+function isSourceColonPrefix(content: string, colonIndex: number): boolean {
+  const beforeColonIndex = findPreviousRegexLookbehindIndex(
+    content,
+    colonIndex,
+  );
+  if (beforeColonIndex === -1) return false;
+
+  const beforeColon = content[beforeColonIndex] ?? '';
+  if (beforeColon === '?') return true;
+  if (!/[\w$\])]$/.test(beforeColon)) return false;
+
+  const tokenStart = /[\w$]/.test(beforeColon)
+    ? findWordStart(content, beforeColonIndex)
+    : beforeColonIndex;
+  const beforeTokenIndex = findPreviousRegexLookbehindIndex(
+    content,
+    tokenStart,
+  );
+  if (beforeTokenIndex === -1) return false;
+
+  return '{[,('.includes(content[beforeTokenIndex] ?? '');
+}
+
+function isRegexKeywordPrefix(
+  content: string,
+  endIndex: number,
+  slashIndex: number,
+): boolean {
   const word = keywordBefore(content, endIndex);
 
   if (/^(?:in|of)$/.test(word ?? '')) {
-    return isWordOperatorPrefix(content, endIndex, word ?? '');
+    return (
+      hasRegexTerminatorBeforeLineEnd(content, slashIndex) &&
+      isWordOperatorPrefix(content, endIndex, word ?? '')
+    );
   }
 
   return /^(?:return|throw|case|default|delete|typeof|void|yield|await|else)$/.test(
     word ?? '',
   );
+}
+
+function hasRegexTerminatorBeforeLineEnd(
+  content: string,
+  slashIndex: number,
+): boolean {
+  const end = findRegexLiteralEnd(content, slashIndex);
+  return end < findLineEnd(content, slashIndex + 1);
 }
 
 function isWordOperatorPrefix(
