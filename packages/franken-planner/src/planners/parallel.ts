@@ -13,7 +13,9 @@ export class ParallelPlanner implements PlanningStrategy {
   readonly name = 'parallel' as const;
 
   async execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
-    const tasks = graph.getTasks();
+    // Validate the DAG up front so cyclic plans fail loudly instead of
+    // deadlocking the wave scheduler and returning partial success.
+    const tasks = graph.topoSort();
     const completedIds = new Set<TaskId>();
     const allResults: TaskResult[] = [];
 

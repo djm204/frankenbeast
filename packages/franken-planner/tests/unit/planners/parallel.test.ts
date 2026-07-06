@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ParallelPlanner } from '../../../src/planners/parallel';
 import { PlanGraph } from '../../../src/core/dag';
+import { CyclicDependencyError } from '../../../src/core/errors';
 import { createTaskId } from '../../../src/core/types';
-import type { Task, TaskResult } from '../../../src/core/types';
+import type { Task, TaskId, TaskResult } from '../../../src/core/types';
 
 function makeTask(id: string): Task {
   return {
@@ -20,6 +21,21 @@ function success(id: string): TaskResult {
 
 function failure(id: string, message = 'task failed'): TaskResult {
   return { status: 'failure', taskId: createTaskId(id), error: new Error(message) };
+}
+
+function cyclicGraph(): PlanGraph {
+  const a = makeTask('a');
+  const b = makeTask('b');
+  const nodes = new Map<TaskId, Task>([
+    [a.id, a],
+    [b.id, b],
+  ]);
+  const edges = new Map<TaskId, Set<TaskId>>([
+    [a.id, new Set<TaskId>([b.id])],
+    [b.id, new Set<TaskId>([a.id])],
+  ]);
+
+  return PlanGraph.createWithRawEdges(nodes, edges);
 }
 
 // ─── Happy path ───────────────────────────────────────────────────────────────
@@ -118,6 +134,19 @@ describe('ParallelPlanner — happy path', () => {
 
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults).toHaveLength(2);
+  });
+});
+
+// ─── Cycle handling ───────────────────────────────────────────────────────────
+
+describe('ParallelPlanner — cycle handling', () => {
+  it('throws CyclicDependencyError before executing tasks when graph contains a cycle', async () => {
+    const executor = vi.fn().mockResolvedValue(success('a'));
+
+    await expect(new ParallelPlanner().execute(cyclicGraph(), { executor })).rejects.toBeInstanceOf(
+      CyclicDependencyError
+    );
+    expect(executor).not.toHaveBeenCalled();
   });
 });
 
