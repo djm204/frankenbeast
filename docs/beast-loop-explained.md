@@ -124,22 +124,24 @@ while tasks remain pending:
 
 ### Execution strategies
 
-The live orchestrator execution phase is sequential: it runs ready tasks one at a time in topological order. Planner strategy modules describe additional target execution modes, but parallel waves and recursive expansion are not wired into `BeastLoop`/`runExecution` yet; that implementation gap is tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
+The live orchestrator execution phase runs topological parallel waves: parallel-safe ready tasks execute together, downstream waves wait for their dependencies to complete, and checkout/HITL-sensitive tasks are serialized. Planner strategy modules still describe additional strategy variants; recursive expansion remains a target planner/orchestrator integration and is not wired into `BeastLoop`/`runExecution` yet.
 
-**Sequential topological execution** (`@franken/orchestrator/src/phases/execution.ts`) — current live behavior
-- Tasks execute one at a time in topological order
+**Parallel wave execution** (`@franken/orchestrator/src/phases/execution.ts`) — current live behavior
+- Each wave contains pending tasks whose dependencies are already completed
+- Parallel-safe tasks in a wave run concurrently via `Promise.all`
+- CLI-backed and HITL-gated tasks are serialized because they share a checkout and operator approval channel
 - A failed task is recorded but not added to the completed set
-- Independent ready tasks can still run; dependents of the failed task are later skipped as unmet dependencies
+- Later waves continue with tasks whose dependencies are satisfied; dependents of failed tasks are later skipped as unmet dependencies
 
 **Linear planner strategy** (`@franken/planner/src/planners/linear.ts`) — planner strategy module, not the live orchestrator execution loop
 - Tasks execute one at a time in topological order
 - First failure stops the strategy sequence
 
-**Parallel** (`@franken/planner/src/planners/parallel.ts`) — target architecture, not wired into orchestrator execution yet
+**Parallel planner strategy** (`@franken/planner/src/planners/parallel.ts`) — planner strategy module, mirrored by the live executor's wave scheduling
 - Tasks execute in concurrent "waves"
 - Each wave contains all tasks whose dependencies are satisfied
 - All tasks in a wave run simultaneously via `Promise.all`
-- A failure in any wave stops subsequent waves
+- A failure in any wave stops subsequent waves in the planner strategy; the live executor preserves its existing recovery and skip semantics
 
 **Recursive** (`@franken/planner/src/planners/recursive.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks can expand into sub-graphs during execution
