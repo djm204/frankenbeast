@@ -93,7 +93,12 @@ describe('npm workspaces configuration', () => {
         '@vitest/coverage-v8': minimumVitest,
         vite: '8.1.3',
         turbo: '2.10.3',
+        '@turbo/darwin-64': '2.10.3',
+        '@turbo/darwin-arm64': '2.10.3',
         '@turbo/linux-64': '2.10.3',
+        '@turbo/linux-arm64': '2.10.3',
+        '@turbo/windows-64': '2.10.3',
+        '@turbo/windows-arm64': '2.10.3',
       };
 
       for (const [packageName, minimumVersion] of Object.entries(toolchainFloors)) {
