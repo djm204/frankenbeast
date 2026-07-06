@@ -3,6 +3,25 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+interface CliProcessError {
+  code?: unknown;
+  stdout?: string;
+  stderr?: string;
+}
+
+function toCliProcessError(error: unknown): CliProcessError | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const record = error as Record<string, unknown>;
+  return {
+    ...('code' in record ? { code: record.code } : {}),
+    ...(typeof record.stdout === 'string' ? { stdout: record.stdout } : {}),
+    ...(typeof record.stderr === 'string' ? { stderr: record.stderr } : {}),
+  };
+}
+
 export interface CliResult {
   stdout: string;
   stderr: string;
@@ -26,8 +45,8 @@ export async function runCli(
       exitCode: 0,
     };
   } catch (error: unknown) {
-    const execError = error as { stdout?: string; stderr?: string; code?: number | string };
-    if (typeof execError.code === 'number') {
+    const execError = toCliProcessError(error);
+    if (execError && typeof execError.code === 'number') {
       return {
         stdout: execError.stdout ?? '',
         stderr: execError.stderr ?? '',
@@ -60,14 +79,15 @@ export async function runCliWithStdin(
       maxBuffer: 10 * 1024 * 1024,
       env: env ? { ...process.env, ...env } : undefined,
     }, (error, stdout, stderr) => {
-      if (error && typeof (error as any).code !== 'number') {
+      const execError = toCliProcessError(error);
+      if (error && typeof execError?.code !== 'number') {
         reject(error);
         return;
       }
       resolve({
         stdout: stdout ?? '',
         stderr: stderr ?? '',
-        exitCode: (error as any)?.code ?? 0,
+        exitCode: typeof execError?.code === 'number' ? execError.code : 0,
       });
     });
     child.stdin?.write(stdin);
