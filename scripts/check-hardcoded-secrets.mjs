@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN)|[A-Z0-9_]*SECRET_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const stringLiteralPattern = /(['"`])((?:\\.|(?!\1).)*)\1/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 
@@ -100,7 +100,7 @@ function hardcodedSensitiveEnvFinding(line) {
   if (!trimmed || trimmed.startsWith('#')) {
     return null;
   }
-  const match = trimmed.match(/^([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS)[A-Z0-9_]*)=(.*)$/);
+  const match = trimmed.match(/^(?:export\s+)?([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS)[A-Z0-9_]*)=(.*)$/);
   if (!match) {
     return null;
   }
@@ -155,14 +155,14 @@ function isSensitiveLiteralName(literal) {
   );
 }
 
-function isSecretLikeLiteral(literal) {
-  return /(?:secret|token|password|api[_-]?key|access[_-]?key|private[_-]?key|credential|bearer)/i.test(literal);
+function isAllowedSourceLiteral(literal) {
+  return isSensitiveLiteralName(literal) || /^\[?<?redacted>?\]?$/i.test(literal);
 }
 
-function hasNonNameStringLiteral(line) {
+function hasHardcodedSourceLiteral(line) {
   for (const match of line.matchAll(stringLiteralPattern)) {
     const literal = match[2].trim();
-    if (!literal || isSensitiveLiteralName(literal) || !isSecretLikeLiteral(literal)) {
+    if (!literal || isAllowedSourceLiteral(literal)) {
       continue;
     }
     return true;
@@ -171,7 +171,7 @@ function hasNonNameStringLiteral(line) {
 }
 
 function hasSensitiveEnvAccess(line) {
-  const envAccessPattern = /process\.env(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])/gi;
+  const envAccessPattern = /(?:process\.env|import\.meta\.env)(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])/gi;
   for (const match of line.matchAll(envAccessPattern)) {
     const name = match[1] ?? match[2] ?? '';
     if (sensitiveIdentifierPattern.test(name)) {
@@ -181,18 +181,39 @@ function hasSensitiveEnvAccess(line) {
   return false;
 }
 
+const sensitiveAssignmentNamePattern = /(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_KEY)|[A-Z0-9_]*(?:AUTH|OPERATOR|BEARER)_TOKEN|[A-Za-z_$][\w$]*(?:ApiKey|Secret|Password|PrivateKey|AccessKey|AuthToken|OperatorToken|BearerToken))\b/;
+
 function hasSensitiveConstantAssignment(prefix) {
-  return /(?:^|\b)(?:export\s+)?(?:const|let|var)\s+[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN)\b[^=]*=\s*$/.test(prefix);
+  return new RegExp(`(?:^|\\b)(?:export\\s+)?(?:const|let|var)\\s+${sensitiveAssignmentNamePattern.source}[^=]*=\\s*$`).test(prefix);
+}
+
+function hasSensitiveDestructuredDefault(prefix) {
+  return new RegExp(`[{,]\\s*(?:[A-Za-z_$][\\w$]*\\s*:\\s*)?${sensitiveAssignmentNamePattern.source}\\s*=\\s*$`).test(prefix);
+}
+
+function hasEnvObjectAccess(line) {
+  return /(?:process\.env|import\.meta\.env)\b/.test(line);
+}
+
+function isFormattingOnlyLine(line) {
+  return /^[([{,;]*$/.test(line.trim());
 }
 
 function hasInlineHardcodedSensitiveSourceValue(line) {
   for (const match of line.matchAll(stringLiteralPattern)) {
     const literal = match[2].trim();
-    if (!literal || isSensitiveLiteralName(literal) || !isSecretLikeLiteral(literal)) {
+    if (!literal || isAllowedSourceLiteral(literal)) {
       continue;
     }
     const prefix = line.slice(0, match.index);
-    if (fallbackOperatorPattern.test(prefix) && (hasSensitiveEnvAccess(prefix) || hasSensitiveConstantAssignment(prefix))) {
+    if (
+      fallbackOperatorPattern.test(prefix)
+      && (
+        hasSensitiveEnvAccess(prefix)
+        || hasSensitiveConstantAssignment(prefix)
+        || (hasSensitiveDestructuredDefault(prefix) && hasEnvObjectAccess(line.slice(match.index)))
+      )
+    ) {
       return true;
     }
   }
@@ -227,9 +248,13 @@ async function scanSourceFile(file, findings) {
       continue;
     }
 
-    if (pendingSensitiveFallbackLine && hasNonNameStringLiteral(code)) {
+    if (pendingSensitiveFallbackLine && hasHardcodedSourceLiteral(code)) {
       findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
       pendingSensitiveFallbackLine = null;
+      continue;
+    }
+
+    if (pendingSensitiveFallbackLine && isFormattingOnlyLine(code)) {
       continue;
     }
 

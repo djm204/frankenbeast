@@ -90,6 +90,89 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).not.toContain(fallback);
   });
 
+  it('rejects ordinary placeholders in sensitive fallback contexts', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      `export const value = process.env.${sensitiveName('JWT', 'SECRET')} ?? 'changeme';\n`,
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("'<redacted>'");
+    expect(result.stderr).not.toContain('changeme');
+  });
+
+  it('rejects camelCase sensitive constant assignments', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const fallback = ['local', 'secret'].join('-');
+    writeFileSync(join(sourceDir, 'config.ts'), `const jwtSecret = '${fallback}';\n`, 'utf8');
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).not.toContain(fallback);
+  });
+
+  it('rejects exported private key values in environment examples', () => {
+    const root = makeFixtureRoot();
+    const placeholder = ['begin', 'private', 'key'].join('-');
+    writeFileSync(join(root, '.env.example'), `export ${sensitiveName('PRIVATE', 'KEY')}=${placeholder}\n`, 'utf8');
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('PRIVATE_KEY=<redacted>');
+    expect(result.stderr).not.toContain(placeholder);
+  });
+
+  it('rejects destructured env defaults and Vite env fallbacks', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `const { ${sensitiveName('JWT', 'SECRET')} = 'dev' } = process.env;`,
+        `const viteToken = import.meta.env.${sensitiveName('VITE', 'BEAST', 'OPERATOR', 'TOKEN')} ?? 'dev';`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+  });
+
+  it('rejects parenthesized multiline sensitive fallback values', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `export const value = process.env.${sensitiveName('JWT', 'SECRET')} ??`,
+        '  (',
+        `    'dev';`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:3');
+  });
+
   it('allows sensitive env checks with ordinary diagnostic strings', () => {
     const root = makeFixtureRoot();
     const sourceDir = join(root, 'packages', 'example', 'src');
