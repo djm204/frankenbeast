@@ -344,11 +344,15 @@ describe('ProcessBeastExecutor', () => {
       stop: vi.fn(async () => {}),
       kill: vi.fn(async () => {}),
     };
+    let branchCreated = false;
     const runGit = vi.fn((args: readonly string[]): string => {
       if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
       if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
-      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args.at(-1)), { recursive: true });
-      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      if (args[0] === 'worktree' && args[1] === 'add') {
+        if (args[2] === '-b') branchCreated = true;
+        mkdirSync(String(args.at(-1)), { recursive: true });
+      }
+      if (args[0] === 'branch' && args[1] === '--list') return branchCreated ? String(args[2] ?? '') : '';
       return '';
     });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
@@ -382,7 +386,103 @@ describe('ProcessBeastExecutor', () => {
     expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
   });
 
-  it('removes a worktree allocation after a tracked process exits successfully', async () => {
+  it('does not remove an existing worktree allocation when process spawning fails', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const existingWorktreePath = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    mkdirSync(existingWorktreePath, { recursive: true });
+
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', existingWorktreePath], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('does not delete a pre-existing branch when spawn cleanup removes a new worktree', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args[2]), { recursive: true });
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+
+    const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'add', expectedWorktree, `beast/${agent.id}`], workDir);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('preserves a worktree allocation after a tracked process exits successfully', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -430,11 +530,11 @@ describe('ProcessBeastExecutor', () => {
     capturedCallbacks!.onExit(0, null);
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
-    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
   });
 
-  it('removes a worktree allocation after a tracked process exits with failure', async () => {
+  it('preserves a worktree allocation after a tracked process exits with failure', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -482,11 +582,11 @@ describe('ProcessBeastExecutor', () => {
     capturedCallbacks!.onExit(1, null);
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
-    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
   });
 
-  it('removes a worktree allocation after a tracked process is killed by the operator', async () => {
+  it('preserves a worktree allocation after a tracked process is killed by the operator', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -530,8 +630,8 @@ describe('ProcessBeastExecutor', () => {
     await executor.kill(run.id, attempt.id);
 
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
-    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
-    expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
   });
 
   it('stops the current attempt without deleting the run row', async () => {

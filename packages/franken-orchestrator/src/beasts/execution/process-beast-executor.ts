@@ -178,7 +178,8 @@ export interface ProcessBeastExecutorOptions {
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly stoppingAttempts = new Set<string>();
-  private readonly configFilePaths = new Map<string, string>();
+  private readonly pendingConfigFilePaths = new Map<string, string>();
+  private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
 
   constructor(
@@ -226,7 +227,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);
     writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
-    this.configFilePaths.set(run.id, configFilePath);
+    this.pendingConfigFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
       ...isolatedSpec,
@@ -353,6 +354,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
       },
     });
 
+    // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
+    // The pending allocation map is only for pre-attempt spawn failures.
+    this.worktreeAllocations.delete(run.id);
+    this.pendingConfigFilePaths.delete(run.id);
+    this.attemptConfigFilePaths.set(attempt.id, configFilePath);
+
     attemptId = attempt.id;
 
     // Flush early buffered lines to logs and SSE
@@ -478,8 +485,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         this.exitPromises.delete(attemptId);
         exitEntry.resolve();
       }
-      // Still clean up config file
-      this.cleanupRunResources(runId);
+      // Still clean up this attempt's config file; completed/failed worktrees are preserved for PRs/debugging.
+      this.cleanupAttemptConfig(attemptId);
       return;
     }
 
@@ -491,7 +498,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         this.exitPromises.delete(attemptId);
         exitEntry.resolve();
       }
-      this.cleanupRunResources(runId);
+      this.cleanupAttemptConfig(attemptId);
       return;
     }
 
@@ -541,7 +548,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       exitEntry.resolve();
     }
 
-    this.cleanupRunResources(runId);
+    this.cleanupAttemptConfig(attemptId);
 
     this.options.eventBus?.publish({
       type: 'run.status',
@@ -560,16 +567,32 @@ export class ProcessBeastExecutor implements BeastExecutor {
   }
 
   private cleanupRunResources(runId: string): void {
-    const configPath = this.configFilePaths.get(runId);
-    if (configPath) {
-      try { unlinkSync(configPath); } catch { /* already removed */ }
-      this.configFilePaths.delete(runId);
-    }
+    this.cleanupPendingRunConfig(runId);
 
     const worktree = this.worktreeAllocations.get(runId);
     if (worktree) {
-      try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
+      try {
+        if (worktree.created) {
+          removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit);
+        }
+      } catch { /* best effort */ }
       finally { this.worktreeAllocations.delete(runId); }
+    }
+  }
+
+  private cleanupPendingRunConfig(runId: string): void {
+    const configPath = this.pendingConfigFilePaths.get(runId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.pendingConfigFilePaths.delete(runId);
+    }
+  }
+
+  private cleanupAttemptConfig(attemptId: string): void {
+    const configPath = this.attemptConfigFilePaths.get(attemptId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.attemptConfigFilePaths.delete(attemptId);
     }
   }
 
@@ -607,7 +630,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId, attemptId: attempt.id, stream: 'stderr', line: stopReason, createdAt: finishedAt },
     });
 
-    this.cleanupRunResources(runId);
+    this.cleanupAttemptConfig(attempt.id);
 
     this.options.eventBus?.publish({
       type: 'run.status',
