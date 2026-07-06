@@ -15,6 +15,7 @@ export interface GitWorktreeIsolationConfig {
 export interface BeastWorktreeAllocation {
   readonly agentId: string;
   readonly branchName: string;
+  readonly branchCreated: boolean;
   readonly created: boolean;
   readonly executionCwd: string;
   readonly gitTopLevel: string;
@@ -83,10 +84,12 @@ export function createBeastWorktree(
 
   mkdirSync(worktreesRoot, { recursive: true });
   const alreadyExists = existsSync(worktreePath);
+  const branchAlreadyExists = branchExists(runGit, projectRoot, branchName);
 
   const allocation: BeastWorktreeAllocation = {
     agentId: safeAgentId,
     branchName,
+    branchCreated: !alreadyExists && !branchAlreadyExists,
     created: !alreadyExists,
     executionCwd: isolatedExecutionCwd(root, worktreePath, baseCwd),
     gitTopLevel: root,
@@ -98,7 +101,7 @@ export function createBeastWorktree(
     return allocation;
   }
 
-  if (branchExists(runGit, projectRoot, branchName)) {
+  if (branchAlreadyExists) {
     runGit(['worktree', 'add', worktreePath, branchName], projectRoot);
   } else {
     runGit(['worktree', 'add', '-b', branchName, worktreePath], projectRoot);
@@ -111,7 +114,7 @@ export function removeBeastWorktree(allocation: BeastWorktreeAllocation, runGit:
   if (existsSync(allocation.worktreePath)) {
     runGit(['worktree', 'remove', '--force', allocation.worktreePath], allocation.projectRoot);
   }
-  if (branchExists(runGit, allocation.projectRoot, allocation.branchName)) {
+  if (allocation.branchCreated && branchExists(runGit, allocation.projectRoot, allocation.branchName)) {
     runGit(['branch', '-D', allocation.branchName], allocation.projectRoot);
   }
 }
