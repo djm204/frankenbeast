@@ -101,6 +101,27 @@ describe('ProcessSupervisor', () => {
       expect(callbacks.onStdout).toHaveBeenCalledWith('done');
     });
 
+    it('does not emit blank lines for CRLF split across stdout chunks', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          "process.stdout.write('one\\r'); setImmediate(() => process.stdout.write('\\ntwo\\r\\n'));",
+        ],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalled();
+      }, { timeout: 5000 });
+
+      expect(callbacks.onStdout).toHaveBeenCalledTimes(2);
+      expect(callbacks.onStdout).toHaveBeenNthCalledWith(1, 'one');
+      expect(callbacks.onStdout).toHaveBeenNthCalledWith(2, 'two');
+    });
+
     it('captures stderr lines via onStderr callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({

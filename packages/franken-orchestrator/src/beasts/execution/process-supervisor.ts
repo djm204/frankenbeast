@@ -113,9 +113,31 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
       const flushBufferedLine = () => {
         if (buffer.length > 0) {
-          onLine(buffer);
+          onLine(buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer);
           buffer = '';
         }
+      };
+      const processBuffer = () => {
+        let start = 0;
+        for (let i = 0; i < buffer.length; i += 1) {
+          const char = buffer[i];
+          if (char === '\n') {
+            onLine(buffer.slice(start, i));
+            start = i + 1;
+            continue;
+          }
+          if (char === '\r') {
+            if (i + 1 >= buffer.length) {
+              break;
+            }
+            onLine(buffer.slice(start, i));
+            if (buffer[i + 1] === '\n') {
+              i += 1;
+            }
+            start = i + 1;
+          }
+        }
+        buffer = buffer.slice(start);
       };
       const finish = () => {
         if (closed) {
@@ -129,11 +151,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       stream.setEncoding('utf8');
       stream.on('data', (chunk: string | Buffer) => {
         buffer += chunk.toString();
-        const lines = buffer.split(/\r\n|[\n\r]/u);
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          onLine(line);
-        }
+        processBuffer();
       });
       stream.on('end', flushBufferedLine);
       stream.on('close', finish);
