@@ -10,6 +10,8 @@ type RawTask = {
   dependsOn?: unknown;
 };
 
+class PlanStructureError extends Error {}
+
 export class LlmPlanner implements IPlannerModule {
   private readonly llmClient: ILlmClient;
 
@@ -59,7 +61,10 @@ export class LlmPlanner implements IPlannerModule {
       }
 
       return { tasks };
-    } catch {
+    } catch (error) {
+      if (error instanceof PlanStructureError) {
+        throw error;
+      }
       return fallback;
     }
   }
@@ -89,8 +94,18 @@ export class LlmPlanner implements IPlannerModule {
     const dependsOn = Array.isArray(raw?.dependsOn)
       ? raw.dependsOn
         .filter((dep): dep is string => typeof dep === 'string')
-        .map(dep => idMap.get(dep))
-        .filter((dep): dep is string => typeof dep === 'string')
+        .map((dep) => {
+          const mappedDep = idMap.get(dep);
+          if (mappedDep === undefined) {
+            const taskId = typeof raw?.id === 'string' && raw.id.trim().length > 0
+              ? raw.id.trim()
+              : `t${index + 1}`;
+            throw new PlanStructureError(
+              `Invalid plan structure: task '${taskId}' depends on unknown task '${dep}'`,
+            );
+          }
+          return mappedDep;
+        })
       : [];
 
     return {

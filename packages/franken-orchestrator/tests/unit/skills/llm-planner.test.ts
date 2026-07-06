@@ -59,6 +59,24 @@ describe('LlmPlanner', () => {
     });
   });
 
+  it('fails plan creation when a task depends on an unknown task id', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          tasks: [
+            { id: 'prep', objective: 'Prep', dependsOn: [] },
+            { id: 'ship', objective: 'Ship', dependsOn: ['missing'] },
+          ],
+        }),
+      ),
+    };
+    const planner = new LlmPlanner(llmClient);
+
+    await expect(planner.createPlan(intent)).rejects.toThrow(
+      "Invalid plan structure: task 'ship' depends on unknown task 'missing'",
+    );
+  });
+
   it('falls back to a single task plan when tasks contain a cycle', async () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue(
