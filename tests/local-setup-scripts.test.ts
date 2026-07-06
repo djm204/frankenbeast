@@ -56,10 +56,13 @@ describe('local setup scripts', () => {
   it('requires explicit non-default Grafana admin credentials for local compose', () => {
     const compose = read('docker-compose.yml');
 
-    expect(compose).toContain('GF_SECURITY_ADMIN_USER=${GRAFANA_USER:?');
-    expect(compose).toContain('GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?');
+    expect(compose).toContain('Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.');
+    expect(compose).toContain('Refusing to start Grafana with admin/admin credentials.');
+    expect(compose).toContain('GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}');
+    expect(compose).toContain('GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}');
     expect(compose).not.toContain('${GRAFANA_USER:-admin}');
     expect(compose).not.toContain('${GRAFANA_PASSWORD:-admin}');
+    expect(compose).toContain('reset the\n  # Grafana password or recreate the volume');
   });
 
   it('.env.example documents current local env vars without removed service knobs', () => {

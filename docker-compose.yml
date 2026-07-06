@@ -23,9 +23,20 @@ services:
       - '3000:3000'
     volumes:
       - grafana-data:/var/lib/grafana
+    entrypoint: ['/bin/sh', '-ec']
+    command: >
+      if [ -z "$${GF_SECURITY_ADMIN_USER:-}" ] || [ -z "$${GF_SECURITY_ADMIN_PASSWORD:-}" ]; then
+        echo 'Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.' >&2;
+        exit 1;
+      fi;
+      if [ "$${GF_SECURITY_ADMIN_USER}" = 'admin' ] && [ "$${GF_SECURITY_ADMIN_PASSWORD}" = 'admin' ]; then
+        echo 'Refusing to start Grafana with admin/admin credentials.' >&2;
+        exit 1;
+      fi;
+      exec /run.sh
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:?Set GRAFANA_USER to a non-default local Grafana admin username}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD to a non-default local Grafana admin password}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
       - GF_AUTH_ANONYMOUS_ENABLED=true
     depends_on:
       - tempo
@@ -43,5 +54,7 @@ services:
 
 volumes:
   chromadb-data:
+  # If this volume was initialized with old admin/admin credentials, reset the
+  # Grafana password or recreate the volume after setting non-default values.
   grafana-data:
   tempo-data:
