@@ -37,8 +37,17 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
     return verify(c, next);
   };
   app.post('/webhook', whatsappMiddleware, async (c) => {
-    const body = await c.req.json();
-    const parsed = WhatsAppWebhookSchema.parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Malformed WhatsApp payload' }, 400);
+    }
+    const webhookPayload = WhatsAppWebhookSchema.safeParse(body);
+    if (!webhookPayload.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const parsed = webhookPayload.data;
 
     for (const entry of parsed.entry) {
       for (const change of entry.changes) {

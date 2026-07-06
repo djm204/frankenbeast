@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { readVitestFlags } from '../../scripts/vitest-env.js';
+import { createFrankenSourceAliases } from '../../scripts/vitest-source-aliases.js';
 
 const packageRoot = dirname(fileURLToPath(import.meta.url));
 const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E']);
@@ -21,6 +22,9 @@ const runMixed = [runE2e, runIntegration, requestedUnit].filter(Boolean).length 
 
 export default defineConfig({
   root: packageRoot,
+  resolve: {
+    alias: createFrankenSourceAliases(import.meta.url),
+  },
   test: {
     globals: false,
     environment: 'node',

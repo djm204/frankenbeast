@@ -11,7 +11,7 @@ vi.mock('../../../src/http/chat-app.js', () => {
   };
 });
 vi.mock('../../../src/http/ws-chat-server.js', () => ({
-  attachChatWebSocketServer: vi.fn(),
+  attachChatWebSocketServer: vi.fn(() => ({ close: vi.fn() })),
 }));
 
 import { startChatServer } from '../../../src/http/chat-server.js';

@@ -30,6 +30,11 @@ describe('SignatureVerifier', () => {
     expect(otherVerifier.verify('payload', sig)).toBe(false);
   });
 
+  it('verify() returns false instead of throwing for a 64-character non-hex signature', () => {
+    expect(() => verifier.verify('payload', 'z'.repeat(64))).not.toThrow();
+    expect(verifier.verify('payload', 'z'.repeat(64))).toBe(false);
+  });
+
   it('sign + verify round-trip succeeds for approval response payloads', () => {
     const payload = formatApprovalResponseSignaturePayload({ requestId: 'req-001', decision: 'APPROVE' });
     const sig = verifier.sign(payload);

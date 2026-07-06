@@ -36,7 +36,9 @@ jobs:
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
-      - run: npx turbo run build test lint
+      - run: |
+          npx turbo run build lint
+          npx turbo run test
 
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
@@ -61,8 +63,8 @@ jobs:
 
       # Packs every publishable package, installs the CLI + its workspace deps
       # into a clean project OUTSIDE the monorepo (optional deps omitted), and
-      # runs `frankenbeast --help`. Catches phantom/undeclared deps, packages
-      # shipping no dist, and broken bins — the class of breakage the in-repo
-      # test suite hides via workspace hoisting.
+      # runs each published CLI's --help. Catches phantom/undeclared deps,
+      # packages shipping no dist, and broken bins — the class of breakage the
+      # in-repo test suite hides via workspace hoisting.
       - name: Publish smoke test
         run: node scripts/publish-smoke.mjs
