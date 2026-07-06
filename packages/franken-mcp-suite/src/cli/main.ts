@@ -12,6 +12,8 @@ import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
 const FRANKENBEAST_INSTALL_HELP = "install @franken/orchestrator with 'npm install -g @franken/orchestrator'";
+const TOP_LEVEL_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
+const MCP_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
@@ -44,6 +46,42 @@ function passthrough(): never {
     process.exit(128 + (constants.signals[result.signal] ?? 0));
   }
   process.exit(result.status ?? 0);
+}
+
+function printMcpHelp(): never {
+  printLine('Usage: fbeast mcp <command>');
+  printLine('');
+  printLine('MCP server management commands:');
+  printLine('  mcp init                        Set up fbeast MCP servers');
+  printLine('  mcp init --client=<name>        Target client: claude (default), gemini, codex');
+  printLine('  mcp init --pick                 Choose which servers to install');
+  printLine('  mcp init --mode=proxy           Register one proxy MCP server instead of individual servers');
+  printLine('  mcp init --hooks                Add pre/post-tool hooks');
+  printLine('  mcp uninstall                   Remove fbeast MCP config');
+  printLine('  mcp uninstall --client=<name>   Target a specific client');
+  printLine('  mcp uninstall --purge           Also remove stored data');
+  printLine('  mcp beast                       Activate Beast mode');
+  printLine('  mcp beast --provider=<name>     LLM provider: anthropic-api (default), codex-cli, claude-cli');
+  printLine('');
+  printLine('All other commands are forwarded to frankenbeast.');
+  printLine('Run: frankenbeast --help');
+  process.exit(0);
+}
+
+function printTopLevelHelp(): never {
+  printLine('Usage: fbeast <command> [args...]');
+  printLine('');
+  printLine('Primary command:');
+  printLine('  mcp   MCP server management commands');
+  printLine('  help  Display help (this message)');
+  printLine('');
+  printLine('All other commands are forwarded to frankenbeast.');
+  printLine('Run: frankenbeast --help');
+  process.exit(0);
+}
+
+if (TOP_LEVEL_HELP_OPTIONS.has(command ?? '')) {
+  printTopLevelHelp();
 }
 
 if (command !== 'mcp') {
@@ -146,21 +184,9 @@ switch (subcommand) {
     break;
   }
   default:
-    printLine('Usage: fbeast mcp <command>');
-    printLine('');
-    printLine('MCP server management commands:');
-    printLine('  mcp init                        Set up fbeast MCP servers');
-    printLine('  mcp init --client=<name>        Target client: claude (default), gemini, codex');
-    printLine('  mcp init --pick                 Choose which servers to install');
-    printLine('  mcp init --mode=proxy           Register one proxy MCP server instead of individual servers');
-    printLine('  mcp init --hooks                Add pre/post-tool hooks');
-    printLine('  mcp uninstall                   Remove fbeast MCP config');
-    printLine('  mcp uninstall --client=<name>   Target a specific client');
-    printLine('  mcp uninstall --purge           Also remove stored data');
-    printLine('  mcp beast                       Activate Beast mode');
-    printLine('  mcp beast --provider=<name>     LLM provider: anthropic-api (default), codex-cli, claude-cli');
-    printLine('');
-    printLine('All other commands are forwarded to frankenbeast.');
-    printLine('Run: frankenbeast --help');
-    process.exit(subcommand ? 1 : 0);
+    if (!subcommand || MCP_HELP_OPTIONS.has(subcommand)) {
+      printMcpHelp();
+    }
+    console.error(`Unknown command: fbeast mcp ${subcommand}`);
+    process.exit(1);
 }
