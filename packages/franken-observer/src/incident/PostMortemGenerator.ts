@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
-import { resolveContainedPath } from '@franken/types'
+import { resolveContainedPath } from '@franken/types/path-containment'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolveContainedExistingPath } from '@franken/types';
+import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
@@ -321,13 +321,18 @@ export class Session {
     let designContent: string;
     if (designDocPath) {
       try {
-        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath');
+        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath', {
+          relativeTo: process.cwd(),
+        });
         designContent = readFileSync(safeDesignDocPath, 'utf-8');
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           throw new Error(
             `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
           );
+        }
+        if ((err as Error).message === 'designDocPath resolves outside base directory') {
+          throw new Error('designDocPath resolves outside project root');
         }
         throw err;
       }

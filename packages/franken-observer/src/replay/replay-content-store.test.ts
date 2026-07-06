@@ -66,4 +66,19 @@ describe('ReplayContentStore', () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  it('rejects dangling blob symlinks before writing content', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const store = new ReplayContentStore(root);
+    const ref = hashContent('secret');
+    const danglingTarget = join(tmpdir(), `missing-replay-target-${Date.now()}`);
+    symlinkSync(danglingTarget, join(root, 'blobs', ref));
+
+    try {
+      expect(() => store.put('secret')).toThrow(/replayBlobPath must not be a symbolic link/i);
+      expect(existsSync(danglingTarget)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

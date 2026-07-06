@@ -29,6 +29,19 @@ describe('realpath containment helpers', () => {
     });
   });
 
+  it('can resolve relative paths from an explicit cwd before containment', () => {
+    withTempRoot('contained-explicit-relative-base', root => {
+      const nested = join(root, 'docs');
+      const designDoc = join(nested, 'design.md');
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(designDoc, '# Design', 'utf8');
+
+      expect(resolveContainedExistingPath(root, 'design.md', 'designDocPath', { relativeTo: nested })).toBe(
+        realpathSync(designDoc),
+      );
+    });
+  });
+
   it('rejects existing paths that escape the base through a symlink', () => {
     withTempRoot('contained-symlink', root => {
       const outside = join(root, '..', `outside-${randomUUID()}`);

@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolveContainedExistingPath, resolveContainedPath } from '@franken/types';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolveContainedExistingPath, resolveContainedPath } from '@franken/types/path-containment';
 import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
 
@@ -37,6 +37,15 @@ export class ReplayContentStore {
       throw new Error('Replay content ref must be exactly 64 lowercase sha256 hex characters');
     }
     const containedPath = resolveContainedPath(this.dir, ref, 'replayBlobPath');
+    try {
+      if (lstatSync(containedPath).isSymbolicLink()) {
+        throw new Error('replayBlobPath must not be a symbolic link');
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
+      }
+    }
     return existsSync(containedPath)
       ? resolveContainedExistingPath(this.dir, ref, 'replayBlobPath')
       : containedPath;
