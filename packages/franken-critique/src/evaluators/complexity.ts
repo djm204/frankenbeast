@@ -1,11 +1,178 @@
-import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
+import type {
+  Evaluator,
+  EvaluationInput,
+  EvaluationResult,
+  EvaluationFinding,
+} from './evaluator.js';
 
 const MAX_PARAMS = 5;
 const MAX_NESTING = 4;
 const MAX_FUNCTION_LINES = 50;
 
 const FUNCTION_PATTERN = /function\s+\w+\s*\(([^)]*)\)\s*\{([\s\S]*?)\}/g;
-const ARROW_FUNCTION_PATTERN = /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
+const ARROW_FUNCTION_PATTERN =
+  /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
+const REGEX_PREFIX_CHARS = new Set([
+  '(',
+  '[',
+  '{',
+  '=',
+  ':',
+  ',',
+  ';',
+  '!',
+  '&',
+  '|',
+  '?',
+  '+',
+  '-',
+  '*',
+  '~',
+  '^',
+  '<',
+  '>',
+]);
+
+function stripIgnoredBraceSyntax(content: string): string {
+  let sanitized = '';
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '/' && next === '/') {
+      const end = findLineEnd(content, i + 2);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      const end = findBlockCommentEnd(content, i + 2);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      const end = findQuotedStringEnd(content, i, char);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '`') {
+      const end = findTemplateLiteralEnd(content, i);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '/' && shouldStartRegexLiteral(content, i)) {
+      const end = findRegexLiteralEnd(content, i);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    sanitized += char;
+  }
+
+  return sanitized;
+}
+
+function maskIgnored(content: string, start: number, end: number): string {
+  return content.slice(start, end).replace(/[^\n]/g, ' ');
+}
+
+function findLineEnd(content: string, start: number): number {
+  const newline = content.indexOf('\n', start);
+  return newline === -1 ? content.length : newline;
+}
+
+function findBlockCommentEnd(content: string, start: number): number {
+  const end = content.indexOf('*/', start);
+  return end === -1 ? content.length : end + 2;
+}
+
+function findQuotedStringEnd(
+  content: string,
+  start: number,
+  quote: string,
+): number {
+  for (let i = start + 1; i < content.length; i++) {
+    if (content[i] === '\\') {
+      i++;
+      continue;
+    }
+    if (content[i] === quote) {
+      return i + 1;
+    }
+  }
+
+  return content.length;
+}
+
+function findTemplateLiteralEnd(content: string, start: number): number {
+  for (let i = start + 1; i < content.length; i++) {
+    if (content[i] === '\\') {
+      i++;
+      continue;
+    }
+    if (content[i] === '`') {
+      return i + 1;
+    }
+  }
+
+  return content.length;
+}
+
+function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
+  const before = content.slice(0, slashIndex).trimEnd();
+  if (!before) return true;
+
+  const previous = before.charAt(before.length - 1);
+  if (REGEX_PREFIX_CHARS.has(previous)) return true;
+
+  return /\b(?:return|throw|case|delete|typeof|void|in|of|yield)$/.test(before);
+}
+
+function findRegexLiteralEnd(content: string, start: number): number {
+  let inCharacterClass = false;
+
+  for (let i = start + 1; i < content.length; i++) {
+    const char = content[i];
+
+    if (char === '\\') {
+      i++;
+      continue;
+    }
+
+    if (char === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+
+    if (char === ']') {
+      inCharacterClass = false;
+      continue;
+    }
+
+    if (char === '/' && !inCharacterClass) {
+      let end = i + 1;
+      while (/[a-z]/i.test(content[end] ?? '')) {
+        end++;
+      }
+      return end;
+    }
+
+    if (char === '\n') {
+      return i;
+    }
+  }
+
+  return content.length;
+}
 
 export class ComplexityEvaluator implements Evaluator {
   readonly name = 'complexity';
@@ -13,7 +180,12 @@ export class ComplexityEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     if (!input.content.trim()) {
-      return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
+      return {
+        evaluatorName: this.name,
+        verdict: 'pass',
+        score: 1,
+        findings: [],
+      };
     }
 
     const findings: EvaluationFinding[] = [];
@@ -32,7 +204,10 @@ export class ComplexityEvaluator implements Evaluator {
     };
   }
 
-  private checkParameterCount(content: string, findings: EvaluationFinding[]): void {
+  private checkParameterCount(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     for (const pattern of [FUNCTION_PATTERN, ARROW_FUNCTION_PATTERN]) {
       for (const match of content.matchAll(pattern)) {
         const params = match[1]?.trim();
@@ -42,18 +217,22 @@ export class ComplexityEvaluator implements Evaluator {
           findings.push({
             message: `Function has ${count} parameters (max ${MAX_PARAMS}). Consider using an options object.`,
             severity: 'warning',
-            suggestion: 'Group related parameters into an options/config object',
+            suggestion:
+              'Group related parameters into an options/config object',
           });
         }
       }
     }
   }
 
-  private checkNestingDepth(content: string, findings: EvaluationFinding[]): void {
+  private checkNestingDepth(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     let maxDepth = 0;
     let currentDepth = 0;
 
-    for (const char of content) {
+    for (const char of stripIgnoredBraceSyntax(content)) {
       if (char === '{') {
         currentDepth++;
         if (currentDepth > maxDepth) maxDepth = currentDepth;
@@ -66,12 +245,16 @@ export class ComplexityEvaluator implements Evaluator {
       findings.push({
         message: `Code nesting depth is ${maxDepth} levels (max ${MAX_NESTING}). Extract nested logic into separate functions.`,
         severity: 'warning',
-        suggestion: 'Use early returns, guard clauses, or extract helper functions to reduce nesting',
+        suggestion:
+          'Use early returns, guard clauses, or extract helper functions to reduce nesting',
       });
     }
   }
 
-  private checkFunctionLength(content: string, findings: EvaluationFinding[]): void {
+  private checkFunctionLength(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     for (const pattern of [FUNCTION_PATTERN, ARROW_FUNCTION_PATTERN]) {
       for (const match of content.matchAll(pattern)) {
         const body = match[2] ?? '';
@@ -80,7 +263,8 @@ export class ComplexityEvaluator implements Evaluator {
           findings.push({
             message: `Function is ${lineCount} lines long (max ${MAX_FUNCTION_LINES}). Break it into smaller functions.`,
             severity: 'warning',
-            suggestion: 'Extract logical sections into well-named helper functions',
+            suggestion:
+              'Extract logical sections into well-named helper functions',
           });
         }
       }

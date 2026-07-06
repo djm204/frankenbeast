@@ -28,7 +28,9 @@ describe('ComplexityEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
   });
 
   it('flags deeply nested code', async () => {
@@ -37,7 +39,44 @@ describe('ComplexityEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces inside strings, regex literals, and comments when checking nesting', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      `
+function bracesInText() {
+  const json = "{{{{{{";
+  const template = ` +
+      '`render ${"{"} and ${/}/.test(input)}`' +
+      `;
+  const pattern = /[{][}]{4,}/;
+  // }}}}}}
+  /* {{{{{{ */
+  return json + template + pattern.source;
+}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('flags actual nested blocks even when strings and comments contain braces', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `
+function stillNested() {
+  const ignored = "{{{{{{"; // }}}}}}
+  if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }
+}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
   });
 
   it('flags very long functions', async () => {
