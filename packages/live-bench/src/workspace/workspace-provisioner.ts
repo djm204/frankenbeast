@@ -1,6 +1,8 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, parse, relative, resolve, sep } from 'node:path';
+import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
+import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
 import type { FixtureStore } from './fixture-store.js';
 
 export interface WorkspaceProvisionerConfig {
@@ -13,6 +15,7 @@ export interface ProvisionedWorkspace {
   readonly workspaceDir: string;
   readonly evidenceDir: string;
   readonly environmentPath: string;
+  readonly toolCallEvidencePath: string;
 }
 
 export interface BenchmarkEnvironmentSnapshot {
@@ -68,6 +71,7 @@ export class WorkspaceProvisioner {
     const workspaceDir = join(runDir, 'workspace');
     const evidenceDir = join(runDir, 'evidence');
     const environmentPath = join(runDir, 'environment.json');
+    const toolCallEvidencePath = join(evidenceDir, LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT);
 
     ensureContained(runDir, dateDir, 'run directory');
     ensureContained(runDir, this.runsRoot, 'run directory');
@@ -99,8 +103,9 @@ export class WorkspaceProvisioner {
       provisionedAt: new Date().toISOString(),
     };
     writeFileSync(environmentPath, `${JSON.stringify(environment, null, 2)}\n`, 'utf8');
+    writeFileSync(toolCallEvidencePath, serializeToolCallEvidence([]), 'utf8');
 
-    return { runDir, workspaceDir, evidenceDir, environmentPath };
+    return { runDir, workspaceDir, evidenceDir, environmentPath, toolCallEvidencePath };
   }
 }
 

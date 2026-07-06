@@ -24,6 +24,26 @@ export type BenchmarkCheck =
   | { readonly type: 'exit-code'; readonly code: number }
   | { readonly type: 'tool-call'; readonly tool: string; readonly requiredParams: readonly string[] };
 
+export const LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT = 'tool-calls.json';
+
+// Tool-call checks are declarative until the scorer consumes normalized evidence.
+// Keep this explicit so benchmark authors do not assume stdout/stderr scraping is supported.
+export const UNSUPPORTED_BENCHMARK_CHECK_TYPES = ['tool-call'] as const satisfies readonly BenchmarkCheck['type'][];
+
+export type ToolCallEvidenceSource = 'client' | 'mcp-proxy' | 'fbeast-proxy' | 'adapter';
+
+export interface ToolCallEvidence {
+  readonly id: string;
+  readonly tool: string;
+  readonly params: Readonly<Record<string, unknown>>;
+  readonly source: ToolCallEvidenceSource;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly ok?: boolean;
+  readonly result?: unknown;
+  readonly error?: string;
+}
+
 export interface BenchmarkMatrixRow {
   readonly runId: string;
   readonly taskId: string;
@@ -47,4 +67,6 @@ export interface ClientRunResult {
   readonly timedOut: boolean;
   readonly wallClockMs: number;
   readonly artifacts: readonly string[];
+  readonly toolCallEvidenceArtifact: typeof LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT;
+  readonly toolCallEvidence: readonly ToolCallEvidence[];
 }
