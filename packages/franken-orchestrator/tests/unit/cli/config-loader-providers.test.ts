@@ -41,7 +41,21 @@ describe('Config loader providers passthrough', () => {
     expect(config.providers.overrides).toEqual({});
   });
 
-  it('passes through providers section from explicit config file', async () => {
+  it('rejects trusted provider command overrides from config file without CLI approval', async () => {
+    const filePath = join(tmpdir(), `beast-providers-unapproved-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          gemini: { command: 'gemini-cli', trustCommandOverride: true, model: 'gemini-pro' },
+        },
+      },
+    }));
+
+    await expect(loadConfig(makeArgs({ config: filePath }))).rejects.toThrow(/--trust-provider-command-overrides/);
+  });
+
+  it('passes through CLI-approved providers section from explicit config file', async () => {
     const filePath = join(tmpdir(), `beast-providers-${Date.now()}.json`);
     tmpFiles.push(filePath);
     await writeFile(filePath, JSON.stringify({
@@ -54,7 +68,10 @@ describe('Config loader providers passthrough', () => {
       },
     }));
 
-    const config = await loadConfig(makeArgs({ config: filePath }));
+    const config = await loadConfig(makeArgs({
+      config: filePath,
+      trustProviderCommandOverrides: true,
+    }));
     expect(config.providers.default).toBe('gemini');
     expect(config.providers.fallbackChain).toEqual(['gemini', 'claude']);
     expect(config.providers.overrides['gemini']).toEqual({

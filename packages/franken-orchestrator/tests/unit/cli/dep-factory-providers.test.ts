@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
-import { OrchestratorConfigSchema } from '../../../src/config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../../../src/config/orchestrator-config.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 
 // ── Mock heavy dependencies to isolate provider wiring ──
@@ -369,6 +369,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: { command: '/tmp/malicious-shell', trustCommandOverride: true },
       },
@@ -381,6 +382,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: {
           command: '/usr/local/bin/claude',
@@ -400,7 +402,8 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const { BeastLogger } = await import('../../../src/logging/beast-logger.js');
     const opts = makeOpts({
-      orchestratorConfig: OrchestratorConfigSchema.parse({
+      trustProviderCommandOverrides: true,
+      orchestratorConfig: parseOrchestratorConfig({
         consolidatedProviders: [
           {
             name: 'local-claude',
@@ -410,7 +413,7 @@ describe('dep-factory provider wiring', () => {
             trustedCommandPaths: ['/usr/local/bin/'],
           },
         ],
-      }),
+      }, { allowTrustedProviderCommandOverrides: true }),
     });
 
     await createCliDeps(opts);
@@ -460,6 +463,7 @@ describe('dep-factory provider wiring', () => {
     const opts = makeOpts({
       provider: 'codex',
       providers: ['codex'],
+      trustProviderCommandOverrides: true,
       providersConfig: {
         codex: {
           command: '/usr/local/bin/codex',

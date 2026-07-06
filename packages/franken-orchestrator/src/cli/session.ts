@@ -77,6 +77,7 @@ export interface SessionConfig {
   provider: string;
   providers?: string[] | undefined;
   providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -612,6 +613,7 @@ export class Session {
       provider: this.config.provider,
       providers: this.config.providers,
       providersConfig: this.config.providersConfig,
+      trustProviderCommandOverrides: this.config.trustProviderCommandOverrides,
       noPr: this.config.noPr,
       verbose: this.config.verbose,
       reset: this.config.reset,

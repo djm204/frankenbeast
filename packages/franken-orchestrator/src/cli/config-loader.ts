@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
 
@@ -139,5 +139,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
     merged = applyNetworkConfigSets(merged, args.networkSet);
   }
 
-  return OrchestratorConfigSchema.parse(merged);
+  return parseOrchestratorConfig(merged, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 }
