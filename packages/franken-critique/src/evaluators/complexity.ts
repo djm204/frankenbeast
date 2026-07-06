@@ -259,7 +259,12 @@ function isLikelyQuotedStringStart(
   }
 
   const previousToken = content[previousIndex] ?? '';
-  if (previousToken === ':') return isSourceColonPrefix(content, previousIndex);
+  if (previousToken === ':') {
+    return (
+      isSourceColonPrefix(content, previousIndex) ||
+      isTernaryAlternateColonPrefix(content, previousIndex)
+    );
+  }
   if ('=([{,!+-*?/&|^~<>'.includes(previousToken)) return true;
   if (previousToken === '>' && content[previousIndex - 1] === '=') return true;
   if (isStringKeywordPrefix(content, previousIndex)) return true;
@@ -282,7 +287,10 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   if (previousIndex === -1) {
     const inlineEnd = findInlineMarkdownCodeEnd(content, start);
     const after = inlineEnd === -1 ? '' : (content[inlineEnd] ?? '');
-    return /[;\n)\]]/.test(after);
+    if (after === '\n') {
+      return !looksLikeCodeSpan(content.slice(start + 1, inlineEnd - 1));
+    }
+    return /[;)\]]/.test(after);
   }
 
   const previous = content[previousIndex] ?? '';
@@ -314,11 +322,16 @@ function isSpacedTemplateTagContext(
   const wordStart = findWordStart(content, previousIndex);
   const beforeWordIndex = findPreviousRegexLookbehindIndex(content, wordStart);
   if (beforeWordIndex === -1) {
-    const word = content.slice(wordStart, previousIndex + 1);
-    return /^[a-z_$][\w$]*$/.test(word);
+    return false;
   }
 
   return '=([{,:;,!+-*?/&|^~<>'.includes(content[beforeWordIndex] ?? '');
+}
+
+function looksLikeCodeSpan(content: string): boolean {
+  return /\b(?:if|for|while|switch|try|catch|function|class|const|let|var|return)\b/.test(
+    content,
+  );
 }
 
 function findWordStart(content: string, endIndex: number): number {
@@ -508,9 +521,14 @@ function isLikelyStatementBlockEnd(
         if (previousIndex === -1) return true;
         const previous = structuralContent[previousIndex] ?? '';
         return (
-          previous === ')' ||
+          (previous === ')' &&
+            (isControlHeaderPrefix(structuralContent, previousIndex) ||
+              isFunctionDeclarationBlockPrefix(
+                structuralContent,
+                previousIndex,
+              ))) ||
           isBlockOpeningKeywordPrefix(structuralContent, previousIndex) ||
-          isNamedClassBlockPrefix(structuralContent, previousIndex)
+          isClassDeclarationBlockPrefix(structuralContent, previousIndex)
         );
       }
     }
@@ -534,10 +552,63 @@ function isBlockOpeningKeywordPrefix(
   endIndex: number,
 ): boolean {
   const word = keywordBefore(content, endIndex);
-  return /^(?:else|try|finally|do|class|function|switch)$/.test(word ?? '');
+  return /^(?:else|try|finally|do|switch)$/.test(word ?? '');
 }
 
-function isNamedClassBlockPrefix(content: string, endIndex: number): boolean {
+function isFunctionDeclarationBlockPrefix(
+  content: string,
+  closeParenIndex: number,
+): boolean {
+  const structuralContent = maskStructuralLiterals(
+    content.slice(0, closeParenIndex + 1),
+  );
+  let depth = 0;
+
+  for (let i = closeParenIndex; i >= 0; i--) {
+    const char = structuralContent[i];
+    if (char === ')') {
+      depth++;
+      continue;
+    }
+    if (char !== '(') continue;
+
+    depth--;
+    if (depth !== 0) continue;
+
+    const beforeParamsIndex = findPreviousRegexLookbehindIndex(
+      structuralContent,
+      i,
+    );
+    if (beforeParamsIndex === -1) return false;
+
+    const candidateStart = /[\w$]/.test(
+      structuralContent[beforeParamsIndex] ?? '',
+    )
+      ? findWordStart(structuralContent, beforeParamsIndex)
+      : beforeParamsIndex + 1;
+    const beforeFunctionIndex = findPreviousRegexLookbehindIndex(
+      structuralContent,
+      candidateStart,
+    );
+    const functionEndIndex =
+      keywordBefore(structuralContent, beforeParamsIndex) === 'function'
+        ? (beforeFunctionIndex ?? beforeParamsIndex)
+        : beforeParamsIndex;
+
+    if (keywordBefore(structuralContent, functionEndIndex) !== 'function') {
+      return false;
+    }
+
+    return isDeclarationKeywordContext(structuralContent, functionEndIndex);
+  }
+
+  return false;
+}
+
+function isClassDeclarationBlockPrefix(
+  content: string,
+  endIndex: number,
+): boolean {
   const classNameStart = findWordStart(content, endIndex);
   const beforeNameIndex = findPreviousRegexLookbehindIndex(
     content,
@@ -545,7 +616,22 @@ function isNamedClassBlockPrefix(content: string, endIndex: number): boolean {
   );
   if (beforeNameIndex === -1) return false;
 
-  return keywordBefore(content, beforeNameIndex) === 'class';
+  if (keywordBefore(content, beforeNameIndex) !== 'class') return false;
+  return isDeclarationKeywordContext(content, beforeNameIndex);
+}
+
+function isDeclarationKeywordContext(
+  content: string,
+  keywordEndIndex: number,
+): boolean {
+  const word = keywordBefore(content, keywordEndIndex);
+  if (!word) return false;
+
+  const wordStart = keywordEndIndex - word.length + 1;
+  const beforeWordIndex = findPreviousRegexLookbehindIndex(content, wordStart);
+  if (beforeWordIndex === -1) return true;
+
+  return ';{}\n'.includes(content[beforeWordIndex] ?? '');
 }
 
 function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
@@ -568,7 +654,7 @@ function isSourceKeywordContext(
 
 function isStringKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
-  return /^(?:return|throw|yield|await|from|case|default|import|extends)$/.test(
+  return /^(?:return|throw|yield|await|from|case|default|import|extends|typeof|void|delete)$/.test(
     word ?? '',
   );
 }
@@ -609,6 +695,31 @@ function isSourceColonPrefix(content: string, colonIndex: number): boolean {
   }
 
   return '{[,('.includes(content[beforeTokenIndex] ?? '');
+}
+
+function isTernaryAlternateColonPrefix(
+  content: string,
+  colonIndex: number,
+): boolean {
+  let depth = 0;
+
+  for (let i = colonIndex - 1; i >= 0; i--) {
+    const char = content[i];
+    if (char === ')' || char === ']' || char === '}') {
+      depth++;
+      continue;
+    }
+    if (char === '(' || char === '[' || char === '{') {
+      if (depth === 0) return false;
+      depth--;
+      continue;
+    }
+    if (depth !== 0) continue;
+    if (char === '?') return true;
+    if (';\n'.includes(char ?? '')) return false;
+  }
+
+  return false;
 }
 
 function isTypeAnnotationColonPrefix(
@@ -688,7 +799,7 @@ function isRegexKeywordPrefix(
 ): boolean {
   const word = keywordBefore(content, endIndex);
 
-  if (/^(?:in|of)$/.test(word ?? '')) {
+  if (/^(?:in|of|instanceof)$/.test(word ?? '')) {
     return (
       hasRegexTerminatorBeforeLineEnd(content, slashIndex) &&
       isWordOperatorPrefix(content, endIndex, word ?? '')

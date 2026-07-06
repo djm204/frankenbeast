@@ -795,6 +795,87 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('keeps leading Markdown inline code visible before newlines', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      '`if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`\nplease simplify';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces in ternary alternate string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const s = ok ? '' : "{{{{{{";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces in unary keyword string operands', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const t = typeof "{{{{{{"; void '{{{{{{'; delete obj["{{{{{{"];`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps lowercase-prose Markdown inline code visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'example `if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not mistake division after function or class expressions for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const functionExpression = `const ratio = function() {} / denom; if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
+    const classExpression = `const ratio = class {} / denom; if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
+
+    await expect(
+      evaluator.evaluate(createInput(functionExpression)),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+    await expect(
+      evaluator.evaluate(createInput(classExpression)),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('ignores regex braces after instanceof', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ok = value instanceof /{{{{{{/;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
