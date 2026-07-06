@@ -18,6 +18,13 @@ npm run check:package-manager
 npm install
 ```
 
+Run reproducible dependency audits through the guarded script so the live npm
+binary still matches the root `packageManager` pin before `npm audit` runs:
+
+```bash
+npm run audit:security
+```
+
 ## 2. Configure environment
 
 ```bash

@@ -49,6 +49,11 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).toContain('npm ci');
     });
 
+    it('runs the guarded security audit after deterministic installs', () => {
+      expect(content).toContain('npm run audit:security');
+      expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run audit:security'));
+    });
+
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
       expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
@@ -123,6 +128,16 @@ describe('release-please.yml publishes released npm packages', () => {
     expect(content.match(/node scripts\/check-package-manager\.mjs/g)?.length).toBe(2);
     expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     expect(content.lastIndexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.lastIndexOf('npm ci'));
+  });
+
+  it('routes security audits through the packageManager-pinned npm guard', () => {
+    const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.['audit:security']).toBe(
+      'node scripts/check-package-manager.mjs && npm audit --audit-level=moderate',
+    );
   });
 
   it('defers npm token enforcement until a public package needs publishing', () => {
