@@ -73,6 +73,26 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('reads static import specifiers after bindings named from', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `import { from } from "ghost-package";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('does not treat regex literal contents as comments', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const pattern = /[/*]/;\nimport ghost from 'ghost-package';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
   it('ignores dynamic require expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const adapter = require('adapter-' + target);`;

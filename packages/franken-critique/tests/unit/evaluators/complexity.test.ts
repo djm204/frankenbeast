@@ -40,6 +40,18 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('preserves active code inside template literal interpolations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'function sample() {\n  return `${(() => { if (a) { if (b) { if (c) { if (d) { work(); } } } } })()}`;\n}';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;

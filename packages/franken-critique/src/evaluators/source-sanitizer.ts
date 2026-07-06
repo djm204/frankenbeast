@@ -7,6 +7,11 @@ enum ScannerState {
   TemplateString = 'templateString',
 }
 
+interface TemplateExpressionRead {
+  value: string;
+  endIndex: number;
+}
+
 export function stripCommentsAndStringLiterals(content: string): string {
   let result = '';
   let state: ScannerState = ScannerState.Code;
@@ -124,6 +129,13 @@ export function stripCommentsAndStringLiterals(content: string): string {
         continue;
       }
 
+      if (ch === '$' && next === '{') {
+        const expression = readTemplateExpression(content, i + 1);
+        result += `  ${stripCommentsAndStringLiterals(expression.value)} `;
+        i = expression.endIndex;
+        continue;
+      }
+
       if (ch === '`') {
         state = ScannerState.Code;
         result += ' ';
@@ -135,4 +147,82 @@ export function stripCommentsAndStringLiterals(content: string): string {
   }
 
   return result;
+}
+
+function readTemplateExpression(
+  content: string,
+  openBraceIndex: number,
+): TemplateExpressionRead {
+  let depth = 1;
+  let value = '';
+
+  for (let i = openBraceIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      const endIndex = skipSingleLineComment(content, i + 2);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      const endIndex = skipMultiLineComment(content, i + 2);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const endIndex = skipStringLiteral(content, i);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth += 1;
+      value += ch;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return { value, endIndex: i };
+      value += ch;
+      continue;
+    }
+
+    value += ch;
+  }
+
+  return { value, endIndex: content.length };
+}
+
+function skipSingleLineComment(content: string, index: number): number {
+  const newlineIndex = content.indexOf('\n', index);
+  return newlineIndex === -1 ? content.length : newlineIndex;
+}
+
+function skipMultiLineComment(content: string, index: number): number {
+  const endIndex = content.indexOf('*/', index);
+  return endIndex === -1 ? content.length : endIndex + 1;
+}
+
+function skipStringLiteral(content: string, startIndex: number): number {
+  const quote = content[startIndex]!;
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+
+    if (ch === quote) return i;
+  }
+
+  return content.length;
 }

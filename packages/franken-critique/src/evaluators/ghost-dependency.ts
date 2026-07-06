@@ -84,6 +84,11 @@ function extractDependencySpecifiers(content: string): string[] {
       continue;
     }
 
+    if (ch === '/' && isRegexLiteralStart(content, i)) {
+      i = skipRegexLiteral(content, i);
+      continue;
+    }
+
     if (ch === '`') {
       const template = readTemplateString(content, i);
       specifiers.push(...template.specifiers);
@@ -166,11 +171,12 @@ function readStaticImportSpecifier(
     }
 
     if (startsWithKeyword(content, i, 'from')) {
-      i = skipWhitespace(content, i + 'from'.length);
-      if (content[i] === "'" || content[i] === '"') {
-        return readQuotedString(content, i);
+      const specifierStart = skipWhitespace(content, i + 'from'.length);
+      if (content[specifierStart] === "'" || content[specifierStart] === '"') {
+        return readQuotedString(content, specifierStart);
       }
-      return null;
+      i += 'from'.length;
+      continue;
     }
 
     if (ch === ';') return null;
@@ -320,6 +326,47 @@ function skipSingleLineComment(content: string, index: number): number {
 function skipMultiLineComment(content: string, index: number): number {
   const endIndex = content.indexOf('*/', index);
   return endIndex === -1 ? content.length : endIndex + 1;
+}
+
+function isRegexLiteralStart(content: string, index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = content[i]!;
+    if (/\s/.test(ch)) continue;
+
+    return '([{:;,=!?&|+-*~^%<>'.includes(ch);
+  }
+
+  return true;
+}
+
+function skipRegexLiteral(content: string, startIndex: number): number {
+  let inCharacterClass = false;
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+
+    if (ch === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+
+    if (ch === ']') {
+      inCharacterClass = false;
+      continue;
+    }
+
+    if (ch === '/' && !inCharacterClass) {
+      while (/[A-Za-z]/.test(content[i + 1] ?? '')) i += 1;
+      return i;
+    }
+  }
+
+  return content.length;
 }
 
 function skipStringLiteral(content: string, startIndex: number): number {
