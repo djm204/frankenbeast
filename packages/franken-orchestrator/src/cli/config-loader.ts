@@ -61,6 +61,40 @@ function deepMerge<T extends Record<string, unknown>>(...layers: Array<Partial<T
   return result as Partial<T>;
 }
 
+function removeTrustFields(value: unknown): void {
+  if (!isRecord(value)) return;
+
+  delete value['trustCommandOverride'];
+  delete value['trustedCommandPaths'];
+}
+
+/**
+ * Repository-local config is an untrusted input from the checked-out project.
+ * It may request provider command overrides, but it must not be able to
+ * self-approve them by also supplying the trust gate fields. Operators can
+ * still opt in deliberately by passing an explicit --config file.
+ */
+function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig>): Partial<OrchestratorConfig> {
+  const sanitized = JSON.parse(JSON.stringify(fileConfig)) as Partial<OrchestratorConfig>;
+  const root = sanitized as Record<string, unknown>;
+
+  const providers = root['providers'];
+  if (isRecord(providers) && isRecord(providers['overrides'])) {
+    for (const override of Object.values(providers['overrides'])) {
+      removeTrustFields(override);
+    }
+  }
+
+  const consolidatedProviders = root['consolidatedProviders'];
+  if (Array.isArray(consolidatedProviders)) {
+    for (const provider of consolidatedProviders) {
+      removeTrustFields(provider);
+    }
+  }
+
+  return sanitized;
+}
+
 /** Extract config overrides from CLI args. */
 function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
   const cli: Partial<OrchestratorConfig> = {};
@@ -82,6 +116,9 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
+      if (!args.config) {
+        fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || args.config) {
         throw error;
