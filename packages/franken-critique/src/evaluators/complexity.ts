@@ -255,7 +255,7 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
 
   if (previous === '!') {
     const beforeBang = before.slice(0, -1).trimEnd();
-    return !/[\w\])]$/.test(beforeBang);
+    return !/[\w$\])]$/.test(beforeBang);
   }
 
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
@@ -280,12 +280,39 @@ function trimRegexLookbehind(content: string): string {
 
   const lastLineStart = before.lastIndexOf('\n') + 1;
   const trailingLine = before.slice(lastLineStart);
-  const trailingComment = trailingLine.indexOf('//');
+  const trailingComment = findLineCommentStart(trailingLine);
   if (trailingComment !== -1) {
     before = before.slice(0, lastLineStart + trailingComment).trimEnd();
   }
 
   return before;
+}
+
+function findLineCommentStart(line: string): number {
+  let quote: '"' | "'" | '`' | null = null;
+
+  for (let i = 0; i < line.length - 1; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (quote) {
+      if (char === '\\') {
+        i++;
+        continue;
+      }
+      if (char === quote) quote = null;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') return i;
+  }
+
+  return -1;
 }
 
 function isControlHeaderPrefix(content: string): boolean {

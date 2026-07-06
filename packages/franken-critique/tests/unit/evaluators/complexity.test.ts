@@ -147,7 +147,17 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
 
   it('does not mistake division after non-null assertions for regex literals', async () => {
     const evaluator = new ComplexityEvaluator();
-    const content = `total! / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const content = `total! / denom; total$! / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not trim line-comment markers inside strings before division', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const url = 'https://api', ratio = total / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
