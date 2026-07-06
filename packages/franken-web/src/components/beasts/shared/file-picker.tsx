@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { estimateTokens, getContextHealth, type ContextHealth } from '../../../lib/token-estimator';
 
 export interface PickedFile {
@@ -12,6 +12,7 @@ interface FilePickerProps {
   files: PickedFile[];
   onFilesChange: (files: PickedFile[]) => void;
   onRemoveFile: (index: number) => void;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 const HEALTH_STYLES: Record<ContextHealth, { badge: string; label: string }> = {
@@ -33,18 +34,39 @@ function readFileText(file: File): Promise<string> {
   });
 }
 
-export function FilePicker({ files, onFilesChange, onRemoveFile }: FilePickerProps) {
+export function FilePicker({ files, onFilesChange, onRemoveFile, onLoadingChange }: FilePickerProps) {
   const filesRef = useRef(files);
+  const isMountedRef = useRef(true);
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  const [isReading, setIsReading] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
 
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
 
+  useEffect(() => {
+    onLoadingChangeRef.current = onLoadingChange;
+  }, [onLoadingChange]);
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+    onLoadingChangeRef.current?.(false);
+  }, []);
+
+  function setReadingState(loading: boolean) {
+    if (!isMountedRef.current) return;
+    setIsReading(loading);
+    onLoadingChangeRef.current?.(loading);
+  }
+
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
     if (selectedFiles.length === 0) return;
 
-    const pickedFiles = await Promise.all(
+    setReadError(null);
+    setReadingState(true);
+    const results = await Promise.allSettled(
       selectedFiles.map(async (file) => {
         const content = await readFileText(file);
         const tokens = estimateTokens(content);
@@ -57,12 +79,26 @@ export function FilePicker({ files, onFilesChange, onRemoveFile }: FilePickerPro
       }),
     );
 
-    onFilesChange([...filesRef.current, ...pickedFiles]);
+    if (!isMountedRef.current) return;
+    const pickedFiles = results
+      .filter((result): result is PromiseFulfilledResult<PickedFile> => result.status === 'fulfilled')
+      .map((result) => result.value);
+    const failedCount = results.length - pickedFiles.length;
+
+    if (pickedFiles.length > 0) {
+      onFilesChange([...filesRef.current, ...pickedFiles]);
+    }
+    if (failedCount > 0) {
+      setReadError(`${failedCount} file${failedCount === 1 ? '' : 's'} could not be read and were skipped.`);
+    }
     event.target.value = '';
+    setReadingState(false);
   }
 
   return (
     <div className="space-y-3">
+      {readError && <p className="text-xs text-beast-danger" role="alert">{readError}</p>}
+      {isReading && <p className="text-xs text-beast-subtle" role="status">Reading selected files…</p>}
       <input
         type="file"
         multiple

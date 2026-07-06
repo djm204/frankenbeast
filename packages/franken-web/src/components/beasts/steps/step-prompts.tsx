@@ -33,6 +33,7 @@ export function StepPrompts() {
         <FilePicker
           files={values.files ?? []}
           onFilesChange={(files) => updateField('files', files)}
+          onLoadingChange={(loading) => updateField('filesLoading', loading)}
           onRemoveFile={(i) => {
             const currentValues = (useBeastStore.getState().stepValues[5] ?? {}) as { files?: PickedFile[] };
             const files = [...(currentValues.files ?? [])];

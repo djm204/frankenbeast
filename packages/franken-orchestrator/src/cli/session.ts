@@ -47,6 +47,11 @@ function resolveContainedExistingPath(projectRoot: string, requestedPath: string
   return target;
 }
 
+function appendPromptContext(value: string, promptText: string | undefined): string {
+  if (!promptText || promptText.trim().length === 0) return value;
+  return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
+}
+
 export interface SessionConfig {
   paths: ProjectPaths;
   baseBranch: string;
@@ -243,8 +248,9 @@ export class Session {
         },
       };
 
+      const runConfig = loadRunConfigFromEnv();
       const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
-      await capturingInterview.build({ goal: 'Gather requirements' });
+      await capturingInterview.build({ goal: appendPromptContext('Gather requirements', runConfig?.promptConfig?.text) });
 
       const displayDesignCard = (designDoc: string): string => {
         const designPath = writeDesignDoc(paths, designDoc);
@@ -326,6 +332,9 @@ export class Session {
       }
       designContent = stored;
     }
+
+    const runConfig = loadRunConfigFromEnv();
+    designContent = appendPromptContext(designContent, runConfig?.promptConfig?.text);
 
     const inferredPlanName = paths.plansDir.split('/').filter(Boolean).pop() ?? 'plans';
     const planName = this.config.planDirOverride
@@ -470,10 +479,11 @@ export class Session {
     loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 
     try {
+      const runConfig = loadRunConfigFromEnv();
       const result = await new BeastLoop(fullDeps, loopConfig).run({
         projectId,
         sessionId: runSessionId,
-        userInput: `Process chunks in ${chunkDir}`,
+        userInput: appendPromptContext(`Process chunks in ${chunkDir}`, runConfig?.promptConfig?.text),
       });
 
       this.displaySummary(result);

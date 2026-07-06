@@ -50,6 +50,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
   const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues);
   const formIsValid = Object.keys(formValidationErrors).length === 0;
+  const promptFilesLoading = Boolean(stepValues[5]?.filesLoading);
   const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues);
 
   function syncValidationErrors(step: number, errors: WizardValidationErrors) {
@@ -61,6 +62,14 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   }
 
   function buildAndLaunch() {
+    if (promptFilesLoading) {
+      setValidationErrors(5, { files: 'Wait for selected files to finish loading before launching.' });
+      if (wizardMode === 'wizard') {
+        setWizardStep(5);
+      }
+      return;
+    }
+
     const firstInvalidStep = getFirstInvalidWizardStep(stepValues);
     if (firstInvalidStep !== null) {
       for (let i = 0; i < STEP_LABELS.length - 1; i += 1) {
@@ -103,7 +112,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
     }
   }
 
-  const primaryActionDisabled = Boolean(launching) || !currentStepIsValid;
+  const primaryActionDisabled = Boolean(launching) || promptFilesLoading || !currentStepIsValid;
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -176,13 +185,18 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               aria-atomic="true"
               className="sr-only"
             >
-              {launching ? 'Launching agent. Please wait.' : ''}
+              {launching ? 'Launching agent. Please wait.' : promptFilesLoading ? 'Reading selected files. Please wait.' : ''}
             </div>
             {wizardMode === 'wizard' && !launchError && !currentStepIsValid && (
               <ValidationSummary stepLabel={STEP_LABELS[wizardStep] ?? 'Current step'} errors={currentValidationErrors} />
             )}
             {wizardMode === 'form' && !launchError && !formIsValid && (
               <ValidationSummary stepLabel="Form View" errors={formValidationErrors} />
+            )}
+            {promptFilesLoading && !launchError && (
+              <div role="status" className="px-4 py-3 rounded-lg bg-beast-elevated border border-beast-border text-beast-muted text-sm">
+                Reading selected files… launch will be available when loading finishes.
+              </div>
             )}
             {launchError && (
               <div
@@ -221,7 +235,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                   <button
                     type="button"
                     onClick={buildAndLaunch}
-                    disabled={launching}
+                    disabled={Boolean(launching) || promptFilesLoading}
                     className="px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors
                       bg-beast-accent text-beast-bg hover:bg-beast-accent-strong disabled:opacity-50"
                   >

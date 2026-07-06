@@ -13,7 +13,7 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
-  it('frontloads prompt text and attached files into design interview goals', () => {
+  it('frontloads prompt text and attached files into run config promptConfig', () => {
     expect(buildWizardLaunchConfig({
       1: { workflowType: 'design-interview', topic: 'Draft a billing design', outputPath: 'docs/billing.md' },
       5: {
@@ -21,7 +21,8 @@ describe('buildWizardLaunchConfig', () => {
         files: [{ name: 'notes.md', content: 'Existing constraints.' }],
       },
     })).toMatchObject({
-      goal: 'Draft a billing design\n\nAdditional prompt context:\nConsider enterprise billing.\n\n---\n\nAttached file: notes.md\n\nExisting constraints.',
+      goal: 'Draft a billing design',
+      promptConfig: { text: 'Consider enterprise billing.\n\n---\n\nAttached file: notes.md\n\nExisting constraints.' },
     });
   });
 
@@ -37,12 +38,13 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
-  it('frontloads prompt text and attached files into martin loop objectives', () => {
+  it('leaves martin objective as a CLI-safe scalar and carries attached files in promptConfig', () => {
     expect(buildWizardLaunchConfig({
       1: { workflowType: 'martin-loop', provider: 'codex', objective: 'Implement chunks', chunkDir: 'tasks/chunks' },
       5: { files: [{ name: 'context.txt', content: 'Use this context.' }] },
     })).toMatchObject({
-      objective: 'Implement chunks\n\nAdditional prompt context:\nAttached file: context.txt\n\nUse this context.',
+      objective: 'Implement chunks',
+      promptConfig: { text: 'Attached file: context.txt\n\nUse this context.' },
     });
   });
 });

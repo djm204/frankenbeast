@@ -26,11 +26,6 @@ function buildPromptFrontload(prompts: Record<string, unknown> | undefined): str
   return parts.length > 0 ? parts.join('\n\n---\n\n') : undefined;
 }
 
-function appendPromptFrontload(value: unknown, promptFrontload: string | undefined): unknown {
-  if (typeof value !== 'string' || !promptFrontload) return value;
-  return `${value}\n\nAdditional prompt context:\n${promptFrontload}`;
-}
-
 export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<string, unknown> {
   const config: Record<string, unknown> = {};
 
@@ -42,6 +37,9 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
 
   const workflow = config.workflow as Record<string, unknown> | undefined;
   const promptFrontload = buildPromptFrontload(config.prompts as Record<string, unknown> | undefined);
+  if (promptFrontload) {
+    config.promptConfig = { text: promptFrontload };
+  }
   if (workflow?.executionMode === 'process' || workflow?.executionMode === 'container') {
     config.executionMode = workflow.executionMode;
   } else {
@@ -50,7 +48,7 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
 
   if (workflow?.workflowType === 'design-interview') {
     if (typeof workflow.topic === 'string') {
-      config.goal = appendPromptFrontload(workflow.topic, promptFrontload);
+      config.goal = workflow.topic;
     }
     if (typeof workflow.outputPath === 'string') {
       config.outputPath = workflow.outputPath;
@@ -70,7 +68,7 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
       config.provider = workflow.provider;
     }
     if (typeof workflow.objective === 'string') {
-      config.objective = appendPromptFrontload(workflow.objective, promptFrontload);
+      config.objective = workflow.objective;
     }
     if (typeof workflow.chunkDir === 'string') {
       config.chunkDirectory = workflow.chunkDir;

@@ -75,6 +75,17 @@ describe('martinLoopDefinition', () => {
       expect(result.success).toBe(true);
     });
 
+    it('keeps promptConfig for dashboard frontloaded prompts', () => {
+      const result = martinLoopDefinition.configSchema.safeParse({
+        ...validConfig,
+        promptConfig: { text: 'attached context' },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.promptConfig?.text).toBe('attached context');
+      }
+    });
+
     it('rejects missing provider', () => {
       const result = martinLoopDefinition.configSchema.safeParse({
         objective: 'test',

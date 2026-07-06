@@ -75,6 +75,17 @@ describe('designInterviewDefinition', () => {
       expect(result.success).toBe(true);
     });
 
+    it('keeps promptConfig for dashboard frontloaded prompts', () => {
+      const result = designInterviewDefinition.configSchema.safeParse({
+        ...validConfig,
+        promptConfig: { text: 'attached context' },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.promptConfig?.text).toBe('attached context');
+      }
+    });
+
     it('rejects missing goal', () => {
       const result = designInterviewDefinition.configSchema.safeParse({
         outputPath: '/tmp/out.md',
