@@ -10,9 +10,9 @@ import {
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../../../src/http/ws-chat-server.js';
 import {
-  CHAT_OPERATOR_TOKEN,
-  BEAST_OPERATOR_TOKEN,
   DASHBOARD_OPERATOR_TOKEN,
+  MISMATCH_BEAST_OPERATOR_TOKEN,
+  MISMATCH_CHAT_OPERATOR_TOKEN,
   SHARED_OPERATOR_TOKEN,
 } from '../__fixtures__/operator-test-tokens.js';
 
@@ -268,11 +268,11 @@ describe('chat server bootstrap', () => {
         sessionStoreDir: join(TMP, 'chat'),
         llm: { complete: vi.fn().mockResolvedValue('') },
         projectName: 'test-project',
-        operatorToken: CHAT_OPERATOR_TOKEN,
+        operatorToken: MISMATCH_CHAT_OPERATOR_TOKEN,
         beastControl: {
           ...beastServices,
           security: new TransportSecurityService(),
-          operatorToken: BEAST_OPERATOR_TOKEN,
+          operatorToken: MISMATCH_BEAST_OPERATOR_TOKEN,
           rateLimit: { windowMs: 60_000, max: 20 },
         },
       })).rejects.toThrow(/different operator tokens/i);

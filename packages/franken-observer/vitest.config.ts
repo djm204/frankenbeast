@@ -1,10 +1,6 @@
-import { dirname, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import { readVitestFlags } from '../../scripts/vitest-env.js'
 import { createFrankenSourceAliases } from '../../scripts/vitest-source-aliases.js'
-import { fileURLToPath } from 'node:url'
-
-const packageRoot = dirname(fileURLToPath(import.meta.url))
 const vitestFlags = readVitestFlags(['INTEGRATION', 'EVAL'])
 const isIntegration = vitestFlags.INTEGRATION
 const isEval = vitestFlags.EVAL
@@ -22,7 +18,6 @@ export default defineConfig({
       : isEval
         ? ['src/**/*.eval.test.ts']
         : ['src/**/*.test.ts'],
-    envFile: resolve(packageRoot, '../../.env.test'),
     exclude: isIntegration || isEval
       ? []
       : ['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts'],
