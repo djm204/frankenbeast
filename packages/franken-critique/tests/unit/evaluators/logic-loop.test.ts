@@ -536,6 +536,55 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('recursion');
   });
 
+  it('keeps fallback exits scoped out of nested loops and functions', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const nestedBreak = 'while (true) { for (;;) { break; } doWork(; }';
+    const nestedAwait = 'while (true) { const f = async () => await job; doWork(; }';
+
+    await expect(evaluator.evaluate(createInput(nestedBreak))).resolves.toMatchObject({ verdict: 'fail' });
+    await expect(evaluator.evaluate(createInput(nestedAwait))).resolves.toMatchObject({ verdict: 'fail' });
+  });
+
+  it('falls back to recursion checks for malformed function snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const result = await evaluator.evaluate(createInput('function loop() { loop(; }'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not duplicate overlapping prose function and loop snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const result = await evaluator.evaluate(createInput('Note: function run() { while (true) { work(); } }'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('masks fallback text using code-unit offsets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const result = await evaluator.evaluate(createInput('😀😀😀😀😀😀 const msg = "while (true) { work(); }"; ???'));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('does not count helper guards that run after helper-mediated recursion', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'function loop(){ function guard(){ return; } function again(){ loop(); } again(); guard(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('resolves helper calls only from the call-site lexical scope', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'function loop(){ { function again(){ loop(); } } function again(){ return; } again(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
   it('handles empty content', async () => {
     const evaluator = new LogicLoopEvaluator();
     const result = await evaluator.evaluate(createInput(''));

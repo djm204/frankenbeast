@@ -316,6 +316,32 @@ function parseJavaScript(code: string): AstNode[] {
   return asts;
 }
 
+function parsesAsJavaScript(code: string): boolean {
+  if (code.trimStart().startsWith('```')) return false;
+  const baseOptions = {
+    ecmaVersion: 'latest' as const,
+    allowAwaitOutsideFunction: true,
+    allowReturnOutsideFunction: true,
+    allowHashBang: true,
+  };
+
+  for (const sourceType of ['module', 'script'] as const) {
+    try {
+      TypeScriptParser.parse(code, { ...baseOptions, sourceType, locations: true });
+      return true;
+    } catch {
+      try {
+        parse(code, { ...baseOptions, sourceType });
+        return true;
+      } catch {
+        // Try the next source type.
+      }
+    }
+  }
+
+  return false;
+}
+
 function isFunctionLike(node: AstNode): boolean {
   return FUNCTION_NODE_TYPES.has(node.type);
 }
@@ -379,9 +405,21 @@ function invokedFunctionCallee(callee: AstNode): AstNode | null {
   return null;
 }
 
-function containsIfStatement(node: AstNode, enterFunction = false): boolean {
+function containsIfStatement(
+  node: AstNode,
+  enterFunction = false,
+  beforePosition = Number.POSITIVE_INFINITY,
+): boolean {
   const enteredHelpers = new Set<string>();
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+    if (
+      current !== node &&
+      !allowFunctionBody &&
+      typeof current.start === 'number' &&
+      current.start > beforePosition
+    ) {
+      return false;
+    }
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'IfStatement') return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
@@ -389,7 +427,7 @@ function containsIfStatement(node: AstNode, enterFunction = false): boolean {
       if (callee.type === 'Identifier') {
         const callName = identifierName(callee);
         if (callName && !enteredHelpers.has(callName)) {
-          const helper = localFunctionDeclaration(node, callName);
+          const helper = localFunctionDeclaration(node, callName, current.start);
           if (helper) {
             enteredHelpers.add(callName);
             if (visit(helper, true)) return true;
@@ -411,28 +449,38 @@ function identifierName(node: AstNode): string | undefined {
   return typeof name === 'string' ? name : undefined;
 }
 
-function localFunctionDeclaration(root: AstNode, name: string): AstNode | null {
-  const visit = (current: AstNode): AstNode | null => {
-    if (current !== root && isFunctionLike(current)) {
-      const id = current.id;
-      if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return current;
-      return null;
+function functionBodyStatements(root: AstNode): AstNode[] {
+  const body = root.body;
+  if (isNode(body) && body.type === 'BlockStatement' && Array.isArray(body.body)) {
+    return body.body.filter(isNode);
+  }
+  if (Array.isArray(body)) return body.filter(isNode);
+  return [];
+}
+
+function localFunctionDeclaration(root: AstNode, name: string, callStart = Number.POSITIVE_INFINITY): AstNode | null {
+  for (const statement of functionBodyStatements(root)) {
+    if (statement.type === 'FunctionDeclaration') {
+      const id = statement.id;
+      if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return statement;
+      continue;
     }
 
-    if (current.type === 'VariableDeclarator' && isNode(current.id) && identifierName(current.id) === name) {
-      const init = current.init;
-      if (isNode(init) && isFunctionLike(init)) return init;
+    if (statement.start > callStart) continue;
+
+    const declarations = statement.type === 'VariableDeclaration' && Array.isArray(statement.declarations)
+      ? statement.declarations
+      : [];
+    for (const declaration of declarations) {
+      if (!isNode(declaration)) continue;
+      if (isNode(declaration.id) && identifierName(declaration.id) === name) {
+        const init = declaration.init;
+        if (isNode(init) && isFunctionLike(init)) return init;
+      }
     }
+  }
 
-    for (const child of childNodes(current)) {
-      const found = visit(child);
-      if (found) return found;
-    }
-
-    return null;
-  };
-
-  return visit(root);
+  return null;
 }
 
 function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
@@ -451,12 +499,12 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
         }
 
         if (callName && !enteredHelpers.has(callName)) {
-          const helper = localFunctionDeclaration(node, callName);
+          const helper = localFunctionDeclaration(node, callName, current.start);
           if (helper) {
             enteredHelpers.add(callName);
             const found = visit(helper, true);
             enteredHelpers.delete(callName);
-            if (found != null) return found;
+            if (found != null) return current.start;
           }
         }
       }
@@ -484,6 +532,14 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
 function hasReturnBefore(node: AstNode, position: number, enterFunction = false): boolean {
   const enteredHelpers = new Set<string>();
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+    if (
+      current !== node &&
+      !allowFunctionBody &&
+      typeof current.start === 'number' &&
+      current.start > position
+    ) {
+      return false;
+    }
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'ReturnStatement' && current.start < position) return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
@@ -491,7 +547,7 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
       if (callee.type === 'Identifier') {
         const callName = identifierName(callee);
         if (callName && !enteredHelpers.has(callName)) {
-          const helper = localFunctionDeclaration(node, callName);
+          const helper = localFunctionDeclaration(node, callName, current.start);
           if (helper) {
             enteredHelpers.add(callName);
             if (visit(helper, true)) return true;
@@ -509,7 +565,7 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
 }
 
 function syntaxMaskedText(code: string): string {
-  const chars = [...code];
+  const chars = code.split('');
   for (const range of ignoredSyntaxRanges(code, false)) {
     for (let index = range.start; index < range.end && index < chars.length; index += 1) {
       chars[index] = ' ';
@@ -519,10 +575,109 @@ function syntaxMaskedText(code: string): string {
 }
 
 function hasFallbackLoopExit(snippet: string): boolean {
-  const withoutNestedFunctions = snippet
-    .replace(/=>\s*\{[\s\S]*?\}/g, '')
-    .replace(/function\b[^{}]*\{[\s\S]*?\}/g, '');
-  return /\b(break|return|throw|await|yield)\b/.test(withoutNestedFunctions);
+  const firstOpen = snippet.indexOf('{');
+  if (firstOpen < 0) return /\b(await|yield)\b/.test(snippet);
+
+  const nestedScopeDepths: number[] = [];
+  let pendingNestedScope = false;
+  let conciseArrowDepth: number | null = null;
+  let depth = 0;
+
+  const startsKeyword = (keyword: string, index: number): boolean =>
+    snippet.startsWith(keyword, index) && hasKeywordBoundary(snippet, keyword, index);
+
+  for (let index = firstOpen; index < snippet.length; index += 1) {
+    const char = snippet[index];
+
+    if (char === '}') {
+      if (nestedScopeDepths.at(-1) === depth) nestedScopeDepths.pop();
+      if (conciseArrowDepth === depth) conciseArrowDepth = null;
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      if (pendingNestedScope && depth > 1) nestedScopeDepths.push(depth);
+      pendingNestedScope = false;
+      continue;
+    }
+
+    if (depth <= 0) continue;
+
+    if (char === ';' && conciseArrowDepth === depth) {
+      conciseArrowDepth = null;
+      continue;
+    }
+
+    if (snippet.startsWith('=>', index)) {
+      const next = snippet.slice(index + 2).trimStart()[0];
+      if (next === '{') {
+        pendingNestedScope = true;
+      } else {
+        conciseArrowDepth = depth;
+      }
+      index += 1;
+      continue;
+    }
+
+    let consumedNestedKeyword = false;
+    for (const keyword of ['function', 'class', 'while', 'for', 'switch']) {
+      if (startsKeyword(keyword, index)) {
+        pendingNestedScope = true;
+        index += keyword.length - 1;
+        consumedNestedKeyword = true;
+        break;
+      }
+    }
+    if (consumedNestedKeyword) continue;
+
+    if (nestedScopeDepths.length > 0 || conciseArrowDepth != null) continue;
+
+    for (const keyword of ['break', 'return', 'throw', 'await', 'yield']) {
+      if (startsKeyword(keyword, index)) return true;
+    }
+  }
+
+  return false;
+}
+
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function fallbackRecursionFindings(code: string): EvaluationFinding[] {
+  const masked = syntaxMaskedText(code.replace(/^```[^\n]*$/gm, ''));
+  const findings: EvaluationFinding[] = [];
+
+  for (const match of masked.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g)) {
+    const fnName = match[1];
+    const start = match.index ?? 0;
+    if (!fnName) continue;
+    const snippet = trimToBalancedSnippet(masked.slice(start));
+    const selfCall = new RegExp(`\\b${escapeRegExpLiteral(fnName)}\\s*\\(`).exec(snippet.slice(match[0].length));
+    if (!selfCall) continue;
+    const beforeCall = snippet.slice(0, match[0].length + selfCall.index);
+    if (/\b(if|return|throw)\b/.test(beforeCall)) continue;
+    findings.push({
+      message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
+      severity: 'critical',
+      suggestion: `Add a base case (if/return) before the recursive call to "${fnName}"`,
+    });
+    break;
+  }
+
+  return findings;
+}
+
+function dedupeFindings(findings: EvaluationFinding[]): EvaluationFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    const key = `${finding.severity}\0${finding.message}\0${finding.suggestion ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function fallbackInfiniteLoopFindings(code: string): EvaluationFinding[] {
@@ -554,6 +709,7 @@ export class LogicLoopEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     const findings: EvaluationFinding[] = [];
+    const fullSourceParses = parsesAsJavaScript(input.content);
     const asts = parseJavaScript(input.content);
 
     for (const ast of asts) {
@@ -561,17 +717,21 @@ export class LogicLoopEvaluator implements Evaluator {
       this.checkUnguardedRecursion(ast, findings);
     }
 
-    if (!findings.some((finding) => finding.message.includes('infinite loop'))) {
+    if (!fullSourceParses && !findings.some((finding) => finding.message.includes('infinite loop'))) {
       findings.push(...fallbackInfiniteLoopFindings(input.content));
     }
+    if (!fullSourceParses && !findings.some((finding) => finding.message.includes('recursion'))) {
+      findings.push(...fallbackRecursionFindings(input.content));
+    }
 
-    const score = findings.length === 0 ? 1 : 0;
+    const uniqueFindings = dedupeFindings(findings);
+    const score = uniqueFindings.length === 0 ? 1 : 0;
 
     return {
       evaluatorName: this.name,
-      verdict: findings.length === 0 ? 'pass' : 'fail',
+      verdict: uniqueFindings.length === 0 ? 'pass' : 'fail',
       score,
-      findings,
+      findings: uniqueFindings,
     };
   }
 
@@ -603,7 +763,9 @@ export class LogicLoopEvaluator implements Evaluator {
         if (fnName) {
           const recursiveCallStart = findRecursiveCallStart(node, fnName);
           if (recursiveCallStart != null) {
-            const hasGuard = containsIfStatement(node) || hasReturnBefore(node, recursiveCallStart);
+            const hasGuard =
+              containsIfStatement(node, false, recursiveCallStart) ||
+              hasReturnBefore(node, recursiveCallStart);
             if (!hasGuard) {
               findings.push({
                 message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
