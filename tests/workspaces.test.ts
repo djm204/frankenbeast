@@ -159,18 +159,30 @@ describe('npm workspaces configuration', () => {
 
       const braceExpansionEntries = Object.entries(lockfile.packages ?? {})
         .filter(([path]) => path === 'node_modules/brace-expansion' || path.endsWith('/node_modules/brace-expansion'));
+      const braceExpansionFloorsByMajor: Record<number, string> = {
+        1: '1.1.15',
+        2: '2.1.1',
+        3: '3.0.2',
+        4: '4.0.1',
+        5: '5.0.7',
+      };
 
       expect(braceExpansionEntries.length, 'brace-expansion missing from package-lock.json').toBeGreaterThan(0);
       for (const [path, packageDetails] of braceExpansionEntries) {
         const lockedVersion = (packageDetails as { version?: string }).version;
 
         expect(lockedVersion, `brace-expansion at ${path} is missing a locked version`).toBeDefined();
-        if ((lockedVersion ?? '').startsWith('5.')) {
-          expect(
-            isAtLeast(lockedVersion ?? '0.0.0', '5.0.7'),
-            `brace-expansion at ${path} must stay outside the vulnerable 5.0.2 - 5.0.5 range`,
-          ).toBe(true);
-        }
+        const [major] = majorMinorPatch(lockedVersion ?? '0.0.0');
+        const minimumVersion = braceExpansionFloorsByMajor[major];
+
+        expect(
+          minimumVersion,
+          `brace-expansion at ${path} uses unsupported major ${major}; add its fixed floor before allowing it`,
+        ).toBeDefined();
+        expect(
+          isAtLeast(lockedVersion ?? '0.0.0', minimumVersion ?? '999.999.999'),
+          `brace-expansion at ${path} must stay on the fixed floor for major ${major}`,
+        ).toBe(true);
       }
     });
   });
