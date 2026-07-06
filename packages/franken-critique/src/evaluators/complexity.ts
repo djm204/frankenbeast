@@ -14,7 +14,6 @@ const ARROW_FUNCTION_PATTERN =
   /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
 const REGEX_PREFIX_CHARS = new Set([
   '(',
-  '[',
   '{',
   '=',
   ':',
@@ -62,9 +61,9 @@ function stripIgnoredBraceSyntax(content: string): string {
     }
 
     if (char === '`') {
-      const end = findTemplateLiteralEnd(content, i);
-      sanitized += maskIgnored(content, i, end);
-      i = end - 1;
+      const masked = maskTemplateLiteral(content, i);
+      sanitized += masked.content;
+      i = masked.end - 1;
       continue;
     }
 
@@ -127,6 +126,97 @@ function findTemplateLiteralEnd(content: string, start: number): number {
   return content.length;
 }
 
+function maskTemplateLiteral(
+  content: string,
+  start: number,
+): { content: string; end: number } {
+  let sanitized = ' ';
+
+  for (let i = start + 1; i < content.length; i++) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '\\') {
+      sanitized += maskIgnored(content, i, Math.min(i + 2, content.length));
+      i++;
+      continue;
+    }
+
+    if (char === '$' && next === '{') {
+      const expression = readTemplateExpression(content, i + 2);
+      sanitized += '  ';
+      sanitized += stripIgnoredBraceSyntax(expression.content);
+      if (expression.closed) sanitized += ' ';
+      i = expression.end - 1;
+      continue;
+    }
+
+    if (char === '`') {
+      sanitized += ' ';
+      return { content: sanitized, end: i + 1 };
+    }
+
+    sanitized += char === '\n' ? '\n' : ' ';
+  }
+
+  return { content: sanitized, end: content.length };
+}
+
+function readTemplateExpression(
+  content: string,
+  start: number,
+): { content: string; end: number; closed: boolean } {
+  let depth = 0;
+
+  for (let i = start; i < content.length; i++) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '/' && next === '/') {
+      i = findLineEnd(content, i + 2) - 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      i = findBlockCommentEnd(content, i + 2) - 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      i = findQuotedStringEnd(content, i, char) - 1;
+      continue;
+    }
+
+    if (char === '`') {
+      i = findTemplateLiteralEnd(content, i) - 1;
+      continue;
+    }
+
+    if (char === '/' && shouldStartRegexLiteral(content, i)) {
+      i = findRegexLiteralEnd(content, i) - 1;
+      continue;
+    }
+
+    if (char === '{') {
+      depth++;
+      continue;
+    }
+
+    if (char === '}') {
+      if (depth === 0) {
+        return {
+          content: content.slice(start, i),
+          end: i + 1,
+          closed: true,
+        };
+      }
+      depth--;
+    }
+  }
+
+  return { content: content.slice(start), end: content.length, closed: false };
+}
+
 function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
   const before = content.slice(0, slashIndex).trimEnd();
   if (!before) return true;
@@ -134,7 +224,9 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
   const previous = before.charAt(before.length - 1);
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
 
-  return /\b(?:return|throw|case|delete|typeof|void|in|of|yield)$/.test(before);
+  return /\b(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
+    before,
+  );
 }
 
 function findRegexLiteralEnd(content: string, start: number): number {

@@ -79,6 +79,42 @@ function stillNested() {
     );
   });
 
+  it('flags executable blocks inside template interpolations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'const output = `' +
+      '${(() => { if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } } })()}' +
+      '`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not mistake division after indexed access for a regex literal', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `
+const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces inside regex literals after await', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `async function matches(input) {
+  return await /{{{{{{/.test(input);
+}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
