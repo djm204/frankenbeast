@@ -53,6 +53,22 @@ function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], l
 
 const UrlSchema = z.string().url();
 
+function defaultDashboardApiUrl(): string {
+  return process.env.NODE_ENV === 'production'
+    ? 'https://127.0.0.1:3737'
+    : 'http://127.0.0.1:3737';
+}
+
+const DashboardApiUrlSchema = z.preprocess(
+  (value) => {
+    if (value === undefined) {
+      return defaultDashboardApiUrl();
+    }
+    return value;
+  },
+  UrlSchema,
+);
+
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
 const LEGACY_BACKEND_MAP: Record<string, string> = {
@@ -93,7 +109,7 @@ export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: UrlSchema.default('https://127.0.0.1:3737'),
+  apiUrl: DashboardApiUrlSchema,
 }).superRefine((value, ctx) => {
   if (!value.enabled) return;
   requireLoopbackServiceHost(ctx, value.host);
