@@ -1,4 +1,4 @@
-# franken-planner
+# @franken/planner
 
 **MOD-04** — Planning and Decomposition module for the Frankenbeast AI agent system.
 
@@ -65,7 +65,7 @@ import {
   RecoveryController,
   type ApprovalResult,
   type HITLGate,
-} from 'franken-planner';
+} from '@franken/planner';
 
 class BrowserConfirmHITLGate implements HITLGate {
   async requestApproval(markdown: string): Promise<ApprovalResult> {

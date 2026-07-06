@@ -294,7 +294,7 @@
 
 ## Current Batch: Beast Mode Hardening
 
-- [x] Write and approve the beast-mode hardening design spec covering the full live `franken-orchestrator` surface.
+- [x] Write and approve the beast-mode hardening design spec covering the full live `@franken/orchestrator` surface.
 - [x] Write a concrete implementation plan for in-place beast hardening with TDD-first execution chunks.
 - [x] Close config and flag no-op gaps on the live beast CLI surface.
 - [x] Replace permissive module fallback behavior on required beast paths with real implementations or hard failures.

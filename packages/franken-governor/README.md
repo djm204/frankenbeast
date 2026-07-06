@@ -111,7 +111,7 @@ The module follows hexagonal architecture with dependency injection at every bou
 
 - **Triggers** are stateless evaluators — no I/O, purely functional
 - **Channels** are the Strategy pattern — swap CLI for Slack (or both) without touching the gateway
-- **Audit** records every decision through a port interface compatible with MOD-03 (franken-brain)
+- **Audit** records every decision through a port interface compatible with MOD-03 (@franken/brain)
 - **Security** layer adds optional HMAC-SHA256 signed approvals and session-token issuance/storage/validation helpers; callers must enforce those tokens at the execution boundary
 
 ## Trigger Evaluators
@@ -146,7 +146,7 @@ Severity: **critical**
 
 ### SkillTrigger
 
-Fires when a skill/tool descriptor is marked as requiring HITL or is destructive. In the current repo, skill/provider handling is consolidated into `franken-orchestrator` and MCP suite surfaces rather than a standalone `franken-skills` package.
+Fires when a skill/tool descriptor is marked as requiring HITL or is destructive. In the current repo, skill/provider handling is consolidated into `@franken/orchestrator` and MCP suite surfaces rather than a standalone `franken-skills` package.
 
 ```typescript
 import { SkillTrigger, type SkillTriggerContext } from '@franken/governor';
@@ -388,7 +388,7 @@ Features:
 
 ## Audit Trail
 
-Every approval decision is recorded as an `EpisodicTraceRecord` compatible with MOD-03 (franken-brain).
+Every approval decision is recorded as an `EpisodicTraceRecord` compatible with MOD-03 (@franken/brain).
 
 ```typescript
 import { GovernorAuditRecorder, type GovernorMemoryPort } from '@franken/governor';
@@ -522,9 +522,9 @@ const config: GovernorConfig = {
 
 ## Integration with Sibling Modules
 
-### MOD-04: franken-planner (SelfCritiqueModule)
+### MOD-04: @franken/planner (SelfCritiqueModule)
 
-`GovernorCritiqueAdapter` implements the `SelfCritiqueModule` interface from franken-planner:
+`GovernorCritiqueAdapter` implements the `SelfCritiqueModule` interface from @franken/planner:
 
 ```typescript
 import { createGovernor, BudgetTrigger, SkillTrigger } from '@franken/governor';
@@ -584,7 +584,7 @@ function shouldGateSkill(contract: { id: string; constraints: { requires_hitl: b
 }
 ```
 
-### MOD-03: franken-brain (Audit Logging)
+### MOD-03: @franken/brain (Audit Logging)
 
 Implement `GovernorMemoryPort` to bridge to the memory orchestrator:
 
@@ -617,7 +617,7 @@ const recorder = new GovernorAuditRecorder(memoryPort);
 | `AmbiguityTrigger` | Evaluates plan ambiguity signals |
 | `TriggerRegistry` | Composes multiple evaluators |
 | `ApprovalGateway` | Orchestrates the approval flow |
-| `GovernorCritiqueAdapter` | SelfCritiqueModule adapter for franken-planner |
+| `GovernorCritiqueAdapter` | SelfCritiqueModule adapter for @franken/planner |
 | `GovernorAuditRecorder` | Maps decisions to EpisodicTraceRecord |
 | `SignatureVerifier` | HMAC-SHA256 sign/verify |
 | `SessionTokenStore` | In-memory token store with TTL expiry |

@@ -586,8 +586,8 @@ describe('GitBranchIsolator', () => {
       isolator.autoCommit('03_my_chunk', 'impl', 1);
 
       // Should have committed inside the submodule first
-      const subAdd = calls.find(c => c.cmd === 'git add -A' && c.cwd.includes('franken-orchestrator'));
-      const subCommit = calls.find(c => c.cmd.startsWith('git commit') && c.cwd.includes('franken-orchestrator'));
+      const subAdd = calls.find(c => c.cmd === 'git add -A' && c.cwd.includes('@franken/orchestrator'));
+      const subCommit = calls.find(c => c.cmd.startsWith('git commit') && c.cwd.includes('@franken/orchestrator'));
       expect(subAdd).toBeDefined();
       expect(subCommit).toBeDefined();
 
@@ -625,7 +625,7 @@ describe('GitBranchIsolator', () => {
     it('skips submodule commit when submodule has nothing to commit', () => {
       mockExecSync.mockImplementation((cmd: string, opts?: { cwd?: string }) => {
         if (cmd === 'git status --porcelain') return ' m franken-orchestrator\n';
-        if (cmd.startsWith('git commit') && opts?.cwd?.includes('franken-orchestrator')) {
+        if (cmd.startsWith('git commit') && opts?.cwd?.includes('@franken/orchestrator')) {
           throw new Error('nothing to commit');
         }
         return '';
@@ -656,7 +656,7 @@ describe('GitBranchIsolator', () => {
 describe('parseDirtySubmodules()', () => {
   it('extracts submodule paths from porcelain output', () => {
     const status = ' m franken-orchestrator\n M README.md\n?? new-file.ts\n';
-    expect(parseDirtySubmodules(status)).toEqual(['franken-orchestrator']);
+    expect(parseDirtySubmodules(status)).toEqual(['@franken/orchestrator']);
   });
 
   it('returns empty array when no dirty submodules', () => {
@@ -666,13 +666,13 @@ describe('parseDirtySubmodules()', () => {
 
   it('handles multiple dirty submodules', () => {
     const status = ' m franken-orchestrator\n m franken-types\n M file.ts\n';
-    expect(parseDirtySubmodules(status)).toEqual(['franken-orchestrator', 'franken-types']);
+    expect(parseDirtySubmodules(status)).toEqual(['@franken/orchestrator', 'franken-types']);
   });
 
   it('handles trimmed output where first line loses leading space', () => {
     // this.git() calls .trim() which strips the leading space from the first line
     const trimmed = 'm franken-orchestrator\n m franken-types';
-    expect(parseDirtySubmodules(trimmed)).toEqual(['franken-orchestrator', 'franken-types']);
+    expect(parseDirtySubmodules(trimmed)).toEqual(['@franken/orchestrator', 'franken-types']);
   });
 
   it('does not match regular modified files (capital M)', () => {
@@ -688,7 +688,7 @@ describe('detectAffectedPackages()', () => {
       'packages/franken-brain/src/store.ts',
       'packages/franken-types/src/types.ts',
     ];
-    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-types']);
+    expect(detectAffectedPackages(files)).toEqual(['@franken/brain', 'franken-types']);
   });
 
   it('returns empty array for root-only changes', () => {
@@ -702,7 +702,7 @@ describe('detectAffectedPackages()', () => {
       'packages/franken-brain/src/b.ts',
       'packages/franken-brain/tests/a.test.ts',
     ];
-    expect(detectAffectedPackages(files)).toEqual(['franken-brain']);
+    expect(detectAffectedPackages(files)).toEqual(['@franken/brain']);
   });
 
   it('sorts package names alphabetically', () => {
@@ -711,7 +711,7 @@ describe('detectAffectedPackages()', () => {
       'packages/franken-brain/src/index.ts',
       'packages/franken-critique/src/index.ts',
     ];
-    expect(detectAffectedPackages(files)).toEqual(['franken-brain', 'franken-critique', 'franken-planner']);
+    expect(detectAffectedPackages(files)).toEqual(['@franken/brain', 'franken-critique', '@franken/planner']);
   });
 
   it('handles mixed root and package files', () => {
@@ -719,7 +719,7 @@ describe('detectAffectedPackages()', () => {
       'CLAUDE.md',
       'packages/franken-orchestrator/src/cli/run.ts',
     ];
-    expect(detectAffectedPackages(files)).toEqual(['franken-orchestrator']);
+    expect(detectAffectedPackages(files)).toEqual(['@franken/orchestrator']);
   });
 });
 
@@ -729,11 +729,11 @@ describe('buildCommitScope()', () => {
   });
 
   it('returns single package scope', () => {
-    expect(buildCommitScope(['franken-brain'])).toBe('(franken-brain)');
+    expect(buildCommitScope(['@franken/brain'])).toBe('(franken-brain)');
   });
 
   it('returns comma-separated for 2-3 packages', () => {
-    expect(buildCommitScope(['franken-brain', 'franken-types'])).toBe('(franken-brain,franken-types)');
+    expect(buildCommitScope(['@franken/brain', 'franken-types'])).toBe('(@franken/brain,franken-types)');
     expect(buildCommitScope(['a', 'b', 'c'])).toBe('(a,b,c)');
   });
 
@@ -777,7 +777,7 @@ describe('autoCommit() scoped messages', () => {
     isolator.autoCommit('03_chunk', 'impl', 1);
 
     expect(mockExecSync).toHaveBeenCalledWith(
-      'git commit -m "auto(franken-brain,franken-types): impl 03_chunk iter 1"',
+      'git commit -m "auto(@franken/brain,franken-types): impl 03_chunk iter 1"',
       expect.objectContaining({ cwd: '/fake/repo' }),
     );
   });

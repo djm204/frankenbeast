@@ -22,7 +22,7 @@ const contextWithSignatures: PlanContext = {
       signatures: 'export interface ILogger { info(msg: string): void; }',
     },
   ],
-  packageDeps: { 'franken-orchestrator': ['vitest', 'typescript'] },
+  packageDeps: { '@franken/orchestrator': ['vitest', 'typescript'] },
   existingPatterns: [],
 };
 

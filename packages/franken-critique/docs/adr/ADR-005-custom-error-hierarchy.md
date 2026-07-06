@@ -13,7 +13,7 @@ MOD-06 has multiple failure modes that consumers need to distinguish programmati
 3. **Integration errors** — A sibling module (MOD-01, MOD-03) is unreachable or returns invalid data
 4. **Configuration errors** — Invalid evaluator setup, missing required evaluators
 
-Generic `Error` objects force consumers to parse error messages as strings, which is fragile and untestable. Sibling modules (franken-governor, franken-brain) use custom error hierarchies.
+Generic `Error` objects force consumers to parse error messages as strings, which is fragile and untestable. Sibling modules (franken-governor, @franken/brain) use custom error hierarchies.
 
 ## Decision
 
@@ -40,7 +40,7 @@ Each error class:
 - Consumers can catch specific error types: `catch (e) { if (e instanceof CircuitBreakerError) ... }`
 - Error codes enable reliable programmatic handling without string parsing
 - Structured context enables observability (MOD-05 can log error metadata)
-- Consistent with franken-governor and franken-brain error patterns
+- Consistent with franken-governor and @franken/brain error patterns
 
 ### Negative
 - More boilerplate than throwing plain `Error` objects

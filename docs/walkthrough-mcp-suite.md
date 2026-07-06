@@ -52,7 +52,7 @@ npx vitest run --reporter=verbose
 Or from repo root with turbo filter:
 
 ```sh
-npx turbo run test --filter=@fbeast/mcp-suite
+npx turbo run test --filter=@franken/mcp-suite
 ```
 
 ### Specific test files
@@ -113,7 +113,7 @@ npm run build
 ### 2. Link the CLI globally (development install)
 
 ```sh
-npm link --workspace=@fbeast/mcp-suite
+npm link --workspace=@franken/mcp-suite
 ```
 
 Verify:

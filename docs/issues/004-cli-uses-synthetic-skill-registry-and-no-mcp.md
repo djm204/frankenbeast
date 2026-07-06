@@ -1,7 +1,7 @@
 # Issue: CLI Uses A Synthetic Skill List And Cannot Reach Real Skills Or MCP
 
 Severity: high
-Area: `franken-orchestrator` execution
+Area: `@franken/orchestrator` execution
 
 ## Summary
 
@@ -22,9 +22,9 @@ Execution should resolve real skills through the registry, preserve `requires_hi
 
 - `docs/ARCHITECTURE.md:33-43`
 - `docs/RAMP_UP.md:13-23`
-- `franken-orchestrator/src/cli/dep-factory.ts:66-83`
-- `franken-orchestrator/src/cli/dep-factory.ts:172-186`
-- `franken-orchestrator/src/deps.ts:34-56`
+- `@franken/orchestrator/src/cli/dep-factory.ts:66-83`
+- `@franken/orchestrator/src/cli/dep-factory.ts:172-186`
+- `@franken/orchestrator/src/deps.ts:34-56`
 
 ## Impact
 

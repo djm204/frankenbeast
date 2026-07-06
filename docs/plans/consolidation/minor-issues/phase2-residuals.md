@@ -4,11 +4,11 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 ---
 
-## M1. Legacy code retained in franken-brain
+## M1. Legacy code retained in @franken/brain
 
 **Status:** Resolved (PR #264, Chunk B)
 **Severity:** Medium
-**Context:** The Phase 2.4 spec says "src/ contains only sqlite-brain.ts and index.ts." In practice, `src/episodic/` (EpisodicMemoryStore, IEpisodicStore, migrations) and `src/types/` (memory.ts, ids.ts, token-budget.ts) were retained because `franken-orchestrator/src/dep-factory.ts` imports `EpisodicMemoryStore` at runtime.
+**Context:** The Phase 2.4 spec says "src/ contains only sqlite-brain.ts and index.ts." In practice, `src/episodic/` (EpisodicMemoryStore, IEpisodicStore, migrations) and `src/types/` (memory.ts, ids.ts, token-budget.ts) were retained because `@franken/orchestrator/src/dep-factory.ts` imports `EpisodicMemoryStore` at runtime.
 
 **Resolution:** Deleted in Chunk B after Chunk A (#262) wired `createBeastDeps()` into dep-factory, replacing `EpisodicMemoryPortAdapter` with `SqliteBrainMemoryAdapter`.
 
@@ -23,7 +23,7 @@ Minor items identified during Phase 2 (Brain Rewrite) final scrutinization that 
 
 **Status:** Resolved (PR #264, Chunk B)
 **Severity:** Medium
-**Context:** `ulid` and `zod@^4.3.6` remain in franken-brain's package.json solely because the legacy episodic/types code uses them. SqliteBrain itself only depends on `better-sqlite3` and `@franken/types`.
+**Context:** `ulid` and `zod@^4.3.6` remain in @franken/brain's package.json solely because the legacy episodic/types code uses them. SqliteBrain itself only depends on `better-sqlite3` and `@franken/types`.
 
 **Resolution:** Removed `ulid` and `zod` from package.json in Chunk B alongside legacy code deletion.
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.39.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.39.0...franken-orchestrator-v0.39.1) (2026-07-06)
+## [0.39.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.39.0...@franken/orchestrator-v0.39.1) (2026-07-06)
 
 
 ### Bug Fixes
@@ -53,11 +53,11 @@
     * @franken/critique bumped from 0.6.9 to 0.6.10
     * @franken/governor bumped from 0.5.7 to 0.5.8
     * @franken/types bumped from 0.7.4 to 0.7.5
-    * @frankenbeast/observer bumped from 0.7.9 to 0.7.10
-    * franken-planner bumped from 0.4.7 to 0.4.8
-    * franken-brain bumped from 0.6.5 to 0.6.6
+    * @franken/observer bumped from 0.7.9 to 0.7.10
+    * @franken/planner bumped from 0.4.7 to 0.4.8
+    * @franken/brain bumped from 0.6.5 to 0.6.6
 
-## [0.39.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.1...franken-orchestrator-v0.39.0) (2026-07-05)
+## [0.39.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.38.1...@franken/orchestrator-v0.39.0) (2026-07-05)
 
 
 ### Features
@@ -85,7 +85,7 @@
 * **web:** keep control-plane operator token server-side ([#666](https://github.com/djm204/frankenbeast/issues/666)) ([d201851](https://github.com/djm204/frankenbeast/commit/d201851f14b35d1388acf4ecf67b872d719559fb))
 * **web:** remove operator token from frontend bundle ([fc1b8f5](https://github.com/djm204/frankenbeast/commit/fc1b8f5f7874488440b5755d4f71e8d6dd0774f1)), closes [#566](https://github.com/djm204/frankenbeast/issues/566)
 
-## [0.38.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.0...franken-orchestrator-v0.38.1) (2026-07-04)
+## [0.38.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.38.0...@franken/orchestrator-v0.38.1) (2026-07-04)
 
 
 ### Bug Fixes
@@ -95,7 +95,7 @@
 * **web:** persist agent detail edits ([#533](https://github.com/djm204/frankenbeast/issues/533)) ([de88101](https://github.com/djm204/frankenbeast/commit/de88101a2fcf9514c9785dee931177d098dd95ef))
 * **web:** wire Network page log fetching ([#532](https://github.com/djm204/frankenbeast/issues/532)) ([49051bd](https://github.com/djm204/frankenbeast/commit/49051bde6a4531c2d5d6439f596f1736e4d98b90))
 
-## [0.38.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.3...franken-orchestrator-v0.38.0) (2026-07-04)
+## [0.38.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.37.3...@franken/orchestrator-v0.38.0) (2026-07-04)
 
 
 ### Features
@@ -108,7 +108,7 @@
 * **cli:** auto-detect smart resume state ([#543](https://github.com/djm204/frankenbeast/issues/543)) ([461b5c0](https://github.com/djm204/frankenbeast/commit/461b5c0db7686ccdff71c2124e65306b55912d26))
 * **network:** track in-process comms gateway ([#487](https://github.com/djm204/frankenbeast/issues/487)) ([b3d7a3b](https://github.com/djm204/frankenbeast/commit/b3d7a3be68dabbfcf3ff6e967ab73b4c0d29677f))
 
-## [0.37.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.2...franken-orchestrator-v0.37.3) (2026-07-04)
+## [0.37.3](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.37.2...@franken/orchestrator-v0.37.3) (2026-07-04)
 
 
 ### Bug Fixes
@@ -122,21 +122,21 @@
 * **orchestrator:** validate refreshed execution plans ([#540](https://github.com/djm204/frankenbeast/issues/540)) ([a2c5a22](https://github.com/djm204/frankenbeast/commit/a2c5a222b4995ea333451cf712c28a6f8870c23f))
 * **web:** stream dashboard sse updates ([#539](https://github.com/djm204/frankenbeast/issues/539)) ([b7d429e](https://github.com/djm204/frankenbeast/commit/b7d429eacdb7f54f83a9cd24ca137415e679306c))
 
-## [0.37.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.1...franken-orchestrator-v0.37.2) (2026-07-04)
+## [0.37.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.37.1...@franken/orchestrator-v0.37.2) (2026-07-04)
 
 
 ### Bug Fixes
 
 * **runtime:** scope beast run configs to project root ([#525](https://github.com/djm204/frankenbeast/issues/525)) ([626b8de](https://github.com/djm204/frankenbeast/commit/626b8de0f3f3754b3ecfaa863924216fa063498b))
 
-## [0.37.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.37.0...franken-orchestrator-v0.37.1) (2026-07-04)
+## [0.37.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.37.0...@franken/orchestrator-v0.37.1) (2026-07-04)
 
 
 ### Bug Fixes
 
 * **orchestrator:** finalize issue-mode sessions ([#481](https://github.com/djm204/frankenbeast/issues/481)) ([6a53d9d](https://github.com/djm204/frankenbeast/commit/6a53d9d17697c0f78da6622f95ea3e506330edb3))
 
-## [0.37.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.36.0...franken-orchestrator-v0.37.0) (2026-07-03)
+## [0.37.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.36.0...@franken/orchestrator-v0.37.0) (2026-07-03)
 
 
 ### Features
@@ -153,7 +153,7 @@
 * **orchestrator:** mark container workspaces git-safe ([#476](https://github.com/djm204/frankenbeast/issues/476)) ([c6fb6a8](https://github.com/djm204/frankenbeast/commit/c6fb6a892748b077443a1f1c924324d19124f348))
 * **web:** wire dashboard Kill action to a real agent/run endpoint ([#450](https://github.com/djm204/frankenbeast/issues/450)) ([562ffad](https://github.com/djm204/frankenbeast/commit/562ffad0661821d7be53ce3d93dbb673b40262a5))
 
-## [0.36.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.5...franken-orchestrator-v0.36.0) (2026-07-01)
+## [0.36.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.5...@franken/orchestrator-v0.36.0) (2026-07-01)
 
 
 ### Features
@@ -174,7 +174,7 @@
 * **orchestrator:** fail closed when safety-critical modules are absent ([#394](https://github.com/djm204/frankenbeast/issues/394)) ([26eb340](https://github.com/djm204/frankenbeast/commit/26eb340c40fd62049bcdbe85a8194db26834462a))
 * **orchestrator:** operator-auth all control-plane routes + comms endpoints ([#396](https://github.com/djm204/frankenbeast/issues/396)) ([398c752](https://github.com/djm204/frankenbeast/commit/398c7524cd467d18ac03a75c046124104e8342ff))
 
-## [0.35.5](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.4...franken-orchestrator-v0.35.5) (2026-06-28)
+## [0.35.5](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.4...@franken/orchestrator-v0.35.5) (2026-06-28)
 
 
 ### Bug Fixes
@@ -182,7 +182,7 @@
 * **orchestrator:** reject stale Discord interaction signatures ([#386](https://github.com/djm204/frankenbeast/issues/386)) ([3890e8d](https://github.com/djm204/frankenbeast/commit/3890e8d90c5db9f93449d7760aa8bda27a5f08db)), closes [#352](https://github.com/djm204/frankenbeast/issues/352)
 * **orchestrator:** use argv subprocess calls for PR/git commands ([#388](https://github.com/djm204/frankenbeast/issues/388)) ([2a9098e](https://github.com/djm204/frankenbeast/commit/2a9098eda6beeb8ccdc612b2bcaca7e9fdc0fb76))
 
-## [0.35.4](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.3...franken-orchestrator-v0.35.4) (2026-06-28)
+## [0.35.4](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.3...@franken/orchestrator-v0.35.4) (2026-06-28)
 
 
 ### Bug Fixes
@@ -190,7 +190,7 @@
 * **critique:** make TokenBudgetBreaker actually enforce the budget ([#343](https://github.com/djm204/frankenbeast/issues/343)) ([b878f5f](https://github.com/djm204/frankenbeast/commit/b878f5f82700e3917e16da6c447cfa094b392595))
 * **observer,types:** guard token counters against overflow & bad input ([#341](https://github.com/djm204/frankenbeast/issues/341)) ([0a7c6b4](https://github.com/djm204/frankenbeast/commit/0a7c6b4852e959489fbb389971b56f0c64278e5b))
 
-## [0.35.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.2...franken-orchestrator-v0.35.3) (2026-06-13)
+## [0.35.3](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.2...@franken/orchestrator-v0.35.3) (2026-06-13)
 
 
 ### Bug Fixes
@@ -200,7 +200,7 @@
 * **orchestrator:** prove and harden MartinLoop abort-listener cleanup ([#324](https://github.com/djm204/frankenbeast/issues/324)) ([5d0465d](https://github.com/djm204/frankenbeast/commit/5d0465d2bd82e7f921c365c9dffe5e024f34c4ba))
 * **orchestrator:** resolve review action item hardening ([#336](https://github.com/djm204/frankenbeast/issues/336)) ([763178a](https://github.com/djm204/frankenbeast/commit/763178a1d1ce311cb6181184ef9f3ebbf60bb8e3))
 
-## [0.35.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.1...franken-orchestrator-v0.35.2) (2026-06-09)
+## [0.35.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.1...@franken/orchestrator-v0.35.2) (2026-06-09)
 
 
 ### Bug Fixes
@@ -212,14 +212,14 @@
 * **orchestrator:** persist BeastLogger file writes ([#315](https://github.com/djm204/frankenbeast/issues/315)) ([0bba450](https://github.com/djm204/frankenbeast/commit/0bba450dd52ee8331d73cfb342638119c4c4ab29))
 * **types:** add recovery fields to FrankenContext ([#312](https://github.com/djm204/frankenbeast/issues/312)) ([34c251a](https://github.com/djm204/frankenbeast/commit/34c251a62ea1eb054d08105beb1cbf659617698e))
 
-## [0.35.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.35.0...franken-orchestrator-v0.35.1) (2026-05-26)
+## [0.35.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.35.0...@franken/orchestrator-v0.35.1) (2026-05-26)
 
 
 ### Bug Fixes
 
 * **security:** mask common secrets in PII middleware ([#306](https://github.com/djm204/frankenbeast/issues/306)) ([97e1374](https://github.com/djm204/frankenbeast/commit/97e13748dcd3afa00037a7195aee755ba8d1ef60))
 
-## [0.35.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.34.1...franken-orchestrator-v0.35.0) (2026-05-25)
+## [0.35.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.34.1...@franken/orchestrator-v0.35.0) (2026-05-25)
 
 
 ### Features
@@ -231,35 +231,35 @@
 
 * **security:** sandbox Beast execution ([#298](https://github.com/djm204/frankenbeast/issues/298)) ([9a7b4f0](https://github.com/djm204/frankenbeast/commit/9a7b4f08a11bc3856d7090c4d2371e7048313cfd))
 
-## [0.34.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.34.0...franken-orchestrator-v0.34.1) (2026-05-21)
+## [0.34.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.34.0...@franken/orchestrator-v0.34.1) (2026-05-21)
 
 
 ### Bug Fixes
 
 * **security:** Chunk 1 — fail-closed HTTP & approval boundaries ([#296](https://github.com/djm204/frankenbeast/issues/296)) ([f281e8e](https://github.com/djm204/frankenbeast/commit/f281e8eb98c6208a7da2f06e2923c57bd9890090))
 
-## [0.34.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.33.1...franken-orchestrator-v0.34.0) (2026-05-17)
+## [0.34.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.33.1...@franken/orchestrator-v0.34.0) (2026-05-17)
 
 
 ### Features
 
 * **orchestrator:** beast mode hardening — explicit resume, fail-closed deps, verification matrix ([#292](https://github.com/djm204/frankenbeast/issues/292)) ([c0dd018](https://github.com/djm204/frankenbeast/commit/c0dd01899fd429e4b80bfb85218f0f98890cc136))
 
-## [0.33.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.33.0...franken-orchestrator-v0.33.1) (2026-05-11)
+## [0.33.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.33.0...@franken/orchestrator-v0.33.1) (2026-05-11)
 
 
 ### Bug Fixes
 
 * **mcp-suite:** mitigate hook hangs and uninstall residue ([#287](https://github.com/djm204/frankenbeast/issues/287)) ([b939d36](https://github.com/djm204/frankenbeast/commit/b939d36b68c8c3336af4df491819b32ec962d168))
 
-## [0.33.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.32.0...franken-orchestrator-v0.33.0) (2026-05-07)
+## [0.33.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.32.0...@franken/orchestrator-v0.33.0) (2026-05-07)
 
 
 ### Features
 
 * **web:** add observer analytics dashboard ([#286](https://github.com/djm204/frankenbeast/issues/286)) ([a375ec3](https://github.com/djm204/frankenbeast/commit/a375ec3c484f03bb67260050931609332d62bdd8))
 
-## [0.32.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.31.0...franken-orchestrator-v0.32.0) (2026-04-28)
+## [0.32.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.31.0...@franken/orchestrator-v0.32.0) (2026-04-28)
 
 
 ### Features
@@ -316,9 +316,9 @@
 * **consolidation:** remove 5 packages, absorb comms into orchestrator (Phase 1) ([1ee949d](https://github.com/djm204/frankenbeast/commit/1ee949d761c4eaf507858f63cccb68e0522bb8b1))
 * dashboard SSE routes and web UI panels ([0c8c8e0](https://github.com/djm204/frankenbeast/commit/0c8c8e0520be173cd921edda6c424cc41e7b1292))
 * **dashboard:** add beasts dispatch station ([2e5537a](https://github.com/djm204/frankenbeast/commit/2e5537a3cdecc078e55d2ecdfb84c62735bdf265))
-* **franken-orchestrator:** add hybrid llm cache primitives ([c929e29](https://github.com/djm204/frankenbeast/commit/c929e29875460703f002b2ec28d738a243d986ec))
-* **franken-orchestrator:** add intelligent LLM caching ([c00307c](https://github.com/djm204/frankenbeast/commit/c00307c91c7612f38aa86962f07d04e7feec6b61))
-* **franken-orchestrator:** cache repeated planning and issue prompts ([89b3591](https://github.com/djm204/frankenbeast/commit/89b3591b3b92213f14129f60d4cce3b40b15b941))
+* **@franken/orchestrator:** add hybrid llm cache primitives ([c929e29](https://github.com/djm204/frankenbeast/commit/c929e29875460703f002b2ec28d738a243d986ec))
+* **@franken/orchestrator:** add intelligent LLM caching ([c00307c](https://github.com/djm204/frankenbeast/commit/c00307c91c7612f38aa86962f07d04e7feec6b61))
+* **@franken/orchestrator:** cache repeated planning and issue prompts ([89b3591](https://github.com/djm204/frankenbeast/commit/89b3591b3b92213f14129f60d4cce3b40b15b941))
 * implement tracked agent init workflow ([366cc75](https://github.com/djm204/frankenbeast/commit/366cc756338774124ee5a4928a9ff451efec3bbd))
 * inject FRANKENBEAST_MODULE_* env vars from run config into beast processes ([6e7aa16](https://github.com/djm204/frankenbeast/commit/6e7aa16a069f4801750b6ee14de57143646cb532))
 * **network:** add canonical operator config ([aae7341](https://github.com/djm204/frankenbeast/commit/aae734127c218e412cf3a80449bc20193ef406b3))
@@ -497,33 +497,33 @@
 ### Miscellaneous
 
 * add firewall, skills, brain workspace deps to orchestrator ([a8317b7](https://github.com/djm204/frankenbeast/commit/a8317b74d0ed177e55ee46eaa1da6cabcd3ac6ad))
-* **franken-orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([f6bad37](https://github.com/djm204/frankenbeast/commit/f6bad3795ebc310ec9a6c9f44d05f2b76a164088))
-* **franken-orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([d1cbef6](https://github.com/djm204/frankenbeast/commit/d1cbef6a1fdf7c7196a2f9d2c8ef48fbb33a990d))
-* **franken-orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([695c286](https://github.com/djm204/frankenbeast/commit/695c286a3f69983c7cd8371330cf32b8cb46b8e1))
+* **@franken/orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([f6bad37](https://github.com/djm204/frankenbeast/commit/f6bad3795ebc310ec9a6c9f44d05f2b76a164088))
+* **@franken/orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([d1cbef6](https://github.com/djm204/frankenbeast/commit/d1cbef6a1fdf7c7196a2f9d2c8ef48fbb33a990d))
+* **@franken/orchestrator:** implement read-homepfkdevfrankenbeastfrankenbeastplan ([695c286](https://github.com/djm204/frankenbeast/commit/695c286a3f69983c7cd8371330cf32b8cb46b8e1))
 * **main:** release franken-governor 0.4.0 ([c1cb8f3](https://github.com/djm204/frankenbeast/commit/c1cb8f341abc745cf2a94a627e665ef961550433))
 * **main:** release franken-governor 0.4.0 ([c252078](https://github.com/djm204/frankenbeast/commit/c252078a6e951748b06996b54f0ab006283af0b3))
-* **main:** release franken-orchestrator 0.11.0 ([836fe1c](https://github.com/djm204/frankenbeast/commit/836fe1ce0d295c56ed04faef1fd42cbc61c824af))
-* **main:** release franken-orchestrator 0.11.0 ([b5c71f8](https://github.com/djm204/frankenbeast/commit/b5c71f8f352f8743b3bb2d5856ad184232dc36a9))
-* **main:** release franken-orchestrator 0.11.0 ([dbba9e9](https://github.com/djm204/frankenbeast/commit/dbba9e95f25530db1c3a5a6de738eae6c568ffe3))
-* **main:** release franken-orchestrator 0.11.0 ([0a8862e](https://github.com/djm204/frankenbeast/commit/0a8862e02dbb6adf852d687386d3cbb4ded1ba9f))
-* **main:** release franken-orchestrator 0.11.1 ([77db6f6](https://github.com/djm204/frankenbeast/commit/77db6f61228a1678c2d2f237cb421c395c1eff25))
-* **main:** release franken-orchestrator 0.11.1 ([949bd84](https://github.com/djm204/frankenbeast/commit/949bd84557d7428d374b4447e1d8356e7df26af2))
-* **main:** release franken-orchestrator 0.12.0 ([de2c822](https://github.com/djm204/frankenbeast/commit/de2c822d4dde5b70e98db06678646be8e98ea53b))
-* **main:** release franken-orchestrator 0.12.0 ([b56a34d](https://github.com/djm204/frankenbeast/commit/b56a34d554b495278b4037cc6c5cefb9d56e33df))
-* **main:** release franken-orchestrator 0.13.0 ([7bfef3d](https://github.com/djm204/frankenbeast/commit/7bfef3dc1dc8610bf7b05d621f5da28c91bfbef0))
-* **main:** release franken-orchestrator 0.13.0 ([3608647](https://github.com/djm204/frankenbeast/commit/36086470d523deb50d7e78542c1f2338980cc674))
-* **main:** release franken-orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
-* **main:** release franken-orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
-* **main:** release franken-orchestrator 0.14.0 ([17ab09e](https://github.com/djm204/frankenbeast/commit/17ab09e21765c8ac894627053937fd365a60dc6b))
-* **main:** release franken-orchestrator 0.14.0 ([36ed876](https://github.com/djm204/frankenbeast/commit/36ed876352be18ee97ff468e131da37d68a1a312))
-* **main:** release franken-orchestrator 0.14.1 ([3d8b754](https://github.com/djm204/frankenbeast/commit/3d8b754310111e59c50f0c2d180c441380a35b24))
-* **main:** release franken-orchestrator 0.14.1 ([2d784f7](https://github.com/djm204/frankenbeast/commit/2d784f79eaa3f34db01f59739c46b67e4d0c54e6))
-* **main:** release franken-orchestrator 0.14.2 ([8a41a9f](https://github.com/djm204/frankenbeast/commit/8a41a9f7665826b8994967e3972369e4bf845b8c))
-* **main:** release franken-orchestrator 0.14.2 ([3596d99](https://github.com/djm204/frankenbeast/commit/3596d99dc1416808b33a794b915b4fdffa487357))
-* **main:** release franken-orchestrator 0.15.0 ([a5795d1](https://github.com/djm204/frankenbeast/commit/a5795d1b3714d8e88d21098494d1c45a6414b757))
-* **main:** release franken-orchestrator 0.15.0 ([2f50aad](https://github.com/djm204/frankenbeast/commit/2f50aadde3aa7f8854ac8065e6643f94cd25959b))
-* **main:** release franken-orchestrator 0.16.0 ([bc5f0b6](https://github.com/djm204/frankenbeast/commit/bc5f0b693b741a7b5901fe4564e3ec4e5d2452e0))
-* **main:** release franken-orchestrator 0.16.0 ([1510dc9](https://github.com/djm204/frankenbeast/commit/1510dc94837ea66c15756f3869dc145ee9cc6ed2))
+* **main:** release @franken/orchestrator 0.11.0 ([836fe1c](https://github.com/djm204/frankenbeast/commit/836fe1ce0d295c56ed04faef1fd42cbc61c824af))
+* **main:** release @franken/orchestrator 0.11.0 ([b5c71f8](https://github.com/djm204/frankenbeast/commit/b5c71f8f352f8743b3bb2d5856ad184232dc36a9))
+* **main:** release @franken/orchestrator 0.11.0 ([dbba9e9](https://github.com/djm204/frankenbeast/commit/dbba9e95f25530db1c3a5a6de738eae6c568ffe3))
+* **main:** release @franken/orchestrator 0.11.0 ([0a8862e](https://github.com/djm204/frankenbeast/commit/0a8862e02dbb6adf852d687386d3cbb4ded1ba9f))
+* **main:** release @franken/orchestrator 0.11.1 ([77db6f6](https://github.com/djm204/frankenbeast/commit/77db6f61228a1678c2d2f237cb421c395c1eff25))
+* **main:** release @franken/orchestrator 0.11.1 ([949bd84](https://github.com/djm204/frankenbeast/commit/949bd84557d7428d374b4447e1d8356e7df26af2))
+* **main:** release @franken/orchestrator 0.12.0 ([de2c822](https://github.com/djm204/frankenbeast/commit/de2c822d4dde5b70e98db06678646be8e98ea53b))
+* **main:** release @franken/orchestrator 0.12.0 ([b56a34d](https://github.com/djm204/frankenbeast/commit/b56a34d554b495278b4037cc6c5cefb9d56e33df))
+* **main:** release @franken/orchestrator 0.13.0 ([7bfef3d](https://github.com/djm204/frankenbeast/commit/7bfef3dc1dc8610bf7b05d621f5da28c91bfbef0))
+* **main:** release @franken/orchestrator 0.13.0 ([3608647](https://github.com/djm204/frankenbeast/commit/36086470d523deb50d7e78542c1f2338980cc674))
+* **main:** release @franken/orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
+* **main:** release @franken/orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
+* **main:** release @franken/orchestrator 0.14.0 ([17ab09e](https://github.com/djm204/frankenbeast/commit/17ab09e21765c8ac894627053937fd365a60dc6b))
+* **main:** release @franken/orchestrator 0.14.0 ([36ed876](https://github.com/djm204/frankenbeast/commit/36ed876352be18ee97ff468e131da37d68a1a312))
+* **main:** release @franken/orchestrator 0.14.1 ([3d8b754](https://github.com/djm204/frankenbeast/commit/3d8b754310111e59c50f0c2d180c441380a35b24))
+* **main:** release @franken/orchestrator 0.14.1 ([2d784f7](https://github.com/djm204/frankenbeast/commit/2d784f79eaa3f34db01f59739c46b67e4d0c54e6))
+* **main:** release @franken/orchestrator 0.14.2 ([8a41a9f](https://github.com/djm204/frankenbeast/commit/8a41a9f7665826b8994967e3972369e4bf845b8c))
+* **main:** release @franken/orchestrator 0.14.2 ([3596d99](https://github.com/djm204/frankenbeast/commit/3596d99dc1416808b33a794b915b4fdffa487357))
+* **main:** release @franken/orchestrator 0.15.0 ([a5795d1](https://github.com/djm204/frankenbeast/commit/a5795d1b3714d8e88d21098494d1c45a6414b757))
+* **main:** release @franken/orchestrator 0.15.0 ([2f50aad](https://github.com/djm204/frankenbeast/commit/2f50aadde3aa7f8854ac8065e6643f94cd25959b))
+* **main:** release @franken/orchestrator 0.16.0 ([bc5f0b6](https://github.com/djm204/frankenbeast/commit/bc5f0b693b741a7b5901fe4564e3ec4e5d2452e0))
+* **main:** release @franken/orchestrator 0.16.0 ([1510dc9](https://github.com/djm204/frankenbeast/commit/1510dc94837ea66c15756f3869dc145ee9cc6ed2))
 * **main:** release frankenfirewall 0.5.0 ([c9939d9](https://github.com/djm204/frankenbeast/commit/c9939d9b8011f8f7cfaa240b2f1c79fb010db1cc))
 * release main ([41acdbe](https://github.com/djm204/frankenbeast/commit/41acdbe09c990c38ade8209b3283b4405399dcda))
 * release main ([19664bb](https://github.com/djm204/frankenbeast/commit/19664bb4baf0e8e0acb4c7042bcfee7f0799526b))
@@ -568,7 +568,7 @@
 ### Documentation
 
 * describe tracked agent init workflow ([efeebb8](https://github.com/djm204/frankenbeast/commit/efeebb8d7be5d0eb1abe2ef9323269f09a7bf0d7))
-* **franken-orchestrator:** document intelligent llm caching ([12a0ea0](https://github.com/djm204/frankenbeast/commit/12a0ea0009d1daa504ed8e12876fe0220cfcd712))
+* **@franken/orchestrator:** document intelligent llm caching ([12a0ea0](https://github.com/djm204/frankenbeast/commit/12a0ea0009d1daa504ed8e12876fe0220cfcd712))
 * update RAMP_UP files across all packages to reflect current integration status ([a6f9f62](https://github.com/djm204/frankenbeast/commit/a6f9f627373e426278eaa98471d3f78da8064d26))
 * update RAMP_UP for all packages with accurate integration status ([78220d6](https://github.com/djm204/frankenbeast/commit/78220d6ffb22720eae325f2f3f94823e6a29a463))
 
@@ -577,20 +577,20 @@
 
 * add integration test for dep-factory real module wiring, toggles, and fallback ([2f42b66](https://github.com/djm204/frankenbeast/commit/2f42b66caf2426d577b6d98ba233a68b523aa235))
 * delete 26 fluff test files (~283 tests) identified by audit ([03358d4](https://github.com/djm204/frankenbeast/commit/03358d4cdc745197e48b61855ed77571a37a2939))
-* **franken-orchestrator:** speed up dep-factory harnesses ([9f0e859](https://github.com/djm204/frankenbeast/commit/9f0e859c82f4b39f281500b802dedd58e900efef))
+* **@franken/orchestrator:** speed up dep-factory harnesses ([9f0e859](https://github.com/djm204/frankenbeast/commit/9f0e859c82f4b39f281500b802dedd58e900efef))
 * **orchestrator:** add comms round-trip integration test (Phase 4.5.05) ([b493ed3](https://github.com/djm204/frankenbeast/commit/b493ed3e3aafdab2f0e8f894c8e72c85815c9eb2))
 * **orchestrator:** add HITL approval integration test via comms gateway ([0e31a39](https://github.com/djm204/frankenbeast/commit/0e31a3924134d240d7478a943b84db547a479d35))
 * **orchestrator:** add provider failover integration tests (Phase 3.9) ([57d2e8f](https://github.com/djm204/frankenbeast/commit/57d2e8f9a883fd07920d4a07485189c324147352))
 * stabilize beast process failure fixtures ([88f4ed7](https://github.com/djm204/frankenbeast/commit/88f4ed7c15d13a1c316e7124e89f17d968b031e2))
 
-## [0.31.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.30.0...franken-orchestrator-v0.31.0) (2026-04-19)
+## [0.31.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.30.0...@franken/orchestrator-v0.31.0) (2026-04-19)
 
 
 ### Features
 
 * complete dual-mode launch chunks 6-8 and fix adapter wrapping ([#282](https://github.com/djm204/frankenbeast/issues/282)) ([100dd1f](https://github.com/djm204/frankenbeast/commit/100dd1f9b0bec44419e7412541e522f3785df472))
 
-## [0.30.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.29.0...franken-orchestrator-v0.30.0) (2026-04-10)
+## [0.30.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.29.0...@franken/orchestrator-v0.30.0) (2026-04-10)
 
 
 ### Features
@@ -605,7 +605,7 @@
 * **orchestrator:** resolve Chunk A residuals R1-R4 ([7572d68](https://github.com/djm204/frankenbeast/commit/7572d68b62c520e4745f9d218f4c5806af71df79))
 * **orchestrator:** resolve Chunk A residuals R1-R4 ([778acba](https://github.com/djm204/frankenbeast/commit/778acbae53803c1e2807c99c973392ee2e666429))
 
-## [0.29.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.28.0...franken-orchestrator-v0.29.0) (2026-04-01)
+## [0.29.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.28.0...@franken/orchestrator-v0.29.0) (2026-04-01)
 
 
 ### Features
@@ -638,7 +638,7 @@
 
 * **orchestrator:** add HITL approval integration test via comms gateway ([0e31a39](https://github.com/djm204/frankenbeast/commit/0e31a3924134d240d7478a943b84db547a479d35))
 
-## [0.28.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.27.0...franken-orchestrator-v0.28.0) (2026-03-27)
+## [0.28.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.27.0...@franken/orchestrator-v0.28.0) (2026-03-27)
 
 
 ### Features
@@ -658,7 +658,7 @@
 * **orchestrator:** migrate dep-factory to consolidated components ([e432b6d](https://github.com/djm204/frankenbeast/commit/e432b6dd845a059e292df70aba3f18c47f9cafe8))
 * **orchestrator:** wire createBeastDeps into dep-factory replacing stubs ([50184a3](https://github.com/djm204/frankenbeast/commit/50184a309f416b49243bf4ca5ae1b133771ca5ad))
 
-## [0.27.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.26.0...franken-orchestrator-v0.27.0) (2026-03-26)
+## [0.27.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.26.0...@franken/orchestrator-v0.27.0) (2026-03-26)
 
 
 ### Features
@@ -673,14 +673,14 @@
 * **orchestrator:** address PR [#260](https://github.com/djm204/frankenbeast/issues/260) review comments ([75d628e](https://github.com/djm204/frankenbeast/commit/75d628e5a7affc50615e48c0b41622f95d7af1b4))
 * **orchestrator:** swallow ENOENT in BeastLogStore.append ([02d303b](https://github.com/djm204/frankenbeast/commit/02d303be59caa5ac2c17be44f3315c42f0903d8a))
 
-## [0.26.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.25.0...franken-orchestrator-v0.26.0) (2026-03-26)
+## [0.26.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.25.0...@franken/orchestrator-v0.26.0) (2026-03-26)
 
 
 ### Features
 
 * Phase 7 — Observer Audit Trail ([ea50e97](https://github.com/djm204/frankenbeast/commit/ea50e97b7b4d88c3a0e7261be8d5b08bb630441e))
 
-## [0.25.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.24.0...franken-orchestrator-v0.25.0) (2026-03-26)
+## [0.25.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.24.0...@franken/orchestrator-v0.25.0) (2026-03-26)
 
 
 ### Features
@@ -718,7 +718,7 @@
 
 * **orchestrator:** add comms round-trip integration test (Phase 4.5.05) ([b493ed3](https://github.com/djm204/frankenbeast/commit/b493ed3e3aafdab2f0e8f894c8e72c85815c9eb2))
 
-## [0.24.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.23.0...franken-orchestrator-v0.24.0) (2026-03-23)
+## [0.24.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.23.0...@franken/orchestrator-v0.24.0) (2026-03-23)
 
 
 ### Features
@@ -739,7 +739,7 @@
 
 * **orchestrator:** add provider failover integration tests (Phase 3.9) ([57d2e8f](https://github.com/djm204/frankenbeast/commit/57d2e8f9a883fd07920d4a07485189c324147352))
 
-## [0.23.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.22.0...franken-orchestrator-v0.23.0) (2026-03-21)
+## [0.23.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.22.0...@franken/orchestrator-v0.23.0) (2026-03-21)
 
 
 ### Features
@@ -752,7 +752,7 @@
 
 * **consolidation:** address review findings — lockfile, comms routes, docs ([e406cc2](https://github.com/djm204/frankenbeast/commit/e406cc2b32cd977f6212b05a300a96ae78480914))
 
-## [0.22.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.21.1...franken-orchestrator-v0.22.0) (2026-03-20)
+## [0.22.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.21.1...@franken/orchestrator-v0.22.0) (2026-03-20)
 
 
 ### Features
@@ -799,21 +799,21 @@
 * honor run config provider and model precedence ([17d3432](https://github.com/djm204/frankenbeast/commit/17d3432f858d2590f2cb0683dbd2b661bd667fab))
 * **lint:** suppress false-positive prefer-const on deferred assignments ([df7779d](https://github.com/djm204/frankenbeast/commit/df7779d9d469ea26361da38147ba23e40321351d))
 
-## [0.21.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.21.0...franken-orchestrator-v0.21.1) (2026-03-15)
+## [0.21.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.21.0...@franken/orchestrator-v0.21.1) (2026-03-15)
 
 
 ### Bug Fixes
 
 * **orchestrator:** add missing @franken/critique and @franken/governor dependencies ([31e71f0](https://github.com/djm204/frankenbeast/commit/31e71f01d4aacd062ec42aebcf7bca3762a7de39))
 
-## [0.21.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.20.0...franken-orchestrator-v0.21.0) (2026-03-15)
+## [0.21.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.20.0...@franken/orchestrator-v0.21.0) (2026-03-15)
 
 
 ### Features
 
-* **franken-orchestrator:** add hybrid llm cache primitives ([c929e29](https://github.com/djm204/frankenbeast/commit/c929e29875460703f002b2ec28d738a243d986ec))
-* **franken-orchestrator:** add intelligent LLM caching ([c00307c](https://github.com/djm204/frankenbeast/commit/c00307c91c7612f38aa86962f07d04e7feec6b61))
-* **franken-orchestrator:** cache repeated planning and issue prompts ([89b3591](https://github.com/djm204/frankenbeast/commit/89b3591b3b92213f14129f60d4cce3b40b15b941))
+* **@franken/orchestrator:** add hybrid llm cache primitives ([c929e29](https://github.com/djm204/frankenbeast/commit/c929e29875460703f002b2ec28d738a243d986ec))
+* **@franken/orchestrator:** add intelligent LLM caching ([c00307c](https://github.com/djm204/frankenbeast/commit/c00307c91c7612f38aa86962f07d04e7feec6b61))
+* **@franken/orchestrator:** cache repeated planning and issue prompts ([89b3591](https://github.com/djm204/frankenbeast/commit/89b3591b3b92213f14129f60d4cce3b40b15b941))
 * **orchestrator:** intelligent LLM caching with work-scoped isolation ([b2d4e87](https://github.com/djm204/frankenbeast/commit/b2d4e870fb43f2dc91a887e058ccc06d961c0d4e))
 * **orchestrator:** wire critique module in dep-factory with fallback ([add4b1f](https://github.com/djm204/frankenbeast/commit/add4b1ffda6a1611662e5a0eab28e52f3741d855))
 * **orchestrator:** wire governor module in dep-factory with HITL channel and fallback ([931da7f](https://github.com/djm204/frankenbeast/commit/931da7f8e53729e99a6f1aa6e5221c471559444b))
@@ -825,7 +825,7 @@
 * **orchestrator:** guard readline creation behind TTY check in governor wiring ([7785c72](https://github.com/djm204/frankenbeast/commit/7785c72d21afa5d331ba02ab5ace298c40b580ed))
 * **orchestrator:** mock session/GC classes in dep-factory tests to prevent CI timeouts ([582dd03](https://github.com/djm204/frankenbeast/commit/582dd032bc37aae92d58559e5919b8b587f9d50a))
 
-## [0.20.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.3...franken-orchestrator-v0.20.0) (2026-03-13)
+## [0.20.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.19.3...@franken/orchestrator-v0.20.0) (2026-03-13)
 
 
 ### Features
@@ -841,7 +841,7 @@
 * wire real FirewallPortAdapter into createCliDeps with module toggle gate ([62ff60e](https://github.com/djm204/frankenbeast/commit/62ff60eabba5b27ca08b4df6a9ac54e0e925c0b3))
 * wire real SkillsPortAdapter into createCliDeps with module toggle gate ([9591a55](https://github.com/djm204/frankenbeast/commit/9591a552507e3519f8cda7825cc2fad5c4404229))
 
-## [0.19.3](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.2...franken-orchestrator-v0.19.3) (2026-03-13)
+## [0.19.3](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.19.2...@franken/orchestrator-v0.19.3) (2026-03-13)
 
 
 ### Bug Fixes
@@ -849,14 +849,14 @@
 * **orchestrator:** use robust cleanLlmJson for issue triage and planning ([1e88e62](https://github.com/djm204/frankenbeast/commit/1e88e6222bc1149311fb8ade17ac8eafa3525bc0))
 * **orchestrator:** use robust cleanLlmJson for issue triage and planning ([33dbf5a](https://github.com/djm204/frankenbeast/commit/33dbf5a483debc2460116f2b1cbbf0cd029a8061))
 
-## [0.19.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.1...franken-orchestrator-v0.19.2) (2026-03-13)
+## [0.19.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.19.1...@franken/orchestrator-v0.19.2) (2026-03-13)
 
 
 ### Bug Fixes
 
 * **orchestrator:** standardize subprocess failures ([#213](https://github.com/djm204/frankenbeast/issues/213)) ([130bce2](https://github.com/djm204/frankenbeast/commit/130bce266b71dcc84ba3e3b463d8ff5b4b46a475))
 
-## [0.19.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.19.0...franken-orchestrator-v0.19.1) (2026-03-13)
+## [0.19.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.19.0...@franken/orchestrator-v0.19.1) (2026-03-13)
 
 
 ### Bug Fixes
@@ -864,7 +864,7 @@
 * **orchestrator:** isolate issue stage sessions ([#212](https://github.com/djm204/frankenbeast/issues/212)) ([44a2c61](https://github.com/djm204/frankenbeast/commit/44a2c617327540bfd04253062e6017487656a3e2))
 * **orchestrator:** remove shell-backed git execution ([4f8f14d](https://github.com/djm204/frankenbeast/commit/4f8f14d881c150065ed7ccd0a665ea2f72a55cda))
 
-## [0.19.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.2...franken-orchestrator-v0.19.0) (2026-03-12)
+## [0.19.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.18.2...@franken/orchestrator-v0.19.0) (2026-03-12)
 
 
 ### Features
@@ -877,7 +877,7 @@
 * **orchestrator:** standardize issue execution via chunk files ([63942f6](https://github.com/djm204/frankenbeast/commit/63942f6b2a6aff3088a1f5c55c652719717fe7f1))
 * **orchestrator:** standardize issue execution via chunk files ([1e6d2eb](https://github.com/djm204/frankenbeast/commit/1e6d2ebbd6e8ad662ca6d70158078bf65070c28a))
 
-## [0.18.2](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.1...franken-orchestrator-v0.18.2) (2026-03-12)
+## [0.18.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.18.1...@franken/orchestrator-v0.18.2) (2026-03-12)
 
 
 ### Bug Fixes
@@ -886,7 +886,7 @@
 * **orchestrator:** make one-shot issues issue-aware and resumable ([09488cb](https://github.com/djm204/frankenbeast/commit/09488cb6f49ee2179ce9d2d0cfaff2f19cd1ef4f))
 * **orchestrator:** make one-shot issues issue-aware and resumable ([66a5f4a](https://github.com/djm204/frankenbeast/commit/66a5f4a08680225f41d805bd217bbd5b81bc483d))
 
-## [0.18.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.18.0...franken-orchestrator-v0.18.1) (2026-03-12)
+## [0.18.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.18.0...@franken/orchestrator-v0.18.1) (2026-03-12)
 
 
 ### Bug Fixes
@@ -897,7 +897,7 @@
 * **orchestrator:** honor provider selection and fallback semantics ([abf1b77](https://github.com/djm204/frankenbeast/commit/abf1b776226e67257ec39e2d34cd359bc3e7eb95))
 * preserve provider semantics during cli fallback ([5f34635](https://github.com/djm204/frankenbeast/commit/5f34635505c4dcc4f449e4f33b64c2d171189d5a))
 
-## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.17.0...franken-orchestrator-v0.18.0) (2026-03-12)
+## [0.18.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.17.0...@franken/orchestrator-v0.18.0) (2026-03-12)
 
 
 ### Features
@@ -910,7 +910,7 @@
 
 * broaden start endpoint status guard and clear selection on agent delete ([45026bf](https://github.com/djm204/frankenbeast/commit/45026bf0f7b7fc5edede087e00176f6ed09d3493))
 
-## [0.17.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.16.0...franken-orchestrator-v0.17.0) (2026-03-12)
+## [0.17.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.16.0...@franken/orchestrator-v0.17.0) (2026-03-12)
 
 
 ### Features
@@ -924,7 +924,7 @@
 * start tracked beast agents from dashboard ([c71865f](https://github.com/djm204/frankenbeast/commit/c71865fe25c0c1341f7228cd718d25156056d479))
 * start tracked beast agents from dashboard ([be65772](https://github.com/djm204/frankenbeast/commit/be65772b5fff6be06246a6817ef6a2d4e1afd3f0))
 
-## [0.16.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.15.0...franken-orchestrator-v0.16.0) (2026-03-12)
+## [0.16.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.15.0...@franken/orchestrator-v0.16.0) (2026-03-12)
 
 
 ### Features
@@ -939,7 +939,7 @@
 * **secret-store:** address PR review — 5 fixes for robustness and correctness ([89076b0](https://github.com/djm204/frankenbeast/commit/89076b06e9427b0adb38579f748009378ca1ae0a))
 * **secret-store:** fix exactOptionalPropertyTypes TS errors across all new interfaces ([bf8f267](https://github.com/djm204/frankenbeast/commit/bf8f267dec4f0658596a6cad03b67719031b6798))
 
-## [0.15.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.1...franken-orchestrator-v0.15.0) (2026-03-11)
+## [0.15.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.14.1...@franken/orchestrator-v0.15.0) (2026-03-11)
 
 
 ### Features
@@ -957,7 +957,7 @@
 * make tracked agent dispatch transactional ([4f622d2](https://github.com/djm204/frankenbeast/commit/4f622d2ac72f665267d7a7a2280baa51b970ac55))
 * migrate legacy beast run schema ([f97d7f5](https://github.com/djm204/frankenbeast/commit/f97d7f548551afa95246563c7fc914e306f74247))
 
-## [0.14.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.14.0...franken-orchestrator-v0.14.1) (2026-03-11)
+## [0.14.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.14.0...@franken/orchestrator-v0.14.1) (2026-03-11)
 
 
 ### Bug Fixes
@@ -965,7 +965,7 @@
 * **beasts:** wire dashboard control routes into chat server ([578f5cc](https://github.com/djm204/frankenbeast/commit/578f5cc4d5b93b0c3ecabec12f8dc222af9ccd16))
 * wire beast control into chat server ([aa7d26e](https://github.com/djm204/frankenbeast/commit/aa7d26ed240621af2273d554ef8268c4d5ecbdb8))
 
-## [0.14.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.13.0...franken-orchestrator-v0.14.0) (2026-03-11)
+## [0.14.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.13.0...@franken/orchestrator-v0.14.0) (2026-03-11)
 
 
 ### Features
@@ -974,7 +974,7 @@
 * **orchestrator:** support upstream repo targeting for issues ([20d0585](https://github.com/djm204/frankenbeast/commit/20d058503589bdf940b4cbc497b5e22ec3310fe8))
 * **orchestrator:** support upstream repo targeting for issues ([aa1819e](https://github.com/djm204/frankenbeast/commit/aa1819e99105376a13b4b8e9f927aca5ba1aba5d))
 
-## [0.13.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.12.0...franken-orchestrator-v0.13.0) (2026-03-10)
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.12.0...@franken/orchestrator-v0.13.0) (2026-03-10)
 
 
 ### Features
@@ -991,7 +991,7 @@
 * **observer:** fix cost tracking and document implementation gaps ([7054989](https://github.com/djm204/frankenbeast/commit/7054989522894d5bd2429d71ef73d041e9599725))
 * **observer:** fix zero-cost tracking and document implementation gaps ([c75c322](https://github.com/djm204/frankenbeast/commit/c75c322b46dc804873cff78c1ae8756104092cb7))
 
-## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.11.1...franken-orchestrator-v0.12.0) (2026-03-10)
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.11.1...@franken/orchestrator-v0.12.0) (2026-03-10)
 
 
 ### Features
@@ -1007,7 +1007,7 @@
 * **orchestrator:** dispatch beasts from chat sessions ([b4336ab](https://github.com/djm204/frankenbeast/commit/b4336ab17b830e4777cf4d302037628c01887585))
 * **orchestrator:** persist beast runs attempts and logs ([b8344e8](https://github.com/djm204/frankenbeast/commit/b8344e8767b4b3bbc5fdb9db67cbf34a645abf5b))
 
-## [0.11.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.11.0...franken-orchestrator-v0.11.1) (2026-03-10)
+## [0.11.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.11.0...@franken/orchestrator-v0.11.1) (2026-03-10)
 
 
 ### Bug Fixes
@@ -1015,7 +1015,7 @@
 * **network:** harden startup flow and dashboard connectivity ([b881f2b](https://github.com/djm204/frankenbeast/commit/b881f2bd2d7bf5aa68e9e1f76986d18204811021))
 * **network:** harden startup flow and dashboard connectivity ([c312e9f](https://github.com/djm204/frankenbeast/commit/c312e9fd4dd6e2db0f3388da765a3bcb6d7e1b92))
 
-## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.10.0...franken-orchestrator-v0.11.0) (2026-03-10)
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.10.0...@franken/orchestrator-v0.11.0) (2026-03-10)
 
 
 ### Features
@@ -1039,7 +1039,7 @@
 * **comms:** resolve build errors and unify websocket types ([2669d44](https://github.com/djm204/frankenbeast/commit/2669d4487bdfab9ef3ba522ce5a2dfa4b929cc7f))
 * **comms:** resolve build errors and unify websocket types ([bfd0fb8](https://github.com/djm204/frankenbeast/commit/bfd0fb8cbb4656a719d9024a96bb5ca60734c40d))
 
-## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.9.0...franken-orchestrator-v0.10.0) (2026-03-10)
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.9.0...@franken/orchestrator-v0.10.0) (2026-03-10)
 
 
 ### Features
@@ -1049,14 +1049,14 @@
 * **cli:** add chat-server command surface ([6b456b4](https://github.com/djm204/frankenbeast/commit/6b456b46523c7bb7add0d96e1b1f13a8d10af354))
 * **cli:** run websocket chat server from frankenbeast ([7ea6b3c](https://github.com/djm204/frankenbeast/commit/7ea6b3ce1b793cf8f4fee46d99d765c6ff9a38b0))
 
-## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.8.0...franken-orchestrator-v0.9.0) (2026-03-09)
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.8.0...@franken/orchestrator-v0.9.0) (2026-03-09)
 
 
 ### Features
 
 * add websocket-backed Frankenbeast dashboard chat ([f0e089d](https://github.com/djm204/frankenbeast/commit/f0e089dea6f35685f016b0a373c6e3440ccc1e45))
 
-## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.7.0...franken-orchestrator-v0.8.0) (2026-03-09)
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.7.0...@franken/orchestrator-v0.8.0) (2026-03-09)
 
 
 ### Features
@@ -1066,7 +1066,7 @@
 * **orchestrator:** make MartinLoop chunk-session aware ([936ca0b](https://github.com/djm204/frankenbeast/commit/936ca0b7f5907acfbe9badbb20665f3f8b06cb81))
 * **orchestrator:** wire chunk session execution and recovery ([32c5cfb](https://github.com/djm204/frankenbeast/commit/32c5cfb7d47bdf2ad89efc35c17ceaf03f767d3e))
 
-## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.6.0...franken-orchestrator-v0.7.0) (2026-03-09)
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.6.0...@franken/orchestrator-v0.7.0) (2026-03-09)
 
 
 ### Features
@@ -1077,14 +1077,14 @@
 * **chat:** replace stub executor with ChatAgentExecutor in chat subcommand ([64f92b0](https://github.com/djm204/frankenbeast/commit/64f92b0b445212a639bf3b6d4524623607a2ce77))
 * **chat:** session continuation, input blocking, spinner, output sanitization, color diff ([e4eb862](https://github.com/djm204/frankenbeast/commit/e4eb86252fc641a17eded66040059c57f4e82702))
 * **chat:** wire /run and /plan slash commands to TurnRunner dispatch ([97062ce](https://github.com/djm204/frankenbeast/commit/97062ceb5c41fe4dc1a0144d34900f2f86ac60d7))
-* **franken-orchestrator:** add conversational chat interface with CLI, HTTP, SSE, and web UI ([13c01f4](https://github.com/djm204/frankenbeast/commit/13c01f410ab81f5fc8223543d567e454701365fb))
+* **@franken/orchestrator:** add conversational chat interface with CLI, HTTP, SSE, and web UI ([13c01f4](https://github.com/djm204/frankenbeast/commit/13c01f410ab81f5fc8223543d567e454701365fb))
 
 
 ### Bug Fixes
 
 * **chat:** foundational chat REPL fixes from prior session ([c3e8300](https://github.com/djm204/frankenbeast/commit/c3e8300ebd831bbae059007217e4dddbace5631f))
 
-## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.5.0...franken-orchestrator-v0.6.0) (2026-03-09)
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.5.0...@franken/orchestrator-v0.6.0) (2026-03-09)
 
 
 ### Features
@@ -1099,48 +1099,48 @@
 * **planner:** refactor LlmGraphBuilder to multi-pass pipeline with 10-field prompts ([3fd09af](https://github.com/djm204/frankenbeast/commit/3fd09af56fba1ce17566f18447027ffd3275c636))
 * **planner:** wire multi-pass pipeline and ChunkFileWriter into session.ts ([3dfd30c](https://github.com/djm204/frankenbeast/commit/3dfd30cdff42c359b71945a51b25e5d52ad946ce))
 
-## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.4.1...franken-orchestrator-v0.5.0) (2026-03-09)
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.4.1...@franken/orchestrator-v0.5.0) (2026-03-09)
 
 
 ### Features
 
-* **franken-orchestrator:** add spinner to LLM progress, extract cleanLlmJson utility, use lastChunks for plan output ([dccc569](https://github.com/djm204/frankenbeast/commit/dccc56923cda689fc06bdbbd3285400e0342f574))
+* **@franken/orchestrator:** add spinner to LLM progress, extract cleanLlmJson utility, use lastChunks for plan output ([dccc569](https://github.com/djm204/frankenbeast/commit/dccc56923cda689fc06bdbbd3285400e0342f574))
 
-## [0.4.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.4.0...franken-orchestrator-v0.4.1) (2026-03-09)
+## [0.4.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.4.0...@franken/orchestrator-v0.4.1) (2026-03-09)
 
 
 ### Bug Fixes
 
-* **franken-orchestrator:** prevent plugin poisoning in spawned CLI for planning ([3c9ea2f](https://github.com/djm204/frankenbeast/commit/3c9ea2f22f32ef329127ded67147f7efb25827fc))
+* **@franken/orchestrator:** prevent plugin poisoning in spawned CLI for planning ([3c9ea2f](https://github.com/djm204/frankenbeast/commit/3c9ea2f22f32ef329127ded67147f7efb25827fc))
 
-## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.3.1...franken-orchestrator-v0.4.0) (2026-03-09)
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.3.1...@franken/orchestrator-v0.4.0) (2026-03-09)
 
 
 ### Features
 
-* **franken-orchestrator:** stream LLM progress during planning phase ([9beeb0b](https://github.com/djm204/frankenbeast/commit/9beeb0b5618b02a0eea3323c365ef25e5f8577e5))
+* **@franken/orchestrator:** stream LLM progress during planning phase ([9beeb0b](https://github.com/djm204/frankenbeast/commit/9beeb0b5618b02a0eea3323c365ef25e5f8577e5))
 
 
 ### Bug Fixes
 
-* **franken-orchestrator:** strip hookSpecificOutput from LLM responses at all parse sites ([483ce6b](https://github.com/djm204/frankenbeast/commit/483ce6b944b8db6dd35db2c16b0275091bb10fda))
+* **@franken/orchestrator:** strip hookSpecificOutput from LLM responses at all parse sites ([483ce6b](https://github.com/djm204/frankenbeast/commit/483ce6b944b8db6dd35db2c16b0275091bb10fda))
 * hook output stripping + stream LLM progress during planning ([5bcc669](https://github.com/djm204/frankenbeast/commit/5bcc6693194edef1775688fc0082a2d1102a1b4c))
 
-## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.3.0...franken-orchestrator-v0.3.1) (2026-03-09)
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.3.0...@franken/orchestrator-v0.3.1) (2026-03-09)
 
 
 ### Bug Fixes
 
 * release-please scoping and commit hygiene ([742c7cc](https://github.com/djm204/frankenbeast/commit/742c7cc7792aac3f6f85ee638ba3b165de34bc5f))
 
-## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.2.0...franken-orchestrator-v0.3.0) (2026-03-09)
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.2.0...@franken/orchestrator-v0.3.0) (2026-03-09)
 
 
 ### Features
 
 * eslint configs, gitignore hygiene, CLI guard fix ([#99](https://github.com/djm204/frankenbeast/issues/99)) ([87d7427](https://github.com/djm204/frankenbeast/commit/87d74276a909b272141119ce151647118725ce2e))
 
-## [0.2.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.1.0...franken-orchestrator-v0.2.0) (2026-03-09)
+## [0.2.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.1.0...@franken/orchestrator-v0.2.0) (2026-03-09)
 
 
 ### Features

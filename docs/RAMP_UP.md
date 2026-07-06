@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`: the consolidated core packages, `franken-mcp-suite` (`@fbeast/mcp-suite`), and `live-bench` (`@fbeast/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md) and ADR-031 for the earlier consolidation history; do not treat the deleted pre-consolidation MCP package as the current MCP suite.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`: the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md) and ADR-031 for the earlier consolidation history; do not treat the deleted pre-consolidation MCP package as the current MCP suite.
 
 ## Modules
 
@@ -18,8 +18,8 @@ A deterministic guardrails framework for AI agents organized as an **npm workspa
 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
 | `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics |
 | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, comms gateway (Slack/Discord/Telegram/WhatsApp), beast control APIs, phases, circuit breakers, skill execution, crash recovery |
-| `packages/franken-mcp-suite/` | MCP suite (`@fbeast/mcp-suite`) for tool registry/server/proxy integrations |
-| `packages/live-bench/` | Live benchmark harness (`@fbeast/live-bench`) and fixture workspace tooling |
+| `packages/franken-mcp-suite/` | MCP suite (`@franken/mcp-suite`) for tool registry/server/proxy integrations |
+| `packages/live-bench/` | Live benchmark harness (`@franken/live-bench`) and fixture workspace tooling |
 
 ## The Beast Loop (4 Phases)
 

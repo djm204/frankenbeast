@@ -189,7 +189,7 @@ vi.mock('../../../src/issues/issue-runner.js', () => ({
   IssueRunner: vi.fn(function () {}),
 }));
 
-vi.mock('franken-brain', () => ({
+vi.mock('@franken/brain', () => ({
   MemoryOrchestrator: vi.fn(function () {}),
   EpisodicMemoryStore: vi.fn(function () {}),
   SemanticMemoryStore: vi.fn(function () {}),

@@ -1,7 +1,7 @@
 # Issue: Interview And Plan Phases Leak Trace Viewer Resources
 
 Severity: medium
-Area: `franken-orchestrator` CLI resource management
+Area: `@franken/orchestrator` CLI resource management
 
 ## Summary
 
@@ -20,9 +20,9 @@ Every `createCliDeps()` call should release any trace viewer and related resourc
 
 ## Evidence
 
-- `franken-orchestrator/src/cli/dep-factory.ts:113-170`
-- `franken-orchestrator/src/cli/session.ts:84-156`
-- `franken-orchestrator/src/cli/session.ts:158-203`
+- `@franken/orchestrator/src/cli/dep-factory.ts:113-170`
+- `@franken/orchestrator/src/cli/session.ts:84-156`
+- `@franken/orchestrator/src/cli/session.ts:158-203`
 
 ## Impact
 

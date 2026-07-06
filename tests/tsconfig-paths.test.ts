@@ -6,24 +6,14 @@ const ROOT = join(import.meta.dirname, '..');
 const readJson = (rel: string) =>
   JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
 
-const ALL_MODULES = [
-  'franken-brain',
-  'franken-critique',
-  'franken-governor',
-  'franken-observer',
-  'franken-orchestrator',
-  'franken-planner',
-  'franken-types',
-] as const;
-
 const EXPECTED_ALIASES: Record<string, string> = {
-  'franken-brain': './packages/franken-brain/src/index.ts',
-  'franken-planner': './packages/franken-planner/src/index.ts',
-  '@frankenbeast/observer': './packages/franken-observer/src/index.ts',
+  '@franken/brain': './packages/franken-brain/src/index.ts',
+  '@franken/planner': './packages/franken-planner/src/index.ts',
+  '@franken/observer': './packages/franken-observer/src/index.ts',
   '@franken/critique': './packages/franken-critique/src/index.ts',
   '@franken/governor': './packages/franken-governor/src/index.ts',
   '@franken/types': './packages/franken-types/src/index.ts',
-  'franken-orchestrator': './packages/franken-orchestrator/src/index.ts',
+  '@franken/orchestrator': './packages/franken-orchestrator/src/index.ts',
 };
 
 describe('tsconfig.json path aliases', () => {
@@ -43,6 +33,13 @@ describe('tsconfig.json path aliases', () => {
       expect(paths[alias]).toEqual([expectedPath]);
     });
   }
+
+  it('exposes only @franken-scoped first-party aliases', () => {
+    expect(Object.keys(paths).sort()).toEqual(Object.keys(EXPECTED_ALIASES).sort());
+    for (const alias of Object.keys(paths)) {
+      expect(alias, `${alias} must use the canonical @franken scope`).toMatch(/^@franken\//);
+    }
+  });
 
   it('has no root-level module paths (no ./franken-* or ./frankenfirewall/)', () => {
     const raw = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8');

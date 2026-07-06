@@ -8,7 +8,7 @@
 
 MOD-06 (Self-Critique & Reflection) is a Node.js module that evaluates agent output against guardrails and architectural rules. It interfaces with MOD-01 (Guardrails/Firewall), MOD-03 (Memory/Brain), and MOD-04 (Planner). The module handles complex domain types: evaluation results, critique feedback, circuit breaker state, and correction requests.
 
-All sibling Frankenbeast modules (franken-governor, franken-brain, franken-skills, frankenfirewall) use TypeScript strict mode. Consistency across the monorepo is essential for cross-module type safety.
+All sibling Frankenbeast modules (franken-governor, @franken/brain, franken-skills, frankenfirewall) use TypeScript strict mode. Consistency across the monorepo is essential for cross-module type safety.
 
 ## Decision
 
@@ -16,7 +16,7 @@ Use **TypeScript (strict mode)** targeting Node.js `>=22.13.0 <23 || >=24.0.0 <2
 
 - `tsconfig.json`: `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`
 - ESM modules (`"type": "module"` in `package.json`)
-- `module: "NodeNext"`, `moduleResolution: "NodeNext"` (Pattern A, consistent with franken-governor, franken-brain, franken-skills)
+- `module: "NodeNext"`, `moduleResolution: "NodeNext"` (Pattern A, consistent with franken-governor, @franken/brain, franken-skills)
 - Vitest as the test runner
 - Package name: `@franken/critique`
 

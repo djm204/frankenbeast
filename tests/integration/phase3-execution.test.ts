@@ -21,8 +21,8 @@ import {
   createSessionToken,
 } from '@franken/governor';
 
-import type { RationaleBlock } from 'franken-planner';
-import { createTaskId } from 'franken-planner';
+import type { RationaleBlock } from '@franken/planner';
+import { createTaskId } from '@franken/planner';
 
 import {
   makeApprovalChannel,

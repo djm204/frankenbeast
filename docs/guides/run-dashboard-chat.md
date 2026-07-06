@@ -4,7 +4,7 @@ This guide starts the Frankenbeast dashboard chat with the real CLI-chat-compati
 
 ## What you are starting
 
-- `franken-orchestrator` runs the backend HTTP and WebSocket chat server
+- `@franken/orchestrator` runs the backend HTTP and WebSocket chat server
 - `franken-web` runs the dashboard UI in Vite
 - the web chat uses the same chat runtime semantics as `frankenbeast chat`
 
@@ -49,7 +49,7 @@ npm --workspace franken-orchestrator run chat-server -- --provider codex
 In a second terminal:
 
 ```bash
-npm --workspace @frankenbeast/web run dev:chat
+npm --workspace @franken/web run dev:chat
 ```
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
@@ -57,7 +57,7 @@ That proxies same-origin browser requests to `http://127.0.0.1:3737`; production
 If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target:
 
 ```bash
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
 Open the URL Vite prints, usually:
@@ -111,5 +111,5 @@ This is the default, verified setup:
 
 ```bash
 npm --workspace franken-orchestrator run chat-server
-npm --workspace @frankenbeast/web run dev:chat
+npm --workspace @franken/web run dev:chat
 ```

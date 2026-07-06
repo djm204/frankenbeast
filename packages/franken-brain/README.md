@@ -1,8 +1,8 @@
-# franken-brain — MOD-03: Memory Systems
+# @franken/brain — MOD-03: Memory Systems
 
 Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `DEFAULT_WORKING_MEMORY_LIMITS`, and the `WorkingMemoryLimits` type.
 
-`franken-brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
+`@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ npm run build             # compile to dist/
 ## Usage
 
 ```typescript
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 
 const brain = new SqliteBrain('.fbeast/beast.db');
 

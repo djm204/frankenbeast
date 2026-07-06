@@ -1,9 +1,9 @@
-# franken-brain (MOD-03) Ramp-Up
+# @franken/brain (MOD-03) Ramp-Up
 
-**Status**: **GHOST** — This module is currently **unwired** from the primary `franken-orchestrator` production path. The orchestrator uses a `stubMemory` adapter in `dep-factory.ts`.
+**Status**: **GHOST** — This module is currently **unwired** from the primary `@franken/orchestrator` production path. The orchestrator uses a `stubMemory` adapter in `dep-factory.ts`.
 
 ## Module Overview
-`franken-brain` is the tiered memory system for the Frankenbeast agent. It provides Working Memory (in-process), Episodic Memory (SQLite trace logs), and Semantic Memory (ChromaDB vector store).
+`@franken/brain` is the tiered memory system for the Frankenbeast agent. It provides Working Memory (in-process), Episodic Memory (SQLite trace logs), and Semantic Memory (ChromaDB vector store).
 
 ## Current Functionality (Implemented but Unused)
 - **Memory Orchestrator**: Unified interface for recording turns and searching context.
@@ -13,7 +13,7 @@
 - **PII Guard**: Scans incoming and outgoing data for sensitive information.
 
 ## Integration Gap
-The `franken-orchestrator` currently bypasses this package. While the logic here is fully tested and functional, the agent operates without long-term episodic or semantic memory in its current CLI configuration. **Phase 8 Focus**: Replace the orchestrator's memory stub with the concrete implementation in this package.
+The `@franken/orchestrator` currently bypasses this package. While the logic here is fully tested and functional, the agent operates without long-term episodic or semantic memory in its current CLI configuration. **Phase 8 Focus**: Replace the orchestrator's memory stub with the concrete implementation in this package.
 
 ## Key API
 - `MemoryOrchestrator`: The primary entry point for all memory operations.

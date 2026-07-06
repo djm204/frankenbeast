@@ -25,8 +25,8 @@ The real confidence number is ~1,555 meaningful tests, not ~2,541.
 |---------|-------|-------|------------|------------|---------|
 | frankenfirewall | 163 | 20 | 25 | 118 | 12% |
 | franken-skills | 75 | 13 | 12 | 50 | 17% |
-| franken-brain | 126 | 31 | 26 | 69 | 25% |
-| franken-planner | 186 | 31 | 33 | 122 | 17% |
+| @franken/brain | 126 | 31 | 26 | 69 | 25% |
+| @franken/planner | 186 | 31 | 33 | 122 | 17% |
 | franken-observer | 352 | 29 | 56 | 267 | 8% |
 | franken-critique | 130 | 45 | 15 | 70 | 35% |
 | franken-governor | 131 | 41 | 31 | 62 | 31% |
@@ -87,7 +87,7 @@ The code these docs describe could be completely broken and every test passes. T
 
 ### Disease 4: Post-Migration Filesystem Checks (24 tests, 100% fluff)
 
-`cleanup-old-dirs.test.ts` checks that old pre-monorepo directories (`franken-brain/` at root) don't exist and that `packages/franken-brain/` does exist. The migration is complete. These will never fail again on any machine.
+`cleanup-old-dirs.test.ts` checks that old pre-monorepo directories (`@franken/brain/` at root) don't exist and that `packages/franken-brain/` does exist. The migration is complete. These will never fail again on any machine.
 
 Partially duplicated by `verify-everything.test.ts` which has another 11 identical checks.
 
@@ -96,8 +96,8 @@ Partially duplicated by `verify-everything.test.ts` which has another 11 identic
 Pattern: mock a dependency to return X, call the function, assert the mock was called. If you remove the mock, there's nothing left. The mock IS the test.
 
 **Worst concentrations:**
-- `franken-brain/pii-guarded-stores.test.ts` — 4/6 tests are delegation-via-mock
-- `franken-brain/episodic-lesson-extractor.test.ts` — 4/8 tests assert the mock returned what it was configured to return
+- `@franken/brain/pii-guarded-stores.test.ts` — 4/6 tests are delegation-via-mock
+- `@franken/brain/episodic-lesson-extractor.test.ts` — 4/8 tests assert the mock returned what it was configured to return
 - `franken-heartbeat/reflection/prompt-builder.test.ts` — 4/6 tests check that keywords appear in a prompt string
 - `franken-heartbeat/cli/run.test.ts` — 6 tests that test stubs behave like stubs
 - `franken-governor/gateway/approval-gateway.test.ts` — 2/8 are pure call-count assertions
@@ -123,7 +123,7 @@ Pattern: mock a dependency to return X, call the function, assert the mock was c
 | `franken-firewall/src/types/guardrail-violation.test.ts` | 4 | `expectTypeOf` |
 | `franken-firewall/src/types/unified-request.test.ts` | 4 | `expectTypeOf` |
 | `franken-firewall/src/types/unified-response.test.ts` | 5 | `expectTypeOf` |
-| `franken-planner/tests/unit/index.test.ts` | 1 | Version string constant |
+| `@franken/planner/tests/unit/index.test.ts` | 1 | Version string constant |
 | Orch `tests/unit/issues/types.test.ts` | 25 | 100% `expectTypeOf` |
 | Orch `tests/unit/beasts/types.test.ts` | 4 | 100% `expectTypeOf` |
 | Orch `tests/unit/http/ws-chat-types.test.ts` | 2 | Zod parse tests |
@@ -136,7 +136,7 @@ Pattern: mock a dependency to return X, call the function, assert the mock was c
 |------|-------|--------|
 | `franken-governor/tests/unit/smoke.test.ts` | 1 | `VERSION === '0.1.0'` |
 | `franken-heartbeat/tests/unit/smoke.test.ts` | 2 | `1 + 1 === 2` |
-| `franken-brain/tests/unit/smoke.test.ts` | 1 | `1 + 1 === 2` |
+| `@franken/brain/tests/unit/smoke.test.ts` | 1 | `1 + 1 === 2` |
 | `franken-governor/tests/unit/gateway/governor-factory.test.ts` | 2 | `typeof x === 'function'` |
 
 ### Documentation / Migration Tests (delete entirely)
@@ -165,9 +165,9 @@ Pattern: mock a dependency to return X, call the function, assert the mock was c
 
 | File | Current | Fluff | Action |
 |------|---------|-------|--------|
-| `franken-brain/pii-guarded-stores.test.ts` | 6 | 4 | Replace delegation mocks with real store tests; add `redact` mode |
-| `franken-brain/episodic-lesson-extractor.test.ts` | 8 | 4 | Test prompt construction, empty LLM response, multiple trace formats |
-| `franken-brain/types/memory.test.ts` | 8 | 5 | Replace `expectTypeOf` with cross-variant parse tests |
+| `@franken/brain/pii-guarded-stores.test.ts` | 6 | 4 | Replace delegation mocks with real store tests; add `redact` mode |
+| `@franken/brain/episodic-lesson-extractor.test.ts` | 8 | 4 | Test prompt construction, empty LLM response, multiple trace formats |
+| `@franken/brain/types/memory.test.ts` | 8 | 5 | Replace `expectTypeOf` with cross-variant parse tests |
 | `franken-heartbeat/reflection/prompt-builder.test.ts` | 6 | 4 | Test actual prompt structure, not keyword presence |
 | `franken-heartbeat/reflection/llm-agnostic.test.ts` | 14 | 5 | Delete duplication; move markdown code block test to response-parser |
 | `franken-heartbeat/cli/run.test.ts` | 14 | 7 | Delete stub-testing-stubs block |

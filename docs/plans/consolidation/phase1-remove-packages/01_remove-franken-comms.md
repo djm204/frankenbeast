@@ -16,18 +16,18 @@ Unlike the other 4 deleted packages (firewall, skills, heartbeat, mcp) which are
 
 | Component | Source | Destination |
 |-----------|--------|-------------|
-| `ChatGateway` | `franken-comms/src/gateway/` | `franken-orchestrator/src/comms/gateway/` |
-| `ChatSocketBridge` | `franken-comms/src/core/` | `franken-orchestrator/src/comms/core/` |
-| `SessionMapper` | `franken-comms/src/core/` | `franken-orchestrator/src/comms/core/` |
-| Channel types | `franken-comms/src/core/types.ts` | `franken-orchestrator/src/comms/types.ts` |
-| `SlackAdapter` + router | `franken-comms/src/channels/slack/` | `franken-orchestrator/src/comms/channels/slack/` |
-| `DiscordAdapter` + router | `franken-comms/src/channels/discord/` | `franken-orchestrator/src/comms/channels/discord/` |
-| `TelegramAdapter` + router | `franken-comms/src/channels/telegram/` | `franken-orchestrator/src/comms/channels/telegram/` |
-| `WhatsAppAdapter` + router | `franken-comms/src/channels/whatsapp/` | `franken-orchestrator/src/comms/channels/whatsapp/` |
-| Signature verification | `franken-comms/src/security/` | `franken-orchestrator/src/comms/security/` |
-| Comms config | `franken-comms/src/config/` | `franken-orchestrator/src/comms/config/` |
+| `ChatGateway` | `franken-comms/src/gateway/` | `@franken/orchestrator/src/comms/gateway/` |
+| `ChatSocketBridge` | `franken-comms/src/core/` | `@franken/orchestrator/src/comms/core/` |
+| `SessionMapper` | `franken-comms/src/core/` | `@franken/orchestrator/src/comms/core/` |
+| Channel types | `franken-comms/src/core/types.ts` | `@franken/orchestrator/src/comms/types.ts` |
+| `SlackAdapter` + router | `franken-comms/src/channels/slack/` | `@franken/orchestrator/src/comms/channels/slack/` |
+| `DiscordAdapter` + router | `franken-comms/src/channels/discord/` | `@franken/orchestrator/src/comms/channels/discord/` |
+| `TelegramAdapter` + router | `franken-comms/src/channels/telegram/` | `@franken/orchestrator/src/comms/channels/telegram/` |
+| `WhatsAppAdapter` + router | `franken-comms/src/channels/whatsapp/` | `@franken/orchestrator/src/comms/channels/whatsapp/` |
+| Signature verification | `franken-comms/src/security/` | `@franken/orchestrator/src/comms/security/` |
+| Comms config | `franken-comms/src/config/` | `@franken/orchestrator/src/comms/config/` |
 | Hono app + server | `franken-comms/src/server/` | Routes merge into orchestrator's existing Hono server |
-| 14 test files | `franken-comms/tests/` | `franken-orchestrator/tests/unit/comms/` |
+| 14 test files | `franken-comms/tests/` | `@franken/orchestrator/tests/unit/comms/` |
 
 ## What to Do
 
@@ -49,7 +49,7 @@ cp -r packages/franken-comms/src/config/* packages/franken-orchestrator/src/comm
 
 ### 2. Fix imports
 
-All internal imports in the moved files change from relative paths within franken-comms to relative paths within franken-orchestrator:
+All internal imports in the moved files change from relative paths within franken-comms to relative paths within @franken/orchestrator:
 
 ```typescript
 // Before (in slack-adapter.ts):

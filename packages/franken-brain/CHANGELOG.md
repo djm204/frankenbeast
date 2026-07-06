@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.6](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.5...franken-brain-v0.6.6) (2026-07-06)
+## [0.6.6](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.5...@franken/brain-v0.6.6) (2026-07-06)
 
 
 ### Bug Fixes
@@ -21,49 +21,49 @@
   * dependencies
     * @franken/types bumped from 0.7.4 to 0.7.5
 
-## [0.6.5](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.4...franken-brain-v0.6.5) (2026-07-05)
+## [0.6.5](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.4...@franken/brain-v0.6.5) (2026-07-05)
 
 
 ### Bug Fixes
 
 * **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
 
-## [0.6.4](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.3...franken-brain-v0.6.4) (2026-07-04)
+## [0.6.4](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.3...@franken/brain-v0.6.4) (2026-07-04)
 
 
 ### Documentation
 
 * fix package README drift (governor, observer, brain, critique) ([#527](https://github.com/djm204/frankenbeast/issues/527)) ([4afdd51](https://github.com/djm204/frankenbeast/commit/4afdd51f0852cfb934c6db1307e61afc98ee51c4))
 
-## [0.6.3](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.2...franken-brain-v0.6.3) (2026-07-04)
+## [0.6.3](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.2...@franken/brain-v0.6.3) (2026-07-04)
 
 
 ### Bug Fixes
 
 * **brain:** hydrate sqlite working memory ([#478](https://github.com/djm204/frankenbeast/issues/478)) ([67ec25e](https://github.com/djm204/frankenbeast/commit/67ec25e6570f9ba8a0ac02208acea95d47206013))
 
-## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.1...franken-brain-v0.6.2) (2026-07-01)
+## [0.6.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.1...@franken/brain-v0.6.2) (2026-07-01)
 
 
 ### Documentation
 
 * refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
 
-## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.6.0...franken-brain-v0.6.1) (2026-06-13)
+## [0.6.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.0...@franken/brain-v0.6.1) (2026-06-13)
 
 
 ### Bug Fixes
 
 * **brain:** bound working memory growth with configurable limits ([#322](https://github.com/djm204/frankenbeast/issues/322)) ([08bd1e3](https://github.com/djm204/frankenbeast/commit/08bd1e3d942a5716435c0180961302d18f5c81c1))
 
-## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.5.2...franken-brain-v0.6.0) (2026-04-28)
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.5.2...@franken/brain-v0.6.0) (2026-04-28)
 
 
 ### Features
 
 * close launch parity gaps ([#284](https://github.com/djm204/frankenbeast/issues/284)) ([7309143](https://github.com/djm204/frankenbeast/commit/7309143648bba36b0788c0b44446455c9a61821a))
 
-## [0.5.2](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.5.1...franken-brain-v0.5.2) (2026-04-01)
+## [0.5.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.5.1...@franken/brain-v0.5.2) (2026-04-01)
 
 
 ### Bug Fixes
@@ -71,7 +71,7 @@
 * **brain:** flush working memory to SQLite on recovery checkpoint ([e4fab04](https://github.com/djm204/frankenbeast/commit/e4fab044a7ee30274c2b6287c6b83a1ebb904dfe))
 * residual one-shots (comms cleanup, HITL test, checkpoint flush, PROGRESS.md) ([e105db3](https://github.com/djm204/frankenbeast/commit/e105db3fe067c6473d3f2a4bc43fc85756487018))
 
-## [0.5.1](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.5.0...franken-brain-v0.5.1) (2026-03-27)
+## [0.5.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.5.0...@franken/brain-v0.5.1) (2026-03-27)
 
 
 ### Refactoring
@@ -79,7 +79,7 @@
 * **brain:** delete legacy episodic memory and types ([c627d6a](https://github.com/djm204/frankenbeast/commit/c627d6ae2e878f454dbbeacda32974c2d12ea393))
 * **brain:** delete legacy episodic memory and types ([e620c62](https://github.com/djm204/frankenbeast/commit/e620c622d3fb25b338e5ce7e5417f82be61163d0))
 
-## [0.5.0](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.4.0...franken-brain-v0.5.0) (2026-03-21)
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.4.0...@franken/brain-v0.5.0) (2026-03-21)
 
 
 ### Features
@@ -95,7 +95,7 @@
 * **brain:** delete old brain code, promote SqliteBrain (Phase 2.4) ([69ec240](https://github.com/djm204/frankenbeast/commit/69ec24042ca8229b71719e585aa75bf76b5acefd))
 * **brain:** delete old brain code, promote SqliteBrain (Phase 2.4) ([080ae32](https://github.com/djm204/frankenbeast/commit/080ae3205bb1286d69a8decdd02a0873cc37ef19))
 
-## [0.4.0](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.3.1...franken-brain-v0.4.0) (2026-03-21)
+## [0.4.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.3.1...@franken/brain-v0.4.0) (2026-03-21)
 
 
 ### Features
@@ -103,21 +103,21 @@
 * **consolidation:** Phase 1 — remove 5 packages (13→8) ([2eac09c](https://github.com/djm204/frankenbeast/commit/2eac09c64e515d3b5007b1e39d3f73d7b3bdf12b))
 * **consolidation:** remove 5 packages, absorb comms into orchestrator (Phase 1) ([1ee949d](https://github.com/djm204/frankenbeast/commit/1ee949d761c4eaf507858f63cccb68e0522bb8b1))
 
-## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.3.0...franken-brain-v0.3.1) (2026-03-09)
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.3.0...@franken/brain-v0.3.1) (2026-03-09)
 
 
 ### Bug Fixes
 
 * release-please scoping and commit hygiene ([742c7cc](https://github.com/djm204/frankenbeast/commit/742c7cc7792aac3f6f85ee638ba3b165de34bc5f))
 
-## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.2.0...franken-brain-v0.3.0) (2026-03-09)
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.2.0...@franken/brain-v0.3.0) (2026-03-09)
 
 
 ### Features
 
 * eslint configs, gitignore hygiene, CLI guard fix ([#99](https://github.com/djm204/frankenbeast/issues/99)) ([87d7427](https://github.com/djm204/frankenbeast/commit/87d74276a909b272141119ce151647118725ce2e))
 
-## [0.2.0](https://github.com/djm204/frankenbeast/compare/franken-brain-v0.1.0...franken-brain-v0.2.0) (2026-03-09)
+## [0.2.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.1.0...@franken/brain-v0.2.0) (2026-03-09)
 
 
 ### Features

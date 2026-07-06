@@ -5,7 +5,7 @@ import {
   CostCalculator,
   CircuitBreaker,
   LoopDetector,
-} from '@frankenbeast/observer';
+} from '@franken/observer';
 
 describe('CliObserverBridge', () => {
   const defaultConfig = { budgetLimitUsd: 1.0 };

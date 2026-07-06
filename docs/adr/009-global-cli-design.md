@@ -6,13 +6,13 @@ Accepted
 
 ## Context
 
-Frankenbeast's CLI (`franken-orchestrator/src/cli/run.ts`) was stub-level — only `--dry-run` worked. The real execution capability lived in per-plan `build-runner.ts` files (e.g., `plan-approach-c/build-runner.ts`). Users had to copy and adapt the build-runner for each new plan.
+Frankenbeast's CLI (`@franken/orchestrator/src/cli/run.ts`) was stub-level — only `--dry-run` worked. The real execution capability lived in per-plan `build-runner.ts` files (e.g., `plan-approach-c/build-runner.ts`). Users had to copy and adapt the build-runner for each new plan.
 
 We need a single `frankenbeast` command that works as a drop-in tool in any project.
 
 ## Decision
 
-1. **Global installation.** `frankenbeast` is installed globally via `npm install -g franken-orchestrator`. It works in any project without being a project dependency.
+1. **Global installation.** `frankenbeast` is installed globally via `npm install -g @franken/orchestrator`. It works in any project without being a project dependency.
 
 2. **Convention-based project layout.** Project state lives in `.frankenbeast/` at the project root:
    - `.frankenbeast/plans/` — design docs and chunk files

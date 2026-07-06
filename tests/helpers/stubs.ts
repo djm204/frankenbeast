@@ -31,8 +31,8 @@ import type {
 
 // ─── MOD-03 Brain Interfaces ────────────────────────────────────────────────
 
-import type { ILlmClient } from 'franken-brain';
-import type { IPiiScanner, ScanResult } from 'franken-brain';
+import type { ILlmClient } from '@franken/brain';
+import type { IPiiScanner, ScanResult } from '@franken/brain';
 
 // ─── MOD-04 Planner Module Interfaces ───────────────────────────────────────
 
@@ -48,7 +48,7 @@ import type {
   RationaleBlock,
   VerificationResult,
   Skill,
-} from 'franken-planner';
+} from '@franken/planner';
 
 // =============================================================================
 // MOD-06: Critique Port Stubs

@@ -5,7 +5,7 @@ import {
   type ExistingDeps,
 } from '../../src/cli/create-beast-deps.js';
 import { BeastLoop } from '../../src/beast-loop.js';
-import { AuditTrail } from '@frankenbeast/observer';
+import { AuditTrail } from '@franken/observer';
 
 function mockExistingDeps(): ExistingDeps {
   return {

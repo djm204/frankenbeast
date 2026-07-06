@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { AuditTrail } from '@frankenbeast/observer';
+import { AuditTrail } from '@franken/observer';
 import { ReplayContentStore } from '../../../src/replay/replay-content-store.js';
 import { AuditTrailObserverAdapter } from '../../../src/adapters/audit-observer-adapter.js';
 

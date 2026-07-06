@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement `@fbeast/live-bench`, a recurring real-client benchmark runner for Codex CLI and Gemini CLI comparing baseline versus Frankenbeast-enabled runs.
+Implement `@franken/live-bench`, a recurring real-client benchmark runner for Codex CLI and Gemini CLI comparing baseline versus Frankenbeast-enabled runs.
 
 ## Source Plan
 
@@ -11,7 +11,7 @@ Implement `@fbeast/live-bench`, a recurring real-client benchmark runner for Cod
 
 ## Ground Rules
 
-- Keep benchmark orchestration in a dedicated package above `@fbeast/mcp-suite`; do not move benchmark storage/reporting into the suite.
+- Keep benchmark orchestration in a dedicated package above `@franken/mcp-suite`; do not move benchmark storage/reporting into the suite.
 - Use TDD for code chunks: write failing tests, verify RED, implement, verify GREEN.
 - Keep real Codex/Gemini CLI tests opt-in; default tests must pass without live CLIs or credentials.
 - Commit each chunk independently after targeted verification.

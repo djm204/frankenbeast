@@ -29,7 +29,7 @@ export const chatServerService: NetworkServiceDefinition = {
       args: [
         '--silent',
         '--workspace',
-        'franken-orchestrator',
+        '@franken/orchestrator',
         'run',
         'chat-server',
         '--',

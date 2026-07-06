@@ -37,6 +37,6 @@
 - SlackChannel (webhook POST + interactive payload parsing)
 
 ## Phase 5: Integration (PR-8) — after all
-- GovernorCritiqueAdapter implementing SelfCritiqueModule from franken-planner
+- GovernorCritiqueAdapter implementing SelfCritiqueModule from @franken/planner
 - createGovernor() factory function
 - Integration tests: full approval flows

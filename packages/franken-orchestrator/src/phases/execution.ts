@@ -25,7 +25,7 @@ import {
   type KnownError,
   type MemoryModule as RecoveryMemoryModule,
   type Task as RecoveryTask,
-} from 'franken-planner';
+} from '@franken/planner';
 
 export const NON_INTERACTIVE_HITL_REMEDY = 'HITL approval was rejected by the non-interactive fail-closed default. To explicitly allow required HITL gates in trusted CI/headless runs, set FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1; otherwise rerun in an interactive TTY and approve the prompt.';
 

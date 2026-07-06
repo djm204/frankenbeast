@@ -61,9 +61,9 @@
 * The following workspace dependencies were updated
   * dependencies
     * @franken/types bumped from 0.7.4 to 0.7.5
-    * franken-brain bumped from 0.6.5 to 0.6.6
+    * @franken/brain bumped from 0.6.5 to 0.6.6
     * @franken/critique bumped from 0.6.9 to 0.6.10
     * @franken/governor bumped from 0.5.7 to 0.5.8
-    * @frankenbeast/observer bumped from 0.7.9 to 0.7.10
-    * franken-orchestrator bumped from 0.39.0 to 0.39.1
-    * franken-planner bumped from 0.4.7 to 0.4.8
+    * @franken/observer bumped from 0.7.9 to 0.7.10
+    * @franken/orchestrator bumped from 0.39.0 to 0.39.1
+    * @franken/planner bumped from 0.4.7 to 0.4.8

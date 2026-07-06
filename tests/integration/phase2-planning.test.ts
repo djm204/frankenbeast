@@ -9,8 +9,8 @@ import { describe, it, expect } from 'vitest';
 
 import { createReviewer } from '@franken/critique';
 import type { EvaluationInput, LoopConfig } from '@franken/critique';
-import { PlanGraph, createTaskId } from 'franken-planner';
-import type { Task } from 'franken-planner';
+import { PlanGraph, createTaskId } from '@franken/planner';
+import type { Task } from '@franken/planner';
 
 import {
   makeGuardrailsPort,

@@ -2,13 +2,13 @@
 
 **Date:** 2026-04-24
 **Status:** Approved
-**Scope:** Full in-place hardening of the live `franken-orchestrator` beast surface so the entire beast workflow and its live command families are actually usable.
+**Scope:** Full in-place hardening of the live `@franken/orchestrator` beast surface so the entire beast workflow and its live command families are actually usable.
 
 ## Goal
 
 Make the current beast runtime credible as a real operator-facing system rather than a partially wired advanced beta.
 
-For this pass, “beast mode” means the live `franken-orchestrator` surface shipped through:
+For this pass, “beast mode” means the live `@franken/orchestrator` surface shipped through:
 
 - `frankenbeast interview`
 - `frankenbeast plan`
@@ -156,7 +156,7 @@ The repo must end this pass with a small, explicit verification matrix for beast
 
 ### Live surface is the authority
 
-The current shipped `franken-orchestrator` CLI surface is the thing being hardened. Historical package CLIs that no longer exist in the current repo are not blockers for this pass.
+The current shipped `@franken/orchestrator` CLI surface is the thing being hardened. Historical package CLIs that no longer exist in the current repo are not blockers for this pass.
 
 ### Hard fail beats fake success
 
@@ -232,7 +232,7 @@ Control:
 
 Beast mode is “ready to use” for this pass when:
 
-- the full live `franken-orchestrator` command surface has real, tested behavior
+- the full live `@franken/orchestrator` command surface has real, tested behavior
 - required runtime dependencies no longer silently degrade to fake success
 - resume/checkpoint behavior is explicit and proven
 - the beast verification matrix is green

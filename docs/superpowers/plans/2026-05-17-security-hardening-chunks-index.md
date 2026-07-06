@@ -35,7 +35,7 @@ No chunk imports another chunk's new modules. Chunk 3 defines
 on it, so ordering between 1/2/3 is by risk priority, not by build dependency.
 
 **Recommended order:** 1 → 2 → 3 → 4. If parallelizing, run 1 and 2 in separate
-worktrees (disjoint file sets — `franken-orchestrator+governor` vs
+worktrees (disjoint file sets — `@franken/orchestrator+governor` vs
 `franken-mcp-suite`), then 3, then 4.
 
 ## ADR Numbering

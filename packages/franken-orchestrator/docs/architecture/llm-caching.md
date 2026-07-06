@@ -2,7 +2,7 @@
 
 ## Summary
 
-`franken-orchestrator` now uses a hybrid LLM cache:
+`@franken/orchestrator` now uses a hybrid LLM cache:
 
 - provider-native work-session continuation first
 - Frankenbeast-managed disk cache second

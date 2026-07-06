@@ -145,7 +145,7 @@ describe('PlanContextGatherer', () => {
   });
 
   it('handles paths under packages/ directories', async () => {
-    const srcDir = join(FIXTURES_DIR, 'packages', 'franken-brain', 'src');
+    const srcDir = join(FIXTURES_DIR, 'packages', '@franken/brain', 'src');
     ensureDir(srcDir);
     writeFileSync(
       join(srcDir, 'memory.ts'),

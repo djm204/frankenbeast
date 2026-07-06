@@ -11,7 +11,7 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## Modes
 
-- `MCP mode`: Claude Code plugin/tool-provider surface via `@fbeast/mcp-suite`
+- `MCP mode`: Claude Code plugin/tool-provider surface via `@franken/mcp-suite`
 - `Beast mode`: standalone orchestrator path with dashboard-first control and CLI parity
 
 Both modes share `.fbeast/beast.db`.
@@ -24,7 +24,7 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `franken-orchestrator` and `@fbeast/mcp-suite`, not standalone package directories.
+Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `@franken/orchestrator` and `@franken/mcp-suite`, not standalone package directories.
 
 The diagrams below describe the Beast-loop model and still use MOD labels as capability names. For the exact current package map, treat the package inventory table as authoritative.
 
@@ -289,16 +289,16 @@ graph TB
 
 | Package | Current role |
 |---------|--------------|
-| `franken-brain` | SQLite-backed working memory, episodic event recall, recovery checkpoints, serialization/hydration. |
-| `franken-planner` | Intent-to-DAG planning primitives, linear/parallel/recursive strategies, HITL plan export, recovery task insertion. |
-| `@frankenbeast/observer` | Trace/span lifecycle, token and cost tracking, circuit breaker, loop detection, export adapters, local trace viewing. |
+| `@franken/brain` | SQLite-backed working memory, episodic event recall, recovery checkpoints, serialization/hydration. |
+| `@franken/planner` | Intent-to-DAG planning primitives, linear/parallel/recursive strategies, HITL plan export, recovery task insertion. |
+| `@franken/observer` | Trace/span lifecycle, token and cost tracking, circuit breaker, loop detection, export adapters, local trace viewing. |
 | `@franken/critique` | Deterministic/heuristic critique pipeline and correction-request loop; it evaluates and returns feedback for callers to apply. |
 | `@franken/governor` | Trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers for HITL decisions. |
 | `@franken/types` | Shared TypeScript types plus runtime Zod schemas. |
-| `franken-orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
-| `@fbeast/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
-| `@frankenbeast/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
-| `@fbeast/live-bench` | Live CLI benchmark tooling. |
+| `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@franken/live-bench` | Live CLI benchmark tooling. |
 
 Historical docs and ADRs may still mention removed packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Current code paths for those capabilities live in the packages above.
 
@@ -312,7 +312,7 @@ Historical docs and ADRs may still mention removed packages such as `frankenfire
 
 ## HTTP surface
 
-The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime always mounts chat (with WebSocket chat on `/v1/chat/ws`), network, and analytics routes; tracked Beast agents/SSE (`/v1/beasts/*`) routes mount only when an operator token resolves (loopback dev mode run without a token omits them), and skills/dashboard routes activate when a provider registry is configured. When comms channels are enabled, the CLI resolves comms secrets, passes `commsConfig` to `startChatServer()`, and auto-wires a `ChatRuntimeCommsAdapter`, which mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes on the chat server. Security routes (`/api/security`) mount when `securityConfig` is supplied. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
+The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime always mounts chat (with WebSocket chat on `/v1/chat/ws`), network, and analytics routes; tracked Beast agents/SSE (`/v1/beasts/*`) routes mount only when an operator token resolves (loopback dev mode run without a token omits them), and skills/dashboard routes activate when a provider registry is configured. When comms channels are enabled, the CLI resolves comms secrets, passes `commsConfig` to `startChatServer()`, and auto-wires a `ChatRuntimeCommsAdapter`, which mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes on the chat server. Security routes (`/api/security`) mount when `securityConfig` is supplied. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
 
 ## Prerequisites
 
@@ -349,7 +349,7 @@ See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup gu
 
 ## Run the Dashboard with MCP Mode
 
-Use this path when you installed `@fbeast/mcp-suite` and ran `fbeast mcp init`, and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
+Use this path when you installed `@franken/mcp-suite` and ran `fbeast mcp init`, and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
 
 From the project where you initialized MCP:
 
@@ -358,7 +358,7 @@ From the project where you initialized MCP:
 # binaries stay on PATH. A one-shot `npx` won't work here: `mcp init` registers
 # servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns
 # later, so those binaries must remain installed after setup.
-npm install -g @fbeast/mcp-suite
+npm install -g @franken/mcp-suite
 
 # One-time MCP setup. Add --hooks if you want tool-call governance and audit logs.
 fbeast mcp init --hooks
@@ -375,7 +375,7 @@ If you initialized MCP in this repo, omit `--base-dir`.
 In a second terminal, start the web UI:
 
 ```bash
-npm --workspace @frankenbeast/web run dev:chat
+npm --workspace @franken/web run dev:chat
 ```
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
@@ -384,7 +384,7 @@ If you run the backend on a different port, keep browser requests same-origin an
 
 ```bash
 npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
 For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
@@ -635,7 +635,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `franken-orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `@franken/orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
 
 ### Circuit Breakers
 
@@ -657,7 +657,7 @@ Frankenbeast is LLM-agnostic through the orchestrator provider registry. CLI pro
 
 ## Wrapping External Agents
 
-The currently shipped integration path is to call the orchestrator runtime, use `@fbeast/mcp-suite` tools/hooks, or implement BeastLoop dependencies around your agent components. The old standalone firewall HTTP proxy guide is historical; see [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) for current options and caveats.
+The currently shipped integration path is to call the orchestrator runtime, use `@franken/mcp-suite` tools/hooks, or implement BeastLoop dependencies around your agent components. The old standalone firewall HTTP proxy guide is historical; see [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) for current options and caveats.
 
 ## Examples
 
@@ -692,7 +692,7 @@ The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket fo
 
 ## Communications Gateway
 
-External communications are implemented in `franken-orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
+External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
 
 | Channel | Transport | Security |
 |---------|-----------|----------|
@@ -776,13 +776,13 @@ frankenbeast/
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
 ├── packages/
-│   ├── franken-brain/           # MOD-03: Memory Systems
-│   ├── franken-planner/         # MOD-04: Planning & Decomposition
+│   ├── @franken/brain/           # MOD-03: Memory Systems
+│   ├── @franken/planner/         # MOD-04: Planning & Decomposition
 │   ├── franken-observer/        # MOD-05: Observability
 │   ├── franken-critique/        # MOD-06: Self-Critique & Reflection
 │   ├── franken-governor/        # MOD-07: HITL & Governance
 │   ├── franken-types/           # Shared type definitions
-│   ├── franken-orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
+│   ├── @franken/orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
 │   ├── franken-mcp-suite/       # MCP suite CLI, servers, hooks, proxy
 │   ├── live-bench/              # Live CLI benchmark tooling
 │   └── franken-web/             # React web dashboard (dev tool)

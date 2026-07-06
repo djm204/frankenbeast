@@ -170,7 +170,7 @@ describe('fbeast main CLI', () => {
     }
 
     const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(message).toContain('franken-orchestrator');
+    expect(message).toContain('@franken/orchestrator');
     expect(message).not.toContain('@fbeast/orchestrator');
     expect(mockExit).toHaveBeenCalledWith(1);
     mockError.mockRestore();

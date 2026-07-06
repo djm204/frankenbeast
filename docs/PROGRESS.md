@@ -5,7 +5,7 @@
 
 ## Current State (2026-07-04)
 
-- **Workspace**: 10 packages under `packages/` (franken-types, franken-brain, franken-planner, franken-observer, franken-critique, franken-governor, franken-orchestrator, franken-mcp-suite, franken-web, live-bench). ADR-031 consolidated 13 → 8; `@fbeast/mcp-suite` and `@fbeast/live-bench` were added afterwards.
+- **Workspace**: 10 packages under `packages/` (franken-types, @franken/brain, @franken/planner, franken-observer, franken-critique, franken-governor, @franken/orchestrator, franken-mcp-suite, franken-web, live-bench). ADR-031 consolidated 13 → 8; `@franken/mcp-suite` and `@franken/live-bench` were added afterwards.
 - **Build health**: `npm run build`, `npm run typecheck`, and `npm test` are all green via turbo (verified 2026-07-04: 20/20 test tasks; orchestrator 2,271 passed / 1 skipped; franken-web 252/252 including direct `vitest run`).
 - Phase sections below are historical PR-by-PR records; counts and package lists inside them reflect the repo at the time they were written (several cite packages since deleted — see ADR-031).
 
@@ -31,7 +31,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
   - Files: `src/adapters/ollama/ollama-adapter.ts`, test, `gemini/gemini-adapter.ts`, `mistral/mistral-adapter.ts`
   - Exit: OllamaAdapter passes conformance, stubs throw "Not implemented", all 156 firewall tests pass
 
-- [x] **PR-17**: franken-brain — ILlmClient audit + cross-provider mocks (26 tests)
+- [x] **PR-17**: @franken/brain — ILlmClient audit + cross-provider mocks (26 tests)
   - Files: `tests/unit/compression/llm-client-agnostic.test.ts`
   - Exit: 3 mock LLM implementations all pass, prompts confirmed provider-agnostic
 
@@ -59,7 +59,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
   - Files: Modified `src/gateway/governor-critique-adapter.ts`, `package.json`
   - Exit: Local RationaleBlock/VerificationResult removed, imported from @franken/types
 
-- [x] **PR-23**: franken-planner — Adopt @franken/types (188 tests pass)
+- [x] **PR-23**: @franken/planner — Adopt @franken/types (188 tests pass)
   - Files: Modified `src/core/types.ts`, `package.json`
   - Exit: TaskId, createTaskId, RationaleBlock, VerificationResult re-exported from @franken/types
 
@@ -72,7 +72,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 ## Phase 4: The Orchestrator ("The Beast Loop")
 
 - [x] **PR-25**: Orchestrator scaffold + FrankenContext (19 tests)
-  - Files: New `franken-orchestrator/` package with config, context, deps, types
+  - Files: New `@franken/orchestrator/` package with config, context, deps, types
   - Exit: Config Zod validation passes, context factory works, BeastLoop stub runs
 
 - [x] **PR-26**: Ingestion + Hydration (Beast Loop Phase 1) (13 tests)
@@ -162,7 +162,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 | PR | Change | ARCHITECTURE.md Updated? |
 |----|--------|--------------------------|
 | PR-20 | New `franken-types` package | Yes |
-| PR-25 | New `franken-orchestrator` package | Yes |
+| PR-25 | New `@franken/orchestrator` package | Yes |
 | PR-31 | Firewall gets Hono server | Yes |
 | PR-34 | Critique gets Hono server | Yes |
 | PR-35 | Governor gets Hono server | Yes |
@@ -179,14 +179,14 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 | Module | Tests | Files | Status |
 |--------|-------|-------|--------|
-| @fbeast/live-bench | 31 | 3 | PASS |
-| @fbeast/mcp-suite | 163 | 26 | PASS |
-| franken-brain | 41 | 2 | PASS |
+| @franken/live-bench | 31 | 3 | PASS |
+| @franken/mcp-suite | 163 | 26 | PASS |
+| @franken/brain | 41 | 2 | PASS |
 | franken-critique | 129 | 17 | PASS |
 | franken-governor | 113 | 17 | PASS |
 | franken-observer | 412 | 32 | PASS |
-| franken-orchestrator | 2,129 | 219 | PASS (1 skipped) |
-| franken-planner | 187 | 17 | PASS |
+| @franken/orchestrator | 2,129 | 219 | PASS (1 skipped) |
+| @franken/planner | 187 | 17 | PASS |
 | franken-types | 61 | 3 | PASS |
 | franken-web | 193 | 47 | PASS (EventSource caveat resolved 2026-07-04; suite has since grown — 252/252 on a current direct `vitest run`, counts in this row are the older tally) |
 | Root integration/docs guard | 135 | 11 | PASS for `tests/docs-issue-86.test.ts`; broader root suite not re-counted in this update |
@@ -197,13 +197,13 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 > Closes all gaps identified in `docs/cli-gap-analysis.md`. Plan: `plan-2026-03-07-cli-gaps/`. Branch: `feat/cli-e2e-pipeline` → integration commits on `feat/12_doc-update`.
 
 - [x] **Chunk 01–03**: CliLlmAdapter — LLM adapter for plan/interview phases
-  - New: `franken-orchestrator/src/adapters/cli-llm-adapter.ts` (implements `IAdapter` via `claude --print`)
+  - New: `@franken/orchestrator/src/adapters/cli-llm-adapter.ts` (implements `IAdapter` via `claude --print`)
   - Edit: `session.ts` — replaced broken `deps.cliExecutor as never` with proper `CliLlmAdapter`
   - Edit: `dep-factory.ts` — creates adapter instance with provider config
   - Closes: GAP-1 (plan + interview phases now functional)
 
 - [x] **Chunk 04–06**: CliObserverBridge — real observer integration
-  - New: `franken-orchestrator/src/adapters/cli-observer-bridge.ts` (bridges `IObserverModule` ↔ `ObserverDeps`)
+  - New: `@franken/orchestrator/src/adapters/cli-observer-bridge.ts` (bridges `IObserverModule` ↔ `ObserverDeps`)
   - Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer
   - Edit: `dep-factory.ts` — replaced stub observer with real bridge
   - Closes: GAP-2 (real token counting, cost tracking, budget enforcement)
@@ -219,11 +219,11 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
   - Closes: GAP-5
 
 - [x] **Chunk 10**: Trace viewer wiring
-  - New: `franken-orchestrator/src/cli/trace-viewer.ts` — `--verbose` starts TraceServer on `:4040`
+  - New: `@franken/orchestrator/src/cli/trace-viewer.ts` — `--verbose` starts TraceServer on `:4040`
   - Closes: GAP-3
 
 - [x] **Chunk 11**: E2E pipeline proof test
-  - New: `franken-orchestrator/tests/e2e/e2e-pipeline.test.ts`
+  - New: `@franken/orchestrator/tests/e2e/e2e-pipeline.test.ts`
   - Validates full CLI subprocess: exit code, service labels, budget bar
   - GAP-4 (LLM commit messages) closed by CliLlmAdapter wiring to PrCreator
 
@@ -236,7 +236,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 > Adds `frankenbeast issues` subcommand — fetch, triage, review, and fix GitHub issues autonomously. Branch: `feat/11_docs-update`. Plan: `plan-2026-03-08-github-issues/`.
 
-**New components** (all in `franken-orchestrator/src/issues/`):
+**New components** (all in `@franken/orchestrator/src/issues/`):
 
 - `IssueFetcher` — wraps `gh issue list` with label/milestone/search/assignee/repo/limit filters
 - `IssueTriage` — LLM-powered classification (one-shot vs chunked complexity)
@@ -270,7 +270,7 @@ All 8 modules implemented with 971+ tests passing. 52 root-level integration tes
 
 > Branch: `feature/agent-init-workflow`. Draft PR: `#183`.
 
-- Added tracked-agent domain types, SQLite persistence, query APIs, and authenticated HTTP routes in `franken-orchestrator`
+- Added tracked-agent domain types, SQLite persistence, query APIs, and authenticated HTTP routes in `@franken/orchestrator`
 - Rewired chat-backed init so `design-interview` and `chunk-plan` create tracked agents first, bind `chatSessionId`, emit init events, and then dispatch linked Beast runs
 - Added `trackedAgentId` linkage from Beast runs back to tracked agents and kept tracked-agent lifecycle in sync through dispatch/start/stop flows
 - Updated the beast catalog contract for typed prompt kinds: `file` for design-doc input and `directory` for MartinLoop chunk directories
@@ -304,7 +304,7 @@ Six chunks implementing the beast daemon execution pipeline:
 > Branch: `feat/architecture-consolidation`. PR: #243.
 > Plan: `docs/plans/consolidation/phase1-remove-packages/`
 
-Reduced monorepo from 13 to 8 packages per ADR-031. (The workspace has since grown back to 10 with `@fbeast/mcp-suite` and `@fbeast/live-bench`.)
+Reduced monorepo from 13 to 8 packages per ADR-031. (The workspace has since grown back to 10 with `@franken/mcp-suite` and `@franken/live-bench`.)
 
 **Deleted packages**: frankenfirewall (MOD-01), franken-skills (MOD-02), franken-heartbeat (MOD-08), franken-mcp, franken-comms
 
@@ -332,7 +332,7 @@ Reduced monorepo from 13 to 8 packages per ADR-031. (The workspace has since gro
 
 > PRs: #245 (types), #247 (SqliteBrain), #248 (episodic recall), #249 (promote + delete)
 
-Rewrote franken-brain around `SqliteBrain` with unified working memory, episodic events, and recovery checkpoints in a single SQLite database. Serialize/hydrate for provider handoff.
+Rewrote @franken/brain around `SqliteBrain` with unified working memory, episodic events, and recovery checkpoints in a single SQLite database. Serialize/hydrate for provider handoff.
 
 ---
 
@@ -397,7 +397,7 @@ Append-only `AuditTrail` with hash-verified integrity, `AuditTrailStore` persist
 > Chunks A-F + One-Shots. PRs: #262, #264, #265, #267, #268
 
 - **Chunk A** (#262): Wired `createBeastDeps()` into `dep-factory.ts`, replacing stubs with real adapters. Added dep-bridge, comms config, token aggregation, skill route mounting, commsConfig pass-through.
-- **Chunk B** (#264): Deleted legacy episodic memory + types from franken-brain (-796 lines), removed ulid/zod deps.
+- **Chunk B** (#264): Deleted legacy episodic memory + types from @franken/brain (-796 lines), removed ulid/zod deps.
 - **Chunk C** (#265): Added CLI command groups during consolidation; current live CLI subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `network`, `skill`, and `security`. Earlier top-level `provider`/`dashboard` command surfaces were removed when provider config, `chat-server`, HTTP dashboard routes, and `franken-web` became the supported surfaces.
 - **Chunk E** (#268): Created skill directory equivalents for beast definitions.
 - **Chunk F** (#267): Added `SkillConfigStore` for persistent skill toggle state.

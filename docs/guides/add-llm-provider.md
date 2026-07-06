@@ -1,6 +1,6 @@
 # Adding an LLM Provider
 
-Frankenbeast's current provider extension points live in `franken-orchestrator`, not in the deleted pre-consolidation `frankenfirewall` package.
+Frankenbeast's current provider extension points live in `@franken/orchestrator`, not in the deleted pre-consolidation `frankenfirewall` package.
 
 ## Current provider surfaces
 

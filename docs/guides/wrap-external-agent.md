@@ -4,10 +4,10 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 
 ## Option 1: Use MCP mode for tool governance
 
-Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
+Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
 
 ```bash
-npm install -g @fbeast/mcp-suite      # or: npm link --workspace=packages/franken-mcp-suite
+npm install -g @franken/mcp-suite      # or: npm link --workspace=packages/franken-mcp-suite
 fbeast mcp init
 fbeast mcp init --hooks                # optional: pre/post-tool governance and audit logs
 ```
@@ -37,7 +37,7 @@ The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network
 For deeper integration, wire your agent components into the orchestrator's ports instead of routing through a standalone proxy:
 
 ```typescript
-import { BeastLoop } from 'franken-orchestrator';
+import { BeastLoop } from '@franken/orchestrator';
 
 const loop = new BeastLoop(deps, { maxTotalTokens: 50_000 });
 const result = await loop.run({

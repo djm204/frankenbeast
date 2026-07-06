@@ -3,7 +3,7 @@ import {
   DEFAULT_PRICING,
   createAuditEvent,
   hashContent,
-} from '@frankenbeast/observer';
+} from '@franken/observer';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
 export interface ObserverLogInput {

@@ -8,7 +8,7 @@
 ## Repository Layout (Target)
 
 ```
-franken-brain/
+@franken/brain/
 ├── docs/
 │   ├── adr/                    # Architecture Decision Records
 │   └── implementation-plan.md  # This file

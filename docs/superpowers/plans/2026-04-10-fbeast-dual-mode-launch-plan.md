@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a first live release where `@fbeast/mcp-suite` provides a real MCP/plugin mode and Beast mode remains a standalone orchestrator path with dashboard-first control plus CLI parity for terminal users.
+**Goal:** Ship a first live release where `@franken/mcp-suite` provides a real MCP/plugin mode and Beast mode remains a standalone orchestrator path with dashboard-first control plus CLI parity for terminal users.
 
 **Architecture:** Keep `packages/franken-mcp-suite` as thin transport, install, and mode-activation glue. Move MCP behavior behind adapter files that call existing franken engines and orchestrator surfaces instead of local stand-ins. Keep Beast runtime in `packages/franken-orchestrator`; use its existing Beast services and `/v1/beasts/*` contract for CLI parity, then let `fbeast beast` persist shared config and hand off to the orchestrator surfaces rather than recreating Beast logic in the MCP package.
 
-**Tech Stack:** TypeScript, npm workspaces, `@modelcontextprotocol/sdk`, `better-sqlite3`, `vitest`, Hono, `franken-brain`, `franken-planner`, `@franken/critique`, `@franken/governor`, `@frankenbeast/observer`, `franken-orchestrator`, `franken-web`
+**Tech Stack:** TypeScript, npm workspaces, `@modelcontextprotocol/sdk`, `better-sqlite3`, `vitest`, Hono, `@franken/brain`, `@franken/planner`, `@franken/critique`, `@franken/governor`, `@franken/observer`, `@franken/orchestrator`, `franken-web`
 
 ---
 
@@ -54,7 +54,7 @@
 ### New files to create
 
 - Create: `packages/franken-mcp-suite/src/adapters/brain-adapter.ts`
-  Reason: isolate `franken-brain` integration and shared DB path translation
+  Reason: isolate `@franken/brain` integration and shared DB path translation
 - Create: `packages/franken-mcp-suite/src/adapters/observer-adapter.ts`
   Reason: isolate observer/cost/audit calls away from MCP handlers
 - Create: `packages/franken-mcp-suite/src/adapters/governor-adapter.ts`
@@ -286,7 +286,7 @@ Expected: FAIL because the server constructors still expect `SqliteStore` direct
 
 ```ts
 // packages/franken-mcp-suite/src/adapters/brain-adapter.ts
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 
 export function createBrainAdapter(dbPath: string) {
   const brain = new SqliteBrain({ dbPath });
@@ -417,7 +417,7 @@ Expected: FAIL because the planner and critique servers still implement local lo
 
 ```ts
 // packages/franken-mcp-suite/src/adapters/planner-adapter.ts
-import { GraphBuilder } from 'franken-planner';
+import { GraphBuilder } from '@franken/planner';
 
 export function createPlannerAdapter() {
   const planner = new GraphBuilder();
@@ -644,7 +644,7 @@ Expected: FAIL until the combined startup smoke assertions and docs changes are 
 <!-- README.md -->
 ## Modes
 
-- `MCP mode`: Claude Code plugin/tool-provider surface via `@fbeast/mcp-suite`
+- `MCP mode`: Claude Code plugin/tool-provider surface via `@franken/mcp-suite`
 - `Beast mode`: standalone orchestrator path with dashboard-first control and CLI parity
 
 Both modes share `.fbeast/beast.db`.

@@ -22,7 +22,7 @@
 - `cd packages/franken-mcp-suite && npm test -- --run src/integration/server-startup.integration.test.ts src/integration/full-cycle.integration.test.ts`
 - CI-shaped local reproduction with `CI=true` and `codex` absent from `PATH`: same two integration files passed, with the Codex prerequisite test skipped.
 - `cd packages/franken-mcp-suite && npm test`
-- `npx turbo run build test lint --filter=@fbeast/mcp-suite`
+- `npx turbo run build test lint --filter=@franken/mcp-suite`
 
 ## Review
 

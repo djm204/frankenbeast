@@ -17,6 +17,6 @@ Verification so far:
 - PASS `npm run typecheck`
 - PASS `npm run build`
 - PASS `npm test --workspace @franken/types -- tests/api-contracts.test.ts`
-- PASS `npm test --workspace @frankenbeast/web -- tests/lib/api.test.ts tests/lib/beast-api.test.ts src/lib/network-api.test.ts`
+- PASS `npm test --workspace @franken/web -- tests/lib/api.test.ts tests/lib/beast-api.test.ts src/lib/network-api.test.ts`
 - PASS `npm test --workspace packages/franken-orchestrator -- tests/unit/chat/types.test.ts`
 - FAIL then PASS-on-isolated-retry: `npm test` failed only in `@franken/critique` test `SafetyEvaluator > allows disjoint and deterministic repeated alternatives` due 5000ms timeout; `npm test --workspace @franken/critique -- tests/unit/evaluators/safety.test.ts -t "allows disjoint and deterministic repeated alternatives"` passed.

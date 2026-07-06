@@ -27,7 +27,7 @@ The strategic decision is to cut the redundant packages, absorb infrastructure c
 
 | Capability | Frankenbeast | Closest Alternatives |
 |-----------|-------------|---------------------|
-| DAG task planning | `franken-planner` — dependency graph with topo sort and critical path | LangGraph (graph workflows), CrewAI (task delegation) — execution-oriented, not planning-oriented |
+| DAG task planning | `@franken/planner` — dependency graph with topo sort and critical path | LangGraph (graph workflows), CrewAI (task delegation) — execution-oriented, not planning-oriented |
 | Self-critique | `franken-critique` — iterative evaluator chains with severity scoring | LangGraph reflection, AutoGen nested chat — similar concepts, different composability model |
 | HITL governance | `franken-governor` — trigger-based escalation with formal approval | OpenClaw HumanConfirmation, LangGraph interrupt — simpler but cover most use cases |
 | Provider failover + memory handoff | `ProviderRegistry` + `BrainSnapshot` serialize/hydrate | LiteLLM (provider abstraction only, no memory portability), no direct equivalent for full state handoff |
@@ -50,12 +50,12 @@ The strategic decision is to cut the redundant packages, absorb infrastructure c
 | Package | Role | Changes |
 |---------|------|---------|
 | `franken-types` | Shared interfaces, branded types, Zod schemas | Add `ILlmProvider`, `IBrain`, `BrainSnapshot` |
-| `franken-brain` | Provider-agnostic portable memory | **Rewrite.** Three memory types (working, episodic, recovery) backed by SQLite. `serialize()`/`hydrate()` for cross-provider handoff. ~300 lines. |
-| `franken-planner` | DAG task decomposition, topo sort, critical path | No changes. |
+| `@franken/brain` | Provider-agnostic portable memory | **Rewrite.** Three memory types (working, episodic, recovery) backed by SQLite. `serialize()`/`hydrate()` for cross-provider handoff. ~300 lines. |
+| `@franken/planner` | DAG task decomposition, topo sort, critical path | No changes. |
 | `franken-critique` | Self-critique loops + evaluator chains | **Absorbs** reflection from `franken-heartbeat`. Reflection becomes a critique evaluator. |
 | `franken-governor` | HITL gates, trigger escalation, approval workflows | No v1 changes. Reusing `franken-critique` severity scoring is a future option after the consolidated runtime stabilizes. |
 | `franken-observer` | Deterministic audit trail, execution replay | **Reframed** from general telemetry to provable execution audit. |
-| `franken-orchestrator` | Beast Loop, process supervisor, provider registry | **Absorbs** firewall (as LLM middleware), checkpointing (from heartbeat), MCP client (from franken-mcp), skill loading (from franken-skills), comms (from franken-comms — Slack/Discord/Telegram/WhatsApp bidirectional). Adds provider registry with failover. |
+| `@franken/orchestrator` | Beast Loop, process supervisor, provider registry | **Absorbs** firewall (as LLM middleware), checkpointing (from heartbeat), MCP client (from franken-mcp), skill loading (from franken-skills), comms (from franken-comms — Slack/Discord/Telegram/WhatsApp bidirectional). Adds provider registry with failover. |
 | `franken-web` | React dashboard + skill management | **Adds** skill management panel: browse provider catalogs, install/toggle skills, create custom MCPs, edit context.md. Standalone, talks to orchestrator via REST/SSE. |
 
 ### Packages Removed (5; historical target)
@@ -262,7 +262,7 @@ The platform should be easily extendable, either through forking or a secure plu
 ### Negative
 
 - **Migration cost**: Existing tests and imports for removed packages need cleanup
-- **Brain rewrite**: Current franken-brain is overengineered; new version is a ground-up rewrite
+- **Brain rewrite**: Current @franken/brain is overengineered; new version is a ground-up rewrite
 - **Skill discovery API stability**: Provider marketplace APIs may change or be undocumented — `discoverSkills()` may need maintenance per provider
 - **Provider adapter maintenance**: Each LLM CLI may change flags/output format across versions
 
@@ -294,14 +294,14 @@ The platform should be easily extendable, either through forking or a secure plu
 ```
 franken-types (leaf — no internal deps)
     ↑
-    ├── franken-planner
+    ├── @franken/planner
     ├── franken-critique
     ├── franken-observer
-    ├── franken-brain
+    ├── @franken/brain
     │
     ├── franken-governor
     │
-    └── franken-orchestrator
+    └── @franken/orchestrator
             ↑ uses ALL of the above
             ↑ + @modelcontextprotocol/sdk
             ↑ + better-sqlite3 (via brain)

@@ -11,7 +11,7 @@ import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
-const FRANKENBEAST_INSTALL_HELP = "install franken-orchestrator with 'npm install -g franken-orchestrator'";
+const FRANKENBEAST_INSTALL_HELP = "install @franken/orchestrator with 'npm install -g franken-orchestrator'";
 
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);

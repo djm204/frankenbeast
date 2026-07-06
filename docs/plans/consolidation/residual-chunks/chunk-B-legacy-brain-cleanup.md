@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Delete legacy episodic memory code and dependencies from franken-brain now that the dep-factory no longer imports them.
+**Goal:** Delete legacy episodic memory code and dependencies from @franken/brain now that the dep-factory no longer imports them.
 
-**Architecture:** Phase 2 rewrote franken-brain around `SqliteBrain`. The old `episodic/` and `types/` directories were retained because `dep-factory.ts` imported `EpisodicMemoryStore`. After Chunk A migrates to `createBeastDeps()`, these are dead code.
+**Architecture:** Phase 2 rewrote @franken/brain around `SqliteBrain`. The old `episodic/` and `types/` directories were retained because `dep-factory.ts` imported `EpisodicMemoryStore`. After Chunk A migrates to `createBeastDeps()`, these are dead code.
 
 **Tech Stack:** TypeScript, Vitest, better-sqlite3
 
@@ -36,7 +36,7 @@
 ### Task 1: Verify no remaining consumers
 
 - [ ] **Step 1:** Grep codebase for imports of `EpisodicMemoryStore`, `IEpisodicStore`, `TokenBudget`, `generateId`, `parseMemoryEntry`, `parseMemoryStatus`, `MemoryStatus`, `MemoryMetadata`, `WorkingTurn`, `EpisodicTrace`, `SemanticChunk`, `MemoryEntry`
-- [ ] **Step 2:** Confirm all references are in files deleted by Chunk A or in franken-brain itself
+- [ ] **Step 2:** Confirm all references are in files deleted by Chunk A or in @franken/brain itself
 - [ ] **Step 3:** If external references remain, update them first
 
 ### Task 2: Delete legacy code

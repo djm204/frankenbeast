@@ -22,8 +22,8 @@ Phase 1 chunk 06 greps for deleted *package names* in `*.json`, which catches di
 For each of the 8 packages, review `dependencies` and `devDependencies`:
 
 ```bash
-for pkg in franken-types franken-brain franken-planner franken-critique \
-           franken-governor franken-observer franken-orchestrator franken-web; do
+for pkg in franken-types @franken/brain @franken/planner franken-critique \
+           franken-governor franken-observer @franken/orchestrator franken-web; do
   echo "=== packages/$pkg/package.json ==="
   cat "packages/$pkg/package.json" | jq '.dependencies // {} | keys'
   cat "packages/$pkg/package.json" | jq '.devDependencies // {} | keys'

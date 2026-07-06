@@ -34,7 +34,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
         'npm',
         '--build-args',
         '--workspace',
-        '@frankenbeast/web',
+        '@franken/web',
         'run',
         'build',
       ],

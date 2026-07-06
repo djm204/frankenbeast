@@ -52,9 +52,9 @@ async function main(): Promise<void> {
   }
 
   // Create collections for each module that uses vector storage
-  await createCollection('episodic-memory', { module: 'franken-brain' });
-  await createCollection('project-adrs', { module: 'franken-brain' });
-  await createCollection('known-errors', { module: 'franken-brain' });
+  await createCollection('episodic-memory', { module: '@franken/brain' });
+  await createCollection('project-adrs', { module: '@franken/brain' });
+  await createCollection('known-errors', { module: '@franken/brain' });
   printLine('Seed complete.');
 }
 

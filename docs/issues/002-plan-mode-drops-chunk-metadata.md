@@ -1,7 +1,7 @@
 # Issue: Plan Mode Drops Chunk Metadata When Writing Files
 
 Severity: high
-Area: `franken-orchestrator` planning UX
+Area: `@franken/orchestrator` planning UX
 
 ## Summary
 
@@ -20,9 +20,9 @@ The design-doc planning flow loses the LLM's structured chunk metadata before wr
 
 ## Evidence
 
-- `franken-orchestrator/src/planning/llm-graph-builder.ts:8-15`
-- `franken-orchestrator/src/cli/session.ts:249-267`
-- `franken-orchestrator/src/cli/file-writer.ts:49-82`
+- `@franken/orchestrator/src/planning/llm-graph-builder.ts:8-15`
+- `@franken/orchestrator/src/cli/session.ts:249-267`
+- `@franken/orchestrator/src/cli/file-writer.ts:49-82`
 
 ## Impact
 

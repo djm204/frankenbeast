@@ -27,4 +27,4 @@
 
 * The following workspace dependencies were updated
   * dependencies
-    * @frankenbeast/observer bumped from 0.7.9 to 0.7.10
+    * @franken/observer bumped from 0.7.9 to 0.7.10

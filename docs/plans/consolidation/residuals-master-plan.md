@@ -45,7 +45,7 @@ Migrate `session.ts` and `run.ts` from `createCliDeps()` to `createBeastDeps()`.
 **Resolves:** Phase 2 M1/M2
 **Depends on:** Chunk A
 
-Delete `franken-brain/src/episodic/`, `franken-brain/src/types/`, remove `ulid` and `zod` from `package.json`, clean up `index.ts` re-exports, remove `EpisodicMemoryPortAdapter`.
+Delete `@franken/brain/src/episodic/`, `@franken/brain/src/types/`, remove `ulid` and `zod` from `package.json`, clean up `index.ts` re-exports, remove `EpisodicMemoryPortAdapter`.
 
 ### [Chunk C: CLI Commands](residual-chunks/chunk-C-cli-commands.md)
 **Estimated size:** Medium

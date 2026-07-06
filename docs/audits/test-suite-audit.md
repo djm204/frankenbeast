@@ -8,14 +8,14 @@
 
 | Package | Total Tests | Useless | % Useless | Status |
 |---------|------------|---------|-----------|--------|
-| franken-orchestrator | ~1,564 | ~40 | 2.6% | Active |
+| @franken/orchestrator | ~1,564 | ~40 | 2.6% | Active |
 | franken-observer | ~250 | 10 | 4.0% | Active |
-| franken-planner | ~200 | 15-18 | 8.0% | Active |
+| @franken/planner | ~200 | 15-18 | 8.0% | Active |
 | franken-critique | ~120 | 17 | 14.2% | Active |
 | franken-governor | ~100 | 13 | 13.0% | Active |
 | root-level | ~80 | 25 | 31.3% | Active |
 | franken-types | ~45 | 13 | 28.9% | Active |
-| franken-brain | 27 | 3 | 11.1% | Active |
+| @franken/brain | 27 | 3 | 11.1% | Active |
 | franken-web | ~38 | 0 | 0% | Active |
 | franken-heartbeat | 117 | 35 | 29.9% | DELETED |
 | franken-mcp | 71 | 15 | 21.1% | DELETED |
@@ -67,7 +67,7 @@ All useless tests are in the "type-level" describe blocks. They construct object
 
 ---
 
-### franken-brain (3 useless / 27 total)
+### @franken/brain (3 useless / 27 total)
 
 All 3 useless tests are in `tests/unit/types/ids.test.ts` -- they test the `ulid` library through a 1-line passthrough wrapper `generateId()`.
 
@@ -81,7 +81,7 @@ All 3 useless tests are in `tests/unit/types/ids.test.ts` -- they test the `ulid
 
 ---
 
-### franken-planner (15-18 useless / ~200 total)
+### @franken/planner (15-18 useless / ~200 total)
 
 | File | Test | Category | Action |
 |------|------|----------|--------|
@@ -152,7 +152,7 @@ The observer suite is remarkably strong. Issues are concentrated in `GrafanaDash
 
 ---
 
-### franken-orchestrator (~40 useless / ~1,564 total)
+### @franken/orchestrator (~40 useless / ~1,564 total)
 
 The largest package has the lowest uselessness rate (2.6%). Issues cluster in specific patterns:
 
@@ -214,7 +214,7 @@ The root-level suite has the highest uselessness rate (31.3%).
 **Redundant with package-level tests** (6 tests):
 | File | Tests | Action |
 |------|-------|--------|
-| `integration/phase2-planning.test.ts` | 3 DAG construction tests | Delete (covered in franken-planner) |
+| `integration/phase2-planning.test.ts` | 3 DAG construction tests | Delete (covered in @franken/planner) |
 | `integration/phase3-execution.test.ts` | 3 governor tests (signatures, tokens, triggers) | Delete (covered in franken-governor) |
 
 **Misleading/redundant CI checks** (4 tests):
@@ -279,7 +279,7 @@ Every package has tests checking `typeof x.method === 'function'`. TypeScript al
 ### 3. Don't test 3rd-party library guarantees
 `ulid()` uniqueness, `crypto.randomUUID()` uniqueness, `HMAC-SHA256` determinism, `JSON.parse(JSON.stringify())` round-trips on plain objects -- these are all documented guarantees of the libraries/runtime. **Rule: Only test your code's logic, not the behavior of well-tested dependencies.**
 
-### 4. Deduplicate test/ vs tests/ in franken-orchestrator
+### 4. Deduplicate test/ vs tests/ in @franken/orchestrator
 The `test/` directory is a legacy location with ~10 files, several of which duplicate files in `tests/`. **Action: Merge any unique tests into `tests/`, then delete `test/`.**
 
 ### 5. Root-level integration tests should add cross-module value

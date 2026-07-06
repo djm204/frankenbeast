@@ -73,7 +73,7 @@ export function parseDirtySubmodules(porcelain: string): string[] {
 
 /**
  * Extract package component names from a list of file paths.
- * Maps `packages/franken-brain/src/foo.ts` → `franken-brain`.
+ * Maps `packages/franken-brain/src/foo.ts` → `@franken/brain`.
  * Returns sorted, deduplicated component names.
  */
 export function detectAffectedPackages(filePaths: string[]): string[] {
@@ -89,7 +89,7 @@ export function detectAffectedPackages(filePaths: string[]): string[] {
  * Build a conventional-commit-style scope string from affected packages.
  * - 0 packages (root-only change): returns empty string
  * - 1 package: returns `(franken-brain)`
- * - 2-3 packages: returns `(franken-brain,franken-types)`
+ * - 2-3 packages: returns `(@franken/brain,franken-types)`
  * - 4+ packages: returns `(4-packages)`
  */
 export function buildCommitScope(packages: string[]): string {
