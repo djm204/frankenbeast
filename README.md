@@ -776,13 +776,13 @@ frankenbeast/
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
 ├── packages/
-│   ├── @franken/brain/           # MOD-03: Memory Systems
-│   ├── @franken/planner/         # MOD-04: Planning & Decomposition
+│   ├── franken-brain/           # MOD-03: Memory Systems
+│   ├── franken-planner/         # MOD-04: Planning & Decomposition
 │   ├── franken-observer/        # MOD-05: Observability
 │   ├── franken-critique/        # MOD-06: Self-Critique & Reflection
 │   ├── franken-governor/        # MOD-07: HITL & Governance
 │   ├── franken-types/           # Shared type definitions
-│   ├── @franken/orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
+│   ├── franken-orchestrator/    # The Beast Loop & CLI (bin: frankenbeast)
 │   ├── franken-mcp-suite/       # MCP suite CLI, servers, hooks, proxy
 │   ├── live-bench/              # Live CLI benchmark tooling
 │   └── franken-web/             # React web dashboard (dev tool)
