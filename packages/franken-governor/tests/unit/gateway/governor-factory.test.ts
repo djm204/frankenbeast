@@ -67,6 +67,24 @@ describe('createGovernor', () => {
     });
   });
 
+  it('applies config overrides over defaults', async () => {
+    const readline = makeReadline(['a']);
+    const memoryPort = makeMemoryPort();
+    const governor = createGovernor({
+      readline,
+      memoryPort,
+      config: { requireSignedApprovals: true },
+      evaluators: [new BudgetTrigger()],
+      budgetState: { getBudgetState: () => ({ tripped: true, limitUsd: 10, spendUsd: 11 }) },
+    });
+
+    await expect(governor.verifyRationale(makeRationale())).rejects.toThrow(
+      'Signed approvals are required but no signature verifier is configured',
+    );
+    expect(readline.question).not.toHaveBeenCalled();
+    expect(memoryPort.recordDecision).not.toHaveBeenCalled();
+  });
+
   it('prefers explicit operatorName and forwards optional skill metadata sources', async () => {
     const memoryPort = makeMemoryPort();
     const governor = createGovernor({
