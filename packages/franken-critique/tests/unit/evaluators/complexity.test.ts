@@ -447,6 +447,16 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not mistake division after property control names for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `obj.if(ok) / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('does not mistake division after angle-bracket assertions for regex literals', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `const ratio = <Box>{} / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;

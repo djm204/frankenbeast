@@ -500,12 +500,8 @@ function isControlHeaderPrefix(
         const previousIndex = findPreviousRegexLookbehindIndex(content, i);
         if (previousIndex === -1) return false;
 
-        let keywordStart = previousIndex;
-        while (keywordStart >= 0 && /[\w$]/.test(content[keywordStart] ?? '')) {
-          keywordStart--;
-        }
-        const keyword = content.slice(keywordStart + 1, previousIndex + 1);
-        return /^(?:if|while|for|with)$/.test(keyword);
+        const keyword = keywordBefore(content, previousIndex);
+        return /^(?:if|while|for|with)$/.test(keyword ?? '');
       }
     }
   }
