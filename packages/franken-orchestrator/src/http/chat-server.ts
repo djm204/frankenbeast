@@ -318,7 +318,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     void handleHonoHttpRequest(app, request, response);
   });
 
-  attachChatWebSocketServer({
+  const webSocketServer = attachChatWebSocketServer({
     server,
     path,
     runtime: runtime.runtime,
@@ -351,6 +351,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      webSocketServer.close();
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       options.disposeBeastControl?.();

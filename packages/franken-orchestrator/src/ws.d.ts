@@ -13,6 +13,7 @@ declare module 'ws' {
 
   export class WebSocketServer {
     constructor(options: { noServer?: boolean });
+    close(callback?: (err?: Error) => void): void;
     handleUpgrade(
       request: IncomingMessage,
       socket: Duplex,

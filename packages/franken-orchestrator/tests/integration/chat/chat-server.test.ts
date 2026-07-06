@@ -91,6 +91,23 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('removes websocket upgrade listeners on shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+    });
+
+    expect(server.server.listenerCount('upgrade')).toBe(1);
+
+    await server.close();
+
+    expect(server.server.listenerCount('upgrade')).toBe(0);
+  });
+
   it('mounts beast routes on the live server when beast control is configured', async () => {
     mkdirSync(TMP, { recursive: true });
     const llm = { complete: vi.fn().mockResolvedValue('Server reply') };

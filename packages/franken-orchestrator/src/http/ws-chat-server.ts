@@ -389,7 +389,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
   const controller = new ChatSocketController(options);
   const server = new WebSocketServer({ noServer: true });
 
-  options.server.on('upgrade', (request, socket, head) => {
+  const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const url = new URL(request.url ?? '', 'http://localhost');
     if (url.pathname !== path) {
       return;
@@ -441,7 +441,16 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
       });
       ws.on('close', () => controller.disconnect(peer));
     });
-  });
+  };
 
-  return { controller, server };
+  options.server.on('upgrade', onUpgrade);
+
+  return {
+    controller,
+    server,
+    close: () => {
+      options.server.off('upgrade', onUpgrade);
+      server.close();
+    },
+  };
 }
