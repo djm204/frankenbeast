@@ -809,9 +809,10 @@ export async function main(): Promise<void> {
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides
+  const shouldReuseActivePlanName = !args.designDoc && (args.subcommand === 'plan' || args.subcommand === 'run');
   const implicitPlanName = args.designDoc
     ? generatePlanName(args.designDoc)
-    : (readActivePlanName(root) ?? generatePlanName());
+    : (shouldReuseActivePlanName ? (readActivePlanName(root) ?? generatePlanName()) : generatePlanName());
   const planName = planDirOverride
     ? undefined
     : (args.planName ?? (args.subcommand === 'issues'
@@ -1103,16 +1104,6 @@ export async function main(): Promise<void> {
     config.providers.overrides,
   );
 
-  if (planName && !planDirOverride && (
-    args.planName !== undefined
-    || args.designDoc !== undefined
-    || args.subcommand === 'interview'
-    || args.subcommand === 'plan'
-    || args.subcommand === undefined
-  )) {
-    writeActivePlanName(paths, planName);
-  }
-
   // Create and run session
   // Precedence: CLI args > config file > defaults
   const session = new Session({
@@ -1159,6 +1150,17 @@ export async function main(): Promise<void> {
   }
 
   const result = await session.start();
+
+  const sessionSucceeded = !result || result.status === 'completed' || result.status === 'no-op';
+  if (sessionSucceeded && planName && !planDirOverride && (
+    args.planName !== undefined
+    || args.designDoc !== undefined
+    || args.subcommand === 'interview'
+    || args.subcommand === 'plan'
+    || args.subcommand === undefined
+  )) {
+    writeActivePlanName(paths, planName);
+  }
 
   // `no-op` is a benign terminal status (empty or intentionally-skipped plan),
   // so it must exit successfully alongside `completed` — otherwise CI/scripts

@@ -852,6 +852,38 @@ describe('main() execution', () => {
     );
   });
 
+  it('starts a fresh interview plan even when an active plan exists', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'interview' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith('/mock/project', 'plan-2026-03-08');
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+  });
+
+  it('does not persist active plan names when the session fails before using the plan', async () => {
+    mockSessionStart.mockResolvedValueOnce({ status: 'failed' } as unknown as Awaited<ReturnType<typeof mockSessionStart>>);
+    const originalExitCode = process.exitCode;
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "1"');
+
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+    process.exitCode = originalExitCode;
+  });
+
+  it('does not mark issue batches as the active plan', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'issues', planName: 'batch-13' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+  });
+
   it('reuses the recorded active plan for an implicit run across date rollover', async () => {
     const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.mocked(readActivePlanName).mockReturnValueOnce('plan-2026-03-07');
