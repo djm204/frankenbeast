@@ -28,7 +28,6 @@ const REGEX_PREFIX_CHARS = new Set([
   '*',
   '~',
   '^',
-  '>',
 ]);
 
 function stripIgnoredBraceSyntax(content: string): string {
@@ -57,6 +56,13 @@ function stripIgnoredBraceSyntax(content: string): string {
       isLikelyQuotedStringStart(content, i, char)
     ) {
       const end = findQuotedStringEnd(content, i, char);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '`' && next === '`' && content[i + 2] === '`') {
+      const end = findLineEnd(content, i + 3);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
       continue;
@@ -258,20 +264,7 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
     return true;
   }
 
-  if (previous === '[') {
-    const previousBeforeBracketIndex = findPreviousRegexLookbehindIndex(
-      content,
-      previousIndex,
-    );
-    if (previousBeforeBracketIndex === -1) return true;
-
-    const previousBeforeBracket = content[previousBeforeBracketIndex] ?? '';
-    return (
-      previousBeforeBracket === '[' ||
-      REGEX_PREFIX_CHARS.has(previousBeforeBracket) ||
-      isRegexKeywordPrefix(content, previousBeforeBracketIndex)
-    );
-  }
+  if (previous === '[') return true;
 
   if (previous === '!') {
     const previousBeforeBangIndex = findPreviousRegexLookbehindIndex(
@@ -292,7 +285,7 @@ function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
   while (start >= 0 && /[\w$]/.test(content[start] ?? '')) start--;
 
   const word = content.slice(start + 1, endIndex + 1);
-  return /^(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
+  return /^(?:return|throw|case|delete|typeof|void|in|of|yield|await|else)$/.test(
     word,
   );
 }

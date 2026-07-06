@@ -246,6 +246,46 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not let Markdown fences mask nested code blocks', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `Example:\n\`\`\`ts\nif (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }\n\`\`\``;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces inside regex literals after else branches', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `if (ok) run(); else /{{{{{{/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside regex literals in computed property indexes', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const value = obj[/{{{{{{/.source];`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not mistake division after generic type assertions for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ratio = value as Box<number> / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
