@@ -237,6 +237,41 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('masks regex literals after control-flow keywords in fallback loop scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function unfinished() { while (true) { throw /break/.test(reason); doWork(); `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('masks regex literals after keyword-prefixed await before fallback recursion scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `Analysis notes:\nfunction loop() { const helper = async () => await /if/.test(value); loop(); not javascript`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('ignores keywords inside template interpolation strings while fallback scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { log(`${({ value: "break }" })}`); doWork(); not javascript';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('ignores keywords inside template interpolation comments while fallback scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { log(`${({ value: /* break } */ 1 })}`); doWork(); not javascript';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('does not treat exits inside class methods as exits from the containing loop', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `while (true) { class Worker { run() { return work(); } } doWork(); }`;

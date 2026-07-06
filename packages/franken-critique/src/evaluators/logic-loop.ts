@@ -88,12 +88,155 @@ function fenceRanges(code: string): Range[] {
   }));
 }
 
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'case',
+  'delete',
+  'else',
+  'in',
+  'instanceof',
+  'new',
+  'of',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+  'await',
+]);
+
 function isRegexLiteralStart(code: string, index: number): boolean {
   let cursor = index - 1;
   while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
   if (cursor < 0) return true;
 
-  return '([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!);
+  if ('([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const tokenEnd = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  if (tokenEnd === cursor + 1) return false;
+
+  const token = code.slice(cursor + 1, tokenEnd);
+  return REGEX_PREFIX_KEYWORDS.has(token) && hasKeywordBoundary(code, token, cursor + 1);
+}
+
+function scanQuotedRange(code: string, index: number, ranges: Range[]): number {
+  const quote = code[index];
+  const start = index;
+  index += 1;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === quote) {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanLineCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index = code.indexOf('\n', index + 2);
+  if (index < 0) index = code.length;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanBlockCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  const end = code.indexOf('*/', index + 2);
+  index = end < 0 ? code.length : end + 2;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanRegexRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index += 1;
+  let inCharacterClass = false;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === '[') inCharacterClass = true;
+    if (code[index] === ']') inCharacterClass = false;
+    if (code[index] === '/' && !inCharacterClass) {
+      index += 1;
+      while (/[a-z]/i.test(code[index] ?? '')) index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanTemplateRange(code: string, index: number, ranges: Range[]): number {
+  let segmentStart = index;
+  index += 1;
+
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+
+    if (code[index] === '$' && code[index + 1] === '{') {
+      ranges.push({ start: segmentStart, end: index + 2 });
+      index += 2;
+      let expressionDepth = 1;
+
+      while (index < code.length && expressionDepth > 0) {
+        const char = code[index];
+        const next = code[index + 1];
+
+        if (char === '\\') {
+          index += 2;
+          continue;
+        }
+        if (char === '\'' || char === '"') {
+          index = scanQuotedRange(code, index, ranges);
+          continue;
+        }
+        if (char === '`') {
+          index = scanTemplateRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '/') {
+          index = scanLineCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '*') {
+          index = scanBlockCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && isRegexLiteralStart(code, index)) {
+          index = scanRegexRange(code, index, ranges);
+          continue;
+        }
+        if (char === '{') expressionDepth += 1;
+        if (char === '}') expressionDepth -= 1;
+        index += 1;
+      }
+
+      segmentStart = index - 1;
+      continue;
+    }
+
+    if (code[index] === '`') {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+
+  ranges.push({ start: segmentStart, end: index });
+  return index;
 }
 
 function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
@@ -106,98 +249,36 @@ function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
       index = fenced.end;
       continue;
     }
+    if (isIndexInRanges(ranges, index)) {
+      index += 1;
+      continue;
+    }
 
     const char = code[index];
     const next = code[index + 1];
 
-    if ((char === '\'' || char === '"') && !isIndexInRanges(ranges, index)) {
-      const quote = char;
-      const start = index;
-      index += 1;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === quote) {
-          index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start, end: index });
+    if (char === '\'' || char === '"') {
+      index = scanQuotedRange(code, index, ranges);
       continue;
     }
 
-    if (char === '`' && !isIndexInRanges(ranges, index)) {
-      let segmentStart = index;
-      index += 1;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === '$' && code[index + 1] === '{') {
-          ranges.push({ start: segmentStart, end: index + 2 });
-          index += 2;
-          let expressionDepth = 1;
-          while (index < code.length && expressionDepth > 0) {
-            if (code[index] === '\\') {
-              index += 2;
-              continue;
-            }
-            if (code[index] === '{') expressionDepth += 1;
-            if (code[index] === '}') expressionDepth -= 1;
-            index += 1;
-          }
-          segmentStart = index - 1;
-          continue;
-        }
-        if (code[index] === '`') {
-          index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start: segmentStart, end: index });
+    if (char === '`') {
+      index = scanTemplateRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && next === '/') {
-      const start = index;
-      index = code.indexOf('\n', index + 2);
-      if (index < 0) index = code.length;
-      ranges.push({ start, end: index });
+      index = scanLineCommentRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && next === '*') {
-      const start = index;
-      const end = code.indexOf('*/', index + 2);
-      index = end < 0 ? code.length : end + 2;
-      ranges.push({ start, end: index });
+      index = scanBlockCommentRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && isRegexLiteralStart(code, index)) {
-      const start = index;
-      index += 1;
-      let inCharacterClass = false;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === '[') inCharacterClass = true;
-        if (code[index] === ']') inCharacterClass = false;
-        if (code[index] === '/' && !inCharacterClass) {
-          index += 1;
-          while (/[a-z]/i.test(code[index] ?? '')) index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start, end: index });
+      index = scanRegexRange(code, index, ranges);
       continue;
     }
 
