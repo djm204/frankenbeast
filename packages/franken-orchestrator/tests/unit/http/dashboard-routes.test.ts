@@ -142,7 +142,7 @@ describe('dashboard routes', () => {
       await res.body?.cancel();
     });
 
-    it('rejects a reused stream ticket', async () => {
+    it('returns no content for a reused stream ticket so EventSource stops native retries', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
       const ticketRes = await app.request('/events/ticket', { method: 'POST' });
@@ -153,7 +153,8 @@ describe('dashboard routes', () => {
       await first.body?.cancel();
 
       const second = await app.request(`/events?ticket=${ticket}`);
-      expect(second.status).toBe(401);
+      expect(second.status).toBe(204);
+      expect(await second.text()).toBe('');
     });
 
     it('sends initial snapshot event in the stream', async () => {

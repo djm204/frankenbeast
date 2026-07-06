@@ -58,8 +58,11 @@ export function createDashboardRoutes(deps: DashboardRouteDeps): Hono {
   // GET /api/dashboard/events — ticket-authenticated SSE stream for real-time dashboard updates
   app.get('/events', (c) => {
     const ticket = c.req.query('ticket');
-    if (operatorToken && (!ticketStore || !ticket || !ticketStore.validate(ticket, operatorToken))) {
+    if (operatorToken && (!ticketStore || !ticket)) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
+    }
+    if (operatorToken && ticketStore && ticket && !ticketStore.validate(ticket, operatorToken)) {
+      return c.body(null, 204);
     }
 
     return streamSSE(c, async (stream) => {
