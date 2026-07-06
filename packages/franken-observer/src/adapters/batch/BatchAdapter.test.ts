@@ -2,9 +2,24 @@ import { describe, it, expect, vi } from 'vitest'
 import { BatchAdapter } from './BatchAdapter.js'
 import { InMemoryAdapter } from '../../export/InMemoryAdapter.js'
 import type { Trace } from '../../core/types.js'
+import type { ExportAdapter } from '../../export/ExportAdapter.js'
 
 function makeTrace(id: string): Trace {
   return { id, goal: 'test', status: 'completed', startedAt: Date.now(), spans: [] }
+}
+
+class FailingFlushAdapter implements ExportAdapter {
+  async flush(_trace: Trace): Promise<void> {
+    throw new Error('database temporarily locked')
+  }
+
+  async queryByTraceId(_traceId: string): Promise<Trace | null> {
+    return null
+  }
+
+  async listTraceIds(): Promise<string[]> {
+    return []
+  }
 }
 
 // ── buffering ─────────────────────────────────────────────────────────────────
@@ -85,6 +100,17 @@ describe('BatchAdapter — drain()', () => {
     const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 5 })
     await batch.drain()
     expect(flushSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps buffered traces when the inner adapter rejects during drain', async () => {
+    const batch = new BatchAdapter({ adapter: new FailingFlushAdapter(), maxBatchSize: 100 })
+    const trace = makeTrace('retry-me')
+
+    await batch.flush(trace)
+    await expect(batch.drain()).rejects.toThrow('database temporarily locked')
+
+    expect(await batch.queryByTraceId('retry-me')).toEqual(trace)
+    expect(await batch.listTraceIds()).toEqual(['retry-me'])
   })
 
   it('sends all batched traces in parallel (order-independent)', async () => {

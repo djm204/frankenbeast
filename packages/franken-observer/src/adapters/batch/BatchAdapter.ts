@@ -52,6 +52,7 @@ export class BatchAdapter implements ExportAdapter {
   private readonly buffer: Trace[] = []
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly clearIntervalFn: (id: ReturnType<typeof setInterval>) => void
+  private drainPromise: Promise<void> | null = null
 
   constructor(options: BatchAdapterOptions) {
     this.inner = options.adapter
@@ -75,12 +76,26 @@ export class BatchAdapter implements ExportAdapter {
 
   /**
    * Forwards all buffered traces to the inner adapter in parallel and clears
-   * the buffer. Safe to call on an empty buffer (no-op).
+   * only successfully persisted traces from the buffer. Safe to call on an
+   * empty buffer (no-op).
    */
   async drain(): Promise<void> {
-    if (this.buffer.length === 0) return
-    const batch = this.buffer.splice(0, this.buffer.length)
-    await Promise.all(batch.map(t => this.inner.flush(t)))
+    if (this.drainPromise !== null) return this.drainPromise
+
+    this.drainPromise = this.drainBufferedTraces()
+    try {
+      await this.drainPromise
+    } finally {
+      this.drainPromise = null
+    }
+  }
+
+  private async drainBufferedTraces(): Promise<void> {
+    while (this.buffer.length > 0) {
+      const batch = [...this.buffer]
+      await Promise.all(batch.map(t => this.inner.flush(t)))
+      this.buffer.splice(0, batch.length)
+    }
   }
 
   /**
