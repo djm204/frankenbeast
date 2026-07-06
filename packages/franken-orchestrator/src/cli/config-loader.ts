@@ -103,6 +103,10 @@ function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
     cli.enableTracing = true;
   }
 
+  if (args.initBackend) {
+    cli.network = { secureBackend: args.initBackend } as Partial<OrchestratorConfig['network']> as OrchestratorConfig['network'];
+  }
+
   return cli;
 }
 

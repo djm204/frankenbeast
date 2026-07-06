@@ -47,6 +47,20 @@ describe('parseArgs', () => {
     expect(args.initNonInteractive).toBe(true);
   });
 
+  it('parses init --backend and normalizes the backend id', () => {
+    const args = parseArgs(['init', '--backend', '1PASSWORD']);
+    expect(args.subcommand).toBe('init');
+    expect(args.initBackend).toBe('1password');
+  });
+
+  it('rejects --backend outside the init subcommand', () => {
+    expect(() => parseArgs(['run', '--backend', '1password'])).toThrow('--backend is only supported for init');
+  });
+
+  it('rejects unsupported init backends', () => {
+    expect(() => parseArgs(['init', '--backend', 'vault'])).toThrow('Invalid init backend');
+  });
+
   it('parses chat-server subcommand with local defaults', () => {
     const args = parseArgs(['chat-server']);
     expect(args.subcommand).toBe('chat-server');

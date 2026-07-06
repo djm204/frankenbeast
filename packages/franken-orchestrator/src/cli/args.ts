@@ -95,6 +95,7 @@ export interface CliArgs {
   initVerify: boolean;
   initRepair: boolean;
   initNonInteractive: boolean;
+  initBackend?: string | undefined;
   beastExecutionMode?: import('../beasts/types.js').BeastExecutionMode | undefined;
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
@@ -107,7 +108,7 @@ const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
 const STRING_OPTIONS = new Set([
   'base-dir', 'base-branch', 'budget', 'provider', 'providers', 'design-doc', 'plan-dir', 'plan-name', 'output-dir',
   'goal', 'output', 'config', 'host', 'port', 'allow-origin', 'label', 'milestone', 'search', 'assignee', 'limit',
-  'repo', 'mode', 'set',
+  'repo', 'mode', 'set', 'backend',
 ]);
 const BOOLEAN_SHORT_OPTIONS = new Set(['d']);
 const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
@@ -151,6 +152,7 @@ Options:
   --verify                Verify init config and readiness
   --repair                Re-run only missing or failed init steps
   --non-interactive       Disable interactive prompts for init
+  --backend <name>        Init secret backend: local-encrypted, os-keychain, 1password, bitwarden
   --help                  Show this help message
 
 Non-interactive HITL:
@@ -385,6 +387,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       verify: { type: 'boolean', default: false },
       repair: { type: 'boolean', default: false },
       'non-interactive': { type: 'boolean', default: false },
+      backend: { type: 'string' },
       help: { type: 'boolean', default: false },
       label: { type: 'string' },
       milestone: { type: 'string' },
@@ -494,6 +497,18 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     throw new TypeError('--mode is only supported for beasts create, spawn, status, and logs');
   }
 
+  if (values.backend !== undefined && subcommand !== 'init') {
+    throw new TypeError('--backend is only supported for init');
+  }
+
+  const initBackend = values.backend?.toLowerCase();
+  if (initBackend !== undefined) {
+    const validBackends = new Set(['local-encrypted', 'os-keychain', '1password', 'bitwarden']);
+    if (!validBackends.has(initBackend)) {
+      throw new TypeError(`Invalid init backend '${values.backend}'. Valid: local-encrypted, os-keychain, 1password, bitwarden`);
+    }
+  }
+
   const providersRaw = values.providers;
   const providers = providersRaw
     ? providersRaw.split(',').map((p) => p.trim().toLowerCase())
@@ -583,6 +598,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     initVerify: values.verify ?? false,
     initRepair: values.repair ?? false,
     initNonInteractive: values['non-interactive'] ?? false,
+    initBackend,
     help: values.help ?? false,
     issueLabel,
     issueMilestone: values.milestone,

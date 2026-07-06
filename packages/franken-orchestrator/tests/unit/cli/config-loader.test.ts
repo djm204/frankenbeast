@@ -118,6 +118,16 @@ describe('Config loader', () => {
     expect(config.enableTracing).toBe(true);
   });
 
+  it('CLI init backend overrides the configured secret backend', async () => {
+    const filePath = join(tmpdir(), `beast-backend-config-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({ network: { secureBackend: 'local-encrypted' } }));
+
+    const config = await loadConfig(makeArgs({ subcommand: 'init', initBackend: '1password', config: filePath }));
+
+    expect(config.network.secureBackend).toBe('1password');
+  });
+
   it('reads boolean env vars', async () => {
     process.env['FRANKEN_ENABLE_HEARTBEAT'] = 'false';
     const config = await loadConfig(makeArgs());
