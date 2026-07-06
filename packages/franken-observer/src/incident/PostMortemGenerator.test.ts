@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { TraceContext } from '../core/TraceContext.js'
 import { SpanLifecycle } from '../core/SpanLifecycle.js'
 import { PostMortemGenerator } from './PostMortemGenerator.js'
@@ -42,6 +42,14 @@ function makeTraceWithId(id: string) {
     span.traceId = id
   }
   return trace
+}
+
+function traceIdHash(id: string): string {
+  return createHash('sha256').update(id, 'utf8').digest('hex')
+}
+
+function expectedReportFilename(traceId: string, timestamp: number): string {
+  return `post-mortem-${traceIdHash(traceId)}-${timestamp}.md`
 }
 
 describe('PostMortemGenerator', () => {
@@ -124,12 +132,15 @@ describe('PostMortemGenerator', () => {
       expect(filePath!.endsWith('.md')).toBe(true)
     })
 
-    it('filename contains the trace id', async () => {
+    it('filename uses a hash instead of preserving the raw trace id', async () => {
       const gen = new PostMortemGenerator({ outputDir })
-      const trace = makeTrace()
+      const rawTraceId = 'trace/with\\separators\u202eand-controls\u0000CON'
+      const trace = makeTraceWithId(rawTraceId)
       const filePath = await gen.generate(trace, makeSignal(trace.id))
       expect(filePath).not.toBeNull()
-      expect(filePath!).toContain(trace.id)
+      expect(filePath!).not.toContain(rawTraceId)
+      expect(filePath!).toContain(traceIdHash(rawTraceId))
+      expect(filePath!).toMatch(/post-mortem-[a-f0-9]{64}-1700000000000\.md$/)
     })
 
     it('written file content matches generateContent()', async () => {
@@ -170,8 +181,8 @@ describe('PostMortemGenerator', () => {
           expect(existsSync(filePath!)).toBe(true)
         }
 
-        const escapedReports = maliciousIds.map(
-          traceId => resolve(containedOutputDir, `post-mortem-${traceId}-1700000000000.md`),
+        const escapedReports = maliciousIds.map(traceId =>
+          resolve(containedOutputDir, expectedReportFilename(traceId, 1_700_000_000_000)),
         )
         expect(escapedReports.some(path => !isInsideDirectory(containedOutputDir, path) && existsSync(path))).toBe(false)
       } finally {
@@ -195,9 +206,9 @@ describe('PostMortemGenerator', () => {
         expect(isInsideDirectory(symlinkedOutputDir, filePath!)).toBe(true)
         expect(existsSync(filePath!)).toBe(true)
 
-        const escapedPath = resolve(realOutputDir, `post-mortem-${trace.id}-1700000000000.md`)
-        expect(isInsideDirectory(realOutputDir, escapedPath)).toBe(false)
-        expect(existsSync(escapedPath)).toBe(false)
+        const rawTraceIdPath = resolve(realOutputDir, `post-mortem-${trace.id}-1700000000000.md`)
+        expect(isInsideDirectory(realOutputDir, rawTraceIdPath)).toBe(false)
+        expect(existsSync(rawTraceIdPath)).toBe(false)
       } finally {
         rmSync(parentDir, { recursive: true, force: true })
       }
@@ -209,7 +220,7 @@ describe('PostMortemGenerator', () => {
       const outsidePath = join(parentDir, 'outside.md')
       const trace = makeTraceWithId('symlink-target')
       const signal = makeSignal(trace.id)
-      const expectedReportPath = join(reportsDir, `post-mortem-symlink-target-${signal.timestamp}.md`)
+      const expectedReportPath = join(reportsDir, expectedReportFilename(trace.id, signal.timestamp))
 
       mkdirSync(reportsDir, { recursive: true })
       writeFileSync(outsidePath, 'do not overwrite')
@@ -243,7 +254,7 @@ describe('PostMortemGenerator', () => {
       }
     })
 
-    it('uses reversible trace id encoding so separator-like ids do not overwrite distinct reports', async () => {
+    it('uses distinct trace id hashes so separator-like ids do not overwrite distinct reports', async () => {
       const gen = new PostMortemGenerator({ outputDir })
       const signalTimestamp = 1_700_000_000_000
       const firstPath = await gen.generate(makeTraceWithId('run\\1'), makeSignal('run\\1', { timestamp: signalTimestamp }))
@@ -256,13 +267,23 @@ describe('PostMortemGenerator', () => {
       expect(existsSync(secondPath!)).toBe(true)
     })
 
-    it('does not throw when encoding malformed UTF-16 trace ids', async () => {
+    it('does not throw when hashing malformed UTF-16 trace ids', async () => {
       const gen = new PostMortemGenerator({ outputDir })
       const malformedTraceId = 'run-\uD800'
       const filePath = await gen.generate(makeTraceWithId(malformedTraceId), makeSignal(malformedTraceId))
 
       expect(filePath).not.toBeNull()
       expect(isInsideDirectory(outputDir, filePath!)).toBe(true)
+      expect(existsSync(filePath!)).toBe(true)
+    })
+
+    it('sanitizes non-finite timestamps before filename construction', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const trace = makeTraceWithId('trace-with-non-finite-timestamp')
+      const filePath = await gen.generate(trace, makeSignal(trace.id, { timestamp: Number.NaN }))
+
+      expect(filePath).not.toBeNull()
+      expect(filePath!).toMatch(/post-mortem-[a-f0-9]{64}-invalid-timestamp\.md$/)
       expect(existsSync(filePath!)).toBe(true)
     })
   })
@@ -302,7 +323,7 @@ describe('PostMortemGenerator', () => {
       // fails with EISDIR — mimics a disk-full / unwritable target without mocks.
       const trace = makeTrace()
       const sig = makeSignal(trace.id)
-      const filename = `post-mortem-${trace.id}-${sig.timestamp}.md`
+      const filename = expectedReportFilename(trace.id, sig.timestamp)
       mkdirSync(join(outputDir, filename), { recursive: true })
 
       const gen = new PostMortemGenerator({ outputDir })

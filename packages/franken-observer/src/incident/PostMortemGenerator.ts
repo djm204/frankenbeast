@@ -1,5 +1,6 @@
 import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
@@ -9,32 +10,12 @@ export interface PostMortemOptions {
   outputDir?: string
 }
 
-function safeFilenameComponent(value: string): string {
-  let wellFormedValue = ''
+function traceIdHashForFilename(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
 
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index)
-
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const nextCode = value.charCodeAt(index + 1)
-      if (nextCode >= 0xdc00 && nextCode <= 0xdfff) {
-        wellFormedValue += value[index] + value[index + 1]
-        index += 1
-      } else {
-        wellFormedValue += '\uFFFD'
-      }
-      continue
-    }
-
-    if (code >= 0xdc00 && code <= 0xdfff) {
-      wellFormedValue += '\uFFFD'
-      continue
-    }
-
-    wellFormedValue += value[index]
-  }
-
-  return encodeURIComponent(wellFormedValue)
+function timestampForFilename(timestamp: number): string {
+  return Number.isFinite(timestamp) ? String(Math.trunc(timestamp)) : 'invalid-timestamp'
 }
 
 function isInsideDirectory(baseDir: string, targetPath: string): boolean {
@@ -71,7 +52,9 @@ export class PostMortemGenerator {
   }
 
   generateContent(trace: Trace, signal: InterruptSignal): string {
-    const detectedAt = new Date(signal.timestamp).toISOString()
+    const detectedAt = Number.isFinite(signal.timestamp)
+      ? new Date(signal.timestamp).toISOString()
+      : 'Invalid timestamp'
     const patternList = signal.detectedPattern.map(p => `  - \`${p}\``).join('\n')
 
     const spansTable = trace.spans
@@ -127,8 +110,8 @@ without reaching a terminal condition. Possible causes:
    * the post-mortem was meant to diagnose.
    */
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
-    const timestamp = signal.timestamp
-    const filename = `post-mortem-${safeFilenameComponent(trace.id)}-${timestamp}.md`
+    const timestamp = timestampForFilename(signal.timestamp)
+    const filename = `post-mortem-${traceIdHashForFilename(trace.id)}-${timestamp}.md`
     const configuredFilePath = join(this.outputDir, filename)
     const content = this.generateContent(trace, signal)
 
