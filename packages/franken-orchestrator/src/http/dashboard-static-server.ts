@@ -112,10 +112,20 @@ async function createProxyResponse(
   return fetch(targetUrl, init);
 }
 
+function sanitizeWebhookPathForProxy(pathname: string): string {
+  // Rewrite potentially sensitive Telegram webhook paths that accidentally include the bot token
+  // so we never forward that token to internal services.
+  return pathname.replace(
+    /(\/webhooks\/telegram)\/\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=$|\/)/i,
+    '$1',
+  );
+}
+
 function resolveProxyTargetUrl(apiTarget: string, sourceUrl: URL): URL {
   const targetBase = new URL(`${apiTarget}/`);
   const basePath = targetBase.pathname.replace(/\/+$/, '');
-  targetBase.pathname = `${basePath}${sourceUrl.pathname}`.replace(/\/+/g, '/');
+  const sanitizedPathname = sanitizeWebhookPathForProxy(sourceUrl.pathname);
+  targetBase.pathname = `${basePath}${sanitizedPathname}`.replace(/\/+/g, '/');
   targetBase.search = sourceUrl.search;
   return targetBase;
 }
