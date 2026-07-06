@@ -97,13 +97,13 @@ frankenbeast/
 ├── docker-compose.yml           # optional ChromaDB/Grafana/Tempo stack
 ├── docs/
 ├── packages/
-│   ├── @franken/brain/           # SQLite-backed working/episodic/recovery memory
-│   ├── @franken/planner/         # DAG planning primitives and strategies
+│   ├── franken-brain/           # @franken/brain: SQLite-backed working/episodic/recovery memory
+│   ├── franken-planner/         # @franken/planner: DAG planning primitives and strategies
 │   ├── franken-observer/        # trace/cost/eval/loop observability
 │   ├── franken-critique/        # critique pipeline and correction requests
 │   ├── franken-governor/        # HITL triggers, approvals, audit/security helpers
 │   ├── franken-types/           # shared types and Zod schemas
-│   ├── @franken/orchestrator/    # Beast Loop, CLI, HTTP surfaces, providers
+│   ├── franken-orchestrator/    # @franken/orchestrator: Beast Loop, CLI, HTTP surfaces, providers
 │   ├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy
 │   ├── franken-web/             # React dashboard
 │   └── live-bench/              # live benchmark tooling

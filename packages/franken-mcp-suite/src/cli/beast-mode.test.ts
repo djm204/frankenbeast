@@ -143,7 +143,7 @@ describe('runBeastMode', () => {
     await runBeastMode([], deps);
 
     const message = mockLog.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(message).toContain('npm install -g franken-orchestrator');
+    expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).toContain('frankenbeast beasts catalog');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');
     mockLog.mockRestore();
