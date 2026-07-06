@@ -17,11 +17,26 @@ if (!match) {
 }
 
 const expected = match[1];
-const actual = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+
+function readVersion(command, args) {
+  try {
+    return execFileSync(command, args, { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+const corepackVersion = readVersion('corepack', ['npm', '--version']);
+const actual = corepackVersion || readVersion('npm', ['--version']);
+if (!actual) {
+  console.error('Unable to determine npm version via `corepack npm --version` or `npm --version`.');
+  process.exit(1);
+}
 
 if (actual !== expected) {
-  console.error(`npm version mismatch: packageManager pins npm@${expected}, but npm --version returned ${actual}.`);
-  console.error(`Run \`corepack enable npm && corepack prepare npm@${expected} --activate\` before installing dependencies.`);
+  const source = corepackVersion ? 'corepack npm' : 'npm';
+  console.error(`npm version mismatch: packageManager pins npm@${expected}, but ${source} --version returned ${actual}.`);
+  console.error(`Run \`corepack enable && corepack prepare npm@${expected} --activate\` before installing dependencies.`);
   process.exit(1);
 }
 
