@@ -9,7 +9,31 @@ export interface PostMortemOptions {
 }
 
 function safeFilenameComponent(value: string): string {
-  return encodeURIComponent(value)
+  let wellFormedValue = ''
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const nextCode = value.charCodeAt(index + 1)
+      if (nextCode >= 0xdc00 && nextCode <= 0xdfff) {
+        wellFormedValue += value[index] + value[index + 1]
+        index += 1
+      } else {
+        wellFormedValue += '\uFFFD'
+      }
+      continue
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      wellFormedValue += '\uFFFD'
+      continue
+    }
+
+    wellFormedValue += value[index]
+  }
+
+  return encodeURIComponent(wellFormedValue)
 }
 
 function isInsideDirectory(baseDir: string, targetPath: string): boolean {

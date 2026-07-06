@@ -232,6 +232,16 @@ describe('PostMortemGenerator', () => {
       expect(existsSync(firstPath!)).toBe(true)
       expect(existsSync(secondPath!)).toBe(true)
     })
+
+    it('does not throw when encoding malformed UTF-16 trace ids', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const malformedTraceId = 'run-\uD800'
+      const filePath = await gen.generate(makeTraceWithId(malformedTraceId), makeSignal(malformedTraceId))
+
+      expect(filePath).not.toBeNull()
+      expect(isInsideDirectory(outputDir, filePath!)).toBe(true)
+      expect(existsSync(filePath!)).toBe(true)
+    })
   })
 
   describe('generate() error handling (disk full / read-only)', () => {
