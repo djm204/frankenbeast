@@ -659,6 +659,89 @@ describe('Chat HTTP Routes', () => {
     expect(session.pendingApproval).toBeNull();
   });
 
+  it('POST /v1/chat/sessions/:id/approve does not execute duplicate HTTP approvals twice', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-http-duplicate-approval',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: {
+        description: 'Deploy staging',
+        requestedAt: now,
+        tool: 'execution',
+        command: 'deploy staging',
+        sessionId: 'chat-http-duplicate-approval',
+      },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    let finishExecution!: () => void;
+    let executionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      executionStarted = resolve;
+    });
+    const finished = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const runtime = {
+      run: vi.fn(async () => {
+        executionStarted();
+        await finished;
+        return {
+          displayMessages: [{ kind: 'execution' as const, content: 'Done' }],
+          events: [],
+          pendingApproval: false,
+          state: 'active' as const,
+          tier: 'premium_execution',
+          transcript: [],
+        };
+      }),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+    });
+
+    const first = app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+    await started;
+    const duplicate = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+    finishExecution();
+    const firstRes = await first;
+
+    expect(firstRes.status).toBe(200);
+    expect(duplicate.status).toBe(200);
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect((await duplicate.json()).data).toMatchObject({
+      id: session.id,
+      approved: true,
+      state: 'approved',
+    });
+    expect(session.pendingApproval).toBeNull();
+  });
+
   it('POST /v1/chat/sessions/:id/approve does not downgrade approved sessions when runtime reports active', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {

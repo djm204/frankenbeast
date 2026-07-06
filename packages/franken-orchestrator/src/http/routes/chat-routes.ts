@@ -184,6 +184,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
       const runtimeInput = approvalRuntimeInput(pendingApproval);
       const originalState = session.state;
+      session.pendingApproval = null;
+      session.state = 'approved';
+      session.updatedAt = new Date().toISOString();
+      sessionStore.save(session);
       try {
         result = await runtime.run(runtimeInput, {
           sessionId: session.id,
