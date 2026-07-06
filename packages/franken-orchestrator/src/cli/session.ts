@@ -546,6 +546,9 @@ export class Session {
     if (result.error) {
       printLine(`  ${A.dim}Warning:${A.reset}   ${result.error.message}`);
     }
+    if (result.prUrl) {
+      printLine(`  ${A.dim}PR:${A.reset}        ${result.prUrl}`);
+    }
     if (result.taskResults?.length) {
       printLine(`\n  ${A.dim}Chunks:${A.reset}`);
       for (const t of result.taskResults) {
