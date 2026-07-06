@@ -425,19 +425,20 @@ function containsIfStatement(
   node: AstNode,
   enterFunction = false,
   beforePosition = Number.POSITIVE_INFINITY,
+  targetName?: string,
 ): boolean {
   const enteredHelpers = new Set<string>();
-  const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+  const visit = (current: AstNode, allowFunctionBody = false, activePosition = beforePosition): boolean => {
     if (
       current !== node &&
       !allowFunctionBody &&
       typeof current.start === 'number' &&
-      current.start > beforePosition
+      current.start > activePosition
     ) {
       return false;
     }
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
-    if (current.type === 'IfStatement') return true;
+    if (current.type === 'IfStatement' && current.start < activePosition) return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
       const callee = current.callee;
       if (callee.type === 'Identifier') {
@@ -445,16 +446,17 @@ function containsIfStatement(
         if (callName && !enteredHelpers.has(callName)) {
           const helper = localFunctionDeclaration(node, callName, current.start);
           if (helper) {
+            const helperPosition = targetName ? findRecursiveCallStart(helper, targetName) ?? activePosition : activePosition;
             enteredHelpers.add(callName);
-            if (visit(helper, true)) return true;
+            if (visit(helper, true, helperPosition)) return true;
             enteredHelpers.delete(callName);
           }
         }
       }
       const invokedFunction = invokedFunctionCallee(callee);
-      if (invokedFunction) return visit(invokedFunction, true);
+      if (invokedFunction) return visit(invokedFunction, true, activePosition);
     }
-    return childNodes(current).some((child) => visit(child));
+    return childNodes(current).some((child) => visit(child, false, activePosition));
   };
 
   return visit(node, enterFunction);
@@ -487,38 +489,32 @@ function functionBodyStatements(root: AstNode): AstNode[] {
   if (isNode(body) && body.type === 'BlockStatement' && Array.isArray(body.body)) {
     return body.body.filter(isNode);
   }
+  if (root.type === 'BlockStatement' && Array.isArray(body)) return body.filter(isNode);
   if (Array.isArray(body)) return body.filter(isNode);
   return [];
 }
 
-function localFunctionDeclaration(root: AstNode, name: string, callStart = Number.POSITIVE_INFINITY): AstNode | null {
-  const candidateBlocks: AstNode[] = [];
-  const collectBlocks = (current: AstNode): void => {
-    if (
-      current !== root &&
-      (isFunctionLike(current) || current.type === 'ClassDeclaration' || current.type === 'ClassExpression')
-    ) {
-      return;
-    }
+function containsPosition(node: AstNode, position: number): boolean {
+  return typeof node.start === 'number' && typeof node.end === 'number' && node.start <= position && position <= node.end;
+}
 
-    if (
-      (current === root || current.type === 'BlockStatement' || current.type === 'Program') &&
-      typeof current.start === 'number' &&
-      typeof current.end === 'number' &&
-      current.start <= callStart &&
-      callStart <= current.end
-    ) {
-      candidateBlocks.push(current);
-    }
-
-    for (const child of childNodes(current)) collectBlocks(child);
+function lexicalScopesAt(root: AstNode, position: number): AstNode[] {
+  const scopes: AstNode[] = [];
+  const visit = (current: AstNode): void => {
+    if (!containsPosition(current, position)) return;
+    if (functionBodyStatements(current).length > 0) scopes.push(current);
+    for (const child of childNodes(current)) visit(child);
   };
 
-  collectBlocks(root);
-  candidateBlocks.sort((a, b) => (b.start - a.start) || (a.end - b.end));
+  visit(root);
+  return scopes;
+}
 
-  for (const block of candidateBlocks) {
-    for (const statement of functionBodyStatements(block)) {
+function localFunctionDeclaration(root: AstNode, name: string, callStart = Number.POSITIVE_INFINITY): AstNode | null {
+  const scopes = lexicalScopesAt(root, callStart).reverse();
+
+  for (const scope of scopes) {
+    for (const statement of functionBodyStatements(scope)) {
       if (statement.type === 'FunctionDeclaration') {
         const id = statement.id;
         if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return statement;
@@ -589,19 +585,19 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
   return visit(node);
 }
 
-function hasReturnBefore(node: AstNode, position: number, enterFunction = false): boolean {
+function hasReturnBefore(node: AstNode, position: number, enterFunction = false, targetName?: string): boolean {
   const enteredHelpers = new Set<string>();
-  const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+  const visit = (current: AstNode, allowFunctionBody = false, activePosition = position): boolean => {
     if (
       current !== node &&
       !allowFunctionBody &&
       typeof current.start === 'number' &&
-      current.start > position
+      current.start > activePosition
     ) {
       return false;
     }
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
-    if (current.type === 'ReturnStatement' && current.start < position) return true;
+    if (current.type === 'ReturnStatement' && current.start < activePosition) return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
       const callee = current.callee;
       if (callee.type === 'Identifier') {
@@ -609,16 +605,17 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
         if (callName && !enteredHelpers.has(callName)) {
           const helper = localFunctionDeclaration(node, callName, current.start);
           if (helper) {
+            const helperPosition = targetName ? findRecursiveCallStart(helper, targetName) ?? activePosition : activePosition;
             enteredHelpers.add(callName);
-            if (visit(helper, true)) return true;
+            if (visit(helper, true, helperPosition)) return true;
             enteredHelpers.delete(callName);
           }
         }
       }
       const invokedFunction = invokedFunctionCallee(callee);
-      if (invokedFunction) return visit(invokedFunction, true);
+      if (invokedFunction) return visit(invokedFunction, true, activePosition);
     }
-    return childNodes(current).some((child) => visit(child));
+    return childNodes(current).some((child) => visit(child, false, activePosition));
   };
 
   return visit(node, enterFunction);
@@ -824,9 +821,9 @@ export class LogicLoopEvaluator implements Evaluator {
           const recursiveCallStart = findRecursiveCallStart(node, fnName);
           if (recursiveCallStart != null) {
             const hasGuard =
-              containsIfStatement(node, false, recursiveCallStart) ||
+              containsIfStatement(node, false, recursiveCallStart, fnName) ||
               containsIfInRecursivePath(node, recursiveCallStart) ||
-              hasReturnBefore(node, recursiveCallStart);
+              hasReturnBefore(node, recursiveCallStart, false, fnName);
             if (!hasGuard) {
               findings.push({
                 message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
