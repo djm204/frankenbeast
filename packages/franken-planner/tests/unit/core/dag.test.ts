@@ -180,6 +180,23 @@ describe('PlanGraph — cycle detection', () => {
 
     expect(() => g.topoSort()).toThrow(/unknown dependency node 'missing'/);
   });
+
+  it('hasCycle rejects missing raw edge ids instead of reporting a spurious cycle', () => {
+    const a = makeTask('a');
+    const b = makeTask('b');
+    const missing = createTaskId('missing');
+    const nodes = new Map([
+      [a.id, a],
+      [b.id, b],
+    ]);
+    const edges = new Map([
+      [a.id, new Set<Task['id']>()],
+      [b.id, new Set([missing])],
+    ]);
+    const g = PlanGraph.createWithRawEdges(nodes, edges);
+
+    expect(() => g.hasCycle()).toThrow(/unknown dependency node 'missing'/);
+  });
 });
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
