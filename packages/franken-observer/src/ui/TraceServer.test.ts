@@ -1,4 +1,5 @@
 import { createContext, Script } from 'node:vm'
+import type { Server } from 'node:http'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { TraceServer } from './TraceServer.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
@@ -37,6 +38,12 @@ describe('TraceServer', () => {
     it('reflects the actual bound port, not 0', () => {
       const port = parseInt(new URL(server.url).port, 10)
       expect(port).toBeGreaterThan(0)
+    })
+
+    it('binds to loopback by default instead of all interfaces', () => {
+      const nodeServer = (server as unknown as { server: Server | null }).server
+      const address = nodeServer?.address()
+      expect(address && typeof address === 'object' ? address.address : undefined).toBe('127.0.0.1')
     })
   })
 
