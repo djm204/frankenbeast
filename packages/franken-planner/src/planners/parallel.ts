@@ -1,4 +1,4 @@
-import { RationaleRejectedError } from '../core/errors.js';
+import { RationaleRejectedError, RecursionDepthExceededError } from '../core/errors.js';
 import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, TaskId, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
@@ -12,7 +12,17 @@ import type { PlanContext, PlanningStrategy } from './types.js';
 export class ParallelPlanner implements PlanningStrategy {
   readonly name = 'parallel' as const;
 
-  async execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
+  constructor(private readonly maxExpansionDepth = 10) {}
+
+  execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
+    return this._exec(graph, context, 0);
+  }
+
+  private async _exec(graph: PlanGraph, context: PlanContext, depth: number): Promise<PlanResult> {
+    if (depth > this.maxExpansionDepth) {
+      throw new RecursionDepthExceededError(depth);
+    }
+
     // Validate the DAG up front so cyclic plans fail loudly instead of
     // deadlocking the wave scheduler and returning partial success.
     const tasks = graph.topoSort();
@@ -82,21 +92,30 @@ export class ParallelPlanner implements PlanningStrategy {
         }
       }
 
+      let firstExpansionFailure: { taskId: TaskId; error: Error } | undefined;
       for (const r of waveResults) {
         if (r.status === 'success' && r.expand === true) {
           const subGraph = PlanGraph.fromTasks(r.newTasks);
-          const subResult = await this.execute(subGraph, context);
+          const subResult = await this._exec(subGraph, context, depth + 1);
           if (subResult.status === 'failed') {
-            return {
-              ...subResult,
-              taskResults: [...allResults, ...subResult.taskResults],
-            };
+            allResults.push(...subResult.taskResults);
+            firstExpansionFailure ??= { taskId: r.taskId, error: subResult.error };
+            continue;
           }
           if (subResult.status !== 'completed') {
             return subResult;
           }
           allResults.push(...subResult.taskResults);
         }
+      }
+
+      if (firstExpansionFailure) {
+        return {
+          status: 'failed',
+          taskResults: allResults,
+          failedTaskId: firstExpansionFailure.taskId,
+          error: firstExpansionFailure.error,
+        };
       }
 
       for (const r of waveResults) {
