@@ -350,6 +350,40 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('parses valid sources before treating fence markers inside strings as markdown', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'const msg = "```js\\nwhile (true) { work(); }\\n```";';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('ignores string literal keywords during fallback extraction', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'const msg = "while (true) { work(); }"; ???';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('does not duplicate findings from a single fenced block', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = '```js\nwhile (true) { doWork(); }\n```';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('balances fallback snippets without counting string braces', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { log("}"); work(); } and then hangs';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('does not duplicate findings when the full source already parses', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `function run() { while (true) { doWork(); } }`;

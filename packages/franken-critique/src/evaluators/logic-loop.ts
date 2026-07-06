@@ -28,6 +28,7 @@ const LOOP_OR_SWITCH_NODE_TYPES = new Set([
 ]);
 
 type AstNode = Node & Record<string, unknown>;
+type Range = { start: number; end: number };
 
 type AcornPlugin = (BaseParser: typeof Parser) => typeof Parser;
 
@@ -60,21 +61,145 @@ function childNodes(node: AstNode): AstNode[] {
   return children;
 }
 
-function isInsideComment(code: string, index: number): boolean {
-  const lineStart = code.lastIndexOf('\n', index - 1) + 1;
-  if (code.slice(lineStart, index).includes('//')) return true;
+function mergeRanges(ranges: Range[]): Range[] {
+  const sorted = ranges.slice().sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Range[] = [];
 
-  const lastBlockStart = code.lastIndexOf('/*', index);
-  const lastBlockEnd = code.lastIndexOf('*/', index);
-  return lastBlockStart > lastBlockEnd;
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+
+  return merged;
+}
+
+function isIndexInRanges(ranges: Range[], index: number): boolean {
+  return ranges.some((range) => index >= range.start && index < range.end);
+}
+
+function fenceRanges(code: string): Range[] {
+  return Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g), (match) => ({
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+}
+
+function isRegexLiteralStart(code: string, index: number): boolean {
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  if (cursor < 0) return true;
+
+  return '([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!);
+}
+
+function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
+  const ranges: Range[] = includeFences ? fenceRanges(code) : [];
+  let index = 0;
+
+  while (index < code.length) {
+    const fenced = includeFences ? ranges.find((range) => range.start === index) : undefined;
+    if (fenced) {
+      index = fenced.end;
+      continue;
+    }
+
+    const char = code[index];
+    const next = code[index + 1];
+
+    if ((char === '\'' || char === '"') && !isIndexInRanges(ranges, index)) {
+      const quote = char;
+      const start = index;
+      index += 1;
+      while (index < code.length) {
+        if (code[index] === '\\') {
+          index += 2;
+          continue;
+        }
+        if (code[index] === quote) {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      ranges.push({ start, end: index });
+      continue;
+    }
+
+    if (char === '`' && !isIndexInRanges(ranges, index)) {
+      const start = index;
+      index += 1;
+      while (index < code.length) {
+        if (code[index] === '\\') {
+          index += 2;
+          continue;
+        }
+        if (code[index] === '`') {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      ranges.push({ start, end: index });
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      const start = index;
+      index = code.indexOf('\n', index + 2);
+      if (index < 0) index = code.length;
+      ranges.push({ start, end: index });
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      const start = index;
+      const end = code.indexOf('*/', index + 2);
+      index = end < 0 ? code.length : end + 2;
+      ranges.push({ start, end: index });
+      continue;
+    }
+
+    if (char === '/' && isRegexLiteralStart(code, index)) {
+      const start = index;
+      index += 1;
+      let inCharacterClass = false;
+      while (index < code.length) {
+        if (code[index] === '\\') {
+          index += 2;
+          continue;
+        }
+        if (code[index] === '[') inCharacterClass = true;
+        if (code[index] === ']') inCharacterClass = false;
+        if (code[index] === '/' && !inCharacterClass) {
+          index += 1;
+          while (/[a-z]/i.test(code[index] ?? '')) index += 1;
+          break;
+        }
+        index += 1;
+      }
+      ranges.push({ start, end: index });
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return mergeRanges(ranges);
 }
 
 function trimToBalancedSnippet(candidate: string): string {
+  const ignoredRanges = ignoredSyntaxRanges(candidate);
   const firstOpen = candidate.indexOf('{');
   if (firstOpen < 0) return candidate;
 
   let depth = 0;
   for (let index = firstOpen; index < candidate.length; index += 1) {
+    if (isIndexInRanges(ignoredRanges, index)) continue;
+
     const char = candidate[index];
     if (char === '{') depth += 1;
     if (char === '}') {
@@ -86,18 +211,49 @@ function trimToBalancedSnippet(candidate: string): string {
   return candidate;
 }
 
-function codeCandidates(code: string): string[] {
-  const fencedBlocks = Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g), (match) => match[1]).filter(
-    (block): block is string => typeof block === 'string' && block.trim().length > 0,
-  );
-  const candidates = fencedBlocks.length > 0 ? [...fencedBlocks, code] : [code];
+function hasKeywordBoundary(code: string, keyword: string, index: number): boolean {
+  const before = code[index - 1] ?? '';
+  const after = code[index + keyword.length] ?? '';
+  return !/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after);
+}
 
-  for (const keyword of ['while', 'for', 'function', 'async function', 'class']) {
+function pushCandidate(candidates: string[], seen: Set<string>, candidate: string): void {
+  const normalized = candidate.trim();
+  if (!normalized || seen.has(normalized)) return;
+  seen.add(normalized);
+  candidates.push(normalized);
+}
+
+function hasMarkdownFence(code: string): boolean {
+  return /(^|\n)```/.test(code);
+}
+
+function codeCandidates(code: string): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const fences = Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g));
+  for (const match of fences) {
+    const block = match[1];
+    if (typeof block === 'string' && block.trim().length > 0) pushCandidate(candidates, seen, block);
+  }
+  pushCandidate(candidates, seen, code);
+
+  const ignoredRanges = ignoredSyntaxRanges(code, true);
+  const maxFallbackSnippets = 50;
+  let fallbackSnippetCount = 0;
+
+  for (const keyword of ['async function', 'function', 'while', 'for', 'class']) {
     let index = code.indexOf(keyword);
     while (index >= 0) {
-      if (!isInsideComment(code, index)) {
+      if (
+        fallbackSnippetCount < maxFallbackSnippets &&
+        hasKeywordBoundary(code, keyword, index) &&
+        !isIndexInRanges(ignoredRanges, index)
+      ) {
         const snippet = code.slice(index);
-        candidates.push(snippet, trimToBalancedSnippet(snippet));
+        pushCandidate(candidates, seen, snippet);
+        pushCandidate(candidates, seen, trimToBalancedSnippet(snippet));
+        fallbackSnippetCount += 1;
       }
       index = code.indexOf(keyword, index + keyword.length);
     }
@@ -132,7 +288,7 @@ function parseJavaScript(code: string): AstNode[] {
     }
   };
 
-  if (!code.includes('```')) {
+  if (!hasMarkdownFence(code)) {
     for (const sourceType of ['module', 'script'] as const) {
       const ast = parseCandidate(code, sourceType);
       if (ast) return [ast];
