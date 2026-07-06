@@ -46,6 +46,9 @@ This starts the services defined in `docker-compose.yml`:
 - **Grafana** (port 3000)
 - **Tempo** (ports 3200, 4317, 4318)
 
+The compose stack pins image versions and mounts `tempo.yaml` into Tempo so the
+optional tracing backend does not depend on floating tags or an implicit config.
+
 There is no `firewall` Docker service in the current compose file.
 
 ## 4. Build and verify
