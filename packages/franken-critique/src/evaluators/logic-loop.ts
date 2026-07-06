@@ -113,7 +113,7 @@ function isRegexLiteralStart(code: string, index: number): boolean {
 
   const tokenEnd = cursor + 1;
   while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
-  if (tokenEnd === cursor + 1) return false;
+  if (tokenEnd === cursor + 1 || code[cursor] === '.') return false;
 
   const token = code.slice(cursor + 1, tokenEnd);
   return REGEX_PREFIX_KEYWORDS.has(token) && hasKeywordBoundary(code, token, cursor + 1);

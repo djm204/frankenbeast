@@ -254,6 +254,15 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('recursion');
   });
 
+  it('does not mask division after keyword-like member names in fallback recursion scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { timer.await / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('ignores keywords inside template interpolation strings while fallback scanning', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = 'while (true) { log(`${({ value: "break }" })}`); doWork(); not javascript';
