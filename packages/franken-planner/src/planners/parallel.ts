@@ -92,7 +92,7 @@ export class ParallelPlanner implements PlanningStrategy {
         }
       }
 
-      const expansionResults = await Promise.all(
+      const settledExpansionResults = await Promise.allSettled(
         waveResults
           .filter((r) => r.status === 'success' && r.expand === true)
           .map(async (r) => {
@@ -101,6 +101,28 @@ export class ParallelPlanner implements PlanningStrategy {
             return { parentTaskId: r.taskId, subResult };
           })
       );
+
+      const rejectedExpansionRationale = settledExpansionResults.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && result.reason instanceof RationaleRejectedError
+      );
+      if (rejectedExpansionRationale) {
+        throw rejectedExpansionRationale.reason;
+      }
+
+      const rejectedExpansion = settledExpansionResults.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
+      );
+      if (rejectedExpansion) {
+        throw rejectedExpansion.reason;
+      }
+
+      const expansionResults = settledExpansionResults.map((result) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        }
+        throw result.reason;
+      });
 
       let firstExpansionFailure: { taskId: TaskId; error: Error } | undefined;
       for (const { parentTaskId, subResult } of expansionResults) {

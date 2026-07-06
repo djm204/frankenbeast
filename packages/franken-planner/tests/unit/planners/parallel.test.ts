@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ParallelPlanner } from '../../../src/planners/parallel';
 import { PlanGraph } from '../../../src/core/dag';
-import { CyclicDependencyError, RecursionDepthExceededError } from '../../../src/core/errors';
+import { CyclicDependencyError, RationaleRejectedError, RecursionDepthExceededError } from '../../../src/core/errors';
 import { createTaskId } from '../../../src/core/types';
 import type { Task, TaskId, TaskResult } from '../../../src/core/types';
 
@@ -207,6 +207,41 @@ describe('ParallelPlanner — happy path', () => {
     expect(resolveSub1).toBeDefined();
     resolveSub1?.(success('sub-1'));
     await expect(execution).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('waits for sibling expansions before propagating an expansion rejection', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let resolveSub2: ((result: TaskResult) => void) | undefined;
+    let rejected = false;
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent-1')) return Promise.resolve(expand('parent-1', [sub1]));
+      if (task.id === createTaskId('parent-2')) return Promise.resolve(expand('parent-2', [sub2]));
+      if (task.id === createTaskId('sub-1')) {
+        return Promise.reject(new RationaleRejectedError('sub-1', 'bad rationale'));
+      }
+      if (task.id === createTaskId('sub-2')) {
+        return new Promise<TaskResult>((resolve) => {
+          resolveSub2 = resolve;
+        });
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const execution = new ParallelPlanner().execute(graph, { executor });
+    execution.catch(() => {
+      rejected = true;
+    });
+    await vi.waitFor(() => expect(resolveSub2).toBeDefined());
+    await Promise.resolve();
+
+    expect(rejected).toBe(false);
+    resolveSub2?.(success('sub-2'));
+    await expect(execution).rejects.toBeInstanceOf(RationaleRejectedError);
   });
 });
 
