@@ -3,6 +3,11 @@ import { ZodError } from 'zod';
 import type { SkillManager } from '../../skills/skill-manager.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
 
+function isSkillInstallValidationError(err: unknown): boolean {
+  return err instanceof ZodError
+    || (err instanceof Error && err.message.startsWith('Invalid skill name '));
+}
+
 function skillInstallErrorMessage(err: unknown): string {
   if (err instanceof ZodError) {
     return err.issues
@@ -60,6 +65,9 @@ export function createSkillRoutes(deps: {
         return c.json({ installed: custom.name }, 201);
       }
     } catch (err) {
+      if (!isSkillInstallValidationError(err)) {
+        throw err;
+      }
       return c.json({ error: skillInstallErrorMessage(err) }, 400);
     }
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { Hono } from 'hono';
 import { SkillManager } from '../../../src/skills/skill-manager.js';
 import { createSkillRoutes } from '../../../src/http/routes/skill-routes.js';
+import { errorHandler } from '../../../src/http/middleware.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
 function mockProviderRegistry(): ProviderRegistry {
@@ -142,6 +143,31 @@ describe('Skill API routes', () => {
       expect(listRes.status).toBe(200);
       const listBody = await listRes.json();
       expect(listBody.skills).toEqual([]);
+    });
+
+    it('propagates operational install failures to the error handler', async () => {
+      const failingManager = {
+        installCustom: vi.fn().mockRejectedValue(new Error('EACCES: permission denied')),
+      } as unknown as SkillManager;
+      const failingApp = new Hono();
+      failingApp.onError(errorHandler);
+      failingApp.route('/api/skills', createSkillRoutes({
+        skillManager: failingManager,
+        providerRegistry: mockProviderRegistry(),
+      }));
+
+      const res = await failingApp.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: { name: 'valid-tool', config: { command: 'node' } },
+        }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error.code).toBe('INTERNAL_ERROR');
+      expect(JSON.stringify(body)).not.toContain('EACCES');
     });
 
     it('returns 400 when neither provided', async () => {
