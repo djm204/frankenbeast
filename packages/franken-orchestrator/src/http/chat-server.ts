@@ -27,6 +27,7 @@ import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } from '../network/network-url.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
+import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -295,6 +296,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
       : undefined);
+  const chatStreamTicketStore = effectiveOperatorToken ? new SseConnectionTicketStore() : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -312,6 +314,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
     ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+    ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
   });
   const server = createServer((request, response) => {
@@ -354,6 +357,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       webSocketServer.close();
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
+      chatStreamTicketStore?.destroy();
       options.disposeBeastControl?.();
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();

@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 interface TicketEntry {
   token: string;
+  scope?: string | undefined;
   expiresAt: number;
 }
 
@@ -22,22 +23,24 @@ export class SseConnectionTicketStore {
     this.cleanupInterval.unref?.();
   }
 
-  issue(token: string): string {
+  issue(token: string, scope?: string | undefined): string {
     const ticket = randomUUID();
     this.tickets.set(ticket, {
       token,
+      scope,
       expiresAt: Date.now() + this.ttlMs,
     });
     return ticket;
   }
 
-  validate(ticket: string, operatorToken: string): boolean {
+  validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
     const entry = this.tickets.get(ticket);
     if (!entry) return false;
 
     this.tickets.delete(ticket);
 
     if (Date.now() > entry.expiresAt) return false;
+    if (entry.scope !== scope) return false;
 
     // Verify the ticket was issued for this operator token
     const bufA = Buffer.from(entry.token);

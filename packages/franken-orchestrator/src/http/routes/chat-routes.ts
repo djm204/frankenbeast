@@ -14,6 +14,7 @@ import type {
 } from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
+import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -34,6 +35,8 @@ export interface ChatRoutesDeps {
   runtime: ChatRuntime;
   turnRunner: TurnRunner;
   issueSocketToken: (sessionId: string) => string;
+  operatorToken?: string | undefined;
+  streamTicketStore?: SseConnectionTicketStore | undefined;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -52,7 +55,7 @@ function sessionResponse(
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, runtime, turnRunner, issueSocketToken } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
 
   // Health check
@@ -140,8 +143,28 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return c.json(response);
   });
 
+  // Browser EventSource cannot attach Authorization headers. Authenticated
+  // callers mint a short-lived, one-shot ticket with normal fetch credentials,
+  // then place only that ticket in the stream URL.
+  app.post('/v1/chat/sessions/:id/stream/ticket', (c) => {
+    const id = c.req.param('id');
+    getSessionOrThrow(sessionStore, id);
+    if (!operatorToken) {
+      return c.json({ ticket: null });
+    }
+    if (!streamTicketStore) {
+      return c.json({ error: { code: 'UNAVAILABLE', message: 'Chat stream tickets are not configured' } }, 503);
+    }
+    return c.json({ ticket: streamTicketStore.issue(operatorToken, id) });
+  });
+
   // SSE stream
-  app.get('/v1/chat/sessions/:id/stream', createSseHandler({ sessionStore, turnRunner }));
+  app.get('/v1/chat/sessions/:id/stream', createSseHandler({
+    sessionStore,
+    turnRunner,
+    operatorToken,
+    ticketStore: streamTicketStore,
+  }));
 
   // Approve action
   app.post('/v1/chat/sessions/:id/approve', async (c) => {
