@@ -579,10 +579,29 @@ describe('LogicLoopEvaluator', () => {
 
   it('resolves helper calls only from the call-site lexical scope', async () => {
     const evaluator = new LogicLoopEvaluator();
-    const content = 'function loop(){ { function again(){ loop(); } } function again(){ return; } again(); }';
+    const hiddenHelper = 'function loop(){ { function again(){ loop(); } } function again(){ return; } again(); }';
+    const blockScopedHelper = 'function loop(){ { function again(){ loop(); } again(); } }';
+
+    await expect(evaluator.evaluate(createInput(hiddenHelper))).resolves.toMatchObject({ verdict: 'pass' });
+    await expect(evaluator.evaluate(createInput(blockScopedHelper))).resolves.toMatchObject({ verdict: 'fail' });
+  });
+
+  it('does not treat returns after helper recursion as guards', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'function loop(){ function again(){ loop(); return; } again(); }';
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.verdict).toBe('pass');
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('preserves template interpolation code during malformed fallback scans', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'function loop(){ const s = `${loop()}`; bad(; }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
   });
 
   it('handles empty content', async () => {

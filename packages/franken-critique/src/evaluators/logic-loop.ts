@@ -130,11 +130,27 @@ function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
     }
 
     if (char === '`' && !isIndexInRanges(ranges, index)) {
-      const start = index;
+      let segmentStart = index;
       index += 1;
       while (index < code.length) {
         if (code[index] === '\\') {
           index += 2;
+          continue;
+        }
+        if (code[index] === '$' && code[index + 1] === '{') {
+          ranges.push({ start: segmentStart, end: index + 2 });
+          index += 2;
+          let expressionDepth = 1;
+          while (index < code.length && expressionDepth > 0) {
+            if (code[index] === '\\') {
+              index += 2;
+              continue;
+            }
+            if (code[index] === '{') expressionDepth += 1;
+            if (code[index] === '}') expressionDepth -= 1;
+            index += 1;
+          }
+          segmentStart = index - 1;
           continue;
         }
         if (code[index] === '`') {
@@ -143,7 +159,7 @@ function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
         }
         index += 1;
       }
-      ranges.push({ start, end: index });
+      ranges.push({ start: segmentStart, end: index });
       continue;
     }
 
@@ -444,6 +460,23 @@ function containsIfStatement(
   return visit(node, enterFunction);
 }
 
+function containsIfInRecursivePath(node: AstNode, position: number): boolean {
+  const visit = (current: AstNode): boolean => {
+    if (current.type === 'IfStatement' && current.start < position) return true;
+    if (
+      current !== node &&
+      typeof current.start === 'number' &&
+      typeof current.end === 'number' &&
+      (current.start > position || current.end < position)
+    ) {
+      return false;
+    }
+    return childNodes(current).some((child) => visit(child));
+  };
+
+  return visit(node);
+}
+
 function identifierName(node: AstNode): string | undefined {
   const name = node.name;
   return typeof name === 'string' ? name : undefined;
@@ -459,23 +492,50 @@ function functionBodyStatements(root: AstNode): AstNode[] {
 }
 
 function localFunctionDeclaration(root: AstNode, name: string, callStart = Number.POSITIVE_INFINITY): AstNode | null {
-  for (const statement of functionBodyStatements(root)) {
-    if (statement.type === 'FunctionDeclaration') {
-      const id = statement.id;
-      if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return statement;
-      continue;
+  const candidateBlocks: AstNode[] = [];
+  const collectBlocks = (current: AstNode): void => {
+    if (
+      current !== root &&
+      (isFunctionLike(current) || current.type === 'ClassDeclaration' || current.type === 'ClassExpression')
+    ) {
+      return;
     }
 
-    if (statement.start > callStart) continue;
+    if (
+      (current === root || current.type === 'BlockStatement' || current.type === 'Program') &&
+      typeof current.start === 'number' &&
+      typeof current.end === 'number' &&
+      current.start <= callStart &&
+      callStart <= current.end
+    ) {
+      candidateBlocks.push(current);
+    }
 
-    const declarations = statement.type === 'VariableDeclaration' && Array.isArray(statement.declarations)
-      ? statement.declarations
-      : [];
-    for (const declaration of declarations) {
-      if (!isNode(declaration)) continue;
-      if (isNode(declaration.id) && identifierName(declaration.id) === name) {
-        const init = declaration.init;
-        if (isNode(init) && isFunctionLike(init)) return init;
+    for (const child of childNodes(current)) collectBlocks(child);
+  };
+
+  collectBlocks(root);
+  candidateBlocks.sort((a, b) => (b.start - a.start) || (a.end - b.end));
+
+  for (const block of candidateBlocks) {
+    for (const statement of functionBodyStatements(block)) {
+      if (statement.type === 'FunctionDeclaration') {
+        const id = statement.id;
+        if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return statement;
+        continue;
+      }
+
+      if (statement.start > callStart) continue;
+
+      const declarations = statement.type === 'VariableDeclaration' && Array.isArray(statement.declarations)
+        ? statement.declarations
+        : [];
+      for (const declaration of declarations) {
+        if (!isNode(declaration)) continue;
+        if (isNode(declaration.id) && identifierName(declaration.id) === name) {
+          const init = declaration.init;
+          if (isNode(init) && isFunctionLike(init)) return init;
+        }
       }
     }
   }
@@ -504,7 +564,7 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
             enteredHelpers.add(callName);
             const found = visit(helper, true);
             enteredHelpers.delete(callName);
-            if (found != null) return current.start;
+            if (found != null) return found;
           }
         }
       }
@@ -765,6 +825,7 @@ export class LogicLoopEvaluator implements Evaluator {
           if (recursiveCallStart != null) {
             const hasGuard =
               containsIfStatement(node, false, recursiveCallStart) ||
+              containsIfInRecursivePath(node, recursiveCallStart) ||
               hasReturnBefore(node, recursiveCallStart);
             if (!hasGuard) {
               findings.push({
