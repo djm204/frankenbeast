@@ -18,7 +18,7 @@ describe('NetworkConfigSchema', () => {
     expect(config.chat.port).toBe(3737);
     expect(config.dashboard.enabled).toBe(true);
     expect(config.dashboard.port).toBe(5173);
-    expect(config.dashboard.apiUrl).toBe('http://127.0.0.1:3737');
+    expect(config.dashboard.apiUrl).toBe('https://127.0.0.1:3737');
     expect(config.comms.enabled).toBe(false);
     expect(config.comms.port).toBe(3200);
     expect(config.comms.orchestratorWsUrl).toBe('ws://127.0.0.1:3737/v1/chat/ws');

@@ -93,7 +93,7 @@ export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: UrlSchema.default('http://127.0.0.1:3737'),
+  apiUrl: UrlSchema.default('https://127.0.0.1:3737'),
 }).superRefine((value, ctx) => {
   if (!value.enabled) return;
   requireLoopbackServiceHost(ctx, value.host);
