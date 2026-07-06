@@ -384,6 +384,51 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('infinite loop');
   });
 
+  it('parses valid sources before extracting fenced comments', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = '/* ```js\nwhile (true) { work(); }\n``` */\nconst ok = true;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('detects recursion through invoked local helper functions', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'function loop(){ function again(){ loop(); } again(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('falls back for obvious malformed infinite loops', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { doWork(; }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('does not duplicate overlapping fallback snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'Note: while (true) { work(); } function ok() {}';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('continues past many non-code keyword hits when extracting fallback snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const prefix = Array.from({ length: 60 }, () => 'while ordinary prose').join(' ');
+    const content = `${prefix} while (true) { work(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('does not duplicate findings when the full source already parses', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `function run() { while (true) { doWork(); } }`;

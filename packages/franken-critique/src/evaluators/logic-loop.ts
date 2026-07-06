@@ -217,15 +217,19 @@ function hasKeywordBoundary(code: string, keyword: string, index: number): boole
   return !/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after);
 }
 
+function isPlausibleSnippetStart(code: string, keyword: string, index: number): boolean {
+  const rest = code.slice(index + keyword.length).trimStart();
+  if (keyword === 'while' || keyword === 'for') return rest.startsWith('(');
+  if (keyword === 'function' || keyword === 'async function') return /^[*\s]*[A-Za-z_$({]/.test(rest);
+  if (keyword === 'class') return /^[A-Za-z_$]/.test(rest);
+  return true;
+}
+
 function pushCandidate(candidates: string[], seen: Set<string>, candidate: string): void {
   const normalized = candidate.trim();
   if (!normalized || seen.has(normalized)) return;
   seen.add(normalized);
   candidates.push(normalized);
-}
-
-function hasMarkdownFence(code: string): boolean {
-  return /(^|\n)```/.test(code);
 }
 
 function codeCandidates(code: string): string[] {
@@ -239,7 +243,7 @@ function codeCandidates(code: string): string[] {
   pushCandidate(candidates, seen, code);
 
   const ignoredRanges = ignoredSyntaxRanges(code, true);
-  const maxFallbackSnippets = 50;
+  const maxFallbackSnippets = 200;
   let fallbackSnippetCount = 0;
 
   for (const keyword of ['async function', 'function', 'while', 'for', 'class']) {
@@ -248,11 +252,13 @@ function codeCandidates(code: string): string[] {
       if (
         fallbackSnippetCount < maxFallbackSnippets &&
         hasKeywordBoundary(code, keyword, index) &&
+        isPlausibleSnippetStart(code, keyword, index) &&
         !isIndexInRanges(ignoredRanges, index)
       ) {
         const snippet = code.slice(index);
-        pushCandidate(candidates, seen, snippet);
-        pushCandidate(candidates, seen, trimToBalancedSnippet(snippet));
+        const trimmed = trimToBalancedSnippet(snippet);
+        pushCandidate(candidates, seen, trimmed);
+        if (trimmed === snippet) pushCandidate(candidates, seen, snippet);
         fallbackSnippetCount += 1;
       }
       index = code.indexOf(keyword, index + keyword.length);
@@ -288,7 +294,7 @@ function parseJavaScript(code: string): AstNode[] {
     }
   };
 
-  if (!hasMarkdownFence(code)) {
+  if (!code.trimStart().startsWith('```')) {
     for (const sourceType of ['module', 'script'] as const) {
       const ast = parseCandidate(code, sourceType);
       if (ast) return [ast];
@@ -392,7 +398,27 @@ function identifierName(node: AstNode): string | undefined {
   return typeof name === 'string' ? name : undefined;
 }
 
+function localFunctionDeclaration(root: AstNode, name: string): AstNode | null {
+  const visit = (current: AstNode): AstNode | null => {
+    if (current !== root && isFunctionLike(current)) {
+      const id = current.id;
+      if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return current;
+      return null;
+    }
+
+    for (const child of childNodes(current)) {
+      const found = visit(child);
+      if (found) return found;
+    }
+
+    return null;
+  };
+
+  return visit(root);
+}
+
 function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
+  const enteredHelpers = new Set<string>();
   const visit = (current: AstNode, enterFunction = false): number | null => {
     if (current !== node && !enterFunction && isFunctionLike(current)) {
       return null;
@@ -400,8 +426,21 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
 
     if (current.type === 'CallExpression') {
       const callee = current.callee;
-      if (isNode(callee) && callee.type === 'Identifier' && identifierName(callee) === fnName) {
-        return current.start;
+      if (isNode(callee) && callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName === fnName) {
+          return current.start;
+        }
+
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName);
+          if (helper) {
+            enteredHelpers.add(callName);
+            const found = visit(helper, true);
+            enteredHelpers.delete(callName);
+            if (found != null) return found;
+          }
+        }
       }
 
       if (isNode(callee)) {
@@ -438,6 +477,38 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
   return visit(node, enterFunction);
 }
 
+function syntaxMaskedText(code: string): string {
+  const chars = [...code];
+  for (const range of ignoredSyntaxRanges(code, true)) {
+    for (let index = range.start; index < range.end && index < chars.length; index += 1) {
+      chars[index] = ' ';
+    }
+  }
+  return chars.join('');
+}
+
+function fallbackInfiniteLoopFindings(code: string): EvaluationFinding[] {
+  const masked = syntaxMaskedText(code);
+  const findings: EvaluationFinding[] = [];
+  const loopHeaders = [/while\s*\(\s*true\s*\)/g, /for\s*\(\s*;\s*;\s*\)/g];
+
+  for (const loopHeader of loopHeaders) {
+    for (const match of masked.matchAll(loopHeader)) {
+      const start = match.index ?? 0;
+      const snippet = trimToBalancedSnippet(masked.slice(start));
+      if (/\b(break|return|throw|await|yield)\b/.test(snippet)) continue;
+      findings.push({
+        message: 'Potential infinite loop detected: loop has no break or return statement',
+        severity: 'critical',
+        suggestion: 'Add a break condition or return statement inside the loop',
+      });
+      break;
+    }
+  }
+
+  return findings;
+}
+
 export class LogicLoopEvaluator implements Evaluator {
   readonly name = 'logic-loop';
   readonly category = 'deterministic' as const;
@@ -449,6 +520,10 @@ export class LogicLoopEvaluator implements Evaluator {
     for (const ast of asts) {
       this.checkInfiniteLoops(ast, findings);
       this.checkUnguardedRecursion(ast, findings);
+    }
+
+    if (asts.length === 0) {
+      findings.push(...fallbackInfiniteLoopFindings(input.content));
     }
 
     const score = findings.length === 0 ? 1 : 0;
