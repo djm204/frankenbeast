@@ -364,35 +364,33 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   });
 }
 
-function startOptionalBuild(options: DashboardStaticServerOptions): DashboardBuildStatus {
+function runOptionalBuild(options: DashboardStaticServerOptions): Promise<void> {
   if (!options.buildCommand) {
-    return { state: 'ready' };
+    return Promise.resolve();
   }
-  const status: DashboardBuildStatus = { state: 'building' };
-  const child = spawn(options.buildCommand, options.buildArgs ?? [], {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: 'inherit',
+  return new Promise((resolveBuild, rejectBuild) => {
+    const child = spawn(options.buildCommand as string, options.buildArgs ?? [], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: 'inherit',
+    });
+    child.once('error', rejectBuild);
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        resolveBuild();
+        return;
+      }
+      const message = signal
+        ? `Dashboard build command terminated by signal ${signal}`
+        : `Dashboard build command exited with status ${code ?? 'unknown'}`;
+      rejectBuild(new Error(message));
+    });
   });
-  child.once('error', (error) => {
-    Object.assign(status, { state: 'failed', message: error.message });
-  });
-  child.once('exit', (code, signal) => {
-    if (code === 0) {
-      Object.assign(status, { state: 'ready' });
-      return;
-    }
-    const message = signal
-      ? `Dashboard build command terminated by signal ${signal}`
-      : `Dashboard build command exited with status ${code ?? 'unknown'}`;
-    Object.assign(status, { state: 'failed', message });
-    console.error(message);
-  });
-  return status;
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
-  const buildStatus = startOptionalBuild(options);
+  await runOptionalBuild(options);
+  const buildStatus: DashboardBuildStatus = { state: 'ready' };
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
     const abortController = new AbortController();
