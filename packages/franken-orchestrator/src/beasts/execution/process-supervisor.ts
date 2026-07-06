@@ -1,7 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
-import { createInterface } from 'node:readline';
 import type { BeastProcessSpec } from '../types.js';
 import { DEFAULT_BEAST_ENV_ALLOWLIST } from './sandbox-policy.js';
 
@@ -85,34 +84,119 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let stdoutClosed = false;
     let stderrClosed = false;
     let exitInfo: { code: number | null; signal: string | null } | undefined;
+    let exitFired = false;
 
     const maybeFireExit = () => {
-      if (stdoutClosed && stderrClosed && exitInfo) {
+      if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
+        exitFired = true;
         this.processes.delete(pid);
         callbacks.onExit(exitInfo.code, exitInfo.signal);
       }
     };
 
-    if (child.stdout) {
-      const stdoutRl = createInterface({ input: child.stdout });
-      stdoutRl.on('line', (line) => callbacks.onStdout(line));
-      stdoutRl.on('close', () => { stdoutClosed = true; maybeFireExit(); });
-    } else {
+    const markStdoutClosed = () => {
+      stdoutClosed = true;
+      maybeFireExit();
+    };
+    const markStderrClosed = () => {
+      stderrClosed = true;
+      maybeFireExit();
+    };
+
+    const wireLineReader = (
+      stream: NonNullable<ChildProcess['stdout']>,
+      onLine: (line: string) => void,
+      markClosed: () => void,
+    ) => {
+      let buffer = '';
+      let closed = false;
+
+      let skipLfAfterCr = false;
+      const flushBufferedLine = () => {
+        if (buffer.length > 0) {
+          onLine(buffer);
+          buffer = '';
+        }
+      };
+      const processBuffer = () => {
+        let start = 0;
+        if (skipLfAfterCr) {
+          skipLfAfterCr = false;
+          if (buffer[0] === '\n') {
+            start = 1;
+          }
+        }
+        for (let i = start; i < buffer.length; i += 1) {
+          const char = buffer[i];
+          if (char === '\n') {
+            onLine(buffer.slice(start, i));
+            start = i + 1;
+            continue;
+          }
+          if (char === '\r') {
+            onLine(buffer.slice(start, i));
+            if (buffer[i + 1] === '\n') {
+              i += 1;
+            } else if (i + 1 >= buffer.length) {
+              skipLfAfterCr = true;
+            }
+            start = i + 1;
+          }
+        }
+        buffer = buffer.slice(start);
+      };
+      const finish = () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        flushBufferedLine();
+        markClosed();
+      };
+
+      stream.setEncoding('utf8');
+      stream.on('data', (chunk: string | Buffer) => {
+        buffer += chunk.toString();
+        processBuffer();
+      });
+      stream.on('end', flushBufferedLine);
+      stream.on('close', finish);
+
+      return () => {
+        finish();
+        stream.destroy();
+      };
+    };
+
+    const forceCloseStdout = child.stdout
+      ? wireLineReader(child.stdout, callbacks.onStdout, markStdoutClosed)
+      : undefined;
+    if (!forceCloseStdout) {
       stdoutClosed = true;
     }
 
-    if (child.stderr) {
-      const stderrRl = createInterface({ input: child.stderr });
-      stderrRl.on('line', (line) => callbacks.onStderr(line));
-      stderrRl.on('close', () => { stderrClosed = true; maybeFireExit(); });
-    } else {
+    const forceCloseStderr = child.stderr
+      ? wireLineReader(child.stderr, callbacks.onStderr, markStderrClosed)
+      : undefined;
+    if (!forceCloseStderr) {
       stderrClosed = true;
     }
 
-    child.on('close', (code, signal) => {
+    const recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
-      maybeFireExit();
-    });
+      setImmediate(() => {
+        if (!stdoutClosed) {
+          forceCloseStdout?.();
+        }
+        if (!stderrClosed) {
+          forceCloseStderr?.();
+        }
+        maybeFireExit();
+      });
+    };
+
+    child.on('exit', recordExit);
+    child.on('close', recordExit);
 
     return { pid };
   }

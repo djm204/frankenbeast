@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProcessSupervisor } from '../../../../src/beasts/execution/process-supervisor.js';
@@ -83,6 +83,64 @@ describe('ProcessSupervisor', () => {
       expect(callbacks.onStdout).toHaveBeenCalledWith('line2');
     });
 
+    it('streams carriage-return terminated stdout updates separately', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: '/bin/sh',
+        args: ['-c', 'printf "step1\\rstep2\\rdone\\n"'],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalled();
+      }, { timeout: 5000 });
+
+      expect(callbacks.onStdout).toHaveBeenCalledWith('step1');
+      expect(callbacks.onStdout).toHaveBeenCalledWith('step2');
+      expect(callbacks.onStdout).toHaveBeenCalledWith('done');
+    });
+
+    it('flushes CR-only stdout progress before the next chunk arrives', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: ['-e', "process.stdout.write('step1\\r'); setTimeout(() => process.exit(0), 1000);"],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onStdout).toHaveBeenCalledWith('step1');
+      }, { timeout: 500 });
+      expect(callbacks.onExit).not.toHaveBeenCalled();
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+      }, { timeout: 5000 });
+    });
+
+    it('does not emit blank lines for CRLF split across stdout chunks', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          "process.stdout.write('one\\r'); setImmediate(() => process.stdout.write('\\ntwo\\r\\n'));",
+        ],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalled();
+      }, { timeout: 5000 });
+
+      expect(callbacks.onStdout).toHaveBeenCalledTimes(2);
+      expect(callbacks.onStdout).toHaveBeenNthCalledWith(1, 'one');
+      expect(callbacks.onStdout).toHaveBeenNthCalledWith(2, 'two');
+    });
+
     it('captures stderr lines via onStderr callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({
@@ -126,6 +184,46 @@ describe('ProcessSupervisor', () => {
         'stderr:stack trace here',
         'exit:1:null',
       ]);
+    });
+
+    it('fires onExit promptly when a grandchild keeps inherited stdio open', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-grandchild-'));
+      const pidFile = join(workDir, 'grandchild.pid');
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          `const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+  detached: true,
+  stdio: 'inherit',
+});
+process.stdout.write('final partial stdout');
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+child.unref();`,
+        ],
+      });
+
+      try {
+        await supervisor.spawn(spec, callbacks);
+
+        await vi.waitFor(() => {
+          expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+        }, { timeout: 500 });
+        expect(callbacks.onStdout).toHaveBeenCalledWith('final partial stdout');
+      } finally {
+        const grandchildPid = Number(await readFile(pidFile, 'utf8').catch(() => '0'));
+        if (grandchildPid > 0) {
+          try {
+            process.kill(grandchildPid, 'SIGKILL');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+              throw error;
+            }
+          }
+        }
+      }
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {

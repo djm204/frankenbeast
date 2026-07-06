@@ -172,6 +172,7 @@ export interface ProcessBeastExecutorOptions {
 
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
+  private readonly stoppingAttempts = new Set<string>();
   private readonly configFilePaths = new Map<string, string>();
 
   constructor(
@@ -410,15 +411,22 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
-      await this.supervisor.stop(attempt.pid);
+      const timeoutMs = options?.timeoutMs ?? this.options.defaultStopTimeoutMs ?? 10_000;
+      const pid = attempt.pid;
+      const exitPromise = new Promise<boolean>((resolve) => {
+        this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
+      });
+
+      this.stoppingAttempts.add(attemptId);
+      try {
+        await this.supervisor.stop(attempt.pid);
+      } catch (error) {
+        this.exitPromises.delete(attemptId);
+        this.stoppingAttempts.delete(attemptId);
+        throw error;
+      }
 
       {
-        const timeoutMs = options?.timeoutMs ?? this.options.defaultStopTimeoutMs ?? 10_000;
-        const pid = attempt.pid;
-        const exitPromise = new Promise<boolean>((resolve) => {
-          this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
-        });
-
         let timer: ReturnType<typeof setTimeout>;
         const timeoutPromise = new Promise<boolean>((resolve) => {
           timer = setTimeout(() => resolve(false), timeoutMs);
@@ -429,15 +437,17 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
+          this.stoppingAttempts.delete(attemptId);
           await this.supervisor.kill(pid);
         }
 
-        // If process exited naturally, handleProcessExit already updated status — don't overwrite
+        // If process exited after an operator stop, handleProcessExit already updated status — don't overwrite
         if (exited) {
           return this.repository.getAttempt(attemptId) ?? attempt;
         }
       }
     }
+    this.stoppingAttempts.delete(attemptId);
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_stop');
   }
 
@@ -476,6 +486,21 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     const status: BeastRunStatus = code === 0 ? 'completed' : 'failed';
+    if (this.stoppingAttempts.delete(attemptId)) {
+      this.finishAttempt(runId, currentAttempt ?? this.requireAttempt(attemptId), 'stopped', 'operator_stop');
+      const exitEntry = this.exitPromises.get(attemptId);
+      if (exitEntry) {
+        this.exitPromises.delete(attemptId);
+        exitEntry.resolve();
+      }
+      const configPath = this.configFilePaths.get(runId);
+      if (configPath) {
+        try { unlinkSync(configPath); } catch { /* already removed */ }
+        this.configFilePaths.delete(runId);
+      }
+      return;
+    }
+
     const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
     const finishedAt = new Date().toISOString();
 
