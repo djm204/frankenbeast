@@ -549,5 +549,30 @@ describe('dep-factory wiring integration', () => {
       expect(deps).toBeDefined();
       await finalize();
     });
+
+    it('passes runConfig.gitConfig.disableBranding into PrCreator', async () => {
+      const paths = createTempPaths();
+      cleanups.push(paths.root);
+
+      const runConfig: RunConfig = {
+        provider: 'claude',
+        gitConfig: { disableBranding: true },
+      };
+
+      const { deps, finalize } = await createCliDeps({
+        paths,
+        baseBranch: 'main',
+        budget: 1.0,
+        provider: 'claude',
+        noPr: false,
+        verbose: false,
+        reset: false,
+        runConfig,
+      });
+
+      const prCreatorConfig = ((deps as unknown as { prCreator?: unknown }).prCreator as { config?: { disableBranding?: boolean } }).config;
+      expect(prCreatorConfig?.disableBranding).toBe(true);
+      await finalize();
+    });
   });
 });

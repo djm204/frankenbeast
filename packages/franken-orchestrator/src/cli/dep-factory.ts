@@ -165,6 +165,7 @@ interface EffectiveCliConfig {
   budget: number;
   branchPattern: string;
   prCreation?: 'auto' | 'manual' | 'disabled' | undefined;
+  disableBranding: boolean;
   mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
   skills?: string[] | undefined;
   enableTracing: boolean;
@@ -222,6 +223,7 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
     budget: options.budget,
     branchPattern: options.runConfig?.gitConfig?.branchPattern ?? 'feat/',
     prCreation: options.runConfig?.gitConfig?.prCreation,
+    disableBranding: options.runConfig?.gitConfig?.disableBranding ?? false,
     mergeStrategy: options.runConfig?.gitConfig?.mergeStrategy,
     skills: options.runConfig?.skills,
     enableTracing: options.orchestratorConfig?.enableTracing ?? false,
@@ -576,7 +578,12 @@ function createCliExecutorDeps(
 ): CliExecutorDeps {
   const prDisabled = options.noPr || config.prCreation === 'disabled';
   const prCreator = prDisabled ? undefined : new PrCreator(
-    { targetBranch: config.baseBranch, disabled: false, remote: 'origin' },
+    {
+      targetBranch: config.baseBranch,
+      disabled: false,
+      remote: 'origin',
+      disableBranding: config.disableBranding,
+    },
     undefined,
     llm.cachedLlm,
   );
