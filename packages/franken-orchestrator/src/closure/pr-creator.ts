@@ -31,6 +31,7 @@ export interface PrCreatorConfig {
   readonly targetBranch: string;
   readonly disabled: boolean;
   readonly remote: string;
+  readonly disableBranding?: boolean;
 }
 
 export interface PrCreateOptions {
@@ -109,6 +110,7 @@ export class PrCreator {
       targetBranch: config.targetBranch ?? 'main',
       disabled: config.disabled ?? false,
       remote: config.remote ?? 'origin',
+      disableBranding: config.disableBranding ?? false,
     };
     this.exec = exec;
     this.llm = llm;
@@ -141,10 +143,10 @@ export class PrCreator {
         stablePrefix: 'surface:commit-message',
         workPrefix: chunkObjective,
       });
-      const msg = cleanCommitMessage(raw);
+      const msg = cleanCommitMessage(raw, this.config.disableBranding);
       const subject = msg.split('\n')[0] ?? '';
       if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
-        return buildFallbackCommitMessage(chunkObjective, scope);
+        return buildFallbackCommitMessage(chunkObjective, scope, this.config.disableBranding);
       }
       return msg;
     } catch {
@@ -196,7 +198,7 @@ export class PrCreator {
         stablePrefix: 'surface:pr-description',
         workPrefix: issueNumber != null ? `issue:${issueNumber}` : result.projectId,
       });
-      return parsePrDescription(raw);
+      return parsePrDescription(raw, this.config.disableBranding);
     } catch {
       return null;
     }
@@ -276,7 +278,7 @@ export class PrCreator {
       body = llmResult.body;
     } else {
       title = buildTitle(result.projectId, outcomes);
-      body = buildBody(result, outcomes, gitContext);
+      body = buildBody(result, outcomes, gitContext, this.config.disableBranding);
     }
 
     // Append issue reference if provided and not already present
@@ -450,6 +452,7 @@ function buildBody(
   result: BeastResult,
   outcomes: readonly TaskOutcome[],
   gitContext?: GitContext,
+  disableBranding = false,
 ): string {
   const succeeded = outcomes.filter(o => o.status === 'success').length;
   const failed = outcomes.filter(o => o.status === 'failure').length;
@@ -550,8 +553,10 @@ function buildBody(
     }
   }
 
-  lines.push('---');
-  lines.push(BRANDING);
+  if (!disableBranding) {
+    lines.push('---');
+    lines.push(BRANDING);
+  }
 
   return lines.join('\n');
 }
@@ -691,7 +696,7 @@ function stringifyError(error: unknown): string {
   return String(error);
 }
 
-function parsePrDescription(raw: string): { title: string; body: string } | null {
+function parsePrDescription(raw: string, disableBranding = false): { title: string; body: string } | null {
   const titleMatch = raw.match(/^TITLE:\s*(.+)$/m);
   const bodyMatch = raw.match(/^BODY:\s*\n?([\s\S]+)$/m);
   if (!titleMatch || !bodyMatch) return null;
@@ -701,7 +706,7 @@ function parsePrDescription(raw: string): { title: string; body: string } | null
   const body = bodyMatch[1]!.trim();
   if (!body) return null;
 
-  return { title, body: `${body}\n\n${BRANDING}` };
+  return { title, body: disableBranding ? body : `${body}\n\n${BRANDING}` };
 }
 
 const BRANDING = 'made with Frankenbeast 🧟';
@@ -709,10 +714,11 @@ const BRANDING = 'made with Frankenbeast 🧟';
 /** Matches a valid conventional commit subject: type(scope): description */
 const CONVENTIONAL_SUBJECT_RE = /^[a-z]+(\([^)]+\))?: \S/;
 
-function buildFallbackCommitMessage(chunkObjective: string, scope?: string): string {
+function buildFallbackCommitMessage(chunkObjective: string, scope?: string, disableBranding = false): string {
   const slug = chunkObjective.trim().slice(0, 50).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').toLowerCase();
   const scopePart = scope ? `(${scope})` : '';
-  return `chore${scopePart}: implement ${slug || 'changes'}\n\n${BRANDING}`;
+  const subject = `chore${scopePart}: implement ${slug || 'changes'}`;
+  return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
 }
 
 /**
@@ -739,7 +745,7 @@ function appendIssueRef(body: string, issueNumber: number): string {
   return `${body}\n\nFixes #${issueNumber}`;
 }
 
-function cleanCommitMessage(raw: string): string {
+function cleanCommitMessage(raw: string, disableBranding = false): string {
   let msg = raw.trim();
   // Strip markdown code fences
   msg = msg.replace(/^```[^\n]*\n?/, '').replace(/\n?```\s*$/, '').trim();
@@ -747,5 +753,5 @@ function cleanCommitMessage(raw: string): string {
   const firstLine = msg.split('\n').find(l => l.trim().length > 0) ?? msg;
   // Truncate to 72 chars
   const subject = firstLine.length > 72 ? firstLine.slice(0, 72) : firstLine;
-  return `${subject}\n\n${BRANDING}`;
+  return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
 }
