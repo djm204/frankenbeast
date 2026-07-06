@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { readVitestFlags } from '../../scripts/vitest-env.js';
 import { createFrankenSourceAliases } from '../../scripts/vitest-source-aliases.js';
@@ -26,6 +26,7 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    envFile: resolve(packageRoot, '../../.env.test'),
     globals: false,
     environment: 'node',
     include: runMixed

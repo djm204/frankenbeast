@@ -9,6 +9,12 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../../../src/http/ws-chat-server.js';
+import {
+  CHAT_OPERATOR_TOKEN,
+  BEAST_OPERATOR_TOKEN,
+  DASHBOARD_OPERATOR_TOKEN,
+  SHARED_OPERATOR_TOKEN,
+} from '../__fixtures__/operator-test-tokens.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/chat-server');
@@ -162,7 +168,7 @@ describe('chat server bootstrap', () => {
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: DASHBOARD_OPERATOR_TOKEN,
         rateLimit: {
           windowMs: 60_000,
           max: 20,
@@ -173,7 +179,7 @@ describe('chat server bootstrap', () => {
     try {
       const response = await fetch(`${server.url}/v1/beasts/catalog`, {
         headers: {
-          authorization: 'Bearer dashboard-operator-token',
+          authorization: ['Bearer', DASHBOARD_OPERATOR_TOKEN].join(' '),
         },
       });
 
@@ -262,11 +268,11 @@ describe('chat server bootstrap', () => {
         sessionStoreDir: join(TMP, 'chat'),
         llm: { complete: vi.fn().mockResolvedValue('') },
         projectName: 'test-project',
-        operatorToken: 'chat-token',
+        operatorToken: CHAT_OPERATOR_TOKEN,
         beastControl: {
           ...beastServices,
           security: new TransportSecurityService(),
-          operatorToken: 'beast-token',
+          operatorToken: BEAST_OPERATOR_TOKEN,
           rateLimit: { windowMs: 60_000, max: 20 },
         },
       })).rejects.toThrow(/different operator tokens/i);
@@ -287,11 +293,11 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+      operatorToken: SHARED_OPERATOR_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: SHARED_OPERATOR_TOKEN,
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
@@ -325,11 +331,11 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+      operatorToken: SHARED_OPERATOR_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: SHARED_OPERATOR_TOKEN,
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
@@ -352,23 +358,27 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+      operatorToken: SHARED_OPERATOR_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: SHARED_OPERATOR_TOKEN,
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
 
     const ticketResponse = await fetch(`${server.url}/v1/beasts/events/ticket`, {
       method: 'POST',
-      headers: { authorization: 'Bearer shared-token' },
+      headers: {
+        authorization: ['Bearer', SHARED_OPERATOR_TOKEN].join(' '),
+      },
     });
     expect(ticketResponse.status).toBe(200);
     const ticketBody = await ticketResponse.json() as { ticket: string };
     const streamResponse = await fetch(`${server.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`, {
-      headers: { authorization: 'Bearer shared-token' },
+      headers: {
+        authorization: ['Bearer', SHARED_OPERATOR_TOKEN].join(' '),
+      },
     });
     expect(streamResponse.status).toBe(200);
 
@@ -387,7 +397,7 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: TMP,
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+      operatorToken: SHARED_OPERATOR_TOKEN,
     })).rejects.toThrow(/non-loopback host/);
   });
 
