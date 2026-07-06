@@ -1,6 +1,6 @@
 {
   "name": "@franken/planner",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "MOD-04: Planning and Decomposition module for the Frankenbeast AI agent system",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.7.5"
+    "@franken/types": "0.7.6"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
