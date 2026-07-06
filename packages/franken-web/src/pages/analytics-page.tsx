@@ -33,6 +33,9 @@ const TIME_WINDOWS = [
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 50;
+const COPY_JSON_SUCCESS_MESSAGE = 'Copied JSON to clipboard.';
+const COPY_JSON_UNAVAILABLE_MESSAGE = 'Clipboard is unavailable. Select the JSON below and copy it manually.';
+const COPY_JSON_FAILURE_MESSAGE = 'Copy failed. Select the JSON below and copy it manually.';
 
 export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [filters, setFilters] = useState<AnalyticsFilters>({ timeWindow: '24h' });
@@ -491,8 +494,49 @@ function DetailDrawer({
 }) {
   const rawJson = JSON.stringify(detail.raw, null, 2);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [copyFeedback, setCopyFeedback] = useState<{
+    message: string;
+    showManualFallback: boolean;
+    tone: 'success' | 'error';
+  } | null>(null);
   const detailStateLabel = hasFullDetail ? 'Full event detail' : 'Partial row data';
   const copyDisabled = !hasFullDetail;
+
+  useEffect(() => {
+    setCopyFeedback(null);
+  }, [rawJson]);
+
+  useEffect(() => {
+    if (copyFeedback?.tone !== 'success') return;
+    const timeoutId = window.setTimeout(() => setCopyFeedback(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [copyFeedback]);
+
+  async function copyRawJson() {
+    if (!navigator.clipboard?.writeText) {
+      setCopyFeedback({
+        message: COPY_JSON_UNAVAILABLE_MESSAGE,
+        showManualFallback: true,
+        tone: 'error',
+      });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(rawJson);
+      setCopyFeedback({
+        message: COPY_JSON_SUCCESS_MESSAGE,
+        showManualFallback: false,
+        tone: 'success',
+      });
+    } catch {
+      setCopyFeedback({
+        message: COPY_JSON_FAILURE_MESSAGE,
+        showManualFallback: true,
+        tone: 'error',
+      });
+    }
+  }
 
   return (
     <Dialog.Root open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -555,7 +599,7 @@ function DetailDrawer({
                 className="button button--secondary button--small"
                 type="button"
                 disabled={copyDisabled}
-                onClick={() => void navigator.clipboard?.writeText(rawJson)}
+                onClick={() => void copyRawJson()}
               >
                 Copy JSON
               </button>
@@ -574,6 +618,25 @@ function DetailDrawer({
               <p className="analytics-drawer__caption">
                 Copy JSON is available after full event detail loads.
               </p>
+            )}
+
+            {copyFeedback && (
+              <div
+                className={copyFeedback.tone === 'error' ? 'analytics-alert' : 'analytics-detail-status'}
+                role={copyFeedback.tone === 'error' ? 'alert' : 'status'}
+              >
+                {copyFeedback.message}
+              </div>
+            )}
+
+            {copyFeedback?.showManualFallback && (
+              <textarea
+                aria-label="Raw JSON manual copy fallback"
+                className="field-control"
+                readOnly
+                rows={Math.min(rawJson.split('\n').length, 12)}
+                value={rawJson}
+              />
             )}
 
             <pre className="analytics-raw">
