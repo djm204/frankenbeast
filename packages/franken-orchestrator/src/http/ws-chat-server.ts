@@ -315,6 +315,11 @@ export class ChatSocketController {
     }
 
     if (!session.pendingApproval && session.state !== 'pending_approval') {
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: session.state !== 'rejected',
+        timestamp: nowIso(),
+      });
       return;
     }
 
@@ -348,6 +353,24 @@ export class ChatSocketController {
       session.state = originalState;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_EXECUTION_FAILED',
+        message: error instanceof Error ? error.message : 'Approved action failed to run.',
+        timestamp: session.updatedAt,
+      });
+      if (pendingApproval) {
+        this.emit(peer, {
+          type: 'turn.approval.requested',
+          description: pendingApproval.description,
+          timestamp: pendingApproval.requestedAt,
+          ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
+          ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
+          ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
+          ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
+          ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+        });
+      }
       throw error;
     }
     session.pendingApproval = null;
