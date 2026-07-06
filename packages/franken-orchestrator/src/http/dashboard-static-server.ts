@@ -25,9 +25,21 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+const HOP_BY_HOP_HEADERS = [
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+] as const;
+
 export interface DashboardStaticResponseOptions {
   apiTarget?: string | undefined;
   operatorToken?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface DashboardStaticServerOptions extends DashboardStaticResponseOptions {
@@ -56,6 +68,17 @@ function normalizeBaseUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   return trimmed.replace(/\/+$/, '');
+}
+
+
+function removeHopByHopHeaders(headers: Headers): void {
+  const connectionTokens = headers.get('connection')
+    ?.split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+  for (const header of [...HOP_BY_HOP_HEADERS, 'host', ...connectionTokens]) {
+    headers.delete(header);
+  }
 }
 
 function isSameOriginProxyRequest(request: Request): boolean {
@@ -96,7 +119,7 @@ async function createProxyResponse(
 
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
-  headers.delete('host');
+  removeHopByHopHeaders(headers);
   if (options.operatorToken) {
     headers.set('authorization', `Bearer ${options.operatorToken}`);
   }
@@ -105,6 +128,7 @@ async function createProxyResponse(
     method: request.method,
     headers,
     redirect: 'manual',
+    ...(options.signal ? { signal: options.signal } : {}),
   };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = await request.arrayBuffer();
@@ -315,25 +339,38 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   });
 }
 
-function startOptionalBuild(options: DashboardStaticServerOptions): void {
+function runOptionalBuild(options: DashboardStaticServerOptions): Promise<void> {
   if (!options.buildCommand) {
-    return;
+    return Promise.resolve();
   }
-  const child = spawn(options.buildCommand, options.buildArgs ?? [], {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: 'inherit',
-  });
-  child.once('exit', (code) => {
-    if (code && code !== 0) {
-      console.error(`Dashboard build command exited with status ${code}`);
-    }
+  return new Promise((resolveBuild, rejectBuild) => {
+    const child = spawn(options.buildCommand as string, options.buildArgs ?? [], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: 'inherit',
+    });
+    child.once('error', rejectBuild);
+    child.once('exit', (code) => {
+      if (code && code !== 0) {
+        rejectBuild(new Error(`Dashboard build command exited with status ${code}`));
+        return;
+      }
+      resolveBuild();
+    });
   });
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
+  await runOptionalBuild(options);
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
+    const abortController = new AbortController();
+    const abortRequest = () => abortController.abort();
+    req.once('aborted', abortRequest);
+    req.once('error', abortRequest);
+    res.once('close', () => {
+      if (!res.writableEnded) abortRequest();
+    });
     void readIncomingBody(req)
       .then(async (body) => {
         const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
@@ -345,7 +382,10 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
         }
         const requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
         const request = new Request(requestUrl, requestInit);
-        const staticResponse = await createDashboardStaticResponse(request, options.staticDir, options);
+        const staticResponse = await createDashboardStaticResponse(request, options.staticDir, {
+          ...options,
+          signal: abortController.signal,
+        });
         await writeWebResponse(staticResponse, req.method, res);
       })
       .catch((error) => {
@@ -367,21 +407,22 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
       resolveListen();
     });
   });
-  startOptionalBuild(options);
   return server;
 }
 
 async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | undefined> {
   try {
     const parsed = parseDotenv(await readFile(filePath, 'utf8'));
-    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim() || undefined;
+    return (parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN ?? parsed.VITE_BEAST_OPERATOR_TOKEN)?.trim() || undefined;
   } catch {
     return undefined;
   }
 }
 
 async function resolveDashboardOperatorToken(): Promise<string | undefined> {
-  const configPath = process.env.FRANKENBEAST_CONFIG_FILE || process.env.FRANKENBEAST_CONFIG_PATH;
+  const configPath = process.env.FRANKENBEAST_CONFIG_FILE
+    || process.env.FRANKENBEAST_CONFIG_PATH
+    || join(process.cwd(), '.fbeast', 'config.json');
   if (configPath) {
     try {
       const resolvedConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
