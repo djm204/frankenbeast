@@ -1,4 +1,5 @@
-import { parse } from 'acorn';
+import { Parser, parse } from 'acorn';
+import { tsPlugin } from 'acorn-typescript';
 import type { Node } from 'acorn';
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
 
@@ -27,6 +28,10 @@ const LOOP_OR_SWITCH_NODE_TYPES = new Set([
 ]);
 
 type AstNode = Node & Record<string, unknown>;
+
+type AcornPlugin = (BaseParser: typeof Parser) => typeof Parser;
+
+const TypeScriptParser = Parser.extend(tsPlugin() as unknown as AcornPlugin);
 
 function isNode(value: unknown): value is AstNode {
   return Boolean(value && typeof value === 'object' && typeof (value as AstNode).type === 'string');
@@ -66,7 +71,15 @@ function parseJavaScript(code: string): AstNode | null {
   for (const candidate of [code, `${code}\n}`, `${code}\n}}`, `${code}\n}}}`]) {
     for (const sourceType of ['module', 'script'] as const) {
       try {
-        return parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode;
+        try {
+          return TypeScriptParser.parse(candidate, {
+            ...baseOptions,
+            sourceType,
+            locations: true,
+          }) as unknown as AstNode;
+        } catch {
+          return parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode;
+        }
       } catch {
         // Try the next source type or the next simple truncation repair.
       }
@@ -102,6 +115,8 @@ function isInfiniteFor(node: AstNode): boolean {
 function hasLoopExit(body: AstNode): boolean {
   const visit = (node: AstNode, nestedLoopOrSwitchDepth: number): boolean => {
     if (isFunctionLike(node) || isClassLike(node)) return false;
+
+    if (node.type === 'ForOfStatement' && node.await === true) return true;
 
     if (LOOP_EXIT_NODE_TYPES.has(node.type)) return true;
 
@@ -143,13 +158,20 @@ function identifierName(node: AstNode): string | undefined {
 }
 
 function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
-  const visit = (current: AstNode): number | null => {
-    if (current !== node && (isFunctionLike(current) || isClassLike(current))) return null;
+  const visit = (current: AstNode, enterFunction = false): number | null => {
+    if (current !== node && !enterFunction && (isFunctionLike(current) || isClassLike(current))) {
+      return null;
+    }
 
     if (current.type === 'CallExpression') {
       const callee = current.callee;
       if (isNode(callee) && callee.type === 'Identifier' && identifierName(callee) === fnName) {
         return current.start;
+      }
+
+      if (isNode(callee) && isFunctionLike(callee)) {
+        const found = visit(callee, true);
+        if (found != null) return found;
       }
     }
 

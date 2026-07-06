@@ -254,6 +254,32 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('detects unguarded recursion through an immediately invoked arrow function', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { (() => loop())(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('detects TypeScript functions that contain infinite loops', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function run(): void { while (true) { work(); } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('treats for-await loops as intentional async suspension points', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `async function run() { while (true) { for await (const job of queue) { handle(job); } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
   // Regression for PR #385 round 2 (Codex F6): real code inside a template
   // interpolation must remain visible to recursion detection.
   it('detects recursion that occurs inside a template interpolation', async () => {
