@@ -1,5 +1,5 @@
+import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, PlanningStrategyName, TaskResult } from '../core/types.js';
-import type { PlanGraph } from '../core/dag.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
 export class LinearPlanner implements PlanningStrategy {
@@ -25,6 +25,21 @@ export class LinearPlanner implements PlanningStrategy {
           failedTaskId: task.id,
           error: result.error,
         };
+      }
+
+      if (result.expand === true) {
+        const subGraph = PlanGraph.fromTasks(result.newTasks);
+        const subResult = await this.execute(subGraph, context);
+        if (subResult.status === 'failed') {
+          return {
+            ...subResult,
+            taskResults: [...taskResults, ...subResult.taskResults],
+          };
+        }
+        if (subResult.status !== 'completed') {
+          return subResult;
+        }
+        taskResults.push(...subResult.taskResults);
       }
     }
 

@@ -19,6 +19,10 @@ function success(id: string): TaskResult {
   return { status: 'success', taskId: createTaskId(id) };
 }
 
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
+}
+
 function failure(id: string, message = 'task failed'): TaskResult {
   return { status: 'failure', taskId: createTaskId(id), error: new Error(message) };
 }
@@ -134,6 +138,37 @@ describe('ParallelPlanner — happy path', () => {
 
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults).toHaveLength(2);
+  });
+
+  it('executes expanded sub-tasks before starting dependent waves', async () => {
+    const parent = makeTask('parent');
+    const dependent = makeTask('dependent');
+    const sub1 = makeTask('sub-1');
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const graph = PlanGraph.empty()
+      .addTask(parent)
+      .addTask(dependent, [createTaskId('parent')]);
+    const callOrder: string[] = [];
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [sub1, sub2]));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new ParallelPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub-1'),
+      createTaskId('sub-2'),
+      createTaskId('dependent'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected status');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual(callOrder);
   });
 });
 

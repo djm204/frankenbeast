@@ -19,6 +19,10 @@ function success(id: string): TaskResult {
   return { status: 'success', taskId: createTaskId(id) };
 }
 
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
+}
+
 function failure(id: string, message = 'task failed'): TaskResult {
   return { status: 'failure', taskId: createTaskId(id), error: new Error(message) };
 }
@@ -78,6 +82,35 @@ describe('LinearPlanner — happy path', () => {
 
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults).toHaveLength(2);
+  });
+
+  it('executes expanded sub-tasks before continuing the linear plan', async () => {
+    const parent = makeTask('parent');
+    const sibling = makeTask('sibling');
+    const sub1 = makeTask('sub-1');
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const graph = PlanGraph.empty().addTask(parent).addTask(sibling);
+    const callOrder: string[] = [];
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [sub1, sub2]));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new LinearPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub-1'),
+      createTaskId('sub-2'),
+      createTaskId('sibling'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected status');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual(callOrder);
   });
 });
 

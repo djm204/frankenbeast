@@ -1,6 +1,6 @@
 import { RationaleRejectedError } from '../core/errors.js';
+import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, TaskId, TaskResult } from '../core/types.js';
-import type { PlanGraph } from '../core/dag.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
 /**
@@ -79,6 +79,23 @@ export class ParallelPlanner implements PlanningStrategy {
             failedTaskId: first.taskId,
             error: first.error,
           };
+        }
+      }
+
+      for (const r of waveResults) {
+        if (r.status === 'success' && r.expand === true) {
+          const subGraph = PlanGraph.fromTasks(r.newTasks);
+          const subResult = await this.execute(subGraph, context);
+          if (subResult.status === 'failed') {
+            return {
+              ...subResult,
+              taskResults: [...allResults, ...subResult.taskResults],
+            };
+          }
+          if (subResult.status !== 'completed') {
+            return subResult;
+          }
+          allResults.push(...subResult.taskResults);
         }
       }
 
