@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PrCreator } from '../../src/closure/pr-creator.js';
+import { PrCreationRequiredActionError, PrCreator } from '../../src/closure/pr-creator.js';
 import type { BeastResult, TaskOutcome } from '../../src/types.js';
 
 interface ExecCall {
@@ -230,6 +230,167 @@ describe('PrCreator argv subprocess safety', () => {
     expect(create!.args.slice(0, 4)).toEqual(['pr', 'create', '--base', 'release/v1.0+stable']);
   });
 
+  it('surfaces gh authentication failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/auth-warning\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'To get started with GitHub CLI, please run: gh auth login';
+        error.status = 4;
+        throw error;
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('gh auth login'),
+      branch: 'feature/auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('surfaces GitHub Actions GH_TOKEN auth failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/actions-auth-warning\n';
+      if (command === 'gh' && args.includes('list')) {
+        const error = new Error('Command failed: gh pr list') as Error & { stderr: string; status: number };
+        error.stderr = 'gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable';
+        error.status = 4;
+        throw error;
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('GH_TOKEN'),
+      action: expect.stringContaining('GH_TOKEN'),
+      branch: 'feature/actions-auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('surfaces GitHub integration permission failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/integration-auth-warning\n';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'GraphQL: Resource not accessible by integration';
+        error.status = 4;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('pull-request permissions'),
+      action: expect.stringContaining('pull-request permissions'),
+      branch: 'feature/integration-auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('does not misclassify generic gh 403 rate-limit failures as auth-required', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/rate-limited\n';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'HTTP 403: API rate limit exceeded for user';
+        error.status = 4;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).resolves.toBeNull();
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('surfaces GitHub Actions PR-creation permission failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/actions-pr-permission\n';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'GitHub Actions is not permitted to create or approve pull requests';
+        error.status = 4;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('pull-request permissions'),
+      action: expect.stringContaining('pull-request permissions'),
+      branch: 'feature/actions-pr-permission',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('surfaces fine-grained PAT permission failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/pat-permission\n';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'GraphQL: Resource not accessible by personal access token';
+        error.status = 4;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('pull-request permissions'),
+      action: expect.stringContaining('pull-request permissions'),
+      branch: 'feature/pat-permission',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
   // Argument-injection and invalid-ref guards must still hold.
   it.each([
     '-evil',
@@ -243,7 +404,7 @@ describe('PrCreator argv subprocess safety', () => {
     '/foo',
     'foo//bar',
     'foo.lock',
-  ])('refuses to run for invalid/unsafe ref %s', async (branch) => {
+  ])('refuses to run for invalid/unsafe ref %s', async (branch: string) => {
     const { exec, calls } = makeExecRecorder(branch);
     const creator = new PrCreator(
       { targetBranch: 'main', disabled: false, remote: 'origin' },

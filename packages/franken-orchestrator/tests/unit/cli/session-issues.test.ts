@@ -476,15 +476,22 @@ describe('Session.runIssues()', () => {
     const { Session } = await import('../../../src/cli/session.js');
     mockRunnerInstance.run.mockResolvedValueOnce([
       makeOutcome({ issueNumber: 1, status: 'fixed', prUrl: 'https://pr/1' }),
-      makeOutcome({ issueNumber: 2, status: 'failed', issueTitle: 'Another bug' }),
+      makeOutcome({
+        issueNumber: 2,
+        status: 'failed',
+        issueTitle: 'Another bug',
+        error: 'PR not created: run `gh auth login`; branch feature/auth-warning is pushed.',
+      }),
     ]);
     const config = makeConfig();
     const session = new Session(config);
 
     await session.runIssues();
 
-    // Summary header should be printed
+    // Summary header and actionable failure details should be printed.
     expect(console.info).toHaveBeenCalledWith(expect.stringContaining('ISSUE SUMMARY'));
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('gh auth login'));
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('1 fixed, 1 failed, 0 skipped'));
   });
 
   it('passes only approved issues to IssueRunner', async () => {
