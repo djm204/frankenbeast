@@ -111,6 +111,7 @@ export class PlanGraph {
   }
 
   hasCycle(): boolean {
+    this._assertEdgesReferenceKnownNodes();
     return this._kahn().sorted.length !== this._nodes.size;
   }
 
@@ -121,6 +122,7 @@ export class PlanGraph {
    * Throws CyclicDependencyError if the graph contains a cycle.
    */
   topoSort(): Task[] {
+    this._assertEdgesReferenceKnownNodes();
     const { sorted } = this._kahn();
     if (sorted.length !== this._nodes.size) {
       throw new CyclicDependencyError(
@@ -202,6 +204,19 @@ export class PlanGraph {
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
+
+  private _assertEdgesReferenceKnownNodes(): void {
+    for (const [id, deps] of this._edges) {
+      if (!this._nodes.has(id)) {
+        throw new Error(`Graph edge references unknown task node '${id}'`);
+      }
+      for (const dep of deps) {
+        if (!this._nodes.has(dep)) {
+          throw new Error(`Task '${id}' depends on unknown dependency node '${dep}'`);
+        }
+      }
+    }
+  }
 
   /** Kahn's BFS topological sort. Returns sorted ids (may be shorter than nodes if cyclic). */
   private _kahn(): { sorted: TaskId[] } {

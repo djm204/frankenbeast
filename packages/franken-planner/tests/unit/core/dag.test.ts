@@ -156,6 +156,30 @@ describe('PlanGraph — cycle detection', () => {
     const g = PlanGraph.createWithRawEdges(nodes, edges);
     expect(() => g.topoSort()).toThrowError(CyclicDependencyError);
   });
+
+  it('topoSort rejects raw edges whose task id is missing from nodes', () => {
+    const a = makeTask('a');
+    const b = makeTask('b');
+    const dangling = createTaskId('dangling');
+    const nodes = new Map([[a.id, a], [b.id, b]]);
+    const edges = new Map([
+      [dangling, new Set([a.id])],
+      [b.id, new Set([dangling])],
+    ]);
+    const g = PlanGraph.createWithRawEdges(nodes, edges);
+
+    expect(() => g.topoSort()).toThrow(/unknown task node 'dangling'/);
+  });
+
+  it('topoSort rejects raw dependencies that are missing from nodes', () => {
+    const a = makeTask('a');
+    const missing = createTaskId('missing');
+    const nodes = new Map([[a.id, a]]);
+    const edges = new Map([[a.id, new Set([missing])]]);
+    const g = PlanGraph.createWithRawEdges(nodes, edges);
+
+    expect(() => g.topoSort()).toThrow(/unknown dependency node 'missing'/);
+  });
 });
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
