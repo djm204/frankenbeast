@@ -187,10 +187,31 @@ describe('BatchAdapter — drain()', () => {
     const oldFlush = batch.flush(makeTrace('old'))
     const newFlush = batch.flush(makeTrace('new'))
 
-    await expect(newFlush).resolves.toBeUndefined()
     oldFailure.reject(new Error('old batch failed'))
     await expect(oldFlush).rejects.toThrow('old batch failed')
+    await expect(newFlush).resolves.toBeUndefined()
     expect((await batch.listTraceIds()).sort()).toEqual(['new', 'old'])
+  })
+
+  it('surfaces failures from follow-up size-triggered drains after the older drain succeeds', async () => {
+    const oldSuccess = deferred()
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        if (trace.id === 'old') return oldSuccess.promise
+        throw new Error('new batch failed')
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 1 })
+
+    const oldFlush = batch.flush(makeTrace('old'))
+    const newFlush = batch.flush(makeTrace('new'))
+    oldSuccess.resolve()
+
+    await expect(oldFlush).resolves.toBeUndefined()
+    await expect(newFlush).rejects.toThrow('new batch failed')
+    expect(await batch.listTraceIds()).toEqual(['new'])
   })
 
   it('drains a snapshot instead of chasing traces appended during the drain', async () => {
@@ -211,6 +232,26 @@ describe('BatchAdapter — drain()', () => {
 
     expect(received).toEqual(['initial'])
     expect(await batch.listTraceIds()).toEqual(['appended'])
+  })
+
+  it('sets the drain guard before invoking inner flush callbacks', async () => {
+    const received: string[] = []
+    let batch!: BatchAdapter
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        received.push(trace.id)
+        if (trace.id === 'initial') void batch.flush(makeTrace('appended'))
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    batch = new BatchAdapter({ adapter: inner, maxBatchSize: 1 })
+
+    await batch.flush(makeTrace('initial'))
+    await batch.drain()
+
+    expect(received).toEqual(['initial', 'appended'])
+    expect(await batch.listTraceIds()).toEqual([])
   })
 })
 
@@ -243,6 +284,31 @@ describe('BatchAdapter — stop()', () => {
     })
     await batch.stop()
     expect(clearFn).toHaveBeenCalledWith(42)
+  })
+
+  it('waits for traces appended during an in-flight drain before stopping', async () => {
+    const firstFlush = deferred()
+    const received: string[] = []
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        received.push(trace.id)
+        if (trace.id === 'initial') return firstFlush.promise
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    await batch.flush(makeTrace('initial'))
+    const inFlightDrain = batch.drain()
+    await batch.flush(makeTrace('appended'))
+    const stopPromise = batch.stop()
+    firstFlush.resolve()
+
+    await expect(inFlightDrain).resolves.toBeUndefined()
+    await expect(stopPromise).resolves.toBeUndefined()
+    expect(received).toEqual(['initial', 'appended'])
+    expect(await batch.listTraceIds()).toEqual([])
   })
 
   it('does not call clearInterval when no timer was started', async () => {

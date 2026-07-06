@@ -53,7 +53,6 @@ export class BatchAdapter implements ExportAdapter {
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly clearIntervalFn: (id: ReturnType<typeof setInterval>) => void
   private drainPromise: Promise<void> | null = null
-  private drainRequestedDuringDrain = false
 
   constructor(options: BatchAdapterOptions) {
     this.inner = options.adapter
@@ -71,11 +70,7 @@ export class BatchAdapter implements ExportAdapter {
     warnIfTraceHasActiveSpans(trace, 'BatchAdapter')
     this.buffer.push(trace)
     if (this.buffer.length >= this.maxBatchSize) {
-      if (this.drainPromise !== null) {
-        this.drainRequestedDuringDrain = true
-        return
-      }
-      await this.drain()
+      await this.drainForSizeTriggeredFlush()
     }
   }
 
@@ -85,25 +80,40 @@ export class BatchAdapter implements ExportAdapter {
    * empty buffer (no-op).
    */
   async drain(): Promise<void> {
-    if (this.drainPromise !== null) return this.drainPromise
+    if (this.drainPromise !== null) {
+      const currentDrain = this.drainPromise
+      await currentDrain
+      if (this.buffer.length > 0) await this.drain()
+      return
+    }
 
-    this.drainRequestedDuringDrain = false
-    this.drainPromise = this.drainBufferedTraces()
-    let drainSucceeded = false
+    const batch = [...this.buffer]
+    const currentDrain = Promise.resolve().then(() => this.drainBufferedTraces(batch))
+    this.drainPromise = currentDrain
     try {
-      await this.drainPromise
-      drainSucceeded = true
+      await currentDrain
     } finally {
-      this.drainPromise = null
-      if (drainSucceeded && this.drainRequestedDuringDrain && this.buffer.length >= this.maxBatchSize) {
-        this.drainRequestedDuringDrain = false
-        void this.drain().catch(() => undefined)
-      }
+      if (this.drainPromise === currentDrain) this.drainPromise = null
     }
   }
 
-  private async drainBufferedTraces(): Promise<void> {
-    const batch = [...this.buffer]
+  private async drainForSizeTriggeredFlush(): Promise<void> {
+    if (this.drainPromise === null) {
+      await this.drain()
+      return
+    }
+
+    const currentDrain = this.drainPromise
+    try {
+      await currentDrain
+    } catch {
+      return
+    }
+
+    if (this.buffer.length >= this.maxBatchSize) await this.drain()
+  }
+
+  private async drainBufferedTraces(batch: Trace[]): Promise<void> {
     if (batch.length === 0) return
 
     const results = await Promise.allSettled(batch.map(t => this.inner.flush(t)))
