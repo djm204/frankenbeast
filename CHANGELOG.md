@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.42.0](https://github.com/djm204/frankenbeast/compare/v0.41.1...v0.42.0) (2026-07-06)
+
+
+### Features
+
+* **orchestrator:** allow disabling PR creator branding ([91f6161](https://github.com/djm204/frankenbeast/commit/91f6161673a307fa06f520a457421541bbc5c19a))
+
+
+### Bug Fixes
+
+* **cli:** surface PR auth failures ([deb8df7](https://github.com/djm204/frankenbeast/commit/deb8df7f7c94a87b106d6729404591a4e0fae871)), closes [#746](https://github.com/djm204/frankenbeast/issues/746)
+* **security:** require explicit Grafana credentials ([#822](https://github.com/djm204/frankenbeast/issues/822)) ([6fa7084](https://github.com/djm204/frankenbeast/commit/6fa7084a3f719a045a39fa066d6c4cf120baccd0))
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+* validate pinned npm install executable ([#821](https://github.com/djm204/frankenbeast/issues/821)) ([0e710c9](https://github.com/djm204/frankenbeast/commit/0e710c9ad9be9e90d169a2c77b118386cdde6bee))
+
+
+### Documentation
+
+* **type-safety:** inventory explicit any migration plan ([7b01d89](https://github.com/djm204/frankenbeast/commit/7b01d89c70da2dfd07780cfcc244b70c2dc7ac86)), closes [#338](https://github.com/djm204/frankenbeast/issues/338)
+
+
+### CI/CD
+
+* enforce pinned npm package manager ([#811](https://github.com/djm204/frankenbeast/issues/811)) ([2881063](https://github.com/djm204/frankenbeast/commit/28810638142bea66c5146a0f8495d4a3a06b63a2))
+* route security audits through pinned npm ([#829](https://github.com/djm204/frankenbeast/issues/829)) ([003c4d9](https://github.com/djm204/frankenbeast/commit/003c4d9d95671b835948b7abd4725eb265428a66))
+
+
+### Tests
+
+* **security:** cover npm audit dependency floors ([737e406](https://github.com/djm204/frankenbeast/commit/737e4065fa3d4b1072d2cb37c25f4a819c888b0f)), closes [#498](https://github.com/djm204/frankenbeast/issues/498)
+* **security:** guard Turbo advisory floor ([#828](https://github.com/djm204/frankenbeast/issues/828)) ([3d1b054](https://github.com/djm204/frankenbeast/commit/3d1b0545265d88ccb37952809e3563ee355c4883))
+
 ## [0.41.1](https://github.com/djm204/frankenbeast/compare/v0.41.0...v0.41.1) (2026-07-06)
 
 

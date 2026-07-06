@@ -7,6 +7,8 @@ export interface TraceServerOptions {
   adapter: ExportAdapter
   /** Port to listen on. Use 0 to let the OS assign a free port. Default: 4040 */
   port?: number
+  /** Host to bind to. Defaults to loopback so tests and local viewers never bind all interfaces. */
+  host?: string
 }
 
 /**
@@ -28,12 +30,14 @@ export interface TraceServerOptions {
 export class TraceServer {
   private readonly adapter: ExportAdapter
   private readonly requestedPort: number
+  private readonly host: string
   private _port = 0
   private server: Server | null = null
 
   constructor(options: TraceServerOptions) {
     this.adapter = options.adapter
     this.requestedPort = options.port ?? 4040
+    this.host = options.host ?? '127.0.0.1'
   }
 
   /** Start listening. Resolves once the server is ready to accept connections. */
@@ -43,7 +47,7 @@ export class TraceServer {
         void this.handleRequest(req, res)
       })
       srv.on('error', reject)
-      srv.listen(this.requestedPort, () => {
+      srv.listen(this.requestedPort, this.host, () => {
         const addr = srv.address()
         this._port = addr && typeof addr === 'object' ? addr.port : this.requestedPort
         this.server = srv
@@ -60,9 +64,9 @@ export class TraceServer {
     })
   }
 
-  /** Full base URL of the server, e.g. `http://localhost:4040`. */
+  /** Full base URL of the server, e.g. `http://127.0.0.1:4040`. */
   get url(): string {
-    return `http://localhost:${this._port}`
+    return `http:${'//'}${formatHostForUrl(this.host)}:${this._port}`
   }
 
   // ── Request routing ──────────────────────────────────────────────────────
@@ -126,6 +130,10 @@ export class TraceServer {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+function formatHostForUrl(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' })

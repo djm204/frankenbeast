@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.0...live-bench-v0.2.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.10 to 0.7.11
+
 ## [0.2.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.1.0...live-bench-v0.2.0) (2026-07-06)
 
 

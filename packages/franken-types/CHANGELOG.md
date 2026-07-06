@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.6](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.5...franken-types-v0.7.6) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+* **types:** move orchestration contracts to canonical package ([#819](https://github.com/djm204/frankenbeast/issues/819)) ([e2e860e](https://github.com/djm204/frankenbeast/commit/e2e860e5576de1cc091dc3f3b59c9c06cd060fb9)), closes [#374](https://github.com/djm204/frankenbeast/issues/374)
+
 ## [0.7.5](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.4...franken-types-v0.7.5) (2026-07-06)
 
 

@@ -589,7 +589,7 @@ function createCliExecutorDeps(
     llm.cachedLlm,
   );
   const commitMessageFn = prCreator
-    ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective)
+    ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective, observer.logger)
     : undefined;
 
   const override = options.providersConfig?.[config.provider];
