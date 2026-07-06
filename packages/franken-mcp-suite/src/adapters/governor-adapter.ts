@@ -51,12 +51,22 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover.
- * Match destructive verbs as verbs instead of arbitrary substrings so benign
- * paths or identifiers such as `src/dropdown.tsx` and `formatMessage()` do not
- * get denied. Command-style flag patterns still fail closed for destructive
- * split flags such as `rm -r -f`, `rm --recursive --force`, and `reset --hard`.
+ * Action/tool names are tokenized separately so destructive verbs in snake_case
+ * or camelCase names (`delete_file`, `dropTable`) still fail closed, while
+ * payload text uses word/command boundaries so benign paths or identifiers such
+ * as `src/dropdown.tsx` and `formatMessage()` do not get denied.
  */
-const DANGEROUS_PATTERNS = [
+const DANGEROUS_ACTION_VERBS = new Set([
+  'delete',
+  'drop',
+  'truncate',
+  'destroy',
+  'format',
+  'wipe',
+  'purge',
+]);
+
+const DANGEROUS_CONTEXT_PATTERNS = [
   /\bdelete\b/i,
   /\bdrop\b/i,
   /\btruncate\b/i,
@@ -98,8 +108,27 @@ function mapSeverityToDecision(
   return 'review_recommended';
 }
 
-function matchesDangerousPattern(text: string): boolean {
-  return DANGEROUS_PATTERNS.some((p) => p.test(text));
+function tokenizeActionName(action: string): string[] {
+  return action
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((token) => token.toLowerCase());
+}
+
+function matchesDangerousActionName(action: string): boolean {
+  const tokens = tokenizeActionName(action);
+  return (
+    tokens.some((token) => DANGEROUS_ACTION_VERBS.has(token))
+    || (tokens.includes('remove') && tokens.includes('all'))
+    || (tokens.includes('force') && tokens.includes('push'))
+    || (tokens.includes('reset') && tokens.includes('hard'))
+  );
+}
+
+function matchesDangerousPattern(action: string, context: string): boolean {
+  const combined = `${action} ${context}`;
+  return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
@@ -113,8 +142,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     };
   }
 
-  const combined = `${action} ${context}`;
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(combined);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(action, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({

@@ -56,6 +56,15 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'denied' });
   });
 
+  it('denies destructive verbs in action names without relying on payload text', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'delete_file', context: '{"path":"src/app.ts"}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'dropTable', context: '{"name":"events"}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+  });
+
   it('approves benign substrings that are not destructive verbs', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
 
