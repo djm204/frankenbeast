@@ -27,7 +27,7 @@ frankenbeast run --plan-dir .fbeast/plans/my-plan/
 For browser or service integration, run the orchestrator chat/dashboard backend:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --port 3737
+npm --workspace @franken/orchestrator run chat-server -- --port 3737
 ```
 
 The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. When comms channels are enabled, the CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) is mounted by `createChatApp()` when `securityConfig` is supplied.

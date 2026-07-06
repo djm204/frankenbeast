@@ -367,7 +367,7 @@ fbeast mcp init --hooks
 From this Frankenbeast repo, start the dashboard backend against that same project root:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project
 ```
 
 If you initialized MCP in this repo, omit `--base-dir`.
@@ -383,7 +383,7 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard ta
 If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
@@ -606,7 +606,7 @@ All modules use **dependency injection** — configuration is passed via constru
 frankenbeast plan --design-doc docs/my-feature-design.md --config frankenbeast.config.json
 
 // Orchestrator chat/dashboard HTTP server
-npm --workspace franken-orchestrator run chat-server -- --port 3737
+npm --workspace @franken/orchestrator run chat-server -- --port 3737
 ```
 
 ## The Beast Loop

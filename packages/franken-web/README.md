@@ -23,7 +23,7 @@ Use this when `@franken/mcp-suite` has been initialized for a project and you wa
 From the repo root, start the backend against the project where MCP was initialized:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project
 ```
 
 If MCP was initialized in this repo, omit `--base-dir`.
@@ -46,7 +46,7 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxi
 If you use a non-default backend port in local development, set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 

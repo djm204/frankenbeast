@@ -56,7 +56,7 @@ The MCP tools, hooks, Beast mode, and web dashboard all use the same project dat
 From the Frankenbeast repo, start the backend in one terminal against the project where MCP was initialized:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project
 ```
 
 If MCP was initialized in this repo, omit `--base-dir`.
@@ -72,7 +72,7 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. `dev:chat` proxies API call
 If the backend uses a different port, keep browser requests same-origin and point the Vite proxy at that backend:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 

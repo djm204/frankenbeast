@@ -21,7 +21,7 @@ If you normally run `frankenbeast chat`, use the same provider setup here. By de
 From the repo root:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server
+npm --workspace @franken/orchestrator run chat-server
 ```
 
 Default bind:
@@ -38,10 +38,10 @@ Chat server listening on http://127.0.0.1:3737
 Useful overrides:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --port 4242
-npm --workspace franken-orchestrator run chat-server -- --host 0.0.0.0 --port 4242
-npm --workspace franken-orchestrator run chat-server -- --allow-origin http://localhost:5173
-npm --workspace franken-orchestrator run chat-server -- --provider codex
+npm --workspace @franken/orchestrator run chat-server -- --port 4242
+npm --workspace @franken/orchestrator run chat-server -- --host 0.0.0.0 --port 4242
+npm --workspace @franken/orchestrator run chat-server -- --allow-origin http://localhost:5173
+npm --workspace @franken/orchestrator run chat-server -- --provider codex
 ```
 
 ## 2. Start the dashboard UI
@@ -110,6 +110,6 @@ Only bind to `0.0.0.0` when you actually need remote access.
 This is the default, verified setup:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server
+npm --workspace @franken/orchestrator run chat-server
 npm --workspace @franken/web run dev:chat
 ```
