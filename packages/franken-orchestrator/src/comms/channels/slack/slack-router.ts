@@ -75,8 +75,18 @@ export function slackRouter(options: SlackRouterOptions) {
       return c.json({ error: 'Missing payload' }, 400);
     }
 
-    const body = JSON.parse(payloadRaw);
-    const parsed = SlackInteractionSchema.parse(body);
+    let body: unknown;
+    try {
+      body = JSON.parse(payloadRaw);
+    } catch {
+      return c.json({ error: 'Malformed payload' }, 400);
+    }
+
+    const interaction = SlackInteractionSchema.safeParse(body);
+    if (!interaction.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const parsed = interaction.data;
 
     const sessionId = sessionMapper.mapToSessionId({
       channelType: 'slack',
