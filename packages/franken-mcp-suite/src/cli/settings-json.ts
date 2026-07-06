@@ -1,5 +1,5 @@
-import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export function parseJsonObjectWithComments(content: string): Record<string, unknown> {
@@ -39,7 +39,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function resolveAtomicWriteTarget(path: string): string {
   try {
-    return lstatSync(path).isSymbolicLink() ? realpathSync(path) : path;
+    if (!lstatSync(path).isSymbolicLink()) return path;
+    try {
+      return realpathSync(path);
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      return resolve(dirname(path), readlinkSync(path));
+    }
   } catch (error) {
     if (isNotFound(error)) return path;
     throw error;

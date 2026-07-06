@@ -71,6 +71,18 @@ describe('settings.json helpers', () => {
     expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual({ existing: true, updated: true });
   });
 
+  it('creates the target of a dangling symlinked settings file without replacing the symlink', () => {
+    const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
+    const targetPath = join(dir, 'settings-target.json');
+    const settingsPath = join(dir, 'settings.json');
+    symlinkSync(targetPath, settingsPath);
+
+    writeJsonFileAtomic(settingsPath, { created: true });
+
+    expect(lstatSync(settingsPath).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual({ created: true });
+  });
+
   it('does not modify an existing file when serialization fails before the atomic rename', () => {
     const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
     const settingsPath = join(dir, 'settings.json');
