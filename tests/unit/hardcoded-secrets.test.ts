@@ -173,6 +173,91 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('packages/example/src/config.ts:3');
   });
 
+  it('rejects comment markers inside hard-coded secret literals', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(sourceDir, 'config.ts'), `const jwtSecret = 'abc//def';\n`, 'utf8');
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).not.toContain('abc//def');
+  });
+
+  it('rejects sensitive object properties and common token variable names', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `export const cfg = { jwtSecret: 'dev-secret' };`,
+        `const accessToken = 'dev-token';`,
+        `const jwt_secret = 'dev-secret';`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+    expect(result.stderr).toContain('packages/example/src/config.ts:3');
+  });
+
+  it('rejects passphrase env examples with dotenv spacing', () => {
+    const root = makeFixtureRoot();
+    writeFileSync(join(root, '.env.example'), `${sensitiveName('FRANKENBEAST', 'PASSPHRASE')} = replace-me\n`, 'utf8');
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('FRANKENBEAST_PASSPHRASE=<redacted>');
+  });
+
+  it('rejects optional-chained and parenthesized env fallbacks', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `const one = process.env?.${sensitiveName('JWT', 'SECRET')} ?? 'dev-secret';`,
+        `const two = (process.env).${sensitiveName('JWT', 'SECRET')} ?? 'dev-secret';`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+  });
+
+  it('rejects multiline destructured defaults', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        'const {',
+        `  ${sensitiveName('JWT', 'SECRET')} = 'dev-secret',`,
+        '} = process.env;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+  });
+
   it('allows sensitive env checks with ordinary diagnostic strings', () => {
     const root = makeFixtureRoot();
     const sourceDir = join(root, 'packages', 'example', 'src');

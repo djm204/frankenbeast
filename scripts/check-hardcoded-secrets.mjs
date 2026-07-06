@@ -27,7 +27,7 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const stringLiteralPattern = /(['"`])((?:\\.|(?!\1).)*)\1/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 
@@ -87,8 +87,8 @@ async function collectEnvironmentExampleFiles() {
   return files;
 }
 
-function redactEnvLine(line) {
-  return line.replace(/=(.*)$/, '=<redacted>');
+function redactEnvAssignment(name) {
+  return `${name}=<redacted>`;
 }
 
 function redactSourceLine(line) {
@@ -100,7 +100,7 @@ function hardcodedSensitiveEnvFinding(line) {
   if (!trimmed || trimmed.startsWith('#')) {
     return null;
   }
-  const match = trimmed.match(/^(?:export\s+)?([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS)[A-Z0-9_]*)=(.*)$/);
+  const match = trimmed.match(/^(?:export\s+)?([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS|PASSPHRASE)[A-Z0-9_]*)\s*=\s*(.*)$/);
   if (!match) {
     return null;
   }
@@ -108,41 +108,55 @@ function hardcodedSensitiveEnvFinding(line) {
   if (!sensitiveIdentifierPattern.test(name) || value.trim().length === 0) {
     return null;
   }
-  return redactEnvLine(trimmed);
+  return redactEnvAssignment(name);
 }
 
 function stripComments(line, state) {
-  let remaining = line;
   let output = '';
+  let quote = null;
+  let escaped = false;
 
-  while (remaining.length > 0) {
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
     if (state.inBlockComment) {
-      const end = remaining.indexOf('*/');
-      if (end === -1) {
-        return output;
+      if (char === '*' && next === '/') {
+        state.inBlockComment = false;
+        index += 1;
       }
-      remaining = remaining.slice(end + 2);
-      state.inBlockComment = false;
       continue;
     }
 
-    const lineComment = remaining.indexOf('//');
-    const blockComment = remaining.indexOf('/*');
+    if (quote) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
 
-    if (lineComment !== -1 && (blockComment === -1 || lineComment < blockComment)) {
-      output += remaining.slice(0, lineComment);
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      output += char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
       return output;
     }
 
-    if (blockComment !== -1) {
-      output += remaining.slice(0, blockComment);
-      remaining = remaining.slice(blockComment + 2);
+    if (char === '/' && next === '*') {
       state.inBlockComment = true;
+      index += 1;
       continue;
     }
 
-    output += remaining;
-    return output;
+    output += char;
   }
 
   return output;
@@ -171,7 +185,7 @@ function hasHardcodedSourceLiteral(line) {
 }
 
 function hasSensitiveEnvAccess(line) {
-  const envAccessPattern = /(?:process\.env|import\.meta\.env)(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])/gi;
+  const envAccessPattern = /(?:(?:\(?process\.env\)?|import\.meta\.env)\??(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\]))/gi;
   for (const match of line.matchAll(envAccessPattern)) {
     const name = match[1] ?? match[2] ?? '';
     if (sensitiveIdentifierPattern.test(name)) {
@@ -181,14 +195,18 @@ function hasSensitiveEnvAccess(line) {
   return false;
 }
 
-const sensitiveAssignmentNamePattern = /(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_KEY)|[A-Z0-9_]*(?:AUTH|OPERATOR|BEARER)_TOKEN|[A-Za-z_$][\w$]*(?:ApiKey|Secret|Password|PrivateKey|AccessKey|AuthToken|OperatorToken|BearerToken))\b/;
+const sensitiveAssignmentNamePattern = /(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_KEY|PASSPHRASE)|[A-Z0-9_]*(?:AUTH|OPERATOR|BEARER|ACCESS|REFRESH)_TOKEN|(?:accessToken|refreshToken|authToken|operatorToken|bearerToken)|[A-Za-z_$][\w$]*(?:ApiKey|Secret|Password|PrivateKey|AccessKey|AuthToken|OperatorToken|BearerToken|AccessToken|RefreshToken)|[a-z_$][\w$]*(?:_secret|_token|_password|_api_key|_access_key))\b/;
 
 function hasSensitiveConstantAssignment(prefix) {
   return new RegExp(`(?:^|\\b)(?:export\\s+)?(?:const|let|var)\\s+${sensitiveAssignmentNamePattern.source}[^=]*=\\s*$`).test(prefix);
 }
 
 function hasSensitiveDestructuredDefault(prefix) {
-  return new RegExp(`[{,]\\s*(?:[A-Za-z_$][\\w$]*\\s*:\\s*)?${sensitiveAssignmentNamePattern.source}\\s*=\\s*$`).test(prefix);
+  return new RegExp(`(?:^|[{,])\\s*(?:[A-Za-z_$][\\w$]*\\s*:\\s*)?${sensitiveAssignmentNamePattern.source}\\s*=\\s*$`).test(prefix);
+}
+
+function hasSensitiveObjectPropertyAssignment(prefix) {
+  return new RegExp(`(?:^|[{,])\\s*${sensitiveAssignmentNamePattern.source}\\s*:\\s*$`).test(prefix);
 }
 
 function hasEnvObjectAccess(line) {
@@ -211,7 +229,8 @@ function hasInlineHardcodedSensitiveSourceValue(line) {
       && (
         hasSensitiveEnvAccess(prefix)
         || hasSensitiveConstantAssignment(prefix)
-        || (hasSensitiveDestructuredDefault(prefix) && hasEnvObjectAccess(line.slice(match.index)))
+        || hasSensitiveObjectPropertyAssignment(prefix)
+        || hasSensitiveDestructuredDefault(prefix)
       )
     ) {
       return true;
@@ -222,7 +241,7 @@ function hasInlineHardcodedSensitiveSourceValue(line) {
 
 function leavesSensitiveFallbackOpen(line) {
   const trimmed = line.trimEnd();
-  return fallbackOperatorPattern.test(trimmed) && (hasSensitiveEnvAccess(trimmed) || hasSensitiveConstantAssignment(trimmed));
+  return fallbackOperatorPattern.test(trimmed) && (hasSensitiveEnvAccess(trimmed) || hasSensitiveConstantAssignment(trimmed) || hasSensitiveObjectPropertyAssignment(trimmed));
 }
 
 async function scanEnvironmentFile(file, findings) {
