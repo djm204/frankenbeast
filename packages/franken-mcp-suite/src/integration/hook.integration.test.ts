@@ -68,6 +68,35 @@ describe('fbeast-hook runtime', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('"logged":true');
   });
+
+  it('reads post-tool payloads from the stream when argv payload is omitted and stdin opt-in is set', async () => {
+    const streamedPayload = JSON.stringify({ ok: true, output: 'x'.repeat(300_000) });
+    const result = await runHookForTest(['post-tool', '--stdin-payload', '--', 'read_file'], {
+      streamedPayload,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      toolName: 'read_file',
+      payload: streamedPayload,
+      phase: 'post-tool',
+    });
+  });
+
+  it('preserves empty payload behavior for legacy post-tool callers that omit stdin opt-in', async () => {
+    const result = await runHookForTest(['post-tool', '--', 'read_file'], {
+      streamedPayload: JSON.stringify({ shouldNotBeRead: true }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      toolName: 'read_file',
+      payload: '',
+      phase: 'post-tool',
+    });
+  });
 });
 
 async function runHookForTest(
@@ -75,16 +104,19 @@ async function runHookForTest(
   options: {
     governorDecision?: { decision: string; reason: string };
     context?: string;
+    streamedPayload?: string;
   } = {},
 ): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
   checkCalls: Array<{ action: string; context: string }>;
+  observerLogs: Array<{ event: string; metadata: string; sessionId: string }>;
 }> {
   let stdout = '';
   let stderr = '';
   const checkCalls: Array<{ action: string; context: string }> = [];
+  const observerLogs: Array<{ event: string; metadata: string; sessionId: string }> = [];
 
   vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
     stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
@@ -109,6 +141,7 @@ async function runHookForTest(
       };
       sessionId(): string;
       readContext(): string;
+      readPostToolPayload?(): Promise<string>;
     },
   ) => Promise<void>)(argv, {
     governor: {
@@ -118,11 +151,15 @@ async function runHookForTest(
       }),
     },
     observer: {
-      log: vi.fn().mockResolvedValue({ id: 1, hash: 'abc123' }),
+      log: vi.fn().mockImplementation(async (input: { event: string; metadata: string; sessionId: string }) => {
+        observerLogs.push(input);
+        return { id: 1, hash: 'abc123' };
+      }),
     },
     sessionId: () => 'sess-test',
     readContext: () => options.context ?? '',
+    readPostToolPayload: async () => options.streamedPayload ?? '',
   });
 
-  return { exitCode: process.exitCode ?? 0, stdout, stderr, checkCalls };
+  return { exitCode: process.exitCode ?? 0, stdout, stderr, checkCalls, observerLogs };
 }
