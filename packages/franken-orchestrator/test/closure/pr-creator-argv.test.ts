@@ -284,6 +284,34 @@ describe('PrCreator argv subprocess safety', () => {
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
+  it('surfaces GitHub integration permission failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/integration-auth-warning\n';
+      if (command === 'gh' && args.includes('create')) {
+        const error = new Error('Command failed: gh pr create') as Error & { stderr: string; status: number };
+        error.stderr = 'GraphQL: Resource not accessible by integration';
+        error.status = 4;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('pull-request permissions'),
+      action: expect.stringContaining('pull-request permissions'),
+      branch: 'feature/integration-auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
   // Argument-injection and invalid-ref guards must still hold.
   it.each([
     '-evil',

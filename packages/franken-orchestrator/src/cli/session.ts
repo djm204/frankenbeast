@@ -531,7 +531,7 @@ export class Session {
     const passed = result.taskResults?.filter((t) => t.status === 'success').length ?? 0;
     const skipped = result.taskResults?.filter((t) => t.status === 'skipped').length ?? 0;
     const failedTasks = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
-    const runFailed = result.status === 'failed' ? 1 : 0;
+    const runFailed = result.status === 'failed' && failedTasks === 0 ? 1 : 0;
     const failed = failedTasks + runFailed;
     const parts = [`${passed} passed`, `${failed} failed`];
     if (skipped > 0) parts.push(`${skipped} skipped`);
