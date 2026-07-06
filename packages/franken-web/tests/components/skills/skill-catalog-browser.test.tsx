@@ -18,9 +18,9 @@ describe('SkillCatalogBrowser', () => {
     expect(screen.getByText('sentry')).toBeDefined();
   });
 
-  it('filters skills by name', () => {
+  it('labels and filters skills by name', () => {
     render(<SkillCatalogBrowser skills={skills} onToggle={vi.fn()} />);
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('textbox', { name: 'Filter skills' });
     fireEvent.change(input, { target: { value: 'git' } });
     expect(screen.getByText('github')).toBeDefined();
     expect(screen.queryByText('linear')).toBeNull();
