@@ -1,4 +1,4 @@
-// @frankenbeast/observer — public API
+// @franken/observer — public API
 
 export { TraceContext } from './core/TraceContext.js'
 export { SpanLifecycle } from './core/SpanLifecycle.js'

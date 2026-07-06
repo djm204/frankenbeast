@@ -28,7 +28,7 @@ describe('network-registry', () => {
     expect(dashboardCommand).toContain('packages/franken-orchestrator/dist/http/dashboard-static-server.js');
     expect(dashboardCommand).toContain('--api-target http://127.0.0.1:3737');
     expect(dashboardCommand).toContain('--build-command npm');
-    expect(dashboardCommand).toContain('--workspace @frankenbeast/web run build');
+    expect(dashboardCommand).toContain('--workspace @franken/web run build');
     expect(dashboardCommand).not.toContain('run dev');
   });
 

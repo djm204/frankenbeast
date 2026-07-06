@@ -10,7 +10,7 @@ const { MockSQLiteAdapter, MockTraceServer, mockStart, mockStop, mockClose } = v
   return { MockSQLiteAdapter, MockTraceServer, mockStart, mockStop, mockClose };
 });
 
-vi.mock('@frankenbeast/observer', () => ({
+vi.mock('@franken/observer', () => ({
   SQLiteAdapter: MockSQLiteAdapter,
   TraceServer: MockTraceServer,
 }));

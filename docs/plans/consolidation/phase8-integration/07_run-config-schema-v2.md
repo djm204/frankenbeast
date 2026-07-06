@@ -349,7 +349,7 @@ describe('loadRunConfig()', () => {
 
 ## Dependencies
 
-Add `yaml` package to `franken-orchestrator`:
+Add `yaml` package to `@franken/orchestrator`:
 
 ```json
 {

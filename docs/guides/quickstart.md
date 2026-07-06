@@ -74,11 +74,11 @@ npx frankenbeast issues --repo owner/repo --dry-run
 
 ## 6. Optional: initialize MCP mode for a project
 
-The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`). Install it persistently so both `fbeast` and the `fbeast-*` MCP server binaries stay on PATH — `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns later, so a one-shot `npx` would leave those servers unable to start:
+The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`). Install it persistently so both `fbeast` and the `fbeast-*` MCP server binaries stay on PATH — `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns later, so a one-shot `npx` would leave those servers unable to start:
 
 ```bash
 # Install once (global), or link from the monorepo with: npm link --workspace=packages/franken-mcp-suite
-npm install -g @fbeast/mcp-suite
+npm install -g @franken/mcp-suite
 
 # Standard MCP registration
 fbeast mcp init
@@ -100,13 +100,13 @@ frankenbeast/
 ├── docker-compose.yml           # optional ChromaDB/Grafana/Tempo stack
 ├── docs/
 ├── packages/
-│   ├── franken-brain/           # SQLite-backed working/episodic/recovery memory
-│   ├── franken-planner/         # DAG planning primitives and strategies
+│   ├── franken-brain/           # @franken/brain: SQLite-backed working/episodic/recovery memory
+│   ├── franken-planner/         # @franken/planner: DAG planning primitives and strategies
 │   ├── franken-observer/        # trace/cost/eval/loop observability
 │   ├── franken-critique/        # critique pipeline and correction requests
 │   ├── franken-governor/        # HITL triggers, approvals, audit/security helpers
 │   ├── franken-types/           # shared types and Zod schemas
-│   ├── franken-orchestrator/    # Beast Loop, CLI, HTTP surfaces, providers
+│   ├── franken-orchestrator/    # @franken/orchestrator: Beast Loop, CLI, HTTP surfaces, providers
 │   ├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy
 │   ├── franken-web/             # React dashboard
 │   └── live-bench/              # live benchmark tooling

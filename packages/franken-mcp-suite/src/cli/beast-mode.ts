@@ -6,7 +6,7 @@ import { FbeastConfig } from '../shared/config.js';
 function printLine(...args: unknown[]): void {
   console.info(...args);
 }
-const FRANKENBEAST_INSTALL_COMMAND = 'npm install -g franken-orchestrator';
+const FRANKENBEAST_INSTALL_COMMAND = 'npm install -g @franken/orchestrator';
 
 export interface BeastModeDeps {
   root: string;

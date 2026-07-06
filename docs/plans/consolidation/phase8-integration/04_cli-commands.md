@@ -226,7 +226,7 @@ export function registerDashboardCommand(program: Command): void {
     .option('-p, --port <port>', 'Port number', '3000')
     .option('--no-open', 'Don\'t open browser')
     .action(async (opts) => {
-      const { startDashboard } = await import('@frankenbeast/web');
+      const { startDashboard } = await import('@franken/web');
       const url = await startDashboard({ port: parseInt(opts.port) });
       process.stdout.write(`Dashboard running at ${url}`);
       if (opts.open !== false) {

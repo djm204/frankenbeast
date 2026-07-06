@@ -83,7 +83,7 @@ import type { BrainSnapshot } from '@frankenbeast/types';
 import { ProviderRegistry } from '../providers/provider-registry.js';
 import { buildMiddlewareChain, resolveSecurityConfig } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
-import { AuditTrail, createAuditEvent } from '@frankenbeast/observer';
+import { AuditTrail, createAuditEvent } from '@franken/observer';
 import { CritiqueChain } from '@frankenbeast/critique';
 import { ReflectionEvaluator } from '@frankenbeast/critique/evaluators/reflection-evaluator.js';
 
@@ -272,7 +272,7 @@ The following are **removed entirely** from `dep-factory.ts`:
 | `createStubSkills()` | Replaced by `SkillManagerAdapter` |
 | Dynamic `import('@franken/firewall')` | Package deleted in Phase 1. Replaced by `MiddlewareChainFirewallAdapter` |
 | Dynamic `import('@franken/skills')` | Package deleted in Phase 1. Replaced by `SkillManagerAdapter` |
-| Dynamic `import('franken-brain')` | Replaced by `SqliteBrainMemoryAdapter` wrapping `SqliteBrain` |
+| Dynamic `import('@franken/brain')` | Replaced by `SqliteBrainMemoryAdapter` wrapping `SqliteBrain` |
 | Dynamic `import('@franken/critique')` | Wiring moves to `CritiqueChain` construction |
 | Dynamic `import('@franken/governor')` | Governor module is retained — this import stays, but wiring simplifies |
 | `FirewallPortAdapter`, `SkillsPortAdapter`, `EpisodicMemoryPortAdapter`, `CritiquePortAdapter`, `SkillRegistryBridge` | Old port adapters replaced by new consolidation adapters |

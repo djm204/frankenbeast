@@ -4,8 +4,8 @@ The beast harness is split across two CLIs. This guide covers both.
 
 | CLI | Package | Role |
 |-----|---------|------|
-| `fbeast` | `@fbeast/mcp-suite` | MCP server registration, beast-mode activation shim |
-| `frankenbeast` / `franken` / `frkn` | `franken-orchestrator` | The actual beast loop — interview, plan, execute |
+| `fbeast` | `@franken/mcp-suite` | MCP server registration, beast-mode activation shim |
+| `frankenbeast` / `franken` / `frkn` | `@franken/orchestrator` | The actual beast loop — interview, plan, execute |
 
 ---
 

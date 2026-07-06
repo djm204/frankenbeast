@@ -31,7 +31,7 @@ User Input
 
 ## Loop 1: The Beast Loop (Outer Pipeline)
 
-**Source:** `franken-orchestrator/src/beast-loop.ts`
+**Source:** `@franken/orchestrator/src/beast-loop.ts`
 
 The top-level pipeline runs 4 sequential phases. This is a single pass — iteration happens within the phases, not around them.
 
@@ -51,7 +51,7 @@ The top-level pipeline runs 4 sequential phases. This is a single pass — itera
 
 ## Loop 2: Plan-Critique Loop (Phase 2)
 
-**Source:** `franken-orchestrator/src/phases/planning.ts`, `franken-critique/src/loop/critique-loop.ts`
+**Source:** `@franken/orchestrator/src/phases/planning.ts`, `franken-critique/src/loop/critique-loop.ts`
 
 This is the primary quality loop. The planner generates a plan, critique reviews it, and the cycle repeats until the plan passes or the iteration limit is hit.
 
@@ -107,7 +107,7 @@ The Critique Pipeline runs deterministic evaluators first, then heuristic evalua
 
 ## Loop 3: Execution Loop (Phase 3)
 
-**Source:** `franken-orchestrator/src/phases/execution.ts`
+**Source:** `@franken/orchestrator/src/phases/execution.ts`
 
 Tasks execute in topological order with dependency tracking:
 
@@ -126,22 +126,22 @@ while tasks remain pending:
 
 The live orchestrator execution phase is sequential: it runs ready tasks one at a time in topological order. Planner strategy modules describe additional target execution modes, but parallel waves and recursive expansion are not wired into `BeastLoop`/`runExecution` yet; that implementation gap is tracked in [#497](https://github.com/djm204/frankenbeast/issues/497).
 
-**Sequential topological execution** (`franken-orchestrator/src/phases/execution.ts`) — current live behavior
+**Sequential topological execution** (`@franken/orchestrator/src/phases/execution.ts`) — current live behavior
 - Tasks execute one at a time in topological order
 - A failed task is recorded but not added to the completed set
 - Independent ready tasks can still run; dependents of the failed task are later skipped as unmet dependencies
 
-**Linear planner strategy** (`franken-planner/src/planners/linear.ts`) — planner strategy module, not the live orchestrator execution loop
+**Linear planner strategy** (`@franken/planner/src/planners/linear.ts`) — planner strategy module, not the live orchestrator execution loop
 - Tasks execute one at a time in topological order
 - First failure stops the strategy sequence
 
-**Parallel** (`franken-planner/src/planners/parallel.ts`) — target architecture, not wired into orchestrator execution yet
+**Parallel** (`@franken/planner/src/planners/parallel.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks execute in concurrent "waves"
 - Each wave contains all tasks whose dependencies are satisfied
 - All tasks in a wave run simultaneously via `Promise.all`
 - A failure in any wave stops subsequent waves
 
-**Recursive** (`franken-planner/src/planners/recursive.ts`) — target architecture, not wired into orchestrator execution yet
+**Recursive** (`@franken/planner/src/planners/recursive.ts`) — target architecture, not wired into orchestrator execution yet
 - Tasks can expand into sub-graphs during execution
 - Depth-limited to prevent unbounded recursion
 - Sub-graphs are themselves executed in topological order
@@ -150,7 +150,7 @@ The live orchestrator execution phase is sequential: it runs ready tasks one at 
 
 ## Loop 4: Recovery Loop (Self-Correction)
 
-**Source:** `franken-planner/src/planner.ts`, `franken-planner/src/recovery/recovery-controller.ts`
+**Source:** `@franken/planner/src/planner.ts`, `@franken/planner/src/recovery/recovery-controller.ts`
 
 > **Implementation status:** This is target architecture. The recovery controller exists in planner code, but the live orchestrator execution phase does not yet call it after task failure. Wiring error classification plus fix-it task injection into execution is tracked in [#496](https://github.com/djm204/frankenbeast/issues/496).
 
@@ -202,7 +202,7 @@ Checks cumulative token spend against a USD budget limit. When the limit is exce
 
 ### Heartbeat Pulse
 
-**Source:** `franken-orchestrator/src/adapters/reflection-heartbeat-adapter.ts`; closure heartbeat is invoked through `deps.heartbeat.pulse()` from `franken-orchestrator/src/phases/closure.ts`, while optional phase-boundary reflection is invoked from `franken-orchestrator/src/beast-loop.ts`
+**Source:** `@franken/orchestrator/src/adapters/reflection-heartbeat-adapter.ts`; closure heartbeat is invoked through `deps.heartbeat.pulse()` from `@franken/orchestrator/src/phases/closure.ts`, while optional phase-boundary reflection is invoked from `@franken/orchestrator/src/beast-loop.ts`
 
 Runs during the Closure phase when `enableHeartbeat` is true, and after planning/execution phase boundaries when `enableReflection` is true. These flags are independent in the normal CLI wiring: `enableReflection=false` disables phase-boundary reflection, but closure still calls `heartbeat.pulse()` unless `enableHeartbeat=false`. If the CLI dependency factory installs a reflection function, closure heartbeat can make an LLM-backed reflection call; if no reflection function is configured, the adapter returns an empty pulse with `No reflection configured.` Target reflection implementations should follow a cost-conscious pattern:
 

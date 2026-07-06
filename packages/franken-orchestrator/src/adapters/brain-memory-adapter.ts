@@ -3,7 +3,7 @@ import type {
   MemoryContext,
   EpisodicEntry,
 } from '../deps.js';
-import type { SqliteBrain } from 'franken-brain';
+import type { SqliteBrain } from '@franken/brain';
 
 /**
  * Adapts SqliteBrain (Phase 2) to the IMemoryModule port.

@@ -25,7 +25,7 @@ Add a new section after the existing progress entries:
 |-------|-------------|----|
 | 0 | Stabilize current branch | #XXX |
 | 1 | Remove 5 dead packages (13→8) | #XXX |
-| 2 | Rewrite franken-brain (SQLite) | #XXX |
+| 2 | Rewrite @franken/brain (SQLite) | #XXX |
 | 3 | Provider registry + 6 adapters | #XXX |
 | 4 | Security middleware + profiles | #XXX |
 | 5 | Marketplace-first skill loading | #XXX |

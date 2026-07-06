@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { createAuditEvent, hashContent } from '@frankenbeast/observer';
+import { createAuditEvent, hashContent } from '@franken/observer';
 import { createObserverAdapter } from './observer-adapter.js';
 
 function tmpDbPath(): string {

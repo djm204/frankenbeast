@@ -46,7 +46,7 @@
 
 | ADR Commitment | Plan Coverage | Notes |
 |---|---|---|
-| `franken-brain` rewritten as SQLite-backed working/episodic/recovery memory | [phase2-brain-rewrite.md](phase2-brain-rewrite.md) | Phase 2 is a direct ADR match. |
+| `@franken/brain` rewritten as SQLite-backed working/episodic/recovery memory | [phase2-brain-rewrite.md](phase2-brain-rewrite.md) | Phase 2 is a direct ADR match. |
 | `IBrain`, `BrainSnapshot`, handoff types in `franken-types` | [01_brain-interfaces-types.md](phase2-brain-rewrite/01_brain-interfaces-types.md), [01_provider-interfaces-types.md](phase3-provider-registry/01_provider-interfaces-types.md) | Types are split cleanly between brain and provider contracts. |
 | `serialize()` / `hydrate()` support provider switching | [02_sqlite-brain-implementation.md](phase2-brain-rewrite/02_sqlite-brain-implementation.md), [09_provider-failover-integration.md](phase3-provider-registry/09_provider-failover-integration.md) | Covered at both unit and integration levels. |
 | Recovery memory via checkpoints | [02_sqlite-brain-implementation.md](phase2-brain-rewrite/02_sqlite-brain-implementation.md), [02_beast-loop-phases.md](phase8-integration/02_beast-loop-phases.md) | Brain-native recovery is implemented in Phase 2 and wired in Phase 8. |

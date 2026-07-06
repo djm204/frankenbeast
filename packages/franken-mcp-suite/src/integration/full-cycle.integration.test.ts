@@ -20,7 +20,7 @@ import { runInit } from '../cli/init.js';
 import { runHook, defaultHookDeps } from '../cli/hook.js';
 import { createBrainAdapter } from '../adapters/brain-adapter.js';
 import { createObserverAdapter } from '../adapters/observer-adapter.js';
-import { SQLiteBeastRepository } from 'franken-orchestrator';
+import { SQLiteBeastRepository } from '@franken/orchestrator';
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 

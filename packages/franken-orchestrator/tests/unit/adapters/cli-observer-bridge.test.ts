@@ -4,7 +4,7 @@ import {
   CostCalculator,
   CircuitBreaker,
   LoopDetector,
-} from '@frankenbeast/observer';
+} from '@franken/observer';
 import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
 import type { IObserverModule } from '../../../src/deps.js';
 

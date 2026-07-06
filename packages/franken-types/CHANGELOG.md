@@ -103,8 +103,8 @@
 
 * **main:** release franken-governor 0.4.0 ([c1cb8f3](https://github.com/djm204/frankenbeast/commit/c1cb8f341abc745cf2a94a627e665ef961550433))
 * **main:** release franken-governor 0.4.0 ([c252078](https://github.com/djm204/frankenbeast/commit/c252078a6e951748b06996b54f0ab006283af0b3))
-* **main:** release franken-orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
-* **main:** release franken-orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
+* **main:** release @franken/orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
+* **main:** release @franken/orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
 * **main:** release franken-types 0.3.2 ([5d88dcb](https://github.com/djm204/frankenbeast/commit/5d88dcb63d5c43f7a66e79b4fd5c976c795df164))
 * **main:** release franken-types 0.3.2 ([64381db](https://github.com/djm204/frankenbeast/commit/64381db3ca76cd36107dfb5a44e6b8c3a278561f))
 * **main:** release franken-types 0.3.2 ([1f7bb59](https://github.com/djm204/frankenbeast/commit/1f7bb596d6b7b9fbcd8c865365e657a2ea4fb04f))

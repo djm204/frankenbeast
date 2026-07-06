@@ -1,4 +1,4 @@
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 import Database from 'better-sqlite3';
 
 export interface BrainQueryInput {

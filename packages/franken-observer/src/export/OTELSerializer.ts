@@ -106,7 +106,7 @@ export const OTELSerializer = {
           },
           scopeSpans: [
             {
-              scope: { name: '@frankenbeast/observer' },
+              scope: { name: '@franken/observer' },
               spans: trace.spans.map(serializeSpan),
             },
           ],

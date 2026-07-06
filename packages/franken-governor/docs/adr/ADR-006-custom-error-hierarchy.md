@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-MOD-07 needs typed error classes for distinct failure modes: approval timeouts, channel unavailability, signature verification failures, and trigger evaluation errors. Sibling modules (franken-planner, franken-skills) use custom error classes with `Object.setPrototypeOf(this, ClassName.prototype)` in constructors to ensure `instanceof` checks work correctly across environments.
+MOD-07 needs typed error classes for distinct failure modes: approval timeouts, channel unavailability, signature verification failures, and trigger evaluation errors. Sibling modules (@franken/planner, franken-skills) use custom error classes with `Object.setPrototypeOf(this, ClassName.prototype)` in constructors to ensure `instanceof` checks work correctly across environments.
 
 ## Decision
 
@@ -22,6 +22,6 @@ Error classes:
 ## Consequences
 
 - **Positive:** `instanceof` checks work correctly in all environments.
-- **Positive:** Consistent with franken-planner's error pattern.
+- **Positive:** Consistent with @franken/planner's error pattern.
 - **Positive:** Structured context fields enable programmatic error handling.
 - **Negative:** Minor boilerplate per error class.

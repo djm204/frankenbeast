@@ -4,9 +4,9 @@
 
 **Goal:** Make the live `packages/franken-orchestrator` beast surface fully usable by closing config/flag no-ops, removing permissive required-path fallbacks, implementing explicit resume semantics, hardening every shipped command family, and ending with an authoritative beast verification matrix.
 
-**Architecture:** Harden in place. Keep `franken-orchestrator` as the single live beast surface, thread config and runtime controls end-to-end through `args.ts -> run.ts -> session.ts -> dep-factory.ts -> BeastLoop`, replace silent degradation on required module paths with real wiring or explicit failure, and use focused integration/E2E tests as the release gate. Avoid modular cleanup unless it directly unblocks correctness on the shipped CLI or server surface.
+**Architecture:** Harden in place. Keep `@franken/orchestrator` as the single live beast surface, thread config and runtime controls end-to-end through `args.ts -> run.ts -> session.ts -> dep-factory.ts -> BeastLoop`, replace silent degradation on required module paths with real wiring or explicit failure, and use focused integration/E2E tests as the release gate. Avoid modular cleanup unless it directly unblocks correctness on the shipped CLI or server surface.
 
-**Tech Stack:** TypeScript, npm workspaces, Vitest, Hono, `better-sqlite3`, `franken-brain`, `@franken/critique`, `@franken/governor`, `@frankenbeast/observer`, `franken-orchestrator`
+**Tech Stack:** TypeScript, npm workspaces, Vitest, Hono, `better-sqlite3`, `@franken/brain`, `@franken/critique`, `@franken/governor`, `@franken/observer`, `@franken/orchestrator`
 
 ---
 
@@ -730,7 +730,7 @@ Expected: PASS.
 
 ```md
 <!-- tasks/todo.md -->
-- [x] Write and approve the beast-mode hardening design spec covering the full live `franken-orchestrator` surface.
+- [x] Write and approve the beast-mode hardening design spec covering the full live `@franken/orchestrator` surface.
 - [x] Write a concrete implementation plan for in-place beast hardening with TDD-first execution chunks.
 - [x] Close config and flag no-op gaps on the live beast CLI surface.
 - [x] Replace permissive module fallback behavior on required beast paths with real implementations or hard failures.

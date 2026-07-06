@@ -6,8 +6,8 @@ import {
   DEFAULT_PRICING,
   TraceContext,
   SpanLifecycle,
-} from '@frankenbeast/observer';
-import type { Trace, Span } from '@frankenbeast/observer';
+} from '@franken/observer';
+import type { Trace, Span } from '@franken/observer';
 import { makeTokenSpend } from '@franken/types';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';

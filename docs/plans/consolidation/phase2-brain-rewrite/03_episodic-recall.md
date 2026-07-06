@@ -1,6 +1,6 @@
 # Chunk 2.3: Episodic Recall
 
-**Phase:** 2 — Rewrite franken-brain
+**Phase:** 2 — Rewrite @franken/brain
 **Depends on:** Chunk 2.1 (brain interfaces)
 **Estimated size:** Small (~50 lines implementation + tests)
 

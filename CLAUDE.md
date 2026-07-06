@@ -9,18 +9,18 @@ This is an npm workspaces monorepo with Turborepo for build orchestration. All 1
 ```
 packages/
 ├── franken-types/           # Shared types + runtime Zod schemas (@franken/types)
-├── franken-brain/           # MOD-03: SQLite-backed memory (working + episodic)
-├── franken-planner/         # MOD-04: DAG planning, strategies, recovery primitives
-├── franken-observer/        # MOD-05: Tracing, token/cost tracking, circuit breaker (@frankenbeast/observer)
+├── franken-brain/           # @franken/brain: MOD-03 SQLite-backed memory (working + episodic)
+├── franken-planner/         # @franken/planner: MOD-04 DAG planning, strategies, recovery primitives
+├── franken-observer/        # MOD-05: Tracing, token/cost tracking, circuit breaker (@franken/observer)
 ├── franken-critique/        # MOD-06: Self-critique evaluators + reviewer loop (@franken/critique)
 ├── franken-governor/        # MOD-07: HITL governance, triggers, approval gateway (@franken/governor)
-├── franken-orchestrator/    # The Beast Loop, CLI (frankenbeast/franken/frkn), chat/network servers
-├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy (@fbeast/mcp-suite)
-├── franken-web/             # React dashboard (@frankenbeast/web)
-└── live-bench/              # Live CLI benchmark tooling (@fbeast/live-bench)
+├── franken-orchestrator/    # @franken/orchestrator: Beast Loop, CLI, chat/network servers
+├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy (@franken/mcp-suite)
+├── franken-web/             # React dashboard (@franken/web)
+└── live-bench/              # Live CLI benchmark tooling (@franken/live-bench)
 ```
 
-Former packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` were consolidated into `franken-orchestrator` and `franken-mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); their capabilities live on as internal adapters.
+Former packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` were consolidated into `@franken/orchestrator` and `franken-mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); their capabilities live on as internal adapters.
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)

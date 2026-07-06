@@ -9,7 +9,7 @@
 
 ## Overview
 
-Cut Frankenbeast from 13 packages to 8. Remove redundant packages, absorb infrastructure into the orchestrator, rewrite franken-brain for portable cross-provider memory, add provider registry with CLI + API adapters, implement marketplace-first skill loading via MCP, add configurable security profiles, and build a simple/advanced dashboard.
+Cut Frankenbeast from 13 packages to 8. Remove redundant packages, absorb infrastructure into the orchestrator, rewrite @franken/brain for portable cross-provider memory, add provider registry with CLI + API adapters, implement marketplace-first skill loading via MCP, add configurable security profiles, and build a simple/advanced dashboard.
 
 Fast ADR mapping: [ADR-031 Coverage Matrix](adr-031-coverage-matrix.md)
 
@@ -19,7 +19,7 @@ Fast ADR mapping: [ADR-031 Coverage Matrix](adr-031-coverage-matrix.md)
 |-------|-----------|--------|-------------|
 | 0 | [Stabilize Current Branch](phase0-stabilize.md) | [2 chunks](phase0-stabilize/) | None |
 | 1 | [Remove Dead Packages](phase1-remove-packages.md) | [6 chunks](phase1-remove-packages/) | Phase 0 |
-| 2 | [Rewrite franken-brain](phase2-brain-rewrite.md) | [4 chunks](phase2-brain-rewrite/) | Phase 1 |
+| 2 | [Rewrite @franken/brain](phase2-brain-rewrite.md) | [4 chunks](phase2-brain-rewrite/) | Phase 1 |
 | 3 | [Provider Registry + Adapters](phase3-provider-registry.md) | [10 chunks](phase3-provider-registry/) | Phase 2 |
 | 4 | [Security Middleware](phase4-security-middleware.md) | [4 chunks](phase4-security-middleware/) | Phase 1 |
 | 4.5 | [Comms Integration](phase4.5-comms-integration.md) | [5 chunks](phase4.5-comms-integration/) | Phase 1 + Phase 3 + Phase 4 |

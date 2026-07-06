@@ -10,8 +10,8 @@
 import { describe, it, expect } from 'vitest';
 
 // MOD-04: Planner
-import { PlanGraph, createTaskId } from 'franken-planner';
-import type { Task } from 'franken-planner';
+import { PlanGraph, createTaskId } from '@franken/planner';
+import type { Task } from '@franken/planner';
 
 // MOD-06: Critique
 import { createReviewer } from '@franken/critique';
@@ -25,7 +25,7 @@ import {
 } from '@franken/governor';
 
 // MOD-03: Brain
-import { WorkingMemoryStore, TruncationStrategy, TokenBudget } from 'franken-brain';
+import { WorkingMemoryStore, TruncationStrategy, TokenBudget } from '@franken/brain';
 
 // Stubs and factory
 import {

@@ -1,4 +1,4 @@
-# Implementation Plan — franken-planner (MOD-04)
+# Implementation Plan — @franken/planner (MOD-04)
 
 > **Methodology:** TDD (red → green → refactor), atomic commits, small logical PRs.
 > Each PR ships a working vertical slice with passing tests.

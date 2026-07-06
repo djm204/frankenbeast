@@ -6,7 +6,7 @@
 
 ## Goal
 
-Ship `@fbeast/mcp-suite` and Beast mode together without conflating their control planes.
+Ship `@franken/mcp-suite` and Beast mode together without conflating their control planes.
 
 The release must make two things true at the same time:
 
@@ -19,7 +19,7 @@ Both modes must share the same `.fbeast/beast.db` state so users can move betwee
 
 ### MCP mode
 
-MCP mode is plugin mode. Claude Code remains the driver and calls `fbeast_*` tools through MCP servers provided by `@fbeast/mcp-suite`.
+MCP mode is plugin mode. Claude Code remains the driver and calls `fbeast_*` tools through MCP servers provided by `@franken/mcp-suite`.
 
 Responsibilities:
 
@@ -67,11 +67,11 @@ That means the launch should preserve this topology:
 
 `MCP mode` remains separate from this path. It is a plugin/tool-provider surface, not a beast-control transport.
 
-For launch purposes, `beasts-daemon` refers to the existing Beast control-plane surfaces already present in `franken-orchestrator`, not to a newly introduced standalone binary. The concrete backend contract for this release is:
+For launch purposes, `beasts-daemon` refers to the existing Beast control-plane surfaces already present in `@franken/orchestrator`, not to a newly introduced standalone binary. The concrete backend contract for this release is:
 
-- `franken-orchestrator` Beast services and repositories remain the single authority for beast lifecycle state
+- `@franken/orchestrator` Beast services and repositories remain the single authority for beast lifecycle state
 - `/v1/beasts/*` HTTP routes are the dashboard-facing control-plane transport
-- CLI Beast operations must call the same underlying Beast services or HTTP control-plane contract rather than reimplementing lifecycle logic in `@fbeast/mcp-suite`
+- CLI Beast operations must call the same underlying Beast services or HTTP control-plane contract rather than reimplementing lifecycle logic in `@franken/mcp-suite`
 - `chat-server` may act as another client when it uses those same backend surfaces
 
 ## Shared State Model
@@ -192,7 +192,7 @@ Chunk sequencing invariants:
 
 Each MCP server must be a thin wrapper over existing frankenbeast engines or orchestrator services. The MCP package should remain transport and install glue, not a second implementation of the product.
 
-Allowed in `@fbeast/mcp-suite`:
+Allowed in `@franken/mcp-suite`:
 
 - path translation
 - input normalization
@@ -201,10 +201,10 @@ Allowed in `@fbeast/mcp-suite`:
 - hook runtime
 - integration tests
 
-Not allowed in `@fbeast/mcp-suite`:
+Not allowed in `@franken/mcp-suite`:
 
 - alternate memory engine behavior
-- template planner logic standing in for real planner output (exception: `decompose` returns a scaffold DAG because `franken-planner` is a graph library, not a planning engine — real decomposition requires an LLM, and injecting one into an MCP tool called by an LLM is circular; the caller refines the scaffold)
+- template planner logic standing in for real planner output (exception: `decompose` returns a scaffold DAG because `@franken/planner` is a graph library, not a planning engine — real decomposition requires an LLM, and injecting one into an MCP tool called by an LLM is circular; the caller refines the scaffold)
 - ad hoc critique heuristics replacing critique engine behavior
 - regex-only governance or skills logic where existing modules already define the behavior
 
@@ -324,7 +324,7 @@ The launch docs must stop underselling or overclaiming the product.
 Required doc outcomes:
 
 - root/project docs no longer say the product is not functioning end-to-end if the release claims launch readiness
-- `@fbeast/mcp-suite` has a concrete install and usage story
+- `@franken/mcp-suite` has a concrete install and usage story
 - docs explain the distinction between plugin mode and standalone mode
 - docs explain that dashboard is the main Beast UI while CLI has parity for core operations
 - docs explain that both modes share `.fbeast/beast.db`

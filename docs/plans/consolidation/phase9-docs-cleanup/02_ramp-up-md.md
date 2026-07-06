@@ -25,13 +25,13 @@ Deterministic guardrails framework for AI agents. Orchestrates multiple LLM prov
 | Package | Role |
 |---------|------|
 | `franken-types` | Shared types + Zod schemas |
-| `franken-brain` | SQLite memory (working, episodic, recovery) |
-| `franken-planner` | DAG task planning |
+| `@franken/brain` | SQLite memory (working, episodic, recovery) |
+| `@franken/planner` | DAG task planning |
 | `franken-observer` | Audit trail + execution replay |
 | `franken-critique` | Self-critique evaluators (including reflection) |
 | `franken-governor` | Human-in-the-loop governance |
 | `franken-web` | Dashboard (simple/advanced) |
-| `franken-orchestrator` | Beast Loop, CLI, providers, skills, security |
+| `@franken/orchestrator` | Beast Loop, CLI, providers, skills, security |
 
 ### 3. Key Concepts (one paragraph each)
 

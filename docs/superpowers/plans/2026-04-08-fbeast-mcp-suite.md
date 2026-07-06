@@ -100,11 +100,11 @@ packages/franken-mcp-suite/
   },
   "dependencies": {
     "@franken/types": "*",
-    "franken-brain": "*",
+    "@franken/brain": "*",
     "franken-critique": "*",
     "franken-governor": "*",
     "franken-observer": "*",
-    "franken-planner": "*",
+    "@franken/planner": "*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2"
   },
@@ -1899,7 +1899,7 @@ Expected: FAIL — module not found
 
 - [ ] **Step 3: Write planner server implementation**
 
-The planner server stores DAGs in SQLite. Decomposition produces a structured task graph that Claude can follow. This is a lightweight planner — the full `franken-planner` module with LLM-based decomposition can be wired in later.
+The planner server stores DAGs in SQLite. Decomposition produces a structured task graph that Claude can follow. This is a lightweight planner — the full `@franken/planner` module with LLM-based decomposition can be wired in later.
 
 File: `packages/franken-mcp-suite/src/servers/planner.ts`
 

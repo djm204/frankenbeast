@@ -1,6 +1,6 @@
 # Chunk 2.1: Brain Interfaces + Types
 
-**Phase:** 2 — Rewrite franken-brain
+**Phase:** 2 — Rewrite @franken/brain
 **Depends on:** Phase 1 (clean monorepo)
 **Estimated size:** Small (~100 lines of types + Zod schemas)
 
@@ -8,7 +8,7 @@
 
 ## Purpose
 
-Define the brain interfaces and `BrainSnapshot` type in `franken-types` so that both `franken-brain` (implementation) and `franken-orchestrator` (consumer) can depend on the contract without depending on each other.
+Define the brain interfaces and `BrainSnapshot` type in `franken-types` so that both `@franken/brain` (implementation) and `@franken/orchestrator` (consumer) can depend on the contract without depending on each other.
 
 ## Interfaces
 

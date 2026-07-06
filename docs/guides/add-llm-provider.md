@@ -1,6 +1,6 @@
 # Adding an LLM Provider
 
-Frankenbeast's current provider extension points live in `franken-orchestrator`, not in the deleted pre-consolidation `frankenfirewall` package.
+Frankenbeast's current provider extension points live in `@franken/orchestrator`, not in the deleted pre-consolidation `frankenfirewall` package.
 
 ## Current provider surfaces
 
@@ -21,8 +21,8 @@ The root CLI flags are `--provider <name>` for the primary provider and `--provi
 5. Verify from the repo root:
 
 ```bash
-npm --workspace franken-orchestrator run typecheck
-npm --workspace franken-orchestrator test -- tests/unit/skills
+npm --workspace @franken/orchestrator run typecheck
+npm --workspace @franken/orchestrator test -- tests/unit/skills
 ```
 
 ## Adding an API provider
@@ -36,8 +36,8 @@ npm --workspace franken-orchestrator test -- tests/unit/skills
 5. Verify from the repo root:
 
 ```bash
-npm --workspace franken-orchestrator run typecheck
-npm --workspace franken-orchestrator test
+npm --workspace @franken/orchestrator run typecheck
+npm --workspace @franken/orchestrator test
 ```
 
 ## What not to follow

@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-19
 **Status:** Accepted
-**Deciders:** franken-planner team
+**Deciders:** @franken/planner team
 
 ---
 

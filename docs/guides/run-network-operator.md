@@ -21,7 +21,7 @@ Optional surfaces activate from config:
 From the repo root:
 
 ```bash
-npm --workspace franken-orchestrator run build
+npm --workspace @franken/orchestrator run build
 node packages/franken-orchestrator/dist/cli/run.js network up
 ```
 

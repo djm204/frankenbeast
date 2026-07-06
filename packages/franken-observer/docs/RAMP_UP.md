@@ -1,6 +1,6 @@
-# @frankenbeast/observer Ramp-Up
+# @franken/observer Ramp-Up
 
-**Status**: **INTEGRATED (Active)** — This is the primary observability and evaluation module for the Frankenbeast framework. It is actively used by the `franken-orchestrator` to track spans, calculate costs, and monitor for loops.
+**Status**: **INTEGRATED (Active)** — This is the primary observability and evaluation module for the Frankenbeast framework. It is actively used by the `@franken/orchestrator` to track spans, calculate costs, and monitor for loops.
 
 ## Module Overview
 The module provides a comprehensive observability suite, including distributed tracing (OTEL-compatible), token spend circuit breakers, and deterministic/LLM-powered evaluations of agent output.
@@ -13,7 +13,7 @@ The module provides a comprehensive observability suite, including distributed t
 - **Storage Adapters**: Supports SQLite, Prometheus, and Langfuse for trace persistence.
 
 ## Key Integration
-The `franken-orchestrator` interacts with this package via the `CliObserverBridge`. Every turn in the `MartinLoop` generates a span that is recorded in the local SQLite database (`.fbeast/.build/observer.db`).
+The `@franken/orchestrator` interacts with this package via the `CliObserverBridge`. Every turn in the `MartinLoop` generates a span that is recorded in the local SQLite database (`.fbeast/.build/observer.db`).
 
 ## Key API
 

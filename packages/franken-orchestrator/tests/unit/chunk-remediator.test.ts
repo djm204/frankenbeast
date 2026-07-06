@@ -59,7 +59,7 @@ const context: PlanContext = {
       signatures: 'export interface ILogger { info(msg: string): void; }',
     },
   ],
-  packageDeps: { 'franken-orchestrator': ['vitest', 'typescript'] },
+  packageDeps: { '@franken/orchestrator': ['vitest', 'typescript'] },
   existingPatterns: [
     { description: 'Adapter pattern', example: 'class FooAdapter extends BaseAdapter {}' },
   ],

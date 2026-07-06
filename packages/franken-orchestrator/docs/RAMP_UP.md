@@ -1,6 +1,6 @@
-# franken-orchestrator Ramp-Up
+# @franken/orchestrator Ramp-Up
 
-`franken-orchestrator` is no longer just the eight-module `BeastLoop`. It is the product package that owns:
+`@franken/orchestrator` is no longer just the eight-module `BeastLoop`. It is the product package that owns:
 
 - the core orchestration pipeline
 - the CLI/session workflow for interview, plan, run, and issues
@@ -184,7 +184,7 @@ npm test
   Local/project skill registry
 - `@franken/firewall`
   Optional firewall module wiring
-- `franken-brain`
+- `@franken/brain`
   Optional memory store wiring
 - `better-sqlite3`
   Local persistence for memory and Beast services

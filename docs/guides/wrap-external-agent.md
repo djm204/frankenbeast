@@ -4,10 +4,10 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 
 ## Option 1: Use MCP mode for tool governance
 
-Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@fbeast/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
+Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
 
 ```bash
-npm install -g @fbeast/mcp-suite      # or: npm link --workspace=packages/franken-mcp-suite
+npm install -g @franken/mcp-suite      # or: npm link --workspace=packages/franken-mcp-suite
 fbeast mcp init
 fbeast mcp init --hooks                # optional: pre/post-tool governance and audit logs
 ```
@@ -27,7 +27,7 @@ frankenbeast run --plan-dir .fbeast/plans/my-plan/
 For browser or service integration, run the orchestrator chat/dashboard backend:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --port 3737
+npm --workspace @franken/orchestrator run chat-server -- --port 3737
 ```
 
 The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. When comms channels are enabled, the CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) is mounted by `createChatApp()` when `securityConfig` is supplied.
@@ -37,7 +37,7 @@ The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network
 For deeper integration, wire your agent components into the orchestrator's ports instead of routing through a standalone proxy:
 
 ```typescript
-import { BeastLoop } from 'franken-orchestrator';
+import { BeastLoop } from '@franken/orchestrator';
 
 const loop = new BeastLoop(deps, { maxTotalTokens: 50_000 });
 const result = await loop.run({

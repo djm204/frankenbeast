@@ -5,7 +5,7 @@
  * and verifies the full pipeline: plan → execute.
  *
  * PREREQUISITES:
- *   - Build the project: cd franken-orchestrator && npm run build
+ *   - Build the project: cd @franken/orchestrator && npm run build
  *   - Real `claude` CLI installed and on PATH
  *   - Valid ANTHROPIC_API_KEY in environment
  *

@@ -1,9 +1,9 @@
-# franken-planner (MOD-04) Ramp-Up
+# @franken/planner (MOD-04) Ramp-Up
 
-**Status**: **GHOST** — This module is currently **unwired** from the primary `franken-orchestrator` production path. The orchestrator uses internal `LlmGraphBuilder` and `ChunkFileGraphBuilder` logic.
+**Status**: **GHOST** — This module is currently **unwired** from the primary `@franken/orchestrator` production path. The orchestrator uses internal `LlmGraphBuilder` and `ChunkFileGraphBuilder` logic.
 
 ## Module Overview
-`franken-planner` is the specialized decomposition engine. It converts user goals into executable DAGs (Directed Acyclic Graphs), enforces Chain-of-Thought (CoT) rationales, and handles self-correction via task injection.
+`@franken/planner` is the specialized decomposition engine. It converts user goals into executable DAGs (Directed Acyclic Graphs), enforces Chain-of-Thought (CoT) rationales, and handles self-correction via task injection.
 
 ## Current Functionality (Implemented but Unused)
 - **PlanGraph**: An immutable DAG structure for managing task dependencies.
@@ -15,7 +15,7 @@
 - **Recovery Controller**: Injects "fix-it" tasks into the DAG when a task fails.
 
 ## Integration Gap
-The `franken-orchestrator` currently implements its own simplified planning logic. **Phase 8 Focus**: Transition the orchestrator to use this package's robust DAG management and parallel/recursive strategies.
+The `@franken/orchestrator` currently implements its own simplified planning logic. **Phase 8 Focus**: Transition the orchestrator to use this package's robust DAG management and parallel/recursive strategies.
 
 ## Key API
 - `PlanGraph`: The core immutable data structure.

@@ -11,7 +11,7 @@ Generated from the 2026-03-08 codebase audit.
 5. `005-resume-flag-is-unwired.md` — **FIXED** (ADR-033: cold runs clear checkpoints; `--resume` fails fast without one)
 6. `006-interview-and-plan-leak-trace-viewer-resources.md` — **FIXED** (`finalize()` in `finally` blocks; GH issue #23 closed)
 7. `007-heartbeat-cli-is-stub-backed.md` — **OBSOLETE** (franken-heartbeat package removed per ADR-031)
-8. `008-franken-mcp-public-api-and-registry-are-incomplete.md` — **OBSOLETE** (franken-mcp removed; superseded by `@fbeast/mcp-suite`)
+8. `008-franken-mcp-public-api-and-registry-are-incomplete.md` — **OBSOLETE** (franken-mcp removed; superseded by `@franken/mcp-suite`)
 9. `009-root-build-and-test-scripts-skip-mcp-and-break-on-failure.md` — **FIXED** (root scripts run via turbo)
 10. `010-root-typecheck-is-red-and-docs-claim-green.md` — **RESOLVED** (offending package deleted; PROGRESS.md reconciled 2026-07-04)
 11. `011-firewall-exports-unimplemented-adapters.md` — **OBSOLETE** (frankenfirewall removed per ADR-031)

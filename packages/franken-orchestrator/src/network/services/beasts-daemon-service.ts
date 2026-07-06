@@ -22,7 +22,7 @@ export const beastsDaemonService: NetworkServiceDefinition = {
       args: [
         '--silent',
         '--workspace',
-        'franken-orchestrator',
+        '@franken/orchestrator',
         'run',
         'beasts-daemon',
         '--',

@@ -1,5 +1,5 @@
 {
-  "name": "@frankenbeast/observer",
+  "name": "@franken/observer",
   "version": "0.7.10",
   "description": "MOD-05 – Observability and Evaluation for the Frankenbeast system",
   "type": "module",

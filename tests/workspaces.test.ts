@@ -196,19 +196,37 @@ describe('npm workspaces configuration', () => {
     }
   });
 
-  describe('name fields preserved', () => {
+  describe('canonical package namespace strategy', () => {
     const expectedNames: Record<string, string> = {
+      'franken-brain': '@franken/brain',
       'franken-critique': '@franken/critique',
       'franken-governor': '@franken/governor',
-      'franken-orchestrator': 'franken-orchestrator',
-      'franken-planner': 'franken-planner',
+      'franken-mcp-suite': '@franken/mcp-suite',
+      'franken-observer': '@franken/observer',
+      'franken-orchestrator': '@franken/orchestrator',
+      'franken-planner': '@franken/planner',
+      'franken-types': '@franken/types',
+      'franken-web': '@franken/web',
+      'live-bench': '@franken/live-bench',
     };
 
     for (const [dir, name] of Object.entries(expectedNames)) {
-      it(`packages/${dir}/package.json retains name "${name}"`, () => {
+      it(`packages/${dir}/package.json uses canonical name "${name}"`, () => {
         const pkg = readPkg(`packages/${dir}/package.json`);
         expect(pkg.name).toBe(name);
       });
     }
+
+    it('keeps every publishable package under the @franken npm scope', () => {
+      const allPackageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `packages/${entry.name}/package.json`);
+
+      for (const path of allPackageJsonPaths) {
+        const pkg = readPkg(path);
+        if (pkg.private === true) continue;
+        expect(pkg.name, `${path} must use the canonical @franken scope`).toMatch(/^@franken\//);
+      }
+    });
   });
 });

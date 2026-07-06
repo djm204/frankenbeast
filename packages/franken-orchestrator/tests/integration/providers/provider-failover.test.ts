@@ -6,7 +6,7 @@ import type {
   ProviderCapabilities,
   BrainSnapshot,
 } from '@franken/types';
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 import { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
 // --- Helpers ---
