@@ -192,7 +192,7 @@ describe('PostMortemGenerator', () => {
         const filePath = await gen.generate(trace, makeSignal(trace.id))
 
         expect(filePath).not.toBeNull()
-        expect(isInsideDirectory(realOutputDir, filePath!)).toBe(true)
+        expect(isInsideDirectory(symlinkedOutputDir, filePath!)).toBe(true)
         expect(existsSync(filePath!)).toBe(true)
 
         const escapedPath = resolve(realOutputDir, `post-mortem-${trace.id}-1700000000000.md`)
@@ -201,6 +201,36 @@ describe('PostMortemGenerator', () => {
       } finally {
         rmSync(parentDir, { recursive: true, force: true })
       }
+    })
+
+    it('preserves configured relative outputDir in the returned path', async () => {
+      const relativeOutputDir = `.pm-relative-${randomUUID()}`
+
+      try {
+        const gen = new PostMortemGenerator({ outputDir: relativeOutputDir })
+        const trace = makeTrace()
+        const filePath = await gen.generate(trace, makeSignal(trace.id))
+
+        expect(filePath).not.toBeNull()
+        expect(isAbsolute(filePath!)).toBe(false)
+        expect(filePath!.startsWith(relativeOutputDir)).toBe(true)
+        expect(existsSync(filePath!)).toBe(true)
+      } finally {
+        rmSync(relativeOutputDir, { recursive: true, force: true })
+      }
+    })
+
+    it('uses reversible trace id encoding so separator-like ids do not overwrite distinct reports', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const signalTimestamp = 1_700_000_000_000
+      const firstPath = await gen.generate(makeTraceWithId('run\\1'), makeSignal('run\\1', { timestamp: signalTimestamp }))
+      const secondPath = await gen.generate(makeTraceWithId('run_1'), makeSignal('run_1', { timestamp: signalTimestamp }))
+
+      expect(firstPath).not.toBeNull()
+      expect(secondPath).not.toBeNull()
+      expect(firstPath).not.toBe(secondPath)
+      expect(existsSync(firstPath!)).toBe(true)
+      expect(existsSync(secondPath!)).toBe(true)
     })
   })
 

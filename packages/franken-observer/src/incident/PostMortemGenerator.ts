@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 
@@ -9,7 +9,7 @@ export interface PostMortemOptions {
 }
 
 function safeFilenameComponent(value: string): string {
-  return value.replace(/[\\/]+/g, '_')
+  return encodeURIComponent(value)
 }
 
 function isInsideDirectory(baseDir: string, targetPath: string): boolean {
@@ -90,25 +90,26 @@ without reaching a terminal condition. Possible causes:
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
     const timestamp = signal.timestamp
     const filename = `post-mortem-${safeFilenameComponent(trace.id)}-${timestamp}.md`
+    const configuredFilePath = join(this.outputDir, filename)
     const content = this.generateContent(trace, signal)
 
-    let filePath = resolve(this.outputDir, filename)
+    let writeFilePath = resolve(this.outputDir, filename)
 
     try {
       await fs.mkdir(this.outputDir, { recursive: true })
       const outputDir = await fs.realpath(this.outputDir)
-      filePath = resolve(outputDir, filename)
+      writeFilePath = resolve(outputDir, filename)
 
-      if (!isInsideDirectory(outputDir, filePath)) {
-        throw new Error(`Resolved post-mortem path escapes output directory: ${filePath}`)
+      if (!isInsideDirectory(outputDir, writeFilePath)) {
+        throw new Error(`Resolved post-mortem path escapes output directory: ${writeFilePath}`)
       }
 
-      await fs.writeFile(filePath, content, 'utf-8')
-      return filePath
+      await fs.writeFile(writeFilePath, content, 'utf-8')
+      return configuredFilePath
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       console.warn(
-        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${filePath}: ${reason}. Continuing without persisting the report.`,
+        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${writeFilePath}: ${reason}. Continuing without persisting the report.`,
       )
       return null
     }
