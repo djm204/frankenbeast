@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LinearPlanner } from '../../../src/planners/linear';
 import { PlanGraph } from '../../../src/core/dag';
+import { RecursionDepthExceededError } from '../../../src/core/errors';
 import { createTaskId } from '../../../src/core/types';
 import type { Task, TaskResult } from '../../../src/core/types';
 import type { PlanContext } from '../../../src/planners/types';
@@ -17,6 +18,10 @@ function makeTask(id: string): Task {
 
 function success(id: string): TaskResult {
   return { status: 'success', taskId: createTaskId(id) };
+}
+
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
 }
 
 function failure(id: string, message = 'task failed'): TaskResult {
@@ -79,6 +84,35 @@ describe('LinearPlanner — happy path', () => {
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults).toHaveLength(2);
   });
+
+  it('executes expanded sub-tasks before continuing the linear plan', async () => {
+    const parent = makeTask('parent');
+    const sibling = makeTask('sibling');
+    const sub1 = makeTask('sub-1');
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const graph = PlanGraph.empty().addTask(parent).addTask(sibling);
+    const callOrder: string[] = [];
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [sub1, sub2]));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new LinearPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub-1'),
+      createTaskId('sub-2'),
+      createTaskId('sibling'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected status');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual(callOrder);
+  });
 });
 
 // ─── Failure handling ────────────────────────────────────────────────────────
@@ -126,5 +160,38 @@ describe('LinearPlanner — failure handling', () => {
     expect(result.taskResults).toHaveLength(2);
     expect(result.taskResults[0]?.status).toBe('success');
     expect(result.taskResults[1]?.status).toBe('failure');
+  });
+
+  it('returns the expanding parent as failed when an expanded sub-task fails', async () => {
+    const parent = makeTask('parent');
+    const sub = makeTask('sub');
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [sub]))
+      .mockResolvedValueOnce(failure('sub', 'sub exploded'));
+
+    const result = await new LinearPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('parent'));
+    expect(result.error.message).toBe('sub exploded');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub'),
+    ]);
+  });
+
+  it('throws RecursionDepthExceededError when nested expansions exceed max depth', async () => {
+    const child = makeTask('child');
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [child]))
+      .mockResolvedValue(success('child'));
+
+    await expect(new LinearPlanner(0).execute(graph, { executor })).rejects.toBeInstanceOf(
+      RecursionDepthExceededError
+    );
   });
 });

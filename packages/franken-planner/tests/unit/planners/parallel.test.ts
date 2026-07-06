@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ParallelPlanner } from '../../../src/planners/parallel';
 import { PlanGraph } from '../../../src/core/dag';
-import { CyclicDependencyError } from '../../../src/core/errors';
+import { CyclicDependencyError, RationaleRejectedError, RecursionDepthExceededError } from '../../../src/core/errors';
 import { createTaskId } from '../../../src/core/types';
 import type { Task, TaskId, TaskResult } from '../../../src/core/types';
 
@@ -17,6 +17,10 @@ function makeTask(id: string): Task {
 
 function success(id: string): TaskResult {
   return { status: 'success', taskId: createTaskId(id) };
+}
+
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
 }
 
 function failure(id: string, message = 'task failed'): TaskResult {
@@ -135,6 +139,110 @@ describe('ParallelPlanner — happy path', () => {
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults).toHaveLength(2);
   });
+
+  it('executes expanded sub-tasks before starting dependent waves', async () => {
+    const parent = makeTask('parent');
+    const dependent = makeTask('dependent');
+    const sub1 = makeTask('sub-1');
+    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const graph = PlanGraph.empty()
+      .addTask(parent)
+      .addTask(dependent, [createTaskId('parent')]);
+    const callOrder: string[] = [];
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [sub1, sub2]));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new ParallelPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub-1'),
+      createTaskId('sub-2'),
+      createTaskId('dependent'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected status');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual(callOrder);
+  });
+
+  it('starts same-wave expansion subgraphs concurrently', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let sub2Started = false;
+    let markSub1Started: (() => void) | undefined;
+    let resolveSub1: ((result: TaskResult) => void) | undefined;
+    const sub1Started = new Promise<void>((resolve) => {
+      markSub1Started = resolve;
+    });
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent-1')) return Promise.resolve(expand('parent-1', [sub1]));
+      if (task.id === createTaskId('parent-2')) return Promise.resolve(expand('parent-2', [sub2]));
+      if (task.id === createTaskId('sub-1')) {
+        markSub1Started?.();
+        return new Promise<TaskResult>((resolve) => {
+          resolveSub1 = resolve;
+        });
+      }
+      if (task.id === createTaskId('sub-2')) {
+        sub2Started = true;
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const execution = new ParallelPlanner().execute(graph, { executor });
+    await sub1Started;
+    await Promise.resolve();
+
+    expect(sub2Started).toBe(true);
+    expect(resolveSub1).toBeDefined();
+    resolveSub1?.(success('sub-1'));
+    await expect(execution).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('waits for sibling expansions before propagating an expansion rejection', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let resolveSub2: ((result: TaskResult) => void) | undefined;
+    let rejected = false;
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent-1')) return Promise.resolve(expand('parent-1', [sub1]));
+      if (task.id === createTaskId('parent-2')) return Promise.resolve(expand('parent-2', [sub2]));
+      if (task.id === createTaskId('sub-1')) {
+        return Promise.reject(new RationaleRejectedError('sub-1', 'bad rationale'));
+      }
+      if (task.id === createTaskId('sub-2')) {
+        return new Promise<TaskResult>((resolve) => {
+          resolveSub2 = resolve;
+        });
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const execution = new ParallelPlanner().execute(graph, { executor });
+    execution.catch(() => {
+      rejected = true;
+    });
+    await vi.waitFor(() => expect(resolveSub2).toBeDefined());
+    await Promise.resolve();
+
+    expect(rejected).toBe(false);
+    resolveSub2?.(success('sub-2'));
+    await expect(execution).rejects.toBeInstanceOf(RationaleRejectedError);
+  });
 });
 
 // ─── Cycle handling ───────────────────────────────────────────────────────────
@@ -196,6 +304,66 @@ describe('ParallelPlanner — failure handling', () => {
     expect(result.taskResults).toHaveLength(2);
     expect(result.taskResults[0]?.status).toBe('success');
     expect(result.taskResults[1]?.status).toBe('failure');
+  });
+
+  it('returns the expanding parent as failed when an expanded sub-task fails', async () => {
+    const parent = makeTask('parent');
+    const sub = makeTask('sub');
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [sub]))
+      .mockResolvedValueOnce(failure('sub', 'sub exploded'));
+
+    const result = await new ParallelPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('parent'));
+    expect(result.error.message).toBe('sub exploded');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub'),
+    ]);
+  });
+
+  it('finishes same-wave expansions before returning an expansion failure', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent-1')) return Promise.resolve(expand('parent-1', [sub1]));
+      if (task.id === createTaskId('parent-2')) return Promise.resolve(expand('parent-2', [sub2]));
+      if (task.id === createTaskId('sub-1')) return Promise.resolve(failure('sub-1', 'sub failed'));
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new ParallelPlanner().execute(graph, { executor });
+
+    expect(executor).toHaveBeenCalledWith(sub2);
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('parent-1'));
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('parent-1'),
+      createTaskId('parent-2'),
+      createTaskId('sub-1'),
+      createTaskId('sub-2'),
+    ]);
+  });
+
+  it('throws RecursionDepthExceededError when nested expansions exceed max depth', async () => {
+    const child = makeTask('child');
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [child]))
+      .mockResolvedValue(success('child'));
+
+    await expect(new ParallelPlanner(0).execute(graph, { executor })).rejects.toBeInstanceOf(
+      RecursionDepthExceededError
+    );
   });
 
   it('returns first failure when multiple tasks fail in the same wave', async () => {
