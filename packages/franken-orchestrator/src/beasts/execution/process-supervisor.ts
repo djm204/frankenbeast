@@ -111,15 +111,22 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       let buffer = '';
       let closed = false;
 
+      let skipLfAfterCr = false;
       const flushBufferedLine = () => {
         if (buffer.length > 0) {
-          onLine(buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer);
+          onLine(buffer);
           buffer = '';
         }
       };
       const processBuffer = () => {
         let start = 0;
-        for (let i = 0; i < buffer.length; i += 1) {
+        if (skipLfAfterCr) {
+          skipLfAfterCr = false;
+          if (buffer[0] === '\n') {
+            start = 1;
+          }
+        }
+        for (let i = start; i < buffer.length; i += 1) {
           const char = buffer[i];
           if (char === '\n') {
             onLine(buffer.slice(start, i));
@@ -127,12 +134,11 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
             continue;
           }
           if (char === '\r') {
-            if (i + 1 >= buffer.length) {
-              break;
-            }
             onLine(buffer.slice(start, i));
             if (buffer[i + 1] === '\n') {
               i += 1;
+            } else if (i + 1 >= buffer.length) {
+              skipLfAfterCr = true;
             }
             start = i + 1;
           }

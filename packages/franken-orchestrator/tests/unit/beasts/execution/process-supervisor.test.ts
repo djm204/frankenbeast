@@ -101,6 +101,25 @@ describe('ProcessSupervisor', () => {
       expect(callbacks.onStdout).toHaveBeenCalledWith('done');
     });
 
+    it('flushes CR-only stdout progress before the next chunk arrives', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: ['-e', "process.stdout.write('step1\\r'); setTimeout(() => process.exit(0), 1000);"],
+      });
+
+      await supervisor.spawn(spec, callbacks);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onStdout).toHaveBeenCalledWith('step1');
+      }, { timeout: 500 });
+      expect(callbacks.onExit).not.toHaveBeenCalled();
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+      }, { timeout: 5000 });
+    });
+
     it('does not emit blank lines for CRLF split across stdout chunks', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({
