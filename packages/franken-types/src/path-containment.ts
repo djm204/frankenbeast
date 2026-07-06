@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 interface ResolveContainedPathOptions {
   relativeTo?: string;
@@ -7,7 +7,7 @@ interface ResolveContainedPathOptions {
 
 function isContainedBy(baseRealPath: string, targetRealPath: string): boolean {
   const relativePath = relative(baseRealPath, targetRealPath);
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
 }
 
 function containmentError(fieldName: string): Error {

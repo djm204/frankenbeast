@@ -52,7 +52,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.7.6",
+    "@franken/types": "0.7.7",
     "acorn": "^8.17.0",
     "acorn-typescript": "^1.4.13",
     "hono": "^4.12.27",

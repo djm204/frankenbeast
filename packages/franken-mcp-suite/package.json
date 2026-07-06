@@ -36,7 +36,7 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.7.6",
+    "@franken/types": "0.7.7",
     "@franken/brain": "0.7.0",
     "@franken/critique": "0.6.11",
     "@franken/governor": "0.5.9",

@@ -42,6 +42,19 @@ describe('realpath containment helpers', () => {
     });
   });
 
+  it('allows contained path names whose first segment starts with dot-dot', () => {
+    withTempRoot('contained-dot-dot-prefix', root => {
+      const nested = join(root, '..design');
+      const designDoc = join(nested, 'design.md');
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(designDoc, '# Design', 'utf8');
+
+      expect(resolveContainedExistingPath(root, '..design/design.md', 'designDocPath')).toBe(
+        realpathSync(designDoc),
+      );
+    });
+  });
+
   it('rejects existing paths that escape the base through a symlink', () => {
     withTempRoot('contained-symlink', root => {
       const outside = join(root, '..', `outside-${randomUUID()}`);
