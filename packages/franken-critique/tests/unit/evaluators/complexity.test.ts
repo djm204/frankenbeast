@@ -22,13 +22,33 @@ describe('ComplexityEvaluator', () => {
     expect(result.score).toBeGreaterThan(0.5);
   });
 
+  it('ignores braces and nested patterns inside comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function sample(value: boolean) {\n  // if (value) {\n  //   doThing();\n  // }\n  return value ? 'ok' : 'skip';\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('ignores braces in string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function sample(value: boolean) {\n  const marker = '{ { { { {';\n  const other = "{ }";\n  return value ? marker : other;\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('flags functions with too many parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
   });
 
   it('flags deeply nested code', async () => {
@@ -37,7 +57,9 @@ describe('ComplexityEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
   });
 
   it('flags very long functions', async () => {

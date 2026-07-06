@@ -26,6 +26,24 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('ignores imports and require calls inside comments', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `// import ghost from 'ghost-package';\n/* const hidden = require('unknown-lib'); */\nimport express from 'express';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('ignores import-like text inside string literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const message = "import ghost from 'ghost-package'";\nconst dynamic = 'require(\"unknown-lib\")';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('fails when an unknown package is imported', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `import ghost from 'ghost-package';`;
