@@ -865,13 +865,16 @@ describe('main() execution', () => {
     );
   });
 
-  it('does not persist active plan names when the session fails before using the plan', async () => {
+  it('persists active plan names when execution fails after the plan is established', async () => {
     mockSessionStart.mockResolvedValueOnce({ status: 'failed' } as unknown as Awaited<ReturnType<typeof mockSessionStart>>);
     const originalExitCode = process.exitCode;
 
     await expect(main()).rejects.toThrow('process.exit unexpectedly called with "1"');
 
-    expect(writeActivePlanName).not.toHaveBeenCalled();
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
     process.exitCode = originalExitCode;
   });
 

@@ -1151,8 +1151,7 @@ export async function main(): Promise<void> {
 
   const result = await session.start();
 
-  const sessionSucceeded = !result || result.status === 'completed' || result.status === 'no-op';
-  if (sessionSucceeded && planName && !planDirOverride && (
+  if (planName && !planDirOverride && (
     args.planName !== undefined
     || args.designDoc !== undefined
     || args.subcommand === 'interview'
