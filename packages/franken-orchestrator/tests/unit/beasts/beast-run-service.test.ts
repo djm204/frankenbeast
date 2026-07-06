@@ -6,6 +6,7 @@ import { BeastCatalogService } from '../../../src/beasts/services/beast-catalog-
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
+import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
@@ -323,5 +324,81 @@ describe('BeastRunService', () => {
       status: 'running',
       dispatchRunId: run.id,
     });
+  });
+
+  it('rolls back tracked-agent status sync when persisting its terminal event fails', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const publish = vi.spyOn(eventBus, 'publish');
+    const runs = new BeastRunService(
+      repo,
+      new BeastCatalogService(),
+      {
+        process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+        container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      },
+      metrics,
+      logs,
+      { eventBus },
+    );
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      status: 'initializing',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Finish atomically',
+          chunkDirectory: 'docs/chunks',
+        },
+      },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Finish atomically',
+        chunkDirectory: 'docs/chunks',
+      },
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'claude',
+        objective: 'Finish atomically',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:01.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'completed',
+      finishedAt: '2026-03-11T00:00:02.000Z',
+      latestExitCode: 0,
+    });
+    const originalAppendTrackedAgentEvent = repo.appendTrackedAgentEvent.bind(repo);
+    repo.appendTrackedAgentEvent = (() => {
+      throw new Error('simulated tracked-agent event failure');
+    }) as SQLiteBeastRepository['appendTrackedAgentEvent'];
+
+    expect(() => runs.notifyRunStatusChange(run.id)).toThrow('simulated tracked-agent event failure');
+
+    repo.appendTrackedAgentEvent = originalAppendTrackedAgentEvent;
+    const storedAgent = repo.getTrackedAgent(agent.id);
+    expect(storedAgent).toMatchObject({
+      status: 'initializing',
+    });
+    expect(storedAgent).not.toHaveProperty('dispatchRunId');
+    expect(repo.listTrackedAgentEvents(agent.id)).toEqual([]);
+    expect(publish).not.toHaveBeenCalled();
   });
 });

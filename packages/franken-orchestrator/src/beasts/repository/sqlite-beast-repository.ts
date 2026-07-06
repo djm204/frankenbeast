@@ -258,11 +258,11 @@ export class SQLiteBeastRepository {
   }
 
   createAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {
-    return this.insertAttempt(runId, input);
+    return this.transaction(() => this.insertAttempt(runId, input));
   }
 
   restartAttempt(runId: string, input: CreateAttemptInput): BeastRunAttempt {
-    return this.insertAttempt(runId, input);
+    return this.transaction(() => this.insertAttempt(runId, input));
   }
 
   listAttempts(runId: string): BeastRunAttempt[] {
