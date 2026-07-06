@@ -11,7 +11,13 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v2/heartbeat']
+      test:
+        [
+          'CMD',
+          'bash',
+          '-ec',
+          'exec 3<>/dev/tcp/127.0.0.1/8000 && printf "GET /api/v2/heartbeat HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -52,7 +52,10 @@ describe('local setup scripts', () => {
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
     const compose = read('docker-compose.yml');
 
-    expect(compose).toContain('http://localhost:8000/api/v2/heartbeat');
+    expect(compose).toContain('/api/v2/heartbeat');
+    expect(compose).toContain("'bash',");
+    expect(compose).toContain('/dev/tcp/127.0.0.1/8000');
+    expect(compose).not.toContain("'curl'");
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
   });
 
