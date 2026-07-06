@@ -20,16 +20,18 @@ describe('Turborepo configuration', () => {
       expect(buildTask.outputs).toContain('dist/**');
     });
 
-    it('defines test task with build dependency', () => {
+    it('defines test task without a build dependency for source-alias watch mode', () => {
       const turbo = readJson('turbo.json');
       const testTask = turbo.tasks?.test;
       expect(testTask).toBeDefined();
-      expect(testTask.dependsOn).toContain('build');
+      expect(testTask.dependsOn).toBeUndefined();
     });
 
-    it('defines test:ci task', () => {
+    it('defines test:ci task with package build dependency for CI ordering', () => {
       const turbo = readJson('turbo.json');
-      expect(turbo.tasks?.['test:ci']).toBeDefined();
+      const testCiTask = turbo.tasks?.['test:ci'];
+      expect(testCiTask).toBeDefined();
+      expect(testCiTask.dependsOn).toContain('build');
     });
 
     it('defines typecheck task', () => {
