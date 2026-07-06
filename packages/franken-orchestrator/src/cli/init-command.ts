@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import type { SecureBackend } from '../network/network-config.js';
 import type { CliArgs } from './args.js';
 import type { ProjectPaths } from './project-root.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
@@ -62,13 +63,14 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     io: options.io,
     passphrase,
   });
+  const initBackend = options.args.initBackend as SecureBackend | undefined;
 
   if (options.args.initRepair) {
     const result = await runRepairInit({
       configFile: options.paths.configFile,
       stateStore,
       io: options.io,
-      baseConfig: options.config,
+      initBackend,
       secretStore,
     });
     options.print(
@@ -80,7 +82,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     configFile: options.paths.configFile,
     stateStore,
     io: options.io,
-    baseConfig: options.config,
+    initBackend,
     secretStore,
   });
 

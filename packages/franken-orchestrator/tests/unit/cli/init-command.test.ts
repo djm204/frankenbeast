@@ -110,6 +110,102 @@ describe('handleInitCommand', () => {
     expect(initState.selectedModules).toEqual(['chat']);
   });
 
+  it('does not persist unrelated resolved CLI/env config when applying init backend', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    const resolvedConfig = defaultConfig();
+    resolvedConfig.enableTracing = true;
+    resolvedConfig.network.secureBackend = 'local-encrypted';
+
+    await handleInitCommand({
+      args: {
+        subcommand: 'init',
+        networkAction: undefined,
+        networkTarget: undefined,
+        networkDetached: false,
+        networkSet: undefined,
+        baseDir: tempDir,
+        baseBranch: undefined,
+        budget: 10,
+        provider: 'claude',
+        providers: undefined,
+        designDoc: undefined,
+        planDir: undefined,
+        planName: undefined,
+        noPr: false,
+        verbose: false,
+        reset: false,
+        resume: false,
+        cleanup: false,
+        config: undefined,
+        host: undefined,
+        port: undefined,
+        allowOrigin: undefined,
+        help: false,
+        issueLabel: undefined,
+        issueMilestone: undefined,
+        issueSearch: undefined,
+        issueAssignee: undefined,
+        issueLimit: undefined,
+        issueRepo: undefined,
+        dryRun: undefined,
+        initVerify: false,
+        initRepair: false,
+        initNonInteractive: false,
+        initBackend: 'local-encrypted',
+      },
+      config: resolvedConfig,
+      io: {
+        ask: async (prompt: string) => {
+          switch (prompt) {
+            case 'Enter passphrase for local encrypted store:':
+              return 'test-passphrase';
+            case 'Enable Chat? [Y/n]':
+              return 'n';
+            case 'Enable Dashboard? [Y/n]':
+              return 'n';
+            case 'Enable Comms? [y/N]':
+              return 'n';
+            case 'Default provider [claude]':
+              return '';
+            case 'Security mode [secure/insecure] (default: secure)':
+              return '';
+            case 'Enter operator token (leave blank to auto-generate):':
+              return '';
+            default:
+              return '';
+          }
+        },
+        display: () => undefined,
+      },
+      paths: {
+        root: tempDir,
+        frankenbeastDir,
+        llmCacheDir: join(frankenbeastDir, '.cache', 'llm'),
+        plansDir: join(frankenbeastDir, 'plans'),
+        buildDir: join(frankenbeastDir, '.build'),
+        beastsDir: join(frankenbeastDir, '.build', 'beasts'),
+        beastLogsDir: join(frankenbeastDir, '.build', 'beasts', 'logs'),
+        beastsDb: join(frankenbeastDir, 'beast.db'),
+        chunkSessionsDir: join(frankenbeastDir, '.build', 'chunk-sessions'),
+        chunkSessionSnapshotsDir: join(frankenbeastDir, '.build', 'chunk-session-snapshots'),
+        checkpointFile: join(frankenbeastDir, '.build', '.checkpoint'),
+        tracesDb: join(frankenbeastDir, '.build', 'build-traces.db'),
+        logFile: join(frankenbeastDir, '.build', 'build.log'),
+        designDocFile: join(frankenbeastDir, 'plans', 'design.md'),
+        configFile,
+        llmResponseFile: join(frankenbeastDir, 'plans', 'llm-response.json'),
+      },
+      print: () => undefined,
+    });
+
+    const config = JSON.parse(await readFile(configFile, 'utf-8')) as { enableTracing: boolean; network: { secureBackend: string } };
+
+    expect(config.network.secureBackend).toBe('local-encrypted');
+    expect(config.enableTracing).toBe(false);
+  });
+
   it('fails fast without prompting when init is non-interactive and config is missing', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
     const frankenbeastDir = join(tempDir, '.fbeast');

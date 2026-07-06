@@ -18,6 +18,7 @@ interface RunInteractiveInitOptions {
   stateStore: FileInitStateStore;
   io: InterviewIO;
   baseConfig?: OrchestratorConfig | undefined;
+  initBackend?: OrchestratorConfig['network']['secureBackend'] | undefined;
   secretStore?: ISecretStore | undefined;
 }
 
@@ -35,6 +36,20 @@ async function loadExistingConfig(configFile: string): Promise<OrchestratorConfi
   }
 }
 
+async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<OrchestratorConfig> {
+  const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile);
+  if (!options.initBackend) {
+    return baseConfig;
+  }
+  return {
+    ...baseConfig,
+    network: {
+      ...baseConfig.network,
+      secureBackend: options.initBackend,
+    },
+  };
+}
+
 async function saveConfig(configFile: string, config: OrchestratorConfig): Promise<void> {
   await mkdir(dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
@@ -42,7 +57,7 @@ async function saveConfig(configFile: string, config: OrchestratorConfig): Promi
 
 export async function runInteractiveInit(options: RunInteractiveInitOptions): Promise<InitEngineResult> {
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile);
+  const baseConfig = await resolveBaseConfig(options);
   const result = await runInitWizard({
     io: options.io,
     initialState,
@@ -80,7 +95,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   }
 
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = options.baseConfig ?? await loadExistingConfig(options.configFile);
+  const baseConfig = await resolveBaseConfig(options);
   const scope = verification.issues.flatMap((issue) => {
     switch (issue.code) {
       case 'slack-incomplete':
