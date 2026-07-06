@@ -129,7 +129,7 @@ describe('CritiquePipeline', () => {
   });
 
   it('short-circuits on safety evaluator failure', async () => {
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const safety = createMockEvaluator('safety', 'deterministic', {
       verdict: 'fail',

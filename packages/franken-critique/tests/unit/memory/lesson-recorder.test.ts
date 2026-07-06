@@ -55,7 +55,7 @@ describe('LessonRecorder', () => {
   });
 
   it('records a lesson when multi-iteration pass occurs (fail then pass)', async () => {
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

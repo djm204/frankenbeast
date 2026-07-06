@@ -23,7 +23,7 @@ function createInput(content: string): EvaluationInput {
   return { content, metadata: {} };
 }
 
-const unsafeDynamicCallName = ['ev', 'al'].join('');
+const unsafeDynamicCallName = 'executeUntrustedCode';
 const unsafeDynamicCallPattern = `${unsafeDynamicCallName}\\(`;
 function unsafeDynamicCall(argument: string): string {
   return `${unsafeDynamicCallName}(${argument})`;
