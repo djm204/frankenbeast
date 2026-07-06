@@ -32,10 +32,6 @@ export class ReplayContentStore {
     return content;
   }
 
-  __corruptForTest(ref: string, replacement: string): void {
-    writeFileSync(this.blobPath(ref), replacement, 'utf8');
-  }
-
   private blobPath(ref: string): string {
     if (!SHA256_HEX_REF.test(ref)) {
       throw new Error('Replay content ref must be exactly 64 lowercase sha256 hex characters');
