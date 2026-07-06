@@ -38,6 +38,9 @@ jobs:
 
       - run: npx turbo run build test lint
 
+      - name: Phantom dependency check (every runtime import is declared)
+        run: node scripts/check-phantom-deps.mjs
+
   publish-smoke:
     name: publish smoke (pack + offline install + run)
     runs-on: ubuntu-latest
