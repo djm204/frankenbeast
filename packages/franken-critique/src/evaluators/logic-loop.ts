@@ -116,24 +116,37 @@ function parseJavaScript(code: string): AstNode[] {
     allowHashBang: true,
   };
 
+  const parseCandidate = (candidate: string, sourceType: 'module' | 'script'): AstNode | null => {
+    try {
+      try {
+        return TypeScriptParser.parse(candidate, {
+          ...baseOptions,
+          sourceType,
+          locations: true,
+        }) as unknown as AstNode;
+      } catch {
+        return parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode;
+      }
+    } catch {
+      return null;
+    }
+  };
+
+  if (!code.includes('```')) {
+    for (const sourceType of ['module', 'script'] as const) {
+      const ast = parseCandidate(code, sourceType);
+      if (ast) return [ast];
+    }
+  }
+
   for (const candidate of codeCandidates(code)) {
     if (seen.has(candidate)) continue;
     seen.add(candidate);
     for (const sourceType of ['module', 'script'] as const) {
-      try {
-        try {
-          asts.push(TypeScriptParser.parse(candidate, {
-            ...baseOptions,
-            sourceType,
-            locations: true,
-          }) as unknown as AstNode);
-          break;
-        } catch {
-          asts.push(parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode);
-          break;
-        }
-      } catch {
-        // Try the next source type or the next simple truncation repair.
+      const ast = parseCandidate(candidate, sourceType);
+      if (ast) {
+        asts.push(ast);
+        break;
       }
     }
   }
@@ -190,12 +203,27 @@ function hasLoopExit(body: AstNode): boolean {
   return visit(body, 0);
 }
 
+function invokedFunctionCallee(callee: AstNode): AstNode | null {
+  if (isFunctionLike(callee)) return callee;
+  if (callee.type !== 'MemberExpression') return null;
+
+  const property = callee.property;
+  const object = callee.object;
+  const propertyName = isNode(property) ? identifierName(property) : undefined;
+  if ((propertyName === 'call' || propertyName === 'apply') && isNode(object) && isFunctionLike(object)) {
+    return object;
+  }
+
+  return null;
+}
+
 function containsIfStatement(node: AstNode, enterFunction = false): boolean {
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'IfStatement') return true;
-    if (current.type === 'CallExpression' && isNode(current.callee) && isFunctionLike(current.callee)) {
-      return visit(current.callee, true);
+    if (current.type === 'CallExpression' && isNode(current.callee)) {
+      const invokedFunction = invokedFunctionCallee(current.callee);
+      if (invokedFunction) return visit(invokedFunction, true);
     }
     return childNodes(current).some((child) => visit(child));
   };
@@ -220,9 +248,12 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
         return current.start;
       }
 
-      if (isNode(callee) && isFunctionLike(callee)) {
-        const found = visit(callee, true);
-        if (found != null) return found;
+      if (isNode(callee)) {
+        const invokedFunction = invokedFunctionCallee(callee);
+        if (invokedFunction) {
+          const found = visit(invokedFunction, true);
+          if (found != null) return found;
+        }
       }
     }
 
@@ -241,8 +272,9 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'ReturnStatement' && current.start < position) return true;
-    if (current.type === 'CallExpression' && isNode(current.callee) && isFunctionLike(current.callee)) {
-      return visit(current.callee, true);
+    if (current.type === 'CallExpression' && isNode(current.callee)) {
+      const invokedFunction = invokedFunctionCallee(current.callee);
+      if (invokedFunction) return visit(invokedFunction, true);
     }
     return childNodes(current).some((child) => visit(child));
   };

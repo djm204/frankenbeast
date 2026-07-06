@@ -342,6 +342,32 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('infinite loop');
   });
 
+  it('does not extract fallback snippets from string literals', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `const msg = "while (true) { work(); }";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('does not duplicate findings when the full source already parses', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function run() { while (true) { doWork(); } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('detects unguarded recursion through immediately invoked function call helpers', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop(){ (function(){ loop(); }).call(null); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('detects unguarded recursion in named function expressions', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `const f = function loop() { loop(); };`;
