@@ -79,7 +79,7 @@ export function slackRouter(options: SlackRouterOptions) {
     try {
       body = JSON.parse(payloadRaw);
     } catch {
-      return c.json({ error: 'Malformed payload' }, 400);
+      return c.json({ error: 'Malformed Slack payload' }, 400);
     }
 
     const interaction = SlackInteractionSchema.safeParse(body);

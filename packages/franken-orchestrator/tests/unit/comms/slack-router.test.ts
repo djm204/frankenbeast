@@ -127,7 +127,7 @@ describe('slackRouter', () => {
     });
 
     expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toEqual({ error: 'Malformed payload' });
+    await expect(res.json()).resolves.toEqual({ error: 'Malformed Slack payload' });
     expect(sessionMapper.mapToSessionId).not.toHaveBeenCalled();
     expect(gateway.handleAction).not.toHaveBeenCalled();
   });
