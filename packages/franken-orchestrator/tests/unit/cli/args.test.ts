@@ -545,7 +545,8 @@ describe('parseArgs', () => {
       expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
     });
 
-    it('rejects a negative budget value', () => {
+    it('rejects zero and negative budget values before they can reach budget rendering', () => {
+      expect(() => parseArgs(['--budget', '0'])).toThrow(/Invalid --budget/);
       expect(() => parseArgs(['--budget=-0.01'])).toThrow(/Invalid --budget/);
     });
 
