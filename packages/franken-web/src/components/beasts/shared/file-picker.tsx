@@ -1,4 +1,5 @@
-import type { ContextHealth } from '../../../lib/token-estimator';
+import type { ChangeEvent } from 'react';
+import { estimateTokens, getContextHealth, type ContextHealth } from '../../../lib/token-estimator';
 
 export interface PickedFile {
   name: string;
@@ -19,12 +20,48 @@ const HEALTH_STYLES: Record<ContextHealth, { badge: string; label: string }> = {
   critical: { badge: 'bg-red-500/20 text-red-400', label: 'Critical' },
 };
 
-export function FilePicker({ files, onFilesChange: _onFilesChange, onRemoveFile }: FilePickerProps) {
+function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') {
+    return file.text();
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}`));
+    reader.readAsText(file);
+  });
+}
+
+export function FilePicker({ files, onFilesChange, onRemoveFile }: FilePickerProps) {
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (selectedFiles.length === 0) return;
+
+    const pickedFiles = await Promise.all(
+      selectedFiles.map(async (file) => {
+        const content = await readFileText(file);
+        const tokens = estimateTokens(content);
+        return {
+          name: file.name,
+          content,
+          tokens,
+          health: getContextHealth(tokens),
+        } satisfies PickedFile;
+      }),
+    );
+
+    onFilesChange([...files, ...pickedFiles]);
+    event.target.value = '';
+  }
+
   return (
     <div className="space-y-3">
       <input
         type="file"
         multiple
+        aria-label="Attach files"
+        onChange={handleFileChange}
         className="block w-full text-sm text-beast-text file:mr-4 file:py-2 file:px-4
           file:rounded-lg file:border file:border-beast-border file:text-sm
           file:bg-beast-control file:text-beast-text hover:file:bg-beast-elevated"
