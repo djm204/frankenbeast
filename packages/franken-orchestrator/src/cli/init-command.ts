@@ -24,6 +24,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     const verification = await verifyInit({
       configFile: options.paths.configFile,
       stateStore,
+      allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
       verification.ok
@@ -37,6 +38,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     const verification = await verifyInit({
       configFile: options.paths.configFile,
       stateStore,
+      allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     if (!verification.ok) {
       throw new Error(
@@ -69,6 +71,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       stateStore,
       io: options.io,
       secretStore,
+      allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
       `Repaired init config at ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
@@ -80,6 +83,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     stateStore,
     io: options.io,
     secretStore,
+    allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
   });
 
   options.print(
