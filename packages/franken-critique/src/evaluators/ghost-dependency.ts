@@ -174,7 +174,7 @@ function readStaticImportSpecifier(
     }
 
     if (startsWithKeyword(content, i, 'from')) {
-      const specifierStart = skipWhitespace(content, i + 'from'.length);
+      const specifierStart = skipImportTrivia(content, i + 'from'.length);
       if (content[specifierStart] === "'" || content[specifierStart] === '"') {
         return readQuotedString(content, specifierStart);
       }
@@ -328,6 +328,26 @@ function skipWhitespace(content: string, index: number): number {
   return i;
 }
 
+function skipImportTrivia(content: string, index: number): number {
+  let i = skipWhitespace(content, index);
+
+  while (i < content.length) {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      i = skipWhitespace(content, skipSingleLineComment(content, i + 2));
+      continue;
+    }
+
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i = skipWhitespace(content, skipMultiLineComment(content, i + 2) + 1);
+      continue;
+    }
+
+    return i;
+  }
+
+  return i;
+}
+
 function skipSingleLineComment(content: string, index: number): number {
   const newlineIndex = content.indexOf('\n', index);
   return newlineIndex === -1 ? content.length : newlineIndex;
@@ -356,6 +376,10 @@ function isRegexLiteralStart(content: string, index: number): boolean {
       return REGEX_PREFIX_KEYWORDS.has(word);
     }
 
+    if (ch === '<' && /[A-Za-z>]/.test(content[index + 1] ?? '')) {
+      return false;
+    }
+
     return '([{:;,=!?&|+-*~^%<>'.includes(ch);
   }
 
@@ -382,6 +406,7 @@ function isIdentifierCharacter(ch: string): boolean {
 }
 
 const REGEX_PREFIX_KEYWORDS = new Set([
+  'await',
   'case',
   'delete',
   'do',

@@ -83,6 +83,16 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('allows comments between from and the module specifier', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `import { x } from /* generated */ "ghost-package";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
   it('ignores object-literal import keys', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const cfg = { import: { from: 'ghost-package' } };`;
@@ -112,9 +122,29 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('recognizes awaited regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `async function check(source) { await /[//]/.test(source); require('ghost-package'); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
   it('does not treat division after postfix operators as regex literals', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const ratio = count++ / total;\nrequire('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('does not treat JSX closing tags as regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const el = <div></div>; require('ghost-package');`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');

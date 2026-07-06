@@ -242,6 +242,10 @@ function isRegexLiteralStart(content: string, index: number): boolean {
       return REGEX_PREFIX_KEYWORDS.has(word);
     }
 
+    if (ch === '<' && /[A-Za-z>]/.test(content[index + 1] ?? '')) {
+      return false;
+    }
+
     return '([{:;,=!?&|+-*~^%<>'.includes(ch);
   }
 
@@ -268,6 +272,7 @@ function isIdentifierCharacter(ch: string): boolean {
 }
 
 const REGEX_PREFIX_KEYWORDS = new Set([
+  'await',
   'case',
   'delete',
   'do',

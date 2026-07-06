@@ -74,9 +74,31 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('recognizes awaited regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `async function check(source) { await /[//]/.test(source); if (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('does not treat division after postfix operators as regex literals', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `const ratio = count++ / total;\nif (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat JSX closing tags as regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const el = <div></div>; if (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
