@@ -878,6 +878,18 @@ describe('main() execution', () => {
     process.exitCode = originalExitCode;
   });
 
+  it('persists active plan names before an interrupted execution exits', async () => {
+    mockSessionStart.mockImplementationOnce(() => {
+      expect(writeActivePlanName).toHaveBeenCalledWith(
+        expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+        'plan-2026-03-08',
+      );
+      process.exit(0);
+    });
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "0"');
+  });
+
   it('does not mark issue batches as the active plan', async () => {
     const baseArgs = mockParseArgs() as Record<string, unknown>;
     mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'issues', planName: 'batch-13' } as ReturnType<typeof mockParseArgs>);

@@ -1143,6 +1143,18 @@ export async function main(): Promise<void> {
     orchestratorConfig: config,
   });
 
+  const shouldPersistActivePlanName = planName && !planDirOverride && args.subcommand !== 'issues' && (
+    args.planName !== undefined
+    || args.designDoc !== undefined
+    || args.subcommand === 'interview'
+    || args.subcommand === 'plan'
+    || args.subcommand === undefined
+  );
+
+  if (shouldPersistActivePlanName) {
+    writeActivePlanName(paths, planName);
+  }
+
   // Issues subcommand dispatches to a separate flow
   if (args.subcommand === 'issues') {
     await session.runIssues();
@@ -1150,16 +1162,6 @@ export async function main(): Promise<void> {
   }
 
   const result = await session.start();
-
-  if (planName && !planDirOverride && (
-    args.planName !== undefined
-    || args.designDoc !== undefined
-    || args.subcommand === 'interview'
-    || args.subcommand === 'plan'
-    || args.subcommand === undefined
-  )) {
-    writeActivePlanName(paths, planName);
-  }
 
   // `no-op` is a benign terminal status (empty or intentionally-skipped plan),
   // so it must exit successfully alongside `completed` — otherwise CI/scripts
