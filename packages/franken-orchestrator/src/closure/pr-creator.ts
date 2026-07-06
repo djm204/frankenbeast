@@ -642,7 +642,7 @@ function isGhMissing(error: unknown): boolean {
   return message.includes('gh: command not found') || message.includes('ENOENT') || message.includes('not found');
 }
 
-const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|resource not accessible by integration|GitHub Actions is not permitted to create or approve pull requests|to get started with github cli|set the GH_TOKEN environment variable|GH_TOKEN/i;
+const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|resource not accessible by (?:integration|personal access token)|GitHub Actions is not permitted to create or approve pull requests|to get started with github cli|set the GH_TOKEN environment variable|GH_TOKEN/i;
 
 function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: string }): boolean {
   const text = [
@@ -663,7 +663,7 @@ function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreation
     readErrorText((details as { summary?: unknown }).summary),
   ].filter(Boolean).join('\n');
   const isActionsTokenFailure = /GH_TOKEN|GitHub Actions workflow/i.test(detailText);
-  const isIntegrationPermissionFailure = /resource not accessible by integration/i.test(detailText);
+  const isIntegrationPermissionFailure = /resource not accessible by (?:integration|personal access token)/i.test(detailText);
   const isActionsPrPermissionFailure = /GitHub Actions is not permitted to create or approve pull requests/i.test(detailText);
   const action = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
     ? 'Set the `GH_TOKEN` environment variable with pull-request permissions, then retry PR creation for the pushed branch.'
