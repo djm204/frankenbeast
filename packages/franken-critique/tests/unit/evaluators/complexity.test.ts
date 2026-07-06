@@ -517,6 +517,67 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('keeps spaced tagged templates masked as template literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'const styles = css `{{{{{{`; const more = tag() `}}}}}}`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside regex literals after word operators', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ok = key in /{{{{{{/.groups; for (const m of /}}}}}}/.exec(s) ?? []) { m; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not hide nested code after unmatched backticks', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'Use `foo\nif (a) { if (b) { if (c) { if (d) { if (e) {} } } } }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat non-http prose URLs as line comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `See s3://bucket/path and gs://bucket/path before if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps leading Markdown inline code visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = '`if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`.';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps quoted prose snippets visible', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `The problematic code is "if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }"`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);

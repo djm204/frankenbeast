@@ -80,6 +80,11 @@ function stripIgnoredBraceSyntax(content: string): string {
         continue;
       }
 
+      if (inlineCodeEnd === -1 && !isLikelyTemplateLiteralStart(content, i)) {
+        sanitized += char;
+        continue;
+      }
+
       const masked = maskTemplateLiteral(content, i);
       sanitized += masked.content;
       i = masked.end - 1;
@@ -112,12 +117,15 @@ function isUrlSchemeSlash(content: string, slashIndex: number): boolean {
   if (content[slashIndex - 1] !== ':') return false;
 
   let schemeStart = slashIndex - 2;
-  while (schemeStart >= 0 && /[A-Za-z]/.test(content[schemeStart] ?? '')) {
+  while (
+    schemeStart >= 0 &&
+    /[A-Za-z0-9+.-]/.test(content[schemeStart] ?? '')
+  ) {
     schemeStart--;
   }
 
   const scheme = content.slice(schemeStart + 1, slashIndex - 1).toLowerCase();
-  return /^(?:https?|ftp|file)$/.test(scheme);
+  return /^(?:https?|ftp|file|s3|gs|ssh|git|wss?)$/.test(scheme);
 }
 
 function findBlockCommentEnd(content: string, start: number): number {
@@ -175,11 +183,23 @@ function isLikelyQuotedStringStart(
   quote: string,
 ): boolean {
   if (!hasClosingQuoteBeforeLineEnd(content, start, quote)) return false;
-  if (quote !== "'") return true;
 
   const previous = content[start - 1] ?? '';
+  if (quote === "'" && /[A-Za-z0-9]/.test(previous)) return false;
 
-  return !/[A-Za-z0-9]/.test(previous);
+  const previousIndex = findPreviousRegexLookbehindIndex(content, start);
+  if (previousIndex === -1) {
+    const end = findQuotedStringEnd(content, start, quote);
+    return /[;,)\]}]/.test(content[end] ?? '');
+  }
+
+  const previousToken = content[previousIndex] ?? '';
+  if ('=([{,:!+-*?/&|^~<>'.includes(previousToken)) return true;
+  if (previousToken === '>' && content[previousIndex - 1] === '=') return true;
+  if (isTemplateKeywordPrefix(content, previousIndex)) return true;
+  if (previousIndex < start - 1) return false;
+
+  return false;
 }
 
 function findInlineMarkdownCodeEnd(content: string, start: number): number {
@@ -196,17 +216,45 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   if (previousIndex === -1) {
     const inlineEnd = findInlineMarkdownCodeEnd(content, start);
     const after = inlineEnd === -1 ? '' : (content[inlineEnd] ?? '');
-    return /[;.)\]]/.test(after);
+    return /[;)\]]/.test(after);
   }
 
   const previous = content[previousIndex] ?? '';
   if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
   if (isTemplateKeywordPrefix(content, previousIndex)) return true;
-  if (previousIndex < start - 1) return false;
+  if (previousIndex < start - 1) {
+    return isSpacedTemplateTagContext(content, previousIndex, start);
+  }
   if (/[\w$)\]]/.test(previous)) return true;
 
   return false;
+}
+
+function isSpacedTemplateTagContext(
+  content: string,
+  previousIndex: number,
+  templateStart: number,
+): boolean {
+  const inlineEnd = findInlineMarkdownCodeEnd(content, templateStart);
+  const after = inlineEnd === -1 ? '' : (content[inlineEnd] ?? '');
+  if (!/[;,)\]}]/.test(after)) return false;
+
+  const previous = content[previousIndex] ?? '';
+  if (previous === ')' || previous === ']') return true;
+  if (!/[\w$]/.test(previous)) return false;
+
+  const wordStart = findWordStart(content, previousIndex);
+  const beforeWordIndex = findPreviousRegexLookbehindIndex(content, wordStart);
+  if (beforeWordIndex === -1) return true;
+
+  return '=([{,:;,!+-*?/&|^~<>'.includes(content[beforeWordIndex] ?? '');
+}
+
+function findWordStart(content: string, endIndex: number): number {
+  let start = endIndex;
+  while (start > 0 && /[\w$]/.test(content[start - 1] ?? '')) start--;
+  return start;
 }
 
 function findTemplateLiteralEnd(content: string, start: number): number {
@@ -417,9 +465,27 @@ function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
 function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
 
+  if (/^(?:in|of)$/.test(word ?? '')) {
+    return isWordOperatorPrefix(content, endIndex, word ?? '');
+  }
+
   return /^(?:return|throw|case|default|delete|typeof|void|yield|await|else)$/.test(
     word ?? '',
   );
+}
+
+function isWordOperatorPrefix(
+  content: string,
+  endIndex: number,
+  word: string,
+): boolean {
+  const beforeWordIndex = findPreviousRegexLookbehindIndex(
+    content,
+    endIndex - word.length + 1,
+  );
+  if (beforeWordIndex === -1) return false;
+
+  return /[\w$)\]]/.test(content[beforeWordIndex] ?? '');
 }
 
 function findPreviousRegexLookbehindIndex(
