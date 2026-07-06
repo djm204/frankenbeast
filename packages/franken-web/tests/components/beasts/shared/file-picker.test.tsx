@@ -59,6 +59,49 @@ describe('FilePicker', () => {
     expect(input.value).toBe('');
   });
 
+  it('appends to the latest file list after async reads finish', async () => {
+    let resolveContent!: (value: string) => void;
+    const onFilesChange = vi.fn();
+    const slowFile = new File(['pending'], 'pending.md', { type: 'text/markdown' });
+    Object.defineProperty(slowFile, 'text', {
+      value: () => new Promise<string>((resolve) => {
+        resolveContent = resolve;
+      }),
+    });
+
+    const { rerender } = render(
+      <FilePicker
+        files={[existingFile]}
+        onFilesChange={onFilesChange}
+        onRemoveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Attach files'), { target: { files: [slowFile] } });
+    const interveningFile: PickedFile = { name: 'intervening.md', content: 'typed later', tokens: 3, health: 'good' };
+    rerender(
+      <FilePicker
+        files={[existingFile, interveningFile]}
+        onFilesChange={onFilesChange}
+        onRemoveFile={vi.fn()}
+      />,
+    );
+
+    resolveContent('loaded after rerender');
+
+    await waitFor(() => expect(onFilesChange).toHaveBeenCalledTimes(1));
+    expect(onFilesChange).toHaveBeenCalledWith([
+      existingFile,
+      interveningFile,
+      {
+        name: 'pending.md',
+        content: 'loaded after rerender',
+        tokens: 6,
+        health: 'good',
+      },
+    ]);
+  });
+
   it('shows critical health indicator for large files', () => {
     const files = [
       { name: 'big.md', content: 'x'.repeat(80000), tokens: 20000, health: 'critical' as const },

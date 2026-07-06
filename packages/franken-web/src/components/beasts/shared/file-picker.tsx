@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react';
+import { useEffect, useRef, type ChangeEvent } from 'react';
 import { estimateTokens, getContextHealth, type ContextHealth } from '../../../lib/token-estimator';
 
 export interface PickedFile {
@@ -34,6 +34,12 @@ function readFileText(file: File): Promise<string> {
 }
 
 export function FilePicker({ files, onFilesChange, onRemoveFile }: FilePickerProps) {
+  const filesRef = useRef(files);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
     if (selectedFiles.length === 0) return;
@@ -51,7 +57,7 @@ export function FilePicker({ files, onFilesChange, onRemoveFile }: FilePickerPro
       }),
     );
 
-    onFilesChange([...files, ...pickedFiles]);
+    onFilesChange([...filesRef.current, ...pickedFiles]);
     event.target.value = '';
   }
 

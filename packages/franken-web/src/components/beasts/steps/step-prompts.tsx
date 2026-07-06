@@ -6,7 +6,8 @@ export function StepPrompts() {
   const values = (stepValues[5] ?? {}) as { promptText?: string; files?: PickedFile[] };
 
   function updateField(field: string, value: unknown) {
-    setStepValues(5, { ...values, [field]: value });
+    const currentValues = (useBeastStore.getState().stepValues[5] ?? {}) as Record<string, unknown>;
+    setStepValues(5, { ...currentValues, [field]: value });
   }
 
   return (
@@ -33,7 +34,8 @@ export function StepPrompts() {
           files={values.files ?? []}
           onFilesChange={(files) => updateField('files', files)}
           onRemoveFile={(i) => {
-            const files = [...(values.files ?? [])];
+            const currentValues = (useBeastStore.getState().stepValues[5] ?? {}) as { files?: PickedFile[] };
+            const files = [...(currentValues.files ?? [])];
             files.splice(i, 1);
             updateField('files', files);
           }}
