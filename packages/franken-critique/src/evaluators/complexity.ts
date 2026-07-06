@@ -222,10 +222,27 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
   if (!before) return true;
 
   const previous = before.charAt(before.length - 1);
+  if (previous === '[') {
+    const beforeBracket = before.slice(0, -1).trimEnd();
+    if (!beforeBracket) return true;
+
+    const previousBeforeBracket = beforeBracket.charAt(
+      beforeBracket.length - 1,
+    );
+    return (
+      REGEX_PREFIX_CHARS.has(previousBeforeBracket) ||
+      isRegexKeywordPrefix(beforeBracket)
+    );
+  }
+
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
 
+  return isRegexKeywordPrefix(before);
+}
+
+function isRegexKeywordPrefix(content: string): boolean {
   return /\b(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
-    before,
+    content,
   );
 }
 
