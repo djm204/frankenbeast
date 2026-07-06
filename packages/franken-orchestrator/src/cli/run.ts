@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -1246,7 +1246,9 @@ async function persistNetworkConfigSets(args: CliArgs, paths: NetworkPaths): Pro
   }
 
   const updatedFileConfig = applyNetworkConfigSets(fileConfig, args.networkSet ?? []);
-  OrchestratorConfigSchema.parse(updatedFileConfig);
+  parseOrchestratorConfig(updatedFileConfig, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 
   await mkdir(dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(updatedFileConfig, null, 2) + '\n', 'utf-8');
