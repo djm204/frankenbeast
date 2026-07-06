@@ -9,10 +9,12 @@ declare module 'ws' {
     on(event: 'message', listener: (data: RawData) => void): this;
     on(event: 'close', listener: () => void): this;
     send(data: string): void;
+    terminate(): void;
   }
 
   export class WebSocketServer {
     constructor(options: { noServer?: boolean });
+    clients: Set<WebSocket>;
     close(callback?: (err?: Error) => void): void;
     handleUpgrade(
       request: IncomingMessage,

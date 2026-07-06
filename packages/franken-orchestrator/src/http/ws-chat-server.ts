@@ -450,6 +450,9 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
     server,
     close: () => {
       options.server.off('upgrade', onUpgrade);
+      for (const client of server.clients) {
+        client.terminate();
+      }
       server.close();
     },
   };
