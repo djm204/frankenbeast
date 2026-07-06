@@ -286,6 +286,13 @@ function readTemplateExpression(
       continue;
     }
 
+    if (ch === '/' && isRegexLiteralStart(content, i)) {
+      const endIndex = skipRegexLiteral(content, i);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
     if (QUOTE_CHARS.has(ch)) {
       const endIndex = skipStringLiteral(content, i);
       value += content.slice(i, Math.min(endIndex + 1, content.length));

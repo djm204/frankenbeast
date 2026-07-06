@@ -93,6 +93,17 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('keeps scanning template interpolations after regex braces', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content =
+      "const value = `${/}/.test(source) && require('ghost-package')}`;";
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
   it('ignores dynamic require expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const adapter = require('adapter-' + target);`;

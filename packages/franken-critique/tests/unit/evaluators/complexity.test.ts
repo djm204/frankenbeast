@@ -52,6 +52,29 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('does not let regex literals hide later active code', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const pattern = /[/*]/;\nif (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps template interpolation code after regex braces', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'function sample() {\n  return `${/}/.test(source) && (() => { if (a) { if (b) { if (c) { if (d) { work(); } } } } })()}`;\n}';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;

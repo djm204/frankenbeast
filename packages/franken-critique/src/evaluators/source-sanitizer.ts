@@ -35,6 +35,13 @@ export function stripCommentsAndStringLiterals(content: string): string {
         continue;
       }
 
+      if (ch === '/' && isRegexLiteralStart(content, i)) {
+        const endIndex = skipRegexLiteral(content, i);
+        result += blankPreservingNewlines(content.slice(i, endIndex + 1));
+        i = endIndex;
+        continue;
+      }
+
       if (ch === "'") {
         state = ScannerState.SingleQuote;
         result += ' ';
@@ -174,6 +181,13 @@ function readTemplateExpression(
       continue;
     }
 
+    if (ch === '/' && isRegexLiteralStart(content, i)) {
+      const endIndex = skipRegexLiteral(content, i);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
     if (ch === "'" || ch === '"' || ch === '`') {
       const endIndex = skipStringLiteral(content, i);
       value += content.slice(i, Math.min(endIndex + 1, content.length));
@@ -208,6 +222,51 @@ function skipSingleLineComment(content: string, index: number): number {
 function skipMultiLineComment(content: string, index: number): number {
   const endIndex = content.indexOf('*/', index);
   return endIndex === -1 ? content.length : endIndex + 1;
+}
+
+function isRegexLiteralStart(content: string, index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = content[i]!;
+    if (/\s/.test(ch)) continue;
+
+    return '([{:;,=!?&|+-*~^%<>'.includes(ch);
+  }
+
+  return true;
+}
+
+function skipRegexLiteral(content: string, startIndex: number): number {
+  let inCharacterClass = false;
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+
+    if (ch === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+
+    if (ch === ']') {
+      inCharacterClass = false;
+      continue;
+    }
+
+    if (ch === '/' && !inCharacterClass) {
+      while (/[A-Za-z]/.test(content[i + 1] ?? '')) i += 1;
+      return i;
+    }
+  }
+
+  return content.length;
+}
+
+function blankPreservingNewlines(content: string): string {
+  return content.replace(/[^\n]/g, ' ');
 }
 
 function skipStringLiteral(content: string, startIndex: number): number {
