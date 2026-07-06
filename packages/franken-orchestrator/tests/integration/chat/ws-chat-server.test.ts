@@ -41,7 +41,7 @@ function createTestRuntime(): ChatRuntime {
     }),
     turnRunner: new TurnRunner({
       execute: vi.fn().mockResolvedValue({
-        status: 'success',
+        status: 'success' as const,
         summary: 'Done',
         filesChanged: [],
         testsRun: 0,
@@ -164,7 +164,7 @@ describe('ws chat server', () => {
       }),
       turnRunner: new TurnRunner({
         execute: vi.fn().mockResolvedValue({
-          status: 'success',
+          status: 'success' as const,
           summary: 'Done',
           filesChanged: [],
           testsRun: 0,
@@ -278,7 +278,7 @@ describe('ws chat server', () => {
     const secret = createSessionTokenSecret();
     const token = issueSessionToken({ secret, sessionId: session.id });
     const execute = vi.fn().mockResolvedValue({
-      status: 'success',
+      status: 'success' as const,
       summary: 'Done',
       filesChanged: [],
       testsRun: 0,
@@ -313,6 +313,8 @@ describe('ws chat server', () => {
       type: 'turn.approval.resolved',
       approved: true,
     }));
+    expect(events.findIndex((event) => event.type === 'turn.approval.resolved'))
+      .toBeLessThan(events.findIndex((event) => event.type === 'turn.execution.start'));
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.execution.start',
       data: { taskDescription: 'deploy staging' },
@@ -348,7 +350,7 @@ describe('ws chat server', () => {
     const execute = vi.fn(async () => {
       await executionStarted;
       return {
-        status: 'success',
+        status: 'success' as const,
         summary: 'Done',
         filesChanged: [],
         testsRun: 0,

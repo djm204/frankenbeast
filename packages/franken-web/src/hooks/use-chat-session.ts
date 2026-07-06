@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  type ApproveResult,
   ChatApiClient,
   type ChatSession,
   type PendingApproval,
@@ -209,6 +210,31 @@ function appendOrUpdateAssistantMessage(
   }
 
   return [...messages, nextMessage];
+}
+
+function activityEventsFromApproveResult(result: ApproveResult, approved: boolean): ActivityEvent[] {
+  const timestamp = new Date().toISOString();
+  return [
+    {
+      type: 'turn.approval.resolved',
+      data: { approved },
+      timestamp,
+    },
+    ...(result.events ?? []).flatMap((event): ActivityEvent[] => {
+      if (!event || typeof event !== 'object' || !('type' in event)) {
+        return [];
+      }
+      const turnEvent = event as { type: unknown; data?: Record<string, unknown> };
+      if (turnEvent.type !== 'start' && turnEvent.type !== 'progress' && turnEvent.type !== 'complete') {
+        return [];
+      }
+      return [{
+        type: `turn.execution.${turnEvent.type}`,
+        ...(turnEvent.data !== undefined ? { data: turnEvent.data } : {}),
+        timestamp,
+      }];
+    }),
+  ];
 }
 
 function updateReceipt(
@@ -864,18 +890,29 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
     if (!socket || socket.readyState !== 1) {
       try {
-        await clientRef.current.approve(sessionId, approved);
+        const approvalResult = await clientRef.current.approve(sessionId, approved);
         const refreshed = await clientRef.current.getSession(sessionId);
         readyRef.current = true;
-        setMessages((current) => mergeSessionSnapshot(current, refreshed));
+        setMessages((current) => {
+          const withSnapshot = mergeSessionSnapshot(current, refreshed);
+          const approvedDisplays = (approvalResult.displayMessages ?? []).flatMap((display): Array<{ content: string }> => {
+            if (!display || typeof display !== 'object' || !('content' in display)) {
+              return [];
+            }
+            const content = (display as { content: unknown }).content;
+            return typeof content === 'string' ? [{ content }] : [];
+          });
+          return approvedDisplays.reduce((messages, display) => appendOrUpdateAssistantMessage(messages, {
+            type: 'assistant.message.complete',
+            messageId: makeId('assistant'),
+            content: display.content,
+            timestamp: new Date().toISOString(),
+          }), withSnapshot);
+        });
         setPendingApproval(refreshed.pendingApproval ?? null);
         setActivity((current) => [
           ...current,
-          {
-            type: 'turn.approval.resolved',
-            data: { approved },
-            timestamp: new Date().toISOString(),
-          },
+          ...activityEventsFromApproveResult(approvalResult, approved),
         ]);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);

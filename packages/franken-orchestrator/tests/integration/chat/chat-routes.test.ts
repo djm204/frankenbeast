@@ -643,7 +643,10 @@ describe('Chat HTTP Routes', () => {
     });
 
     expect(res.status).toBe(200);
-    expect((await res.json()).data.state).toBe('approved');
+    const body = await res.json();
+    expect(body.data.state).toBe('approved');
+    expect(body.data.displayMessages).toEqual([{ kind: 'execution', content: 'Done' }]);
+    expect(body.data.events).toEqual([{ type: 'complete', sessionId: session.id, data: { status: 'success' } }]);
     expect(runtime.run).toHaveBeenCalledWith('/run deploy staging', expect.objectContaining({
       pendingApproval: true,
       sessionId: session.id,

@@ -314,23 +314,15 @@ export class ChatSocketController {
       return;
     }
 
+    if (!session.pendingApproval && session.state !== 'pending_approval') {
+      return;
+    }
+
     const pendingApproval = session.pendingApproval ?? null;
+    const originalState = session.state;
     const runtimeInput = approvalRuntimeInput(pendingApproval);
     session.pendingApproval = null;
     session.state = 'approved';
-    session.updatedAt = nowIso();
-    this.sessionStore.save(session);
-
-    const result = await this.runtime.run(runtimeInput, {
-      sessionId: session.id,
-      pendingApproval: Boolean(pendingApproval),
-      projectId: session.projectId,
-      transcript: session.transcript,
-      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
-    });
-    session.pendingApproval = null;
-    session.state = result.state === 'active' ? 'approved' : result.state;
-    session.beastContext = result.beastContext ?? null;
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 
@@ -339,9 +331,31 @@ export class ChatSocketController {
       approved: true,
       timestamp: session.updatedAt,
     });
-    for (const event of result.events) {
-      this.emit(peer, mapTurnEvent(event));
+
+    let result: Awaited<ReturnType<ChatRuntime['run']>>;
+    try {
+      result = await this.runtime.run(runtimeInput, {
+        sessionId: session.id,
+        pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        projectId: session.projectId,
+        transcript: session.transcript,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      }, {
+        onEvent: (event) => this.emit(peer, mapTurnEvent(event)),
+      });
+    } catch (error) {
+      session.pendingApproval = pendingApproval;
+      session.state = originalState;
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
+      throw error;
     }
+    session.pendingApproval = null;
+    session.state = result.state === 'active' ? 'approved' : result.state;
+    session.beastContext = result.beastContext ?? null;
+    session.updatedAt = nowIso();
+    this.sessionStore.save(session);
+
     for (const display of result.displayMessages) {
       this.emit(peer, {
         type: 'assistant.message.complete',
