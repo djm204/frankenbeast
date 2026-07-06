@@ -170,6 +170,44 @@ describe('ParallelPlanner — happy path', () => {
     if (result.status !== 'completed') throw new Error('unexpected status');
     expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual(callOrder);
   });
+
+  it('starts same-wave expansion subgraphs concurrently', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let sub2Started = false;
+    let markSub1Started: (() => void) | undefined;
+    let resolveSub1: ((result: TaskResult) => void) | undefined;
+    const sub1Started = new Promise<void>((resolve) => {
+      markSub1Started = resolve;
+    });
+
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent-1')) return Promise.resolve(expand('parent-1', [sub1]));
+      if (task.id === createTaskId('parent-2')) return Promise.resolve(expand('parent-2', [sub2]));
+      if (task.id === createTaskId('sub-1')) {
+        markSub1Started?.();
+        return new Promise<TaskResult>((resolve) => {
+          resolveSub1 = resolve;
+        });
+      }
+      if (task.id === createTaskId('sub-2')) {
+        sub2Started = true;
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const execution = new ParallelPlanner().execute(graph, { executor });
+    await sub1Started;
+    await Promise.resolve();
+
+    expect(sub2Started).toBe(true);
+    expect(resolveSub1).toBeDefined();
+    resolveSub1?.(success('sub-1'));
+    await expect(execution).resolves.toMatchObject({ status: 'completed' });
+  });
 });
 
 // ─── Cycle handling ───────────────────────────────────────────────────────────

@@ -92,21 +92,27 @@ export class ParallelPlanner implements PlanningStrategy {
         }
       }
 
+      const expansionResults = await Promise.all(
+        waveResults
+          .filter((r) => r.status === 'success' && r.expand === true)
+          .map(async (r) => {
+            const subGraph = PlanGraph.fromTasks(r.newTasks);
+            const subResult = await this._exec(subGraph, context, depth + 1);
+            return { parentTaskId: r.taskId, subResult };
+          })
+      );
+
       let firstExpansionFailure: { taskId: TaskId; error: Error } | undefined;
-      for (const r of waveResults) {
-        if (r.status === 'success' && r.expand === true) {
-          const subGraph = PlanGraph.fromTasks(r.newTasks);
-          const subResult = await this._exec(subGraph, context, depth + 1);
-          if (subResult.status === 'failed') {
-            allResults.push(...subResult.taskResults);
-            firstExpansionFailure ??= { taskId: r.taskId, error: subResult.error };
-            continue;
-          }
-          if (subResult.status !== 'completed') {
-            return subResult;
-          }
+      for (const { parentTaskId, subResult } of expansionResults) {
+        if (subResult.status === 'failed') {
           allResults.push(...subResult.taskResults);
+          firstExpansionFailure ??= { taskId: parentTaskId, error: subResult.error };
+          continue;
         }
+        if (subResult.status !== 'completed') {
+          return subResult;
+        }
+        allResults.push(...subResult.taskResults);
       }
 
       if (firstExpansionFailure) {
