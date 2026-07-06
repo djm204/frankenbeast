@@ -18,7 +18,16 @@ npm run check:package-manager
 npm install
 ```
 
-## 2. Optional: start infrastructure
+## 2. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env with provider API keys or local runtime settings as needed.
+# Before starting the full Docker stack, uncomment GRAFANA_USER=admin and set a
+# unique GRAFANA_PASSWORD; Grafana refuses the old admin/admin default pair.
+```
+
+## 3. Optional: start infrastructure
 
 ```bash
 docker compose up -d
@@ -31,13 +40,6 @@ This starts the services defined in `docker-compose.yml`:
 - **Tempo** (ports 3200, 4317, 4318)
 
 There is no `firewall` Docker service in the current compose file.
-
-## 3. Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env with provider API keys or local runtime settings as needed
-```
 
 ## 4. Build and verify
 

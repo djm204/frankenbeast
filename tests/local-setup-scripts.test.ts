@@ -56,6 +56,19 @@ describe('local setup scripts', () => {
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
   });
 
+  it('requires explicit non-default Grafana admin credentials for local compose', () => {
+    const compose = read('docker-compose.yml');
+
+    expect(compose).toContain('Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.');
+    expect(compose).toContain('Refusing to start Grafana with admin/admin credentials.');
+    expect(compose).toContain('admin reset-admin-password "$${GF_SECURITY_ADMIN_PASSWORD}"');
+    expect(compose).toContain('GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}');
+    expect(compose).toContain('GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}');
+    expect(compose).not.toContain('${GRAFANA_USER:-admin}');
+    expect(compose).not.toContain('${GRAFANA_PASSWORD:-admin}');
+    expect(compose).toContain('startup guard resets the persisted admin password');
+  });
+
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
 
@@ -91,5 +104,9 @@ describe('local setup scripts', () => {
     for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
     }
+
+    expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
+    expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('Generate a unique local password before uncommenting');
   });
 });
