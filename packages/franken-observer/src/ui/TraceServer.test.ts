@@ -31,8 +31,8 @@ describe('TraceServer', () => {
   })
 
   describe('url getter', () => {
-    it('returns an http://localhost URL after start()', () => {
-      expect(server.url).toMatch(/^http:\/\/localhost:\d+$/)
+    it('returns an http://127.0.0.1 URL after start()', () => {
+      expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
     })
 
     it('reflects the actual bound port, not 0', () => {

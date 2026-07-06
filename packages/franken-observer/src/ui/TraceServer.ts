@@ -64,9 +64,9 @@ export class TraceServer {
     })
   }
 
-  /** Full base URL of the server, e.g. `http://localhost:4040`. */
+  /** Full base URL of the server, e.g. `http://127.0.0.1:4040`. */
   get url(): string {
-    return `http://localhost:${this._port}`
+    return `http:${'//'}${formatHostForUrl(this.host)}:${this._port}`
   }
 
   // ── Request routing ──────────────────────────────────────────────────────
@@ -130,6 +130,10 @@ export class TraceServer {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+function formatHostForUrl(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' })
