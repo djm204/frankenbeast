@@ -47,10 +47,26 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('denied');
   });
 
+  it('denies split recursive and force rm flags in any order', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'rm -r -f /var/data' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'run_shell', context: 'rm --force --recursive /var/data' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('approves benign substrings that are not destructive verbs', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'edit_file', context: '{"path":"src/dropdown.tsx"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_node', context: 'formatMessage("hello")' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
   it('denies when the dangerous pattern is only in the context payload', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
-    // 'rm -rf' is in DANGEROUS_PATTERNS; the tool name alone is benign.
-    // (Word-order variants like 'push --force' are #475's split-flag scope.)
     const result = await governor.check({ action: 'run_shell', context: 'rm -rf /var/data' });
     expect(result.decision).toBe('denied');
   });

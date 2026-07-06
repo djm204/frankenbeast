@@ -51,25 +51,23 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * Fallback patterns for CLI-level dangers the SkillTrigger doesn't cover.
- * Substring (not word-boundary) matching is deliberate: it fails closed, so
- * snake_case/camelCase destructive verbs (`drop_table`, `dropTable`) are still
- * caught. The tradeoff is benign paths containing these substrings
- * (`src/dropdown.tsx`) also trip — a safe false-positive. Tightening this
- * heuristic (tokenizer/verb-aware matching, split-flag detection like
- * `rm -r -f`) is tracked as a follow-up and intentionally out of scope here.
+ * Match destructive verbs as verbs instead of arbitrary substrings so benign
+ * paths or identifiers such as `src/dropdown.tsx` and `formatMessage()` do not
+ * get denied. Command-style flag patterns still fail closed for destructive
+ * split flags such as `rm -r -f`, `rm --recursive --force`, and `reset --hard`.
  */
 const DANGEROUS_PATTERNS = [
-  /delete/i,
-  /drop/i,
-  /truncate/i,
-  /destroy/i,
-  /remove.*all/i,
-  /force.*push/i,
-  /reset.*hard/i,
-  /rm\s+-rf/i,
-  /format/i,
-  /wipe/i,
-  /purge/i,
+  /\bdelete\b/i,
+  /\bdrop\b/i,
+  /\btruncate\b/i,
+  /\bdestroy\b/i,
+  /\bremove\b[^\n;|&]*\ball\b/i,
+  /\b(?:force\b[\s_-]+\bpush|push\b[^\n;|&]*\s--force\b)/i,
+  /\breset\b[^\n;|&]*\b(?:hard|--hard)\b/i,
+  /\brm\b(?=[^\n;|&]*\s(?:-[A-Za-z]*r[A-Za-z]*|--recursive)\b)(?=[^\n;|&]*\s(?:-[A-Za-z]*f[A-Za-z]*|--force)\b)/i,
+  /\bformat\b/i,
+  /\bwipe\b/i,
+  /\bpurge\b/i,
 ];
 
 export interface GovernorCheckResult {
