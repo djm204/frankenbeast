@@ -12,7 +12,7 @@ import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
 const FRANKENBEAST_INSTALL_HELP = "install @franken/orchestrator with 'npm install -g @franken/orchestrator'";
-const TOP_LEVEL_HELP_OPTIONS = new Set(['--help', '-h']);
+const TOP_LEVEL_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 const MCP_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 
 function resolveClient(): McpClient {

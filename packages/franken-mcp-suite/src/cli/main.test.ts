@@ -105,6 +105,27 @@ describe('fbeast main CLI', () => {
     expect(mockExit).toHaveBeenCalledWith(0);
   });
 
+  it('exits 0 for fbeast help', async () => {
+    const mockSpawnSync = vi.fn();
+    vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
+
+    process.argv = ['node', 'fbeast', 'help'];
+    const mockInfo = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
+
+    try {
+      await import('./main.js');
+    } catch {
+      // process.exit throws in test
+    }
+
+    expect(mockSpawnSync).not.toHaveBeenCalled();
+    const message = mockInfo.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('Usage: fbeast <command> [args...]');
+    expect(message).toContain('help  Display help (this message)');
+    expect(mockExit).toHaveBeenCalledWith(0);
+  });
+
   it('exits 0 for fbeast mcp --help', async () => {
     const mockSpawnSync = vi.fn();
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
