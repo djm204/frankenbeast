@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -16,13 +16,16 @@ export function readSettingsJson(content: string): Record<string, unknown> {
 
 export function writeJsonFileAtomic(path: string, value: unknown): void {
   const content = JSON.stringify(value, null, 2) + '\n';
-  const dir = dirname(path);
-  const tempPath = join(dir, `.${basename(path)}.tmp-${process.pid}-${randomUUID()}`);
+  const targetPath = resolveAtomicWriteTarget(path);
+  const existingMode = getExistingFileMode(targetPath);
+  const dir = dirname(targetPath);
+  const tempPath = join(dir, `.${basename(targetPath)}.tmp-${process.pid}-${randomUUID()}`);
 
   try {
-    writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+    writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx', mode: existingMode });
+    if (existingMode !== undefined) chmodSync(tempPath, existingMode);
     fsyncFile(tempPath);
-    renameSync(tempPath, path);
+    renameSync(tempPath, targetPath);
     fsyncDirectory(dir);
   } catch (error) {
     rmSync(tempPath, { force: true });
@@ -32,6 +35,31 @@ export function writeJsonFileAtomic(path: string, value: unknown): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function resolveAtomicWriteTarget(path: string): string {
+  try {
+    return lstatSync(path).isSymbolicLink() ? realpathSync(path) : path;
+  } catch (error) {
+    if (isNotFound(error)) return path;
+    throw error;
+  }
+}
+
+function getExistingFileMode(path: string): number | undefined {
+  try {
+    return statSync(path).mode & 0o777;
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: string }).code === 'ENOENT';
 }
 
 function stripJsonCommentsAndTrailingCommas(content: string): string {

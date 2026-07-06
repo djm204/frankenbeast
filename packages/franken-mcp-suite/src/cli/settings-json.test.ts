@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +44,31 @@ describe('settings.json helpers', () => {
       mcpServers: { 'fbeast-memory': { command: 'fbeast-memory' } },
     });
     expect(readdirSync(dir).filter((entry) => entry.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('preserves permissions when replacing an existing settings file', () => {
+    const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
+    const settingsPath = join(dir, 'settings.json');
+    writeFileSync(settingsPath, '{"existing":true}\n', 'utf-8');
+    chmodSync(settingsPath, 0o600);
+
+    writeJsonFileAtomic(settingsPath, { existing: true, updated: true });
+
+    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({ existing: true, updated: true });
+  });
+
+  it('updates the target of a symlinked settings file without replacing the symlink', () => {
+    const dir = mkdtempSync(join(tmpdir(), `fbeast-settings-${randomUUID()}`));
+    const targetPath = join(dir, 'settings-target.json');
+    const settingsPath = join(dir, 'settings.json');
+    writeFileSync(targetPath, '{"existing":true}\n', 'utf-8');
+    symlinkSync(targetPath, settingsPath);
+
+    writeJsonFileAtomic(settingsPath, { existing: true, updated: true });
+
+    expect(lstatSync(settingsPath).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(targetPath, 'utf-8'))).toEqual({ existing: true, updated: true });
   });
 
   it('does not modify an existing file when serialization fails before the atomic rename', () => {
