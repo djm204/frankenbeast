@@ -1,5 +1,5 @@
-import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, join, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
@@ -34,18 +34,6 @@ function printLine(...args: unknown[]): void {
   console.info(...args);
 }
 export type SessionPhase = 'interview' | 'plan' | 'execute';
-
-function resolveContainedExistingPath(projectRoot: string, requestedPath: string, fieldName: string): string {
-  const root = realpathSync(resolve(projectRoot));
-  const requested = isAbsolute(requestedPath) ? requestedPath : resolve(process.cwd(), requestedPath);
-  const target = realpathSync(requested);
-  const rel = relative(root, target);
-  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {
-    throw new Error(`${fieldName} resolves outside project root: ${requestedPath}`);
-  }
-
-  return target;
-}
 
 function appendPromptContext(value: string, promptText: string | undefined): string {
   if (!promptText || promptText.trim().length === 0) return value;
@@ -333,13 +321,18 @@ export class Session {
     let designContent: string;
     if (designDocPath) {
       try {
-        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath');
+        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath', {
+          relativeTo: process.cwd(),
+        });
         designContent = readFileSync(safeDesignDocPath, 'utf-8');
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           throw new Error(
             `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
           );
+        }
+        if ((err as Error).message === 'designDocPath resolves outside base directory') {
+          throw new Error('designDocPath resolves outside project root');
         }
         throw err;
       }

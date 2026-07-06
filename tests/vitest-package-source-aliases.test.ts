@@ -11,6 +11,7 @@ const EXPECTED_ALIASES = {
   '@franken/observer': resolve(ROOT, 'packages/franken-observer/src/index.ts'),
   '@franken/critique': resolve(ROOT, 'packages/franken-critique/src/index.ts'),
   '@franken/governor': resolve(ROOT, 'packages/franken-governor/src/index.ts'),
+  '@franken/types/path-containment': resolve(ROOT, 'packages/franken-types/src/path-containment.ts'),
   '@franken/types': resolve(ROOT, 'packages/franken-types/src/index.ts'),
   '@franken/orchestrator': resolve(ROOT, 'packages/franken-orchestrator/src/index.ts'),
 };

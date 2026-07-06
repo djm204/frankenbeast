@@ -30,7 +30,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.7.6",
+    "@franken/types": "0.7.7",
     "better-sqlite3": "^12.6.2"
   },
   "engines": {

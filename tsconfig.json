@@ -31,6 +31,9 @@
       "@franken/governor": [
         "./packages/franken-governor/src/index.ts"
       ],
+      "@franken/types/path-containment": [
+        "./packages/franken-types/src/path-containment.ts"
+      ],
       "@franken/types": [
         "./packages/franken-types/src/index.ts"
       ],
