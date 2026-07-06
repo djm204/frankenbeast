@@ -27,6 +27,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run audit:security
+
       - run: npm run test:root -- tests/workspaces.test.ts
 
       - run: npm run lint:security

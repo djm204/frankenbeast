@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
+    "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "check:package-manager": "node scripts/check-package-manager.mjs",
     "lint:any": "node scripts/audit-explicit-any.mjs",
     "lint:security": "node scripts/check-plain-http.mjs",
