@@ -17,6 +17,7 @@ describe('discordRouter', () => {
   } as unknown as SessionMapper;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     keys = generateKeyPairSync('ed25519');
     rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
   });
@@ -127,5 +128,25 @@ describe('discordRouter', () => {
 
     expect(res.status).toBe(200);
     expect(gateway.handleAction).toHaveBeenCalledWith('discord', 'session-123', 'approve');
+  });
+
+  it('returns 400 for invalid interaction payloads without invoking handlers', async () => {
+    const app = discordRouter({
+      gateway,
+      sessionMapper,
+      publicKey: rawPublicKey,
+      verifySignature: false,
+    });
+
+    const res = await app.request('/interactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: DiscordInteractionType.APPLICATION_COMMAND, data: 'not-an-object' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
   });
 });

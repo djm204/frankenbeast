@@ -87,6 +87,22 @@ describe('telegramRouter', () => {
     );
   });
 
+  it('returns 400 for invalid webhook payloads without invoking handlers', async () => {
+    const res = await app.request('/', {
+      method: 'POST',
+      headers: {
+        'X-Telegram-Bot-Api-Secret-Token': webhookSecretToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ update_id: 'not-a-number' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
+  });
+
   it('uses embedded session ids from callback data when another group operator clicks', async () => {
     const body = JSON.stringify({
       update_id: 3,
