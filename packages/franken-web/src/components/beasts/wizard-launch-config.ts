@@ -39,6 +39,7 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
   const promptFrontload = buildPromptFrontload(config.prompts as Record<string, unknown> | undefined);
   if (promptFrontload) {
     config.promptConfig = { text: promptFrontload };
+    delete config.prompts;
   }
   if (workflow?.executionMode === 'process' || workflow?.executionMode === 'container') {
     config.executionMode = workflow.executionMode;

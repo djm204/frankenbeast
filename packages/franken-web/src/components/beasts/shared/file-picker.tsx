@@ -61,6 +61,11 @@ export function FilePicker({ files, onFilesChange, onRemoveFile, onLoadingChange
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    if (isReading) {
+      event.target.value = '';
+      return;
+    }
+
     const selectedFiles = Array.from(event.target.files ?? []);
     if (selectedFiles.length === 0) return;
 
@@ -102,6 +107,7 @@ export function FilePicker({ files, onFilesChange, onRemoveFile, onLoadingChange
       <input
         type="file"
         multiple
+        disabled={isReading}
         aria-label="Attach files"
         onChange={handleFileChange}
         className="block w-full text-sm text-beast-text file:mr-4 file:py-2 file:px-4

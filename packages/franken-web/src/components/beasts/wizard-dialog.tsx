@@ -115,7 +115,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   const primaryActionDisabled = Boolean(launching) || promptFilesLoading || !currentStepIsValid;
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open && !promptFilesLoading) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/60 z-[70]" />
         <Dialog.Content
@@ -130,6 +130,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               <button
                 type="button"
                 onClick={toggleWizardMode}
+                disabled={promptFilesLoading}
                 aria-label="Toggle form mode"
                 className="text-xs px-4 py-2 rounded-lg border border-beast-border text-beast-muted
                   hover:text-beast-text hover:bg-beast-elevated transition-colors"
@@ -139,6 +140,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               <Dialog.Close asChild>
                 <button
                   type="button"
+                  disabled={promptFilesLoading}
                   className="p-2.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors"
                   aria-label="Close"
                 >
@@ -157,7 +159,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               currentStep={wizardStep}
               highestCompleted={highestCompleted}
               stepStatuses={stepStatuses}
-              onStepClick={setWizardStep}
+              onStepClick={promptFilesLoading ? () => undefined : setWizardStep}
             />
           )}
 
@@ -212,7 +214,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                   <button
                     type="button"
                     onClick={prevStep}
-                    disabled={isFirstStep || launching}
+                    disabled={isFirstStep || launching || promptFilesLoading}
                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-beast-muted hover:text-beast-text
                       hover:bg-beast-elevated border border-beast-border disabled:opacity-50 disabled:cursor-not-allowed
                       transition-colors"

@@ -14,16 +14,19 @@ describe('buildWizardLaunchConfig', () => {
   });
 
   it('frontloads prompt text and attached files into run config promptConfig', () => {
-    expect(buildWizardLaunchConfig({
+    const config = buildWizardLaunchConfig({
       1: { workflowType: 'design-interview', topic: 'Draft a billing design', outputPath: 'docs/billing.md' },
       5: {
         promptText: 'Consider enterprise billing.',
         files: [{ name: 'notes.md', content: 'Existing constraints.' }],
       },
-    })).toMatchObject({
+    });
+
+    expect(config).toMatchObject({
       goal: 'Draft a billing design',
       promptConfig: { text: 'Consider enterprise billing.\n\n---\n\nAttached file: notes.md\n\nExisting constraints.' },
     });
+    expect(config).not.toHaveProperty('prompts');
   });
 
   it('maps martin loop fields to backend init config keys', () => {
