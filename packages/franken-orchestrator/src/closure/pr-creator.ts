@@ -116,7 +116,11 @@ export class PrCreator {
     this.llm = llm;
   }
 
-  async generateCommitMessage(diffStat: string, chunkObjective: string): Promise<string | null> {
+  async generateCommitMessage(
+    diffStat: string,
+    chunkObjective: string,
+    logger?: ILogger,
+  ): Promise<string | null> {
     if (!this.llm) return null;
     try {
       const scope = detectScopeFromDiffStat(diffStat);
@@ -149,7 +153,8 @@ export class PrCreator {
         return buildFallbackCommitMessage(chunkObjective, scope, this.config.disableBranding);
       }
       return msg;
-    } catch {
+    } catch (error) {
+      logger?.warn('PrCreator: generateCommitMessage failed', formatCaughtError(error));
       return null;
     }
   }
@@ -160,6 +165,7 @@ export class PrCreator {
     result: BeastResult,
     issueNumber?: number,
     cacheWorkId?: string,
+    logger?: ILogger,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
@@ -199,7 +205,8 @@ export class PrCreator {
         workPrefix: issueNumber != null ? `issue:${issueNumber}` : result.projectId,
       });
       return parsePrDescription(raw, this.config.disableBranding);
-    } catch {
+    } catch (error) {
+      logger?.warn('PrCreator: generatePrDescription failed', formatCaughtError(error));
       return null;
     }
   }
@@ -397,8 +404,10 @@ export class PrCreator {
         result,
         issueNumber,
         branch ? `pr:${branch}` : undefined,
+        logger,
       );
-    } catch {
+    } catch (error) {
+      logger?.warn('PrCreator: tryGeneratePrFromLlm failed', formatCaughtError(error));
       return null;
     }
   }
@@ -414,6 +423,13 @@ export class PrCreator {
 
     return { diffStat, logOutput, shortstat: shortstat.trim() };
   }
+}
+
+function formatCaughtError(error: unknown): { error: string; name?: string | undefined } {
+  if (error instanceof Error) {
+    return { error: error.message, name: error.name };
+  }
+  return { error: String(error) };
 }
 
 interface GitContext {
