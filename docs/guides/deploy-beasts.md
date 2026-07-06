@@ -38,11 +38,17 @@ From the repo root:
 ```bash
 npm --workspace franken-orchestrator run beasts-daemon
 # in another terminal, for chat/WebSocket/dashboard gateway compatibility:
-FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4050 \
+npm --workspace franken-orchestrator run chat-server
+```
+
+When a live `beasts-daemon` pidfile exists, `chat-server` automatically proxies Beast control routes to the configured local daemon URL (default `http://127.0.0.1:4050`) instead of starting a second in-process Beast supervisor over the same SQLite database. If the daemon runs on a non-default local port, set `FRANKENBEAST_BEAST_DAEMON_URL` explicitly:
+
+```bash
+FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4051 \
   npm --workspace franken-orchestrator run chat-server
 ```
 
-If you omit `FRANKENBEAST_BEAST_DAEMON_URL`, `chat-server` starts an in-process local Beast control plane for standalone development instead of proxying to the daemon.
+If no daemon is running and `FRANKENBEAST_BEAST_DAEMON_URL` is unset, `chat-server` starts an in-process local Beast control plane for standalone development.
 
 Default bind:
 
