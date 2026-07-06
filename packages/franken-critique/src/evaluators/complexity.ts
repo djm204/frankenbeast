@@ -254,7 +254,10 @@ function isSpacedTemplateTagContext(
 
   const wordStart = findWordStart(content, previousIndex);
   const beforeWordIndex = findPreviousRegexLookbehindIndex(content, wordStart);
-  if (beforeWordIndex === -1) return true;
+  if (beforeWordIndex === -1) {
+    const word = content.slice(wordStart, previousIndex + 1);
+    return /^[a-z_$][\w$]*$/.test(word);
+  }
 
   return '=([{,:;,!+-*?/&|^~<>'.includes(content[beforeWordIndex] ?? '');
 }
@@ -472,7 +475,9 @@ function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
 
 function isStringKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
-  return /^(?:return|throw|yield|await|from|case|default)$/.test(word ?? '');
+  return /^(?:return|throw|yield|await|from|case|default|import|extends)$/.test(
+    word ?? '',
+  );
 }
 
 function isSourceColonPrefix(content: string, colonIndex: number): boolean {
@@ -484,6 +489,9 @@ function isSourceColonPrefix(content: string, colonIndex: number): boolean {
 
   const beforeColon = content[beforeColonIndex] ?? '';
   if (beforeColon === '?') return true;
+  if (beforeColon === '"' || beforeColon === "'") {
+    return isQuotedSourceKeyPrefix(content, beforeColonIndex);
+  }
   if (!/[\w$\])]$/.test(beforeColon)) return false;
 
   const tokenStart = /[\w$]/.test(beforeColon)
@@ -496,6 +504,29 @@ function isSourceColonPrefix(content: string, colonIndex: number): boolean {
   if (beforeTokenIndex === -1) return false;
 
   return '{[,('.includes(content[beforeTokenIndex] ?? '');
+}
+
+function isQuotedSourceKeyPrefix(
+  content: string,
+  quoteEndIndex: number,
+): boolean {
+  const quote = content[quoteEndIndex];
+
+  for (let i = quoteEndIndex - 1; i >= 0; i--) {
+    if (content[i] === '\\') {
+      i--;
+      continue;
+    }
+
+    if (content[i] !== quote) continue;
+
+    const beforeQuoteIndex = findPreviousRegexLookbehindIndex(content, i);
+    if (beforeQuoteIndex === -1) return false;
+
+    return '{[,'.includes(content[beforeQuoteIndex] ?? '');
+  }
+
+  return false;
 }
 
 function isRegexKeywordPrefix(

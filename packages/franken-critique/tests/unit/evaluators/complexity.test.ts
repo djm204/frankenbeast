@@ -644,6 +644,56 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('ignores braces inside strings after quoted object keys', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const obj = { "pattern": "{{{{{{", 'other': '{{{{{{' };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside import and extends string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const sideEffectImport = `import "{{{{{{";`;
+    const stringLiteralType = `type X<T> = T extends "{{{{{{" ? 1 : 2;`;
+
+    await expect(
+      evaluator.evaluate(createInput(sideEffectImport)),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+    await expect(
+      evaluator.evaluate(createInput(stringLiteralType)),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('keeps Markdown inline code visible before semicolons', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'Example `if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
