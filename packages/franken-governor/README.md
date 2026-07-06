@@ -724,4 +724,4 @@ All I/O is injected — tests use fakes/mocks, no real network or terminal requi
 
 ## License
 
-UNLICENSED
+MIT
