@@ -67,7 +67,7 @@ export class Planner {
 
     // 5. Execute with self-correction loop (ADR-007)
     let currentGraph = graph;
-    let attempt = 1;
+    const recoveryAttemptsByTask = new Map<TaskId, number>();
 
     for (;;) {
       let result: PlanResult;
@@ -84,6 +84,7 @@ export class Planner {
       if (result.status !== 'failed') return result; // defensive: unexpected status
 
       // result.status === 'failed' — attempt recovery
+      const attempt = (recoveryAttemptsByTask.get(result.failedTaskId) ?? 0) + 1;
       try {
         currentGraph = await this.recovery.recover(
           result.failedTaskId,
@@ -91,7 +92,7 @@ export class Planner {
           currentGraph,
           attempt
         );
-        attempt++;
+        recoveryAttemptsByTask.set(result.failedTaskId, attempt);
       } catch (recoveryErr) {
         if (
           recoveryErr instanceof MaxRecoveryAttemptsError ||

@@ -216,6 +216,33 @@ describe('Planner — self-correction loop', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('tracks recovery attempts independently for each failed task', async () => {
+    const t1 = makeTask('t-1');
+    const t2 = makeTask('t-2');
+    const graph = PlanGraph.empty().addTask(t1).addTask(t2);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const failedOnce = new Set<string>();
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if ((task.id === createTaskId('t-1') || task.id === createTaskId('t-2')) && !failedOnce.has(task.id)) {
+        failedOnce.add(task.id);
+        return Promise.resolve(failure(task.id, 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory, maxRecoveryAttempts: 1 });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: createTaskId('fix-t-1-attempt-1') })
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: createTaskId('fix-t-2-attempt-1') })
+    );
+  });
+
   it('returns failed when error is unknown (no known fix)', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const memory = makeMemory([]); // no known errors
