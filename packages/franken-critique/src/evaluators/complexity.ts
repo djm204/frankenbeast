@@ -247,9 +247,15 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
       beforeBracket.length - 1,
     );
     return (
+      previousBeforeBracket === '[' ||
       REGEX_PREFIX_CHARS.has(previousBeforeBracket) ||
       isRegexKeywordPrefix(beforeBracket)
     );
+  }
+
+  if (previous === '!') {
+    const beforeBang = before.slice(0, -1).trimEnd();
+    return !/[\w\])]$/.test(beforeBang);
   }
 
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
@@ -270,6 +276,13 @@ function trimRegexLookbehind(content: string): string {
     const start = before.lastIndexOf('/*');
     if (start === -1) break;
     before = before.slice(0, start).trimEnd();
+  }
+
+  const lastLineStart = before.lastIndexOf('\n') + 1;
+  const trailingLine = before.slice(lastLineStart);
+  const trailingComment = trailingLine.indexOf('//');
+  if (trailingComment !== -1) {
+    before = before.slice(0, lastLineStart + trailingComment).trimEnd();
   }
 
   return before;

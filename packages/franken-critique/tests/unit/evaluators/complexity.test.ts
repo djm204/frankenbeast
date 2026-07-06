@@ -145,6 +145,37 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not mistake division after non-null assertions for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `total! / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores braces inside regex literals after line comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `// note
+/{{{{{{/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside regex literals after nested array brackets', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const rules = [[/{{{{{{/]];`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('ignores comments before regex literals after keywords', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function matches(input) {
