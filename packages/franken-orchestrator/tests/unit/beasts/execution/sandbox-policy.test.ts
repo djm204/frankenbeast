@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nonRootUserForWorkspace } from '../../../../src/beasts/execution/sandbox-policy.js';
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -13,6 +13,10 @@ vi.mock('node:fs', async (importOriginal) => {
 const mockedStatSync = vi.mocked(statSync);
 
 describe('nonRootUserForWorkspace', () => {
+  beforeEach(() => {
+    mockedStatSync.mockReset();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     mockedStatSync.mockReset();
