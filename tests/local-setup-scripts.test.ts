@@ -17,6 +17,9 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
+    expect(read('docs/guides/quickstart.md')).toContain('corepack enable npm');
+    expect(read('docs/guides/quickstart.md')).toContain('npm run check:package-manager');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
