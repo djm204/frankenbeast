@@ -36,19 +36,21 @@ describe('hard-coded example secret scanner', () => {
     execFileSync(process.execPath, [SCRIPT], { cwd: ROOT, stdio: 'pipe' });
   });
 
-  it('rejects uncommented secret values in environment examples', () => {
+  it('rejects and redacts uncommented secret values in environment examples', () => {
     const root = makeFixtureRoot();
     const placeholder = ['replace', 'me'].join('-');
-    writeFileSync(join(root, '.env.example'), `${sensitiveName('SECRET', 'KEY')}=${placeholder}\n`, 'utf8');
+    writeFileSync(join(root, '.env.example'), `${sensitiveName('OPENAI', 'API', 'KEY')}=${placeholder}\n`, 'utf8');
 
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('.env.example:1');
+    expect(result.stderr).toContain('OPENAI_API_KEY=<redacted>');
+    expect(result.stderr).not.toContain(placeholder);
     expect(result.stderr).toContain('Hard-coded example secret values are not allowed');
   });
 
-  it('rejects hard-coded sensitive fallback values in production sources', () => {
+  it('rejects and redacts hard-coded sensitive fallback values in production sources', () => {
     const root = makeFixtureRoot();
     const sourceDir = join(root, 'packages', 'example', 'src');
     mkdirSync(sourceDir, { recursive: true });
@@ -63,6 +65,60 @@ describe('hard-coded example secret scanner', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain("'<redacted>'");
+    expect(result.stderr).not.toContain(fallback);
+  });
+
+  it('rejects formatted multiline sensitive fallback values in production sources', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const fallback = ['dev', 'secret'].join('-');
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      [
+        `export const value = process.env.${sensitiveName('JWT', 'SECRET')} ??`,
+        `  '${fallback}';`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:2');
+    expect(result.stderr).not.toContain(fallback);
+  });
+
+  it('allows sensitive env checks with ordinary diagnostic strings', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      `if (!process.env.${sensitiveName('JWT', 'SECRET')}) throw new Error('required');\n`,
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
+  it('allows sensitive-looking examples inside block comments', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const fallback = ['comment', 'secret'].join('-');
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      `/* use process.env.${sensitiveName('JWT', 'SECRET')} ?? '${fallback}' only in tests */\n`,
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
   });
 
   it('allows environment-backed production reads without literal fallbacks', () => {

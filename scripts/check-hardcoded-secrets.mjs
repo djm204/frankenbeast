@@ -27,8 +27,9 @@ const sensitiveEnvNames = [
   ['SECRET', 'KEY'],
 ].map((parts) => parts.join('_'));
 
-const sensitiveNamePattern = new RegExp(`\\b(?:${sensitiveEnvNames.join('|')})\\b`, 'i');
+const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN)|[A-Z0-9_]*SECRET_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const stringLiteralPattern = /(['"`])((?:\\.|(?!\1).)*)\1/g;
+const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 
 function printLine(...args) {
   console.info(...args);
@@ -86,55 +87,166 @@ async function collectEnvironmentExampleFiles() {
   return files;
 }
 
-function hasHardcodedSensitiveEnvValue(line) {
+function redactEnvLine(line) {
+  return line.replace(/=(.*)$/, '=<redacted>');
+}
+
+function redactSourceLine(line) {
+  return line.replace(stringLiteralPattern, (literal, quote) => `${quote}<redacted>${quote}`);
+}
+
+function hardcodedSensitiveEnvFinding(line) {
   const trimmed = line.trimStart();
   if (!trimmed || trimmed.startsWith('#')) {
-    return false;
+    return null;
   }
   const match = trimmed.match(/^([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|ACCESS)[A-Z0-9_]*)=(.*)$/);
   if (!match) {
-    return false;
+    return null;
   }
   const [, name, value] = match;
-  return sensitiveNamePattern.test(name) && value.trim().length > 0;
+  if (!sensitiveIdentifierPattern.test(name) || value.trim().length === 0) {
+    return null;
+  }
+  return redactEnvLine(trimmed);
 }
 
-function hasHardcodedSensitiveSourceValue(line) {
-  const trimmed = line.trimStart();
-  if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*')) {
-    return false;
-  }
-  if (!sensitiveNamePattern.test(line)) {
-    return false;
-  }
+function stripComments(line, state) {
+  let remaining = line;
+  let output = '';
 
-  for (const match of line.matchAll(stringLiteralPattern)) {
-    const literal = match[2].trim();
-    if (!literal || sensitiveEnvNames.some((name) => name.toLowerCase() === literal.toLowerCase())) {
+  while (remaining.length > 0) {
+    if (state.inBlockComment) {
+      const end = remaining.indexOf('*/');
+      if (end === -1) {
+        return output;
+      }
+      remaining = remaining.slice(end + 2);
+      state.inBlockComment = false;
       continue;
     }
-    const prefix = line.slice(0, match.index);
-    if (/(=|:|\?\?|\|\|)\s*$/.test(prefix) || /process\.env\./.test(prefix)) {
+
+    const lineComment = remaining.indexOf('//');
+    const blockComment = remaining.indexOf('/*');
+
+    if (lineComment !== -1 && (blockComment === -1 || lineComment < blockComment)) {
+      output += remaining.slice(0, lineComment);
+      return output;
+    }
+
+    if (blockComment !== -1) {
+      output += remaining.slice(0, blockComment);
+      remaining = remaining.slice(blockComment + 2);
+      state.inBlockComment = true;
+      continue;
+    }
+
+    output += remaining;
+    return output;
+  }
+
+  return output;
+}
+
+function isSensitiveLiteralName(literal) {
+  return /^[A-Z0-9_]+$/.test(literal) && (
+    sensitiveEnvNames.some((name) => name === literal)
+    || sensitiveIdentifierPattern.test(literal)
+  );
+}
+
+function isSecretLikeLiteral(literal) {
+  return /(?:secret|token|password|api[_-]?key|access[_-]?key|private[_-]?key|credential|bearer)/i.test(literal);
+}
+
+function hasNonNameStringLiteral(line) {
+  for (const match of line.matchAll(stringLiteralPattern)) {
+    const literal = match[2].trim();
+    if (!literal || isSensitiveLiteralName(literal) || !isSecretLikeLiteral(literal)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function hasSensitiveEnvAccess(line) {
+  const envAccessPattern = /process\.env(?:\.([A-Z0-9_]+)|\[['"`]([^'"`]+)['"`]\])/gi;
+  for (const match of line.matchAll(envAccessPattern)) {
+    const name = match[1] ?? match[2] ?? '';
+    if (sensitiveIdentifierPattern.test(name)) {
       return true;
     }
   }
   return false;
 }
 
-async function scanFile(file, predicate, findings) {
+function hasSensitiveConstantAssignment(prefix) {
+  return /(?:^|\b)(?:export\s+)?(?:const|let|var)\s+[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN)\b[^=]*=\s*$/.test(prefix);
+}
+
+function hasInlineHardcodedSensitiveSourceValue(line) {
+  for (const match of line.matchAll(stringLiteralPattern)) {
+    const literal = match[2].trim();
+    if (!literal || isSensitiveLiteralName(literal) || !isSecretLikeLiteral(literal)) {
+      continue;
+    }
+    const prefix = line.slice(0, match.index);
+    if (fallbackOperatorPattern.test(prefix) && (hasSensitiveEnvAccess(prefix) || hasSensitiveConstantAssignment(prefix))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function leavesSensitiveFallbackOpen(line) {
+  const trimmed = line.trimEnd();
+  return fallbackOperatorPattern.test(trimmed) && (hasSensitiveEnvAccess(trimmed) || hasSensitiveConstantAssignment(trimmed));
+}
+
+async function scanEnvironmentFile(file, findings) {
   const content = await readFile(file, 'utf8');
   const lines = content.split(/\r?\n/);
   for (const [index, line] of lines.entries()) {
-    if (predicate(line)) {
-      findings.push(`${toRepoPath(file)}:${index + 1}: ${line.trim()}`);
+    const redacted = hardcodedSensitiveEnvFinding(line);
+    if (redacted) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: ${redacted}`);
     }
+  }
+}
+
+async function scanSourceFile(file, findings) {
+  const content = await readFile(file, 'utf8');
+  const lines = content.split(/\r?\n/);
+  const commentState = { inBlockComment: false };
+  let pendingSensitiveFallbackLine = null;
+
+  for (const [index, line] of lines.entries()) {
+    const code = stripComments(line, commentState).trim();
+    if (!code) {
+      continue;
+    }
+
+    if (pendingSensitiveFallbackLine && hasNonNameStringLiteral(code)) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
+      pendingSensitiveFallbackLine = null;
+      continue;
+    }
+
+    if (hasInlineHardcodedSensitiveSourceValue(code)) {
+      findings.push(`${toRepoPath(file)}:${index + 1}: ${redactSourceLine(code)}`);
+      pendingSensitiveFallbackLine = null;
+      continue;
+    }
+
+    pendingSensitiveFallbackLine = leavesSensitiveFallbackOpen(code) ? index + 1 : null;
   }
 }
 
 const findings = [];
 
 for (const file of await collectEnvironmentExampleFiles()) {
-  await scanFile(file, hasHardcodedSensitiveEnvValue, findings);
+  await scanEnvironmentFile(file, findings);
 }
 
 for (const scanRoot of sourceRoots) {
@@ -142,7 +254,7 @@ for (const scanRoot of sourceRoots) {
     if (fileURLToPath(import.meta.url) === file) {
       continue;
     }
-    await scanFile(file, hasHardcodedSensitiveSourceValue, findings);
+    await scanSourceFile(file, findings);
   }
 }
 
