@@ -141,6 +141,7 @@ const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
   detached: true,
   stdio: 'inherit',
 });
+process.stdout.write('final partial stdout');
 require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
 child.unref();`,
         ],
@@ -152,6 +153,7 @@ child.unref();`,
         await vi.waitFor(() => {
           expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
         }, { timeout: 500 });
+        expect(callbacks.onStdout).toHaveBeenCalledWith('final partial stdout');
       } finally {
         const grandchildPid = Number(await readFile(pidFile, 'utf8').catch(() => '0'));
         if (grandchildPid > 0) {

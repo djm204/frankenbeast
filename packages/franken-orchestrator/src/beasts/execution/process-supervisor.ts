@@ -1,7 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
-import { createInterface } from 'node:readline';
 import type { BeastProcessSpec } from '../types.js';
 import { DEFAULT_BEAST_ENV_ALLOWLIST } from './sandbox-policy.js';
 
@@ -104,23 +103,58 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       maybeFireExit();
     };
 
-    const stdoutRl = child.stdout
-      ? createInterface({ input: child.stdout })
+    const wireLineReader = (
+      stream: NonNullable<ChildProcess['stdout']>,
+      onLine: (line: string) => void,
+      markClosed: () => void,
+    ) => {
+      let buffer = '';
+      let closed = false;
+
+      const flushBufferedLine = () => {
+        if (buffer.length > 0) {
+          onLine(buffer);
+          buffer = '';
+        }
+      };
+      const finish = () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        flushBufferedLine();
+        markClosed();
+      };
+
+      stream.setEncoding('utf8');
+      stream.on('data', (chunk: string | Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split(/\r?\n/u);
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          onLine(line);
+        }
+      });
+      stream.on('end', flushBufferedLine);
+      stream.on('close', finish);
+
+      return () => {
+        finish();
+        stream.destroy();
+      };
+    };
+
+    const forceCloseStdout = child.stdout
+      ? wireLineReader(child.stdout, callbacks.onStdout, markStdoutClosed)
       : undefined;
-    if (stdoutRl) {
-      stdoutRl.on('line', (line) => callbacks.onStdout(line));
-      stdoutRl.on('close', markStdoutClosed);
-    } else {
+    if (!forceCloseStdout) {
       stdoutClosed = true;
     }
 
-    const stderrRl = child.stderr
-      ? createInterface({ input: child.stderr })
+    const forceCloseStderr = child.stderr
+      ? wireLineReader(child.stderr, callbacks.onStderr, markStderrClosed)
       : undefined;
-    if (stderrRl) {
-      stderrRl.on('line', (line) => callbacks.onStderr(line));
-      stderrRl.on('close', markStderrClosed);
-    } else {
+    if (!forceCloseStderr) {
       stderrClosed = true;
     }
 
@@ -128,10 +162,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       exitInfo = { code, signal };
       setImmediate(() => {
         if (!stdoutClosed) {
-          stdoutRl?.close();
+          forceCloseStdout?.();
         }
         if (!stderrClosed) {
-          stderrRl?.close();
+          forceCloseStderr?.();
         }
         maybeFireExit();
       });
