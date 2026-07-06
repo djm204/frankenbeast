@@ -77,6 +77,42 @@ describe('LlmPlanner', () => {
     );
   });
 
+  it('fails plan creation when a task dependency is not a string', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          tasks: [
+            { id: 'prep', objective: 'Prep', dependsOn: [] },
+            { id: 'ship', objective: 'Ship', dependsOn: [42] },
+          ],
+        }),
+      ),
+    };
+    const planner = new LlmPlanner(llmClient);
+
+    await expect(planner.createPlan(intent)).rejects.toThrow(
+      "Invalid plan structure: task 'ship' has non-string dependency at index 0",
+    );
+  });
+
+  it('normalizes whitespace around dependency ids before validation', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          tasks: [
+            { id: ' prep ', objective: 'Prep', dependsOn: [] },
+            { id: 'ship', objective: 'Ship', dependsOn: [' prep '] },
+          ],
+        }),
+      ),
+    };
+    const planner = new LlmPlanner(llmClient);
+
+    const plan = await planner.createPlan(intent);
+
+    expect(plan.tasks[1]?.dependsOn).toEqual(['t1']);
+  });
+
   it('falls back to a single task plan when tasks contain a cycle', async () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue(
