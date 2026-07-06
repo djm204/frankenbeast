@@ -10,8 +10,12 @@ name: Daily Deterministic Security Scan
 # - SARIF upload to code scanning is best-effort (continue-on-error) so the
 #   workflow still works on repos without GitHub Advanced Security; findings
 #   are always captured as build artifacts and as deduped rolling issues.
-# - Issue filing is idempotent: one rolling issue per category (label
-#   `ci-scan`), updated in place, so a daily cadence produces near-zero noise.
+# - Issue filing is idempotent AND self-clearing: one rolling issue per
+#   category (label `ci-scan`), upserted when findings exist and CLOSED when
+#   they clear, so the record never goes stale and the LLM dedup layer never
+#   trusts a resolved finding as active.
+# - All generated files live under $RUNNER_TEMP (outside the checkout) so the
+#   secret scan never inspects CI-downloaded tool binaries or report output.
 
 on:
   schedule:
@@ -23,7 +27,7 @@ on:
 permissions:
   contents: read
   security-events: write   # upload SARIF to code scanning (best-effort)
-  issues: write            # file/update deduped summary issues
+  issues: write            # file/update/close deduped summary issues
 
 concurrency:
   group: daily-security-scan
@@ -63,42 +67,44 @@ jobs:
             --config p/javascript \
             --config p/typescript \
             --config p/nodejs \
-            --sarif --output semgrep.sarif \
+            --sarif --output "$RUNNER_TEMP/semgrep.sarif" \
             --timeout 300 --metrics off || true
 
       - name: Upload Semgrep SARIF to code scanning
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: ${{ runner.temp }}/semgrep.sarif
           category: semgrep
 
       # ── Gitleaks secret scan ─────────────────────────────────────────────
+      # Tool download + report output go under $RUNNER_TEMP so `--source .`
+      # (the checkout) never scans CI-generated artifacts.
       - name: Run Gitleaks
         run: |
           curl -sSL \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            -o gitleaks.tgz
-          tar -xzf gitleaks.tgz gitleaks
-          chmod +x gitleaks
+            -o "$RUNNER_TEMP/gitleaks.tgz"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          chmod +x "$RUNNER_TEMP/gitleaks"
           # Scan the current tree (not full history). Never fail the job.
-          ./gitleaks detect \
+          "$RUNNER_TEMP/gitleaks" detect \
             --source . --no-git \
-            --report-format sarif --report-path gitleaks.sarif \
+            --report-format sarif --report-path "$RUNNER_TEMP/gitleaks.sarif" \
             --redact --exit-code 0 || true
 
       - name: Upload Gitleaks SARIF to code scanning
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: gitleaks.sarif
+          sarif_file: ${{ runner.temp }}/gitleaks.sarif
           category: gitleaks
 
       # ── Dependency audit ─────────────────────────────────────────────────
       - name: Run npm audit
         run: |
           # Reads package-lock.json directly; no install needed.
-          npm audit --audit-level=high --json > audit.json || true
+          npm audit --audit-level=high --json > "$RUNNER_TEMP/audit.json" || true
 
       # ── Persist all raw reports ──────────────────────────────────────────
       - name: Upload scan reports
@@ -107,47 +113,61 @@ jobs:
         with:
           name: security-scan-reports
           path: |
-            semgrep.sarif
-            gitleaks.sarif
-            audit.json
+            ${{ runner.temp }}/semgrep.sarif
+            ${{ runner.temp }}/gitleaks.sarif
+            ${{ runner.temp }}/audit.json
           if-no-files-found: warn
           retention-days: 30
 
-      # ── File/update deduped rolling issues ───────────────────────────────
-      - name: File deduped issues for high-severity findings
+      # ── Reconcile deduped rolling issues (upsert on findings, close on clear)
+      - name: Reconcile ci-scan issues
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          gh label create ci-scan --repo "$REPO" --color 5319e7 \
-            --description "Filed by the deterministic daily CI scan" 2>/dev/null || true
 
-          # upsert_issue <title-prefix> <label-csv> <full-title> <body-file>
-          # Finds an open ci-scan issue whose title starts with <title-prefix>;
-          # updates it in place if found, otherwise creates it. One rolling
-          # issue per category => near-zero daily noise.
-          upsert_issue() {
-            local prefix="$1" labels="$2" title="$3" bodyfile="$4"
+          # Ensure every label used below exists (idempotent). Existing labels
+          # keep their current color/description; missing ones are created so a
+          # real finding never fails `gh issue create` on a fresh repo.
+          ensure_label() {
+            gh label create "$1" --repo "$REPO" --color "$2" --description "$3" 2>/dev/null || true
+          }
+          ensure_label ci-scan  5319e7 "Filed by the deterministic daily CI scan"
+          ensure_label security d93f0b "Security vulnerability or hardening"
+          ensure_label P0       b60205 "Priority 0: urgent"
+          ensure_label P1       ff8c00 "Priority 1: high priority"
+
+          # reconcile <title-prefix> <label-csv> <count> <full-title> <body-file>
+          #   count>0  -> upsert the open rolling issue (create or edit in place)
+          #   count==0 -> close any open matching issue so the record self-clears
+          reconcile() {
+            local prefix="$1" labels="$2" count="$3" title="$4" bodyfile="$5"
             local num
             num=$(gh issue list --repo "$REPO" --state open --label ci-scan \
                     --search "$prefix in:title" --json number,title \
                     --jq "[.[] | select(.title | startswith(\"$prefix\"))][0].number // empty")
-            if [ -n "$num" ]; then
-              gh issue edit "$num" --repo "$REPO" --title "$title" --body-file "$bodyfile"
-              echo "updated #$num: $title"
-            else
-              gh issue create --repo "$REPO" --title "$title" \
-                --label "$labels" --body-file "$bodyfile"
-              echo "created: $title"
+            if [ "${count:-0}" -gt 0 ]; then
+              if [ -n "$num" ]; then
+                gh issue edit "$num" --repo "$REPO" --title "$title" --body-file "$bodyfile"
+                echo "updated #$num: $title"
+              else
+                gh issue create --repo "$REPO" --title "$title" --label "$labels" --body-file "$bodyfile"
+                echo "created: $title"
+              fi
+            elif [ -n "$num" ]; then
+              gh issue comment "$num" --repo "$REPO" \
+                --body "Resolved: this category is no longer detected by the deterministic scan as of ${RUN_URL}. Auto-closing; it will reopen if the finding returns."
+              gh issue close "$num" --repo "$REPO" --reason completed
+              echo "closed #$num (finding cleared)"
             fi
           }
 
           footer=$'\n\n---\n🤖 Filed automatically by the daily deterministic security scan. Detail in the run artifacts: '"$RUN_URL"
 
           # ── Secrets (gitleaks) — P0 ──
-          SECRETS=$(jq '[.runs[]?.results[]?] | length' gitleaks.sarif 2>/dev/null || echo 0)
+          SECRETS=$(jq '[.runs[]?.results[]?] | length' "$RUNNER_TEMP/gitleaks.sarif" 2>/dev/null || echo 0)
           if [ "${SECRETS:-0}" -gt 0 ]; then
             {
               echo "## Finding"
@@ -156,7 +176,7 @@ jobs:
               echo "## Evidence"
               echo "Rule IDs and (redacted) locations from this run:"
               echo '```'
-              jq -r '.runs[]?.results[]? | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' gitleaks.sarif 2>/dev/null | sort -u | head -50
+              jq -r '.runs[]?.results[]? | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' "$RUNNER_TEMP/gitleaks.sarif" 2>/dev/null | sort -u | head -50
               echo '```'
               echo
               echo "## Impact"
@@ -165,13 +185,13 @@ jobs:
               echo "## Suggested fix"
               echo "Triage each hit: if real, rotate the credential and purge it (and its history) then move it to a secret store; if a false positive, add a scoped allowlist entry to a gitleaks config."
               echo "$footer"
-            } > secrets_body.md
-            upsert_issue "security: gitleaks detected" "ci-scan,security,P0" \
-              "security: gitleaks detected $SECRETS potential secret(s)" secrets_body.md
+            } > "$RUNNER_TEMP/secrets_body.md"
           fi
+          reconcile "security: gitleaks detected" "ci-scan,security,P0" "${SECRETS:-0}" \
+            "security: gitleaks detected ${SECRETS} potential secret(s)" "$RUNNER_TEMP/secrets_body.md"
 
-          # ── Semgrep ERROR-severity findings — P1/P2 ──
-          SG_ERR=$(jq '[.runs[]?.results[]? | select((.level // "warning") == "error")] | length' semgrep.sarif 2>/dev/null || echo 0)
+          # ── Semgrep ERROR-severity findings — P1 ──
+          SG_ERR=$(jq '[.runs[]?.results[]? | select((.level // "warning") == "error")] | length' "$RUNNER_TEMP/semgrep.sarif" 2>/dev/null || echo 0)
           if [ "${SG_ERR:-0}" -gt 0 ]; then
             {
               echo "## Finding"
@@ -180,7 +200,7 @@ jobs:
               echo "## Evidence"
               echo "Top rules and locations from this run:"
               echo '```'
-              jq -r '.runs[]?.results[]? | select((.level // "warning") == "error") | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' semgrep.sarif 2>/dev/null | sort | uniq -c | sort -rn | head -50
+              jq -r '.runs[]?.results[]? | select((.level // "warning") == "error") | "\(.ruleId): \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // "?")"' "$RUNNER_TEMP/semgrep.sarif" 2>/dev/null | sort | uniq -c | sort -rn | head -50
               echo '```'
               echo
               echo "## Impact"
@@ -189,14 +209,14 @@ jobs:
               echo "## Suggested fix"
               echo "Review each rule hit in context; fix genuine issues, or add a scoped \`# nosemgrep: <ruleId>\` with justification for intentional patterns. Full SARIF is in the run artifacts (and the Security tab if code scanning is enabled)."
               echo "$footer"
-            } > semgrep_body.md
-            upsert_issue "security: semgrep flagged" "ci-scan,security,P1" \
-              "security: semgrep flagged $SG_ERR high-severity finding(s)" semgrep_body.md
+            } > "$RUNNER_TEMP/semgrep_body.md"
           fi
+          reconcile "security: semgrep flagged" "ci-scan,security,P1" "${SG_ERR:-0}" \
+            "security: semgrep flagged ${SG_ERR} high-severity finding(s)" "$RUNNER_TEMP/semgrep_body.md"
 
           # ── npm audit high/critical — P1 ──
-          CRIT=$(jq '.metadata.vulnerabilities.critical // 0' audit.json 2>/dev/null || echo 0)
-          HIGH=$(jq '.metadata.vulnerabilities.high // 0' audit.json 2>/dev/null || echo 0)
+          CRIT=$(jq '.metadata.vulnerabilities.critical // 0' "$RUNNER_TEMP/audit.json" 2>/dev/null || echo 0)
+          HIGH=$(jq '.metadata.vulnerabilities.high // 0' "$RUNNER_TEMP/audit.json" 2>/dev/null || echo 0)
           if [ "$((CRIT + HIGH))" -gt 0 ]; then
             {
               echo "## Finding"
@@ -205,7 +225,7 @@ jobs:
               echo "## Evidence"
               echo "Advisories from this run:"
               echo '```'
-              jq -r '.vulnerabilities // {} | to_entries[] | select(.value.severity == "critical" or .value.severity == "high") | "\(.value.severity)\t\(.key)\t\(.value.via | if type=="array" then (map(if type=="object" then .title else . end) | join("; ")) else . end)"' audit.json 2>/dev/null | head -60
+              jq -r '.vulnerabilities // {} | to_entries[] | select(.value.severity == "critical" or .value.severity == "high") | "\(.value.severity)\t\(.key)\t\(.value.via | if type=="array" then (map(if type=="object" then .title else . end) | join("; ")) else . end)"' "$RUNNER_TEMP/audit.json" 2>/dev/null | head -60
               echo '```'
               echo
               echo "## Impact"
@@ -214,9 +234,9 @@ jobs:
               echo "## Suggested fix"
               echo "Run \`npm audit fix\` where safe, or bump the offending packages manually and re-lock. For transitive-only advisories, use overrides. Coordinate with existing dependency-upgrade issues before duplicating."
               echo "$footer"
-            } > audit_body.md
-            upsert_issue "security(deps): npm audit reports" "ci-scan,security,P1" \
-              "security(deps): npm audit reports $CRIT critical / $HIGH high advisories" audit_body.md
+            } > "$RUNNER_TEMP/audit_body.md"
           fi
+          reconcile "security(deps): npm audit reports" "ci-scan,security,P1" "$((CRIT + HIGH))" \
+            "security(deps): npm audit reports ${CRIT} critical / ${HIGH} high advisories" "$RUNNER_TEMP/audit_body.md"
 
-          echo "scan issue-filing complete: secrets=$SECRETS semgrep_err=$SG_ERR npm_crit=$CRIT npm_high=$HIGH"
+          echo "reconcile complete: secrets=${SECRETS} semgrep_err=${SG_ERR} npm_crit=${CRIT} npm_high=${HIGH}"
