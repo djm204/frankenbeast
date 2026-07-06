@@ -313,7 +313,8 @@ export class ChatSocketController {
       return;
     }
 
-    const result = await this.runtime.run('/approve', {
+    const approvedAction = session.pendingApproval?.command ?? session.pendingApproval?.description;
+    const result = await this.runtime.run(approvedAction ? `/run ${approvedAction}` : '/approve', {
       sessionId: session.id,
       pendingApproval: Boolean(session.pendingApproval),
       projectId: session.projectId,

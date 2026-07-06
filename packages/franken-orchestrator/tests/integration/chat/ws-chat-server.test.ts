@@ -277,21 +277,19 @@ describe('ws chat server', () => {
     store.save(session);
     const secret = createSessionTokenSecret();
     const token = issueSessionToken({ secret, sessionId: session.id });
-    const runtime = {
-      run: vi.fn().mockResolvedValue({
-        displayMessages: [{ kind: 'execution', content: 'Done' }],
-        events: [
-          { type: 'start', sessionId: session.id, data: { taskDescription: 'deploy staging' } },
-          { type: 'complete', sessionId: session.id, data: { status: 'success' } },
-        ],
-        pendingApproval: false,
-        state: 'active',
-        tier: 'premium_execution',
-        transcript: session.transcript,
-      }),
-    };
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success',
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
     const controller = new ChatSocketController({
-      runtime: runtime as unknown as ChatRuntime,
+      runtime,
       sessionStore: store,
       tokenSecret: secret,
     });
@@ -309,10 +307,7 @@ describe('ws chat server', () => {
       approved: true,
     }));
 
-    expect(runtime.run).toHaveBeenCalledWith('/approve', expect.objectContaining({
-      pendingApproval: true,
-      sessionId: session.id,
-    }));
+    expect(execute).toHaveBeenCalledWith({ userInput: 'deploy staging' });
     const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.approval.resolved',
