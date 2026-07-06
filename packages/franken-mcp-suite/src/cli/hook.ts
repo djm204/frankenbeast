@@ -18,6 +18,11 @@ export interface HookDeps {
    * rather than stdin is also non-blocking.
    */
   readContext(): string;
+  /**
+   * Reads a streamed post-tool payload. Generated client hook scripts use stdin
+   * for tool responses so large outputs never become argv/env exec payloads.
+   */
+  readPostToolPayload?(): Promise<string>;
 }
 
 export function defaultHookDeps(dbPath?: string): HookDeps {
@@ -49,6 +54,18 @@ export function redactSecrets(text: string): string {
     .replace(/(\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
     .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+}
+
+async function readStdinPayload(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export async function runHook(
@@ -99,9 +116,15 @@ export async function runHook(
   }
 
   if (phase === 'post-tool') {
+    // Generated hook scripts stream large tool responses on stdin instead of
+    // passing them through argv, avoiding ARG_MAX/E2BIG audit bypasses. Keep the
+    // positional payload fallback for direct/legacy callers.
+    const streamedPayload = payload === ''
+      ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
+      : '';
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload, phase }),
+      metadata: JSON.stringify({ toolName, payload: payload || streamedPayload, phase }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

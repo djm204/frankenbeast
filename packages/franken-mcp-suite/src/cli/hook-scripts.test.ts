@@ -64,7 +64,18 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
-    '  TOOL_NAME="${3:-}"',
+    '  TOOL_NAME="${4:-}"',
+    '  PAYLOAD=$(cat)',
+    '  if [ "${FBEAST_EXPECT_STDIN_PAYLOAD:-}" = "1" ]; then',
+    "    if [ \"$#\" -ne 4 ]; then",
+    "      printf 'post-tool payload should not be passed as argv; saw %s args\\n' \"$#\" >&2",
+    '      exit 98',
+    '    fi',
+    '    if [ ${#PAYLOAD} -lt 300000 ]; then',
+    "      printf 'post-tool payload was not streamed on stdin\\n' >&2",
+    '      exit 97',
+    '    fi',
+    '  fi',
     '  if [ "$TOOL_NAME" = "hang" ]; then',
     '    sleep 10',
     '    exit 0',
@@ -358,6 +369,24 @@ describe('Codex hook scripts', () => {
       tool_response: { ok: true },
       session_id: 'sess-1',
     }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('streams large post-tool responses to fbeast-hook stdin instead of argv', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'read_file',
+      tool_response: { output: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_EXPECT_STDIN_PAYLOAD: '1',
+    });
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
