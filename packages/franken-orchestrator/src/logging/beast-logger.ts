@@ -8,7 +8,6 @@
 
 import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, truncateSync, writeSync } from 'node:fs';
 import { resolve } from 'node:path';
-import sharp from 'sharp';
 import type { ILogger } from '../deps.js';
 import { isCommandFailure } from '../errors/command-failure.js';
 
@@ -111,6 +110,11 @@ export async function renderBanner(root: string): Promise<string> {
   }
 
   try {
+    // sharp is an optional dependency used only to render the graphic banner.
+    // It is a heavy native module and may be absent (unsupported platform, or a
+    // slim install); load it lazily so its absence degrades to the ASCII banner
+    // instead of crashing the CLI at import time.
+    const sharp = (await import('sharp')).default;
     const columns = process.stdout.columns ?? 100;
     const width = Math.max(28, Math.min(Math.floor(columns * 0.55), 44));
     const pipeline = sharp(logoPath)
