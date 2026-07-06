@@ -13,6 +13,11 @@ interface StringLiteralRead {
   endIndex: number;
 }
 
+interface TemplateRead {
+  specifiers: string[];
+  endIndex: number;
+}
+
 export class GhostDependencyEvaluator implements Evaluator {
   readonly name = 'ghost-dependency';
   readonly category = 'deterministic' as const;
@@ -79,7 +84,14 @@ function extractDependencySpecifiers(content: string): string[] {
       continue;
     }
 
-    if (QUOTE_CHARS.has(ch)) {
+    if (ch === '`') {
+      const template = readTemplateString(content, i);
+      specifiers.push(...template.specifiers);
+      i = template.endIndex;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
       i = skipStringLiteral(content, i);
       continue;
     }
@@ -127,8 +139,12 @@ function readStaticImportSpecifier(
 ): StringLiteralRead | null {
   let i = skipWhitespace(content, index);
 
-  // Ignore dynamic import(...) expressions; they were not covered by the original evaluator.
-  if (content[i] === '(') return null;
+  // Ignore import.meta and dynamic import(...), neither of which is a static dependency declaration.
+  if (content[i] === '.' || content[i] === '(') return null;
+
+  if (content[i] === "'" || content[i] === '"') {
+    return readQuotedString(content, i);
+  }
 
   while (i < content.length) {
     const ch = content[i]!;
@@ -144,8 +160,17 @@ function readStaticImportSpecifier(
       continue;
     }
 
-    if (ch === "'" || ch === '"') {
-      return readQuotedString(content, i);
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i) + 1;
+      continue;
+    }
+
+    if (startsWithKeyword(content, i, 'from')) {
+      i = skipWhitespace(content, i + 'from'.length);
+      if (content[i] === "'" || content[i] === '"') {
+        return readQuotedString(content, i);
+      }
+      return null;
     }
 
     if (ch === ';') return null;
@@ -166,7 +191,13 @@ function readRequireSpecifier(
   i = skipWhitespace(content, i + 1);
   if (content[i] !== "'" && content[i] !== '"') return null;
 
-  return readQuotedString(content, i);
+  const specifier = readQuotedString(content, i);
+  if (!specifier) return null;
+
+  const closeParenIndex = skipWhitespace(content, specifier.endIndex + 1);
+  if (content[closeParenIndex] !== ')') return null;
+
+  return specifier;
 }
 
 function readQuotedString(
@@ -196,6 +227,83 @@ function readQuotedString(
   }
 
   return null;
+}
+
+function readTemplateString(content: string, startIndex: number): TemplateRead {
+  const specifiers: string[] = [];
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+
+    if (ch === '`') {
+      return { specifiers, endIndex: i };
+    }
+
+    if (ch === '$' && next === '{') {
+      const expression = readTemplateExpression(content, i + 1);
+      specifiers.push(...extractDependencySpecifiers(expression.value));
+      i = expression.endIndex;
+    }
+  }
+
+  return { specifiers, endIndex: content.length };
+}
+
+function readTemplateExpression(
+  content: string,
+  openBraceIndex: number,
+): StringLiteralRead {
+  let depth = 1;
+  let value = '';
+
+  for (let i = openBraceIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      const endIndex = skipSingleLineComment(content, i + 2);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      const endIndex = skipMultiLineComment(content, i + 2);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (QUOTE_CHARS.has(ch)) {
+      const endIndex = skipStringLiteral(content, i);
+      value += content.slice(i, Math.min(endIndex + 1, content.length));
+      i = endIndex;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth += 1;
+      value += ch;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return { value, endIndex: i };
+      value += ch;
+      continue;
+    }
+
+    value += ch;
+  }
+
+  return { value, endIndex: content.length };
 }
 
 function skipWhitespace(content: string, index: number): number {
