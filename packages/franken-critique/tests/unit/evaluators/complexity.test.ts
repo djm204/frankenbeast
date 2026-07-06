@@ -396,9 +396,20 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
-  it('keeps keyword-prefixed template literals masked as template literals', async () => {
+  it('keeps Markdown inline code visible after prose keyword-like words', async () => {
     const evaluator = new ComplexityEvaluator();
-    const content = 'function render() { return `{{{{{{`; }';
+    const content =
+      'Example of `if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps template literals at the start of input masked', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = '`{{{{{{`;';
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
@@ -409,6 +420,26 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
   it('does not mistake division after object literals for regex literals', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `const ratio = {} / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not mistake division after object property values for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const o = { ratio: {} / denom }; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not mistake division after contextual identifiers for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `let of = 10; const ratio = of / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
@@ -429,6 +460,16 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
   it('does not mask plural possessive apostrophes as strings', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `users' nested code: if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not hide prose after unmatched double quotes', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `He said " nested code: if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(

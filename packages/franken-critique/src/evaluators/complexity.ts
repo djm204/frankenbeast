@@ -148,11 +148,33 @@ function findQuotedStringEnd(
   return content.length;
 }
 
+function hasClosingQuoteBeforeLineEnd(
+  content: string,
+  start: number,
+  quote: string,
+): boolean {
+  for (let i = start + 1; i < content.length; i++) {
+    if (content[i] === '\\') {
+      if (content[i + 1] === '\r' && content[i + 2] === '\n') {
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (content[i] === '\n') return false;
+    if (content[i] === quote) return true;
+  }
+
+  return false;
+}
+
 function isLikelyQuotedStringStart(
   content: string,
   start: number,
   quote: string,
 ): boolean {
+  if (!hasClosingQuoteBeforeLineEnd(content, start, quote)) return false;
   if (quote !== "'") return true;
 
   const previous = content[start - 1] ?? '';
@@ -171,12 +193,16 @@ function findInlineMarkdownCodeEnd(content: string, start: number): number {
 
 function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   const previousIndex = findPreviousRegexLookbehindIndex(content, start);
-  if (previousIndex === -1) return false;
+  if (previousIndex === -1) {
+    const inlineEnd = findInlineMarkdownCodeEnd(content, start);
+    const after = inlineEnd === -1 ? '' : (content[inlineEnd] ?? '');
+    return /[;.)\]]/.test(after);
+  }
 
   const previous = content[previousIndex] ?? '';
   if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
-  if (isRegexKeywordPrefix(content, previousIndex)) return true;
+  if (isTemplateKeywordPrefix(content, previousIndex)) return true;
   if (previousIndex < start - 1) return false;
   if (/[\w$)\]]/.test(previous)) return true;
 
@@ -356,7 +382,6 @@ function isLikelyStatementBlockEnd(
         const previous = content[previousIndex] ?? '';
         return (
           previous === ')' ||
-          previous === ':' ||
           isBlockOpeningKeywordPrefix(content, previousIndex)
         );
       }
@@ -384,10 +409,15 @@ function isBlockOpeningKeywordPrefix(
   return /^(?:else|try|finally|do|class|function|switch)$/.test(word ?? '');
 }
 
+function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
+  const word = keywordBefore(content, endIndex);
+  return /^(?:return|throw|yield|await)$/.test(word ?? '');
+}
+
 function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
 
-  return /^(?:return|throw|case|default|delete|typeof|void|in|of|yield|await|else)$/.test(
+  return /^(?:return|throw|case|default|delete|typeof|void|yield|await|else)$/.test(
     word ?? '',
   );
 }
