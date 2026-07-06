@@ -245,7 +245,7 @@ describe('ProcessBeastExecutor', () => {
     const sourcePlanDir = join(projectCwd, '.fbeast', 'plans', 'plan-1');
     const sourceDesignDoc = join(projectCwd, '.fbeast', 'designs', 'design.md');
     const sourceOutputDir = join(projectCwd, '.fbeast', 'outputs', 'plan-1');
-    const originalCliEntrypoint = join(workDir, 'packages', '@franken/orchestrator', 'dist', 'cli', 'run.js');
+    const originalCliEntrypoint = join(workDir, 'packages', 'franken-orchestrator', 'dist', 'cli', 'run.js');
     mkdirSync(sourcePlanDir, { recursive: true });
     mkdirSync(join(projectCwd, '.fbeast', 'designs'), { recursive: true });
     mkdirSync(sourceOutputDir, { recursive: true });
