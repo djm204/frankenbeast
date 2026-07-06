@@ -745,6 +745,56 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('ignores braces inside parameterized string-literal return types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function f(x: number): "{{{{{{" { return ''; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps real blocks visible after division following regex classes', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ok = /[//]/.test(s) / denom; if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores regex braces inside prior blocks when detecting regex starts', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `if (ok) { const r = /}/; } /{{{{{{/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores ASI-terminated template expression braces', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = '`{{{{{{`\nfoo();';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces in template interpolation string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'const x = `${"{{{{{{"}`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);

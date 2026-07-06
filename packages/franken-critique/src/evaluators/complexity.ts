@@ -129,6 +129,13 @@ function maskStructuralLiterals(content: string): string {
       continue;
     }
 
+    if (char === '/' && hasRegexTerminatorBeforeLineEnd(content, i)) {
+      const end = findRegexLiteralEnd(content, i);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
     if (char === '"' || char === "'" || char === '`') {
       const end =
         char === '`'
@@ -260,7 +267,7 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   if (previousIndex === -1) {
     const inlineEnd = findInlineMarkdownCodeEnd(content, start);
     const after = inlineEnd === -1 ? '' : (content[inlineEnd] ?? '');
-    return /[;)\]]/.test(after);
+    return /[;\n)\]]/.test(after);
   }
 
   const previous = content[previousIndex] ?? '';
@@ -346,7 +353,10 @@ function maskTemplateLiteral(
     if (char === '$' && next === '{') {
       const expression = readTemplateExpression(content, i + 2);
       sanitized += '  ';
-      sanitized += stripIgnoredBraceSyntax(expression.content);
+      sanitized += stripIgnoredBraceSyntax(`(${expression.content})`).slice(
+        1,
+        -1,
+      );
       if (expression.closed) sanitized += ' ';
       i = expression.end - 1;
       continue;
@@ -557,6 +567,12 @@ function isSourceColonPrefix(content: string, colonIndex: number): boolean {
 
   const beforeColon = content[beforeColonIndex] ?? '';
   if (beforeColon === '?') return true;
+  if (
+    beforeColon === ')' &&
+    isReturnTypeAnnotationPrefix(content, beforeColonIndex)
+  ) {
+    return true;
+  }
   if (beforeColon === '"' || beforeColon === "'") {
     return isQuotedSourceKeyPrefix(content, beforeColonIndex);
   }
@@ -589,6 +605,42 @@ function isTypeAnnotationColonPrefix(
 
   const word = keywordBefore(content, beforeTokenIndex);
   return /^(?:let|const|var|type|interface)$/.test(word ?? '');
+}
+
+function isReturnTypeAnnotationPrefix(
+  content: string,
+  closeParenIndex: number,
+): boolean {
+  const structuralContent = maskStructuralLiterals(
+    content.slice(0, closeParenIndex + 1),
+  );
+  let depth = 0;
+
+  for (let i = closeParenIndex; i >= 0; i--) {
+    const char = structuralContent[i];
+    if (char === ')') {
+      depth++;
+      continue;
+    }
+    if (char !== '(') continue;
+
+    depth--;
+    if (depth !== 0) continue;
+
+    const beforeOpenIndex = findPreviousRegexLookbehindIndex(
+      structuralContent,
+      i,
+    );
+    if (beforeOpenIndex === -1) return false;
+
+    const word = keywordBefore(structuralContent, beforeOpenIndex);
+    return (
+      word === 'function' ||
+      /^[\w$)\]]$/.test(structuralContent[beforeOpenIndex] ?? '')
+    );
+  }
+
+  return false;
 }
 
 function isQuotedSourceKeyPrefix(
@@ -707,7 +759,14 @@ function findLineCommentStart(line: string): number {
       continue;
     }
 
-    if (char === '/' && next === '/' && !isUrlSchemeSlash(line, i)) return i;
+    if (
+      char === '/' &&
+      next === '/' &&
+      line[i - 1] !== '[' &&
+      !isUrlSchemeSlash(line, i)
+    ) {
+      return i;
+    }
   }
 
   return -1;
