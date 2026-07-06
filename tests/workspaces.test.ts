@@ -46,6 +46,11 @@ describe('npm workspaces configuration', () => {
       expect(rootPkg.overrides?.vite).toBeDefined();
       expect(isAtLeast(rootPkg.overrides.vite, '8.1.3')).toBe(true);
     });
+
+    it('keeps Turbo above the local execution/session advisory range', () => {
+      expect(rootPkg.devDependencies?.turbo).toBeDefined();
+      expect(isAtLeast(rootPkg.devDependencies.turbo, '2.10.3')).toBe(true);
+    });
   });
 
   describe('Vitest toolchain security floor', () => {
@@ -81,12 +86,19 @@ describe('npm workspaces configuration', () => {
       }
     });
 
-    it('keeps every locked Vitest and Vite package on its security floor', () => {
+    it('keeps every locked Vitest, Vite, and Turbo package on its security floor', () => {
       const lockfile = readJson('package-lock.json');
       const toolchainFloors = {
         vitest: minimumVitest,
         '@vitest/coverage-v8': minimumVitest,
         vite: '8.1.3',
+        turbo: '2.10.3',
+        '@turbo/darwin-64': '2.10.3',
+        '@turbo/darwin-arm64': '2.10.3',
+        '@turbo/linux-64': '2.10.3',
+        '@turbo/linux-arm64': '2.10.3',
+        '@turbo/windows-64': '2.10.3',
+        '@turbo/windows-arm64': '2.10.3',
       };
 
       for (const [packageName, minimumVersion] of Object.entries(toolchainFloors)) {
