@@ -1373,6 +1373,7 @@ export async function runNetworkCommand(
       repoRoot: root,
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
     }),
     action === 'up' ? undefined : args.networkTarget,
   );

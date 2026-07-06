@@ -32,6 +32,17 @@ describe('network-registry', () => {
     expect(dashboardCommand).not.toContain('run dev');
   });
 
+  it('passes provider command override approval to managed chat-server children', () => {
+    const services = resolveNetworkServices(defaultConfig(), {
+      repoRoot: '/repo/frankenbeast',
+      configFile: '/repo/frankenbeast/.fbeast/config.json',
+      allowTrustedProviderCommandOverrides: true,
+    });
+    const chat = services.find((service) => service.id === 'chat-server');
+
+    expect(chat?.runtimeConfig.process?.args).toContain('--trust-provider-command-overrides');
+  });
+
   it('orders dependencies before dependents', () => {
     const config = defaultConfig();
     config.comms.enabled = true;

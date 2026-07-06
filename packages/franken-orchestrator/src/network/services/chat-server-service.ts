@@ -38,6 +38,7 @@ export const chatServerService: NetworkServiceDefinition = {
         '--port',
         String(config.chat.port),
         ...(context.configFile ? ['--config', context.configFile] : []),
+        ...(context.allowTrustedProviderCommandOverrides ? ['--trust-provider-command-overrides'] : []),
         ...(context.configOverrides?.flatMap((override) => ['--set', override]) ?? []),
       ],
       cwd: context.repoRoot,

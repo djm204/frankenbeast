@@ -66,7 +66,12 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.get('/v1/network/status', async (c) => {
     const supervisor = createSupervisor(deps.frankenbeastDir);
     const status = await supervisor.status();
-    const services = resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root });
+    const config = deps.getConfig();
+    const services = resolveNetworkServices(config, {
+      repoRoot: deps.root,
+      configFile: deps.configFile,
+      allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+    });
     const response: NetworkStatusResponse = {
       ...status,
       services: status.services.map((service) => {
@@ -83,12 +88,17 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/up', async (c) => {
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const services = resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root });
+    const config = deps.getConfig();
+    const services = resolveNetworkServices(config, {
+      repoRoot: deps.root,
+      configFile: deps.configFile,
+      allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+    });
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
@@ -102,15 +112,20 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/start', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
+    const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+      resolveNetworkServices(config, {
+        repoRoot: deps.root,
+        configFile: deps.configFile,
+        allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+      }),
       body.target,
     );
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
@@ -126,15 +141,20 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
     await supervisor.stop(body.target);
+    const config = deps.getConfig();
     const services = filterNetworkServices(
-      resolveNetworkServices(deps.getConfig(), { repoRoot: deps.root }),
+      resolveNetworkServices(config, {
+        repoRoot: deps.root,
+        configFile: deps.configFile,
+        allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+      }),
       body.target,
     );
     const state = await supervisor.up({
       services,
       detached: true,
-      mode: deps.getConfig().network.mode,
-      secureBackend: deps.getConfig().network.secureBackend,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
     });
     return c.json({ data: state });
   });
