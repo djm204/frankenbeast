@@ -26,11 +26,12 @@ export class SignatureVerifier {
 
   verify(payload: string, signature: string): boolean {
     const expected = this.sign(payload);
-    if (expected.length !== signature.length) return false;
+    if (!/^[0-9a-f]{64}$/i.test(signature)) return false;
 
-    return timingSafeEqual(
-      Buffer.from(expected, 'hex'),
-      Buffer.from(signature, 'hex'),
-    );
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const signatureBuffer = Buffer.from(signature, 'hex');
+    if (expectedBuffer.length !== signatureBuffer.length) return false;
+
+    return timingSafeEqual(expectedBuffer, signatureBuffer);
   }
 }
