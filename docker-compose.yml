@@ -24,8 +24,8 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:?Set GRAFANA_USER to a non-default local Grafana admin username}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD to a non-default local Grafana admin password}
       - GF_AUTH_ANONYMOUS_ENABLED=true
     depends_on:
       - tempo
