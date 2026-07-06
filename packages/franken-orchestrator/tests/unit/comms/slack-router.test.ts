@@ -81,6 +81,25 @@ describe('slackRouter', () => {
     }));
   });
 
+  it('returns 400 for invalid event payloads without invoking handlers', async () => {
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const res = await appWithoutSig.request('/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'event_callback', event: 'not-an-object' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
+  });
+
   it('handles interactive button clicks', async () => {
     const appWithoutSig = slackRouter({
       gateway,

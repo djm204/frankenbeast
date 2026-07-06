@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { whatsappRouter } from '../../../src/comms/channels/whatsapp/whatsapp-router.js';
 import { createHmac } from 'node:crypto';
 import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
@@ -20,6 +20,10 @@ describe('whatsappRouter', () => {
     sessionMapper,
     appSecret,
     verifyToken,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   function getSignature(body: string) {
@@ -68,6 +72,27 @@ describe('whatsappRouter', () => {
       text: 'hello',
       externalUserId: '123456',
     }));
+  });
+
+  it('returns 400 for invalid webhook payloads without invoking handlers', async () => {
+    const appWithoutSig = whatsappRouter({
+      gateway,
+      sessionMapper,
+      appSecret,
+      verifyToken,
+      verifySignature: false,
+    });
+
+    const res = await appWithoutSig.request('/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ object: 'whatsapp_business_account', entry: 'not-an-array' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
   });
 
   it('routes button reply to gateway', async () => {

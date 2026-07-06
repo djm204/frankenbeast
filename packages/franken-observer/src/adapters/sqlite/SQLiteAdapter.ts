@@ -82,6 +82,7 @@ export class SQLiteAdapter implements ExportAdapter {
 
   constructor(filePath: string) {
     this.db = new Database(filePath)
+    this.db.pragma('busy_timeout = 5000')
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.exec(CREATE_TABLES)

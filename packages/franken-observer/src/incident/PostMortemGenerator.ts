@@ -1,11 +1,59 @@
+import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 
 export interface PostMortemOptions {
   /** Directory where post-mortem files are written. Default: './post-mortems' */
   outputDir?: string
+}
+
+function safeFilenameComponent(value: string): string {
+  let wellFormedValue = ''
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const nextCode = value.charCodeAt(index + 1)
+      if (nextCode >= 0xdc00 && nextCode <= 0xdfff) {
+        wellFormedValue += value[index] + value[index + 1]
+        index += 1
+      } else {
+        wellFormedValue += '\uFFFD'
+      }
+      continue
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      wellFormedValue += '\uFFFD'
+      continue
+    }
+
+    wellFormedValue += value[index]
+  }
+
+  return encodeURIComponent(wellFormedValue)
+}
+
+function isInsideDirectory(baseDir: string, targetPath: string): boolean {
+  const relativePath = relative(baseDir, targetPath)
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+}
+
+async function writeNewReportFile(filePath: string, content: string): Promise<void> {
+  const fileHandle = await fs.open(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o600,
+  )
+
+  try {
+    await fileHandle.writeFile(content, 'utf-8')
+  } finally {
+    await fileHandle.close()
+  }
 }
 
 /**
@@ -80,18 +128,27 @@ without reaching a terminal condition. Possible causes:
    */
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
     const timestamp = signal.timestamp
-    const filename = `post-mortem-${trace.id}-${timestamp}.md`
-    const filePath = join(this.outputDir, filename)
+    const filename = `post-mortem-${safeFilenameComponent(trace.id)}-${timestamp}.md`
+    const configuredFilePath = join(this.outputDir, filename)
     const content = this.generateContent(trace, signal)
+
+    let writeFilePath = resolve(this.outputDir, filename)
 
     try {
       await fs.mkdir(this.outputDir, { recursive: true })
-      await fs.writeFile(filePath, content, 'utf-8')
-      return filePath
+      const outputDir = await fs.realpath(this.outputDir)
+      writeFilePath = resolve(outputDir, filename)
+
+      if (!isInsideDirectory(outputDir, writeFilePath)) {
+        throw new Error(`Resolved post-mortem path escapes output directory: ${writeFilePath}`)
+      }
+
+      await writeNewReportFile(writeFilePath, content)
+      return configuredFilePath
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       console.warn(
-        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${filePath}: ${reason}. Continuing without persisting the report.`,
+        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${writeFilePath}: ${reason}. Continuing without persisting the report.`,
       )
       return null
     }

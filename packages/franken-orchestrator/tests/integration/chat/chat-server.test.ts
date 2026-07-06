@@ -33,6 +33,22 @@ function waitForSocketEvent(socket: WebSocket, type: string): Promise<Record<str
   });
 }
 
+function waitForSocketClose(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (socket.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(() => {
+      reject(new Error('Timed out waiting for websocket close'));
+    }, 2_000);
+    socket.addEventListener('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+  });
+}
+
 describe('chat server bootstrap', () => {
   afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
@@ -89,6 +105,45 @@ describe('chat server bootstrap', () => {
     } finally {
       await server.close();
     }
+  });
+
+  it('removes websocket upgrade listeners and closes active sockets on shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+    });
+
+    const createRes = await fetch(`${server.url}/v1/chat/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    expect(createRes.status).toBe(201);
+    const body = await createRes.json() as {
+      data: {
+        id: string;
+        socketToken: string;
+      };
+    };
+    const socket = new WebSocket(
+      `${server.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+    );
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener('error', (event) => reject(event.error ?? new Error('websocket error')), { once: true });
+    });
+
+    expect(server.server.listenerCount('upgrade')).toBe(1);
+
+    await server.close();
+    await waitForSocketClose(socket);
+
+    expect(server.server.listenerCount('upgrade')).toBe(0);
   });
 
   it('mounts beast routes on the live server when beast control is configured', async () => {
