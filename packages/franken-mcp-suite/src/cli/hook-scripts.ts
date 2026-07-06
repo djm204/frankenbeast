@@ -105,17 +105,20 @@ fi
 DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
-INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()")
-PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()")
-trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:]]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
-cat > "$INPUT_FILE"
+INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()") || exit 0
+PAYLOAD_FILE=""
+trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:] if p]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()") || exit 0
+cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('tool_name',''))" "$INPUT_FILE" 2>/dev/null || echo "")
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null || printf '{}' > "$PAYLOAD_FILE"
+if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+  printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
+fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -197,17 +200,20 @@ fi
 DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
-INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()")
-PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()")
-trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:]]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
-cat > "$INPUT_FILE"
+INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()") || exit 0
+PAYLOAD_FILE=""
+trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:] if p]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()") || exit 0
+cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('tool_name',''))" "$INPUT_FILE" 2>/dev/null || echo "")
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null || printf '{}' > "$PAYLOAD_FILE"
+if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+  printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
+fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);
@@ -290,17 +296,20 @@ fi
 DB_PATH=${JSON.stringify(dbPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
-INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()")
-PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()")
-trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:]]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
-cat > "$INPUT_FILE"
+INPUT_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-input.', delete=False); print(f.name); f.close()") || exit 0
+PAYLOAD_FILE=""
+trap 'python3 -c "import os,sys; [os.path.exists(p) and os.unlink(p) for p in sys.argv[1:] if p]" "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
+PAYLOAD_FILE=$(python3 -c "import tempfile; f=tempfile.NamedTemporaryFile(prefix='fbeast-hook-response.', delete=False); print(f.name); f.close()") || exit 0
+cat > "$INPUT_FILE" || exit 0
 TOOL_NAME=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('tool_name',''))" "$INPUT_FILE" 2>/dev/null || echo "")
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null || printf '{}' > "$PAYLOAD_FILE"
+if ! python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.stdout.write(json.dumps(d.get('tool_response',{})))" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+  printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
+fi
 
 if command -v timeout >/dev/null 2>&1; then
-  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  timeout "$HOOK_TIMEOUT_SECONDS" fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 else
-  fbeast-hook post-tool --db "$DB_PATH" -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
+  fbeast-hook post-tool --db "$DB_PATH" --stdin-payload -- "$TOOL_NAME" < "$PAYLOAD_FILE" >/dev/null 2>&1 || true
 fi
 exit 0
 `);

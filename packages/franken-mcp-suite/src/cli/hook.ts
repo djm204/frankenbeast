@@ -76,6 +76,7 @@ export async function runHook(
   // option parsing so any following token (e.g. an untrusted tool name) is never
   // interpreted as a flag.
   let dbPath: string | undefined;
+  let streamPostToolPayload = false;
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -87,6 +88,8 @@ export async function runHook(
       dbPath = argv[++i];
     } else if (arg.startsWith('--db=')) {
       dbPath = arg.slice(5);
+    } else if (arg === '--stdin-payload') {
+      streamPostToolPayload = true;
     } else {
       positionals.push(arg);
     }
@@ -116,10 +119,10 @@ export async function runHook(
   }
 
   if (phase === 'post-tool') {
-    // Generated hook scripts stream large tool responses on stdin instead of
-    // passing them through argv, avoiding ARG_MAX/E2BIG audit bypasses. Keep the
-    // positional payload fallback for direct/legacy callers.
-    const streamedPayload = payload === ''
+    // Generated hook scripts pass --stdin-payload and stream large tool responses
+    // on stdin instead of argv, avoiding ARG_MAX/E2BIG audit bypasses. Keep stdin
+    // opt-in so direct/legacy callers that omit payload keep empty-payload behavior.
+    const streamedPayload = payload === '' && streamPostToolPayload
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     await resolvedDeps.observer.log({
