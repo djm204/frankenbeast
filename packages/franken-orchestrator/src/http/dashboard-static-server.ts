@@ -5,11 +5,12 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseDotenv } from 'dotenv';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { createSecretStore } from '../network/secret-store.js';
 
 const SERVICE_IDENTITY = 'dashboard-web';
 const LOCAL_HTTP_PROTOCOL = 'http:';
+const TRUST_PROVIDER_COMMAND_OVERRIDES_ENV = 'FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES';
 const RESERVED_PREFIXES = ['/api', '/v1', '/webhooks', '/comms'];
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -56,6 +57,11 @@ function normalizeBaseUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   return trimmed.replace(/\/+$/, '');
+}
+
+function isTruthyEnvFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
 function isSameOriginProxyRequest(request: Request): boolean {
@@ -385,7 +391,9 @@ async function resolveDashboardOperatorToken(): Promise<string | undefined> {
   if (configPath) {
     try {
       const resolvedConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
-      const config = OrchestratorConfigSchema.parse(JSON.parse(await readFile(resolvedConfigPath, 'utf8')));
+      const config = parseOrchestratorConfig(JSON.parse(await readFile(resolvedConfigPath, 'utf8')), {
+        allowTrustedProviderCommandOverrides: isTruthyEnvFlag(process.env[TRUST_PROVIDER_COMMAND_OVERRIDES_ENV]),
+      });
       const tokenRef = config.network.operatorTokenRef?.trim();
       if (tokenRef) {
         const store = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {
