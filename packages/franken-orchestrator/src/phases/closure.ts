@@ -94,7 +94,10 @@ export async function runClosure(
     try {
       const pr = await prCreator.create(result, logger);
       if (pr) {
-        (result as any).prUrl = pr.url;
+        result = {
+          ...result,
+          prUrl: pr.url,
+        };
       }
     } catch (error) {
       if (error instanceof PrCreationRequiredActionError) {
