@@ -91,7 +91,11 @@ function stripIgnoredBraceSyntax(content: string): string {
       continue;
     }
 
-    if (char === '/' && shouldStartRegexLiteral(content, i)) {
+    if (
+      char === '/' &&
+      shouldStartRegexLiteral(content, i) &&
+      hasRegexTerminatorBeforeLineEnd(content, i)
+    ) {
       const end = findRegexLiteralEnd(content, i);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
@@ -527,6 +531,9 @@ function isLikelyStatementBlockEnd(
                 structuralContent,
                 previousIndex,
               ))) ||
+          (previous === '>' &&
+            structuralContent[previousIndex - 1] === '=' &&
+            isArrowFunctionBlockPrefix(structuralContent, previousIndex)) ||
           isBlockOpeningKeywordPrefix(structuralContent, previousIndex) ||
           isClassDeclarationBlockPrefix(structuralContent, previousIndex)
         );
@@ -553,6 +560,21 @@ function isBlockOpeningKeywordPrefix(
 ): boolean {
   const word = keywordBefore(content, endIndex);
   return /^(?:else|try|finally|do|switch)$/.test(word ?? '');
+}
+
+function isArrowFunctionBlockPrefix(
+  content: string,
+  arrowEndIndex: number,
+): boolean {
+  const equalsIndex = arrowEndIndex - 1;
+  const beforeArrowIndex = findPreviousRegexLookbehindIndex(
+    content,
+    equalsIndex,
+  );
+  if (beforeArrowIndex === -1) return false;
+
+  const beforeArrow = content[beforeArrowIndex] ?? '';
+  return /[\w$)\]]/.test(beforeArrow);
 }
 
 function isFunctionDeclarationBlockPrefix(
@@ -654,7 +676,7 @@ function isSourceKeywordContext(
 
 function isStringKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
-  return /^(?:return|throw|yield|await|from|case|default|import|extends|typeof|void|delete)$/.test(
+  return /^(?:return|throw|yield|await|from|case|default|import|extends|typeof|void|delete|as|satisfies|module)$/.test(
     word ?? '',
   );
 }
@@ -866,6 +888,7 @@ function findPreviousRegexLookbehindIndex(
 
 function findLineCommentStart(line: string): number {
   let quote: '"' | "'" | '`' | null = null;
+  let inCharacterClass = false;
 
   for (let i = 0; i < line.length - 1; i++) {
     const char = line[i];
@@ -885,9 +908,20 @@ function findLineCommentStart(line: string): number {
       continue;
     }
 
+    if (char === '[') {
+      inCharacterClass = true;
+      continue;
+    }
+
+    if (char === ']') {
+      inCharacterClass = false;
+      continue;
+    }
+
     if (
       char === '/' &&
       next === '/' &&
+      !inCharacterClass &&
       line[i - 1] !== '[' &&
       !isUrlSchemeSlash(line, i)
     ) {

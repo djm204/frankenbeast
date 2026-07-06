@@ -876,6 +876,61 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not mask slash-led prose without a regex terminator', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `/tmp before if (a) { if (b) { if (c) { if (d) { if (e) {} } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores regex braces after ASI-terminated arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const f = () => {}\n/{{{{{{/.test(s);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces in TypeScript string-literal type contexts', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const assertions = `const x = value as "{{{{{{"; const y = value satisfies "}}}}}}";`;
+    const declaration = `declare module "{{{{{{" { export const value: 1; }`;
+
+    await expect(evaluator.evaluate(createInput(assertions))).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+    await expect(evaluator.evaluate(createInput(declaration))).resolves.toEqual(
+      expect.objectContaining({
+        findings: expect.not.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('nesting'),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('ignores line-comment markers inside regex character classes', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const r = /[a//]/; /{{{{{{/.test(s);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
