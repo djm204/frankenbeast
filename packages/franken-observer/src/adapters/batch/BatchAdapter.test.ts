@@ -190,7 +190,7 @@ describe('BatchAdapter — drain()', () => {
     oldFailure.reject(new Error('old batch failed'))
     await expect(oldFlush).rejects.toThrow('old batch failed')
     await expect(newFlush).resolves.toBeUndefined()
-    expect((await batch.listTraceIds()).sort()).toEqual(['new', 'old'])
+    expect(await batch.listTraceIds()).toEqual(['old'])
   })
 
   it('surfaces failures from follow-up size-triggered drains after the older drain succeeds', async () => {
@@ -252,6 +252,27 @@ describe('BatchAdapter — drain()', () => {
 
     expect(received).toEqual(['initial', 'appended'])
     expect(await batch.listTraceIds()).toEqual([])
+  })
+
+  it('drops an older failed duplicate when a newer trace with the same id succeeds', async () => {
+    const older = { ...makeTrace('same-id'), goal: 'older' }
+    const newer = { ...makeTrace('same-id'), goal: 'newer' }
+    const inner = new InMemoryAdapter()
+    const calls: string[] = []
+    vi.spyOn(inner, 'flush').mockImplementation(async trace => {
+      calls.push(trace.goal)
+      if (trace.goal === 'older') throw new Error('stale write failed')
+      await InMemoryAdapter.prototype.flush.call(inner, trace)
+    })
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    await batch.flush(older)
+    await batch.flush(newer)
+    await batch.drain()
+
+    expect(await batch.listTraceIds()).toEqual(['same-id'])
+    expect(await batch.queryByTraceId('same-id')).toEqual(newer)
+    expect(calls).toEqual(['older', 'newer'])
   })
 })
 

@@ -61,7 +61,7 @@ export class BatchAdapter implements ExportAdapter {
 
     if (options.flushIntervalMs && options.flushIntervalMs > 0) {
       const si = options.setInterval ?? setInterval
-      this.timer = si(() => { void this.drain() }, options.flushIntervalMs)
+      this.timer = si(() => { void this.drain().catch(() => undefined) }, options.flushIntervalMs)
     }
   }
 
@@ -70,7 +70,7 @@ export class BatchAdapter implements ExportAdapter {
     warnIfTraceHasActiveSpans(trace, 'BatchAdapter')
     this.buffer.push(trace)
     if (this.buffer.length >= this.maxBatchSize) {
-      await this.drainForSizeTriggeredFlush()
+      await this.drainForSizeTriggeredFlush(trace)
     }
   }
 
@@ -88,7 +88,10 @@ export class BatchAdapter implements ExportAdapter {
       } catch (error) {
         currentFailure = error
       }
-      if (this.buffer.length > 0) await this.drain()
+      if (this.buffer.length > 0) {
+        await this.drain()
+        return
+      }
       if (currentFailure !== null) {
         throw currentFailure instanceof Error ? currentFailure : new Error(String(currentFailure))
       }
@@ -105,7 +108,7 @@ export class BatchAdapter implements ExportAdapter {
     }
   }
 
-  private async drainForSizeTriggeredFlush(): Promise<void> {
+  private async drainForSizeTriggeredFlush(triggerTrace: Trace): Promise<void> {
     if (this.drainPromise === null) {
       await this.drain()
       return
@@ -115,6 +118,15 @@ export class BatchAdapter implements ExportAdapter {
     try {
       await currentDrain
     } catch {
+      if (this.buffer.length > 0) {
+        try {
+          await this.drain()
+        } catch (error) {
+          if (this.buffer.includes(triggerTrace)) {
+            throw error instanceof Error ? error : new Error(String(error))
+          }
+        }
+      }
       return
     }
 
@@ -127,12 +139,24 @@ export class BatchAdapter implements ExportAdapter {
     const results = await Promise.allSettled(batch.map(t => this.inner.flush(t)))
     const failures: unknown[] = []
 
+    const latestSucceededIndexByTraceId = new Map<string, number>()
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]?.status === 'fulfilled') latestSucceededIndexByTraceId.set(batch[i]!.id, i)
+    }
+
     for (let i = 0; i < results.length; i++) {
       const result = results[i]
+      const trace = batch[i]!
       if (result.status === 'fulfilled') {
-        const index = this.buffer.indexOf(batch[i]!)
+        const index = this.buffer.indexOf(trace)
         if (index !== -1) this.buffer.splice(index, 1)
       } else {
+        const latestSucceededIndex = latestSucceededIndexByTraceId.get(trace.id)
+        if (latestSucceededIndex !== undefined && latestSucceededIndex > i) {
+          const index = this.buffer.indexOf(trace)
+          if (index !== -1) this.buffer.splice(index, 1)
+          continue
+        }
         failures.push(result.reason)
       }
     }
