@@ -19,7 +19,7 @@ import { handleSecurityCommand } from './security-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast, readActivePlanName, writeActivePlanName } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
@@ -809,11 +809,14 @@ export async function main(): Promise<void> {
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides
+  const implicitPlanName = args.designDoc
+    ? generatePlanName(args.designDoc)
+    : (readActivePlanName(root) ?? generatePlanName());
   const planName = planDirOverride
     ? undefined
     : (args.planName ?? (args.subcommand === 'issues'
       ? undefined
-      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
+      : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
   const runPlanDir = planDirOverride ?? paths.plansDir;
@@ -1099,6 +1102,16 @@ export async function main(): Promise<void> {
     args.providers ?? config.providers.fallbackChain,
     config.providers.overrides,
   );
+
+  if (planName && !planDirOverride && (
+    args.planName !== undefined
+    || args.designDoc !== undefined
+    || args.subcommand === 'interview'
+    || args.subcommand === 'plan'
+    || args.subcommand === undefined
+  )) {
+    writeActivePlanName(paths, planName);
+  }
 
   // Create and run session
   // Precedence: CLI args > config file > defaults
