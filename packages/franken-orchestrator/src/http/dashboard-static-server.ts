@@ -25,6 +25,13 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+const VALID_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+type DashboardBuildStatus =
+  | { state: 'ready' }
+  | { state: 'building' }
+  | { state: 'failed'; message: string };
+
 const HOP_BY_HOP_HEADERS = [
   'connection',
   'keep-alive',
@@ -40,6 +47,7 @@ export interface DashboardStaticResponseOptions {
   apiTarget?: string | undefined;
   operatorToken?: string | undefined;
   signal?: AbortSignal | undefined;
+  buildStatus?: DashboardBuildStatus | undefined;
 }
 
 export interface DashboardStaticServerOptions extends DashboardStaticResponseOptions {
@@ -75,7 +83,7 @@ function removeHopByHopHeaders(headers: Headers): void {
   const connectionTokens = headers.get('connection')
     ?.split(',')
     .map((token) => token.trim().toLowerCase())
-    .filter(Boolean) ?? [];
+    .filter((token) => token && VALID_HEADER_NAME.test(token)) ?? [];
   for (const header of [...HOP_BY_HOP_HEADERS, 'host', ...connectionTokens]) {
     headers.delete(header);
   }
@@ -180,6 +188,23 @@ export async function createDashboardStaticResponse(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') {
+    if (options.buildStatus?.state === 'building') {
+      return response(JSON.stringify({ service: SERVICE_IDENTITY, ok: false, reason: 'dashboard-build-building' }), {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
+    if (options.buildStatus?.state === 'failed') {
+      return response(JSON.stringify({
+        service: SERVICE_IDENTITY,
+        ok: false,
+        reason: 'dashboard-build-failed',
+        message: options.buildStatus.message,
+      }), {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
     const indexPath = resolveSafeAssetPath(staticDir, '/index.html');
     const index = indexPath ? await readStaticFile(indexPath) : undefined;
     if (!index) {
@@ -339,29 +364,35 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   });
 }
 
-function runOptionalBuild(options: DashboardStaticServerOptions): Promise<void> {
+function startOptionalBuild(options: DashboardStaticServerOptions): DashboardBuildStatus {
   if (!options.buildCommand) {
-    return Promise.resolve();
+    return { state: 'ready' };
   }
-  return new Promise((resolveBuild, rejectBuild) => {
-    const child = spawn(options.buildCommand as string, options.buildArgs ?? [], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: 'inherit',
-    });
-    child.once('error', rejectBuild);
-    child.once('exit', (code) => {
-      if (code && code !== 0) {
-        rejectBuild(new Error(`Dashboard build command exited with status ${code}`));
-        return;
-      }
-      resolveBuild();
-    });
+  const status: DashboardBuildStatus = { state: 'building' };
+  const child = spawn(options.buildCommand, options.buildArgs ?? [], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'inherit',
   });
+  child.once('error', (error) => {
+    Object.assign(status, { state: 'failed', message: error.message });
+  });
+  child.once('exit', (code, signal) => {
+    if (code === 0) {
+      Object.assign(status, { state: 'ready' });
+      return;
+    }
+    const message = signal
+      ? `Dashboard build command terminated by signal ${signal}`
+      : `Dashboard build command exited with status ${code ?? 'unknown'}`;
+    Object.assign(status, { state: 'failed', message });
+    console.error(message);
+  });
+  return status;
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
-  await runOptionalBuild(options);
+  const buildStatus = startOptionalBuild(options);
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
     const abortController = new AbortController();
@@ -384,6 +415,7 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
         const request = new Request(requestUrl, requestInit);
         const staticResponse = await createDashboardStaticResponse(request, options.staticDir, {
           ...options,
+          buildStatus,
           signal: abortController.signal,
         });
         await writeWebResponse(staticResponse, req.method, res);
