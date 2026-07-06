@@ -144,8 +144,11 @@ function readStaticImportSpecifier(
 ): StringLiteralRead | null {
   let i = skipWhitespace(content, index);
 
-  // Ignore import.meta and dynamic import(...), neither of which is a static dependency declaration.
-  if (content[i] === '.' || content[i] === '(') return null;
+  // Ignore import.meta, dynamic import(...), and non-declaration object keys like
+  // `{ import: { from: 'pkg' } }`.
+  if (content[i] === '.' || content[i] === '(' || content[i] === ':') {
+    return null;
+  }
 
   if (content[i] === "'" || content[i] === '"') {
     return readQuotedString(content, i);
@@ -340,11 +343,58 @@ function isRegexLiteralStart(content: string, index: number): boolean {
     const ch = content[i]!;
     if (/\s/.test(ch)) continue;
 
+    if (
+      (ch === '+' || ch === '-') &&
+      previousNonWhitespace(content, i - 1) === ch
+    ) {
+      return false;
+    }
+
+    if (isIdentifierCharacter(ch)) {
+      const wordStart = readIdentifierStart(content, i);
+      const word = content.slice(wordStart, i + 1);
+      return REGEX_PREFIX_KEYWORDS.has(word);
+    }
+
     return '([{:;,=!?&|+-*~^%<>'.includes(ch);
   }
 
   return true;
 }
+
+function previousNonWhitespace(content: string, index: number): string | null {
+  for (let i = index; i >= 0; i--) {
+    const ch = content[i]!;
+    if (!/\s/.test(ch)) return ch;
+  }
+
+  return null;
+}
+
+function readIdentifierStart(content: string, index: number): number {
+  let i = index;
+  while (i > 0 && isIdentifierCharacter(content[i - 1]!)) i -= 1;
+  return i;
+}
+
+function isIdentifierCharacter(ch: string): boolean {
+  return /[$_A-Za-z0-9]/.test(ch);
+}
+
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'case',
+  'delete',
+  'do',
+  'else',
+  'in',
+  'instanceof',
+  'new',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+]);
 
 function skipRegexLiteral(content: string, startIndex: number): number {
   let inCharacterClass = false;

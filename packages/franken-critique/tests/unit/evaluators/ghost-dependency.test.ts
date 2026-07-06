@@ -83,9 +83,38 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('ignores object-literal import keys', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const cfg = { import: { from: 'ghost-package' } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('does not treat regex literal contents as comments', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const pattern = /[/*]/;\nimport ghost from 'ghost-package';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('recognizes regex literals after keywords', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `function check(source) { return /[/*]/.test(source); }\nrequire('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('does not treat division after postfix operators as regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const ratio = count++ / total;\nrequire('ghost-package');`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
