@@ -17,7 +17,7 @@ import { commsRoutes } from './routes/comms-routes.js';
 import { createSecurityRoutes } from './routes/security-routes.js';
 import type { SecurityConfig } from '../middleware/security-profiles.js';
 import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
-import { createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
+import { CHAT_SOCKET_TOKEN_TTL_MS, createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
 import { requireOperatorAuth } from './operator-auth.js';
@@ -214,6 +214,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     operatorToken: effectiveOperatorToken,
     streamTicketStore: chatStreamTicketStore,
     issueSocketToken: (sessionId) => issueSessionToken({
+      expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,
       sessionId,
     }),

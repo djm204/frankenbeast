@@ -15,6 +15,7 @@ import {
   attachChatWebSocketServer,
 } from '../../../src/http/ws-chat-server.js';
 import {
+  CHAT_SOCKET_TOKEN_TTL_MS,
   createSessionTokenSecret,
   issueSessionToken,
 } from '../../../src/http/ws-chat-auth.js';
@@ -75,7 +76,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -103,7 +104,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -131,7 +132,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -156,7 +157,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const runtime = new ChatRuntime({
       engine: new ConversationEngine({
         llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
@@ -205,7 +206,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const engine = {
       processTurn: vi.fn().mockResolvedValue({
         tier: 'premium_execution',
