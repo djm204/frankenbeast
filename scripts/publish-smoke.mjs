@@ -119,13 +119,19 @@ for (const dirName of RUNTIME_DIRS) {
 }
 
 // 4b. Each executable CLI's --help must exit cleanly with non-empty output.
+// Put the project's node_modules/.bin on PATH so a bin that shells out to a
+// sibling bin (e.g. `fbeast` forwards non-mcp commands to `frankenbeast`)
+// resolves it — exactly as a real co-install does, where every package bin
+// lands in the same PATH-visible directory.
+const binDir = join(proj, 'node_modules', '.bin');
+const childEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` };
 for (const { bin, mustMatch } of EXECUTABLE_BINS) {
-  const binFile = join(proj, 'node_modules', '.bin', bin);
+  const binFile = join(binDir, bin);
   if (!existsSync(binFile)) {
     fail(`bin "${bin}" was not linked into node_modules/.bin`);
     continue;
   }
-  const res = spawnSync(binFile, ['--help'], { cwd: proj, encoding: 'utf8', timeout: 30_000 });
+  const res = spawnSync(binFile, ['--help'], { cwd: proj, env: childEnv, encoding: 'utf8', timeout: 30_000 });
   if (res.error) fail(`${bin} --help failed to run: ${res.error.message}`);
   else if (res.status !== 0) fail(`${bin} --help exited ${res.status}\n${(res.stderr || '').slice(0, 500)}`);
   else if (!(res.stdout || '').trim()) fail(`${bin} --help produced no stdout`);
