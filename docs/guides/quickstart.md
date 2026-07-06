@@ -5,12 +5,15 @@ Get Frankenbeast running locally.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26` (see `.nvmrc` for the pinned local default; npm enforces this with `engine-strict=true`)
-- npm >= 10 (the repo is an npm workspaces monorepo; root `packageManager` is npm)
+- Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)
 - Docker only if you want the optional ChromaDB/Grafana/Tempo stack
 
 ## 1. Install dependencies
 
 ```bash
+corepack enable npm
+corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+npm run check:package-manager
 npm install
 ```
 

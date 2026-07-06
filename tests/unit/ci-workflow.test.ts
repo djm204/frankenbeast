@@ -49,6 +49,13 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).toContain('npm ci');
     });
 
+    it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
+      expect(content).toContain('corepack enable npm');
+      expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
+      expect(content).toContain('node scripts/check-package-manager.mjs');
+      expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
+    });
+
     it('runs turbo run build test lint', () => {
       expect(content).toContain('turbo run');
       expect(content).toMatch(/turbo run.*build.*test.*lint/);
@@ -108,6 +115,14 @@ describe('release-please.yml publishes released npm packages', () => {
     expect(content).toContain('validate-release:');
     expect(content).toContain('release-please:\n    needs: validate-release');
     expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run.*build.*typecheck.*test.*lint/);
+  });
+
+  it('enforces the packageManager-pinned npm before release installs and publishes', () => {
+    const content = readFileSync(RELEASE_PATH, 'utf-8');
+    expect(content.match(/corepack enable npm/g)?.length).toBe(2);
+    expect(content.match(/node scripts\/check-package-manager\.mjs/g)?.length).toBe(2);
+    expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
+    expect(content.lastIndexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.lastIndexOf('npm ci'));
   });
 
   it('defers npm token enforcement until a public package needs publishing', () => {
