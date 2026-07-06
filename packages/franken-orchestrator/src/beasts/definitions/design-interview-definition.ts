@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
+const promptConfigSchema = z.object({
+  text: z.string().optional(),
+  files: z.array(z.string()).optional(),
+}).strict();
+
 export const designInterviewDefinition: BeastDefinition = {
   id: 'design-interview',
   version: 1,
@@ -12,6 +17,7 @@ export const designInterviewDefinition: BeastDefinition = {
     goal: z.string().min(1),
     outputPath: z.string().min(1),
     projectRoot: z.string().optional(),
+    promptConfig: promptConfigSchema.optional(),
   }).strict(),
   interviewPrompts: [
     {

@@ -4,6 +4,11 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
+const promptConfigSchema = z.object({
+  text: z.string().optional(),
+  files: z.array(z.string()).optional(),
+}).strict();
+
 function canonicalPath(path: string): string {
   try {
     return realpathSync(path);
@@ -37,6 +42,7 @@ export const chunkPlanDefinition: BeastDefinition = {
     designDocPath: z.string().min(1),
     outputDir: z.string().min(1),
     projectRoot: z.string().optional(),
+    promptConfig: promptConfigSchema.optional(),
   }).strict(),
   interviewPrompts: [
     {

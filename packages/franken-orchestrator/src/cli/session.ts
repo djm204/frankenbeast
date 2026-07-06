@@ -18,7 +18,7 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
-import { loadRunConfigFromEnv } from './run-config-loader.js';
+import { PromptConfigSchema, RunConfigSchema, type RunConfig } from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -45,6 +45,29 @@ function resolveContainedExistingPath(projectRoot: string, requestedPath: string
   }
 
   return target;
+}
+
+function appendPromptContext(value: string, promptText: string | undefined): string {
+  if (!promptText || promptText.trim().length === 0) return value;
+  return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
+}
+
+function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  const raw = readFileSync(filePath, 'utf-8');
+  const parsed = JSON.parse(raw) as { promptConfig?: unknown };
+  if (!parsed.promptConfig) return undefined;
+  return PromptConfigSchema.parse(parsed.promptConfig);
+}
+
+function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  const raw = readFileSync(filePath, 'utf-8');
+  const parsed = JSON.parse(raw) as unknown;
+  const result = RunConfigSchema.safeParse(parsed);
+  return result.success ? result.data : undefined;
 }
 
 export interface SessionConfig {
@@ -243,8 +266,9 @@ export class Session {
         },
       };
 
+      const promptConfig = loadPromptConfigFromEnv();
       const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
-      await capturingInterview.build({ goal: 'Gather requirements' });
+      await capturingInterview.build({ goal: appendPromptContext('Gather requirements', promptConfig?.text) });
 
       const displayDesignCard = (designDoc: string): string => {
         const designPath = writeDesignDoc(paths, designDoc);
@@ -326,6 +350,9 @@ export class Session {
       }
       designContent = stored;
     }
+
+    const promptConfig = loadPromptConfigFromEnv();
+    designContent = appendPromptContext(designContent, promptConfig?.text);
 
     const inferredPlanName = paths.plansDir.split('/').filter(Boolean).pop() ?? 'plans';
     const planName = this.config.planDirOverride
@@ -470,10 +497,11 @@ export class Session {
     loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 
     try {
+      const promptConfig = loadPromptConfigFromEnv();
       const result = await new BeastLoop(fullDeps, loopConfig).run({
         projectId,
         sessionId: runSessionId,
-        userInput: `Process chunks in ${chunkDir}`,
+        userInput: appendPromptContext(`Process chunks in ${chunkDir}`, promptConfig?.text),
       });
 
       this.displaySummary(result);
@@ -589,7 +617,7 @@ export class Session {
       reset: this.config.reset,
       resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,
-      runConfig: loadRunConfigFromEnv(),
+      runConfig: loadCompatibleRunConfigFromEnv(),
       orchestratorConfig: this.config.orchestratorConfig,
     };
   }

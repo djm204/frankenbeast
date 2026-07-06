@@ -2,6 +2,30 @@ export const WIZARD_SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 's
 
 type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 
+interface PromptFile {
+  name?: unknown;
+  content?: unknown;
+}
+
+function buildPromptFrontload(prompts: Record<string, unknown> | undefined): string | undefined {
+  if (!prompts) return undefined;
+
+  const parts: string[] = [];
+  if (typeof prompts.promptText === 'string' && prompts.promptText.trim().length > 0) {
+    parts.push(prompts.promptText.trim());
+  }
+
+  const files = Array.isArray(prompts.files) ? (prompts.files as PromptFile[]) : [];
+  const fileSections = files.flatMap((file) => {
+    if (typeof file.content !== 'string' || file.content.length === 0) return [];
+    const name = typeof file.name === 'string' && file.name.trim().length > 0 ? file.name.trim() : 'attached-file';
+    return [`Attached file: ${name}\n\n${file.content}`];
+  });
+  parts.push(...fileSections);
+
+  return parts.length > 0 ? parts.join('\n\n---\n\n') : undefined;
+}
+
 export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<string, unknown> {
   const config: Record<string, unknown> = {};
 
@@ -12,6 +36,11 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
   }
 
   const workflow = config.workflow as Record<string, unknown> | undefined;
+  const promptFrontload = buildPromptFrontload(config.prompts as Record<string, unknown> | undefined);
+  if (promptFrontload) {
+    config.promptConfig = { text: promptFrontload };
+    delete config.prompts;
+  }
   if (workflow?.executionMode === 'process' || workflow?.executionMode === 'container') {
     config.executionMode = workflow.executionMode;
   } else {
