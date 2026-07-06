@@ -155,13 +155,13 @@ async function fetchServiceIdentity(url: string): Promise<string | undefined> {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      return undefined;
-    }
-
     const headerIdentity = response.headers.get('x-frankenbeast-service');
     if (headerIdentity) {
       return headerIdentity;
+    }
+
+    if (!response.ok) {
+      return undefined;
     }
 
     const contentType = response.headers.get('content-type') ?? '';

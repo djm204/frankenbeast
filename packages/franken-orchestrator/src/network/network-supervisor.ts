@@ -60,10 +60,12 @@ function collectDependents(services: ManagedNetworkServiceState[], target: strin
 export class NetworkSupervisor {
   private readonly now: () => string;
   private readonly startupAttempts: number;
+  private readonly startupAttemptsExplicit: boolean;
   private readonly startupDelayMs: number;
 
   constructor(private readonly deps: NetworkSupervisorDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.startupAttemptsExplicit = deps.startupAttempts !== undefined;
     this.startupAttempts = deps.startupAttempts ?? 20;
     this.startupDelayMs = deps.startupDelayMs ?? 250;
   }
@@ -328,7 +330,7 @@ export class NetworkSupervisor {
   }
 
   private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
-    const startupAttempts = service.serviceIdentity === 'dashboard-web'
+    const startupAttempts = service.serviceIdentity === 'dashboard-web' && !this.startupAttemptsExplicit
       ? Math.max(this.startupAttempts, 240)
       : this.startupAttempts;
     for (let attempt = 0; attempt < startupAttempts; attempt += 1) {

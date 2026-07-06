@@ -399,7 +399,7 @@ function startOptionalBuild(options: DashboardStaticServerOptions): DashboardBui
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
-  const buildStatus = startOptionalBuild(options);
+  let buildStatus: DashboardBuildStatus = options.buildCommand ? { state: 'building' } : { state: 'ready' };
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
     const abortController = new AbortController();
@@ -443,6 +443,7 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
     server.once('error', rejectListen);
     server.listen(options.port, options.host, () => {
       server.off('error', rejectListen);
+      buildStatus = startOptionalBuild(options);
       resolveListen();
     });
   });
@@ -452,9 +453,7 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
 async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | undefined> {
   try {
     const parsed = parseDotenv(await readFile(filePath, 'utf8'));
-    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim()
-      || parsed.VITE_BEAST_OPERATOR_TOKEN?.trim()
-      || undefined;
+    return parsed.FRANKENBEAST_BEAST_OPERATOR_TOKEN?.trim() || undefined;
   } catch {
     return undefined;
   }
