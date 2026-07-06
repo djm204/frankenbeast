@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
-import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { TraceContext } from '../core/TraceContext.js'
 import { SpanLifecycle } from '../core/SpanLifecycle.js'
@@ -27,6 +27,20 @@ function makeTrace() {
     TraceContext.endSpan(span)
   }
   TraceContext.endTrace(trace)
+  return trace
+}
+
+function isInsideDirectory(baseDir: string, targetPath: string): boolean {
+  const relativePath = relative(resolve(baseDir), resolve(targetPath))
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+}
+
+function makeTraceWithId(id: string) {
+  const trace = makeTrace()
+  trace.id = id
+  for (const span of trace.spans) {
+    span.traceId = id
+  }
   return trace
 }
 
@@ -105,15 +119,17 @@ describe('PostMortemGenerator', () => {
       const gen = new PostMortemGenerator({ outputDir })
       const trace = makeTrace()
       const filePath = await gen.generate(trace, makeSignal(trace.id))
-      expect(existsSync(filePath)).toBe(true)
-      expect(filePath.endsWith('.md')).toBe(true)
+      expect(filePath).not.toBeNull()
+      expect(existsSync(filePath!)).toBe(true)
+      expect(filePath!.endsWith('.md')).toBe(true)
     })
 
     it('filename contains the trace id', async () => {
       const gen = new PostMortemGenerator({ outputDir })
       const trace = makeTrace()
       const filePath = await gen.generate(trace, makeSignal(trace.id))
-      expect(filePath).toContain(trace.id)
+      expect(filePath).not.toBeNull()
+      expect(filePath!).toContain(trace.id)
     })
 
     it('written file content matches generateContent()', async () => {
@@ -131,6 +147,122 @@ describe('PostMortemGenerator', () => {
       const gen = new PostMortemGenerator({ outputDir: nested })
       const trace = makeTrace()
       const filePath = await gen.generate(trace, makeSignal(trace.id))
+      expect(existsSync(filePath!)).toBe(true)
+    })
+
+    it('keeps reports under outputDir when trace ids contain traversal, absolute paths, or separators', async () => {
+      const parentDir = join(tmpdir(), `pm-parent-${randomUUID()}`)
+      const containedOutputDir = join(parentDir, 'reports')
+      const maliciousIds = [
+        `trace${sep}..${sep}..${sep}escaped`,
+        join(tmpdir(), 'absolute-trace-id'),
+        'slash/and\\backslash',
+      ]
+
+      try {
+        for (const traceId of maliciousIds) {
+          const gen = new PostMortemGenerator({ outputDir: containedOutputDir })
+          const trace = makeTraceWithId(traceId)
+          const filePath = await gen.generate(trace, makeSignal(trace.id))
+
+          expect(filePath).not.toBeNull()
+          expect(isInsideDirectory(containedOutputDir, filePath!)).toBe(true)
+          expect(existsSync(filePath!)).toBe(true)
+        }
+
+        const escapedReports = maliciousIds.map(
+          traceId => resolve(containedOutputDir, `post-mortem-${traceId}-1700000000000.md`),
+        )
+        expect(escapedReports.some(path => !isInsideDirectory(containedOutputDir, path) && existsSync(path))).toBe(false)
+      } finally {
+        rmSync(parentDir, { recursive: true, force: true })
+      }
+    })
+
+    it('enforces containment when outputDir is a symlink', async () => {
+      const parentDir = join(tmpdir(), `pm-symlink-parent-${randomUUID()}`)
+      const realOutputDir = join(parentDir, 'real-reports')
+      const symlinkedOutputDir = join(parentDir, 'reports-link')
+      mkdirSync(realOutputDir, { recursive: true })
+      symlinkSync(realOutputDir, symlinkedOutputDir, 'dir')
+
+      try {
+        const gen = new PostMortemGenerator({ outputDir: symlinkedOutputDir })
+        const trace = makeTraceWithId(`trace${sep}..${sep}..${sep}escaped-from-symlink`)
+        const filePath = await gen.generate(trace, makeSignal(trace.id))
+
+        expect(filePath).not.toBeNull()
+        expect(isInsideDirectory(symlinkedOutputDir, filePath!)).toBe(true)
+        expect(existsSync(filePath!)).toBe(true)
+
+        const escapedPath = resolve(realOutputDir, `post-mortem-${trace.id}-1700000000000.md`)
+        expect(isInsideDirectory(realOutputDir, escapedPath)).toBe(false)
+        expect(existsSync(escapedPath)).toBe(false)
+      } finally {
+        rmSync(parentDir, { recursive: true, force: true })
+      }
+    })
+
+    it('does not follow a symlink at the report file path', async () => {
+      const parentDir = join(tmpdir(), `pm-leaf-symlink-parent-${randomUUID()}`)
+      const reportsDir = join(parentDir, 'reports')
+      const outsidePath = join(parentDir, 'outside.md')
+      const trace = makeTraceWithId('symlink-target')
+      const signal = makeSignal(trace.id)
+      const expectedReportPath = join(reportsDir, `post-mortem-symlink-target-${signal.timestamp}.md`)
+
+      mkdirSync(reportsDir, { recursive: true })
+      writeFileSync(outsidePath, 'do not overwrite')
+      symlinkSync(outsidePath, expectedReportPath)
+
+      try {
+        const gen = new PostMortemGenerator({ outputDir: reportsDir })
+        const filePath = await gen.generate(trace, signal)
+
+        expect(filePath).toBeNull()
+        expect(readFileSync(outsidePath, 'utf-8')).toBe('do not overwrite')
+      } finally {
+        rmSync(parentDir, { recursive: true, force: true })
+      }
+    })
+
+    it('preserves configured relative outputDir in the returned path', async () => {
+      const relativeOutputDir = `.pm-relative-${randomUUID()}`
+
+      try {
+        const gen = new PostMortemGenerator({ outputDir: relativeOutputDir })
+        const trace = makeTrace()
+        const filePath = await gen.generate(trace, makeSignal(trace.id))
+
+        expect(filePath).not.toBeNull()
+        expect(isAbsolute(filePath!)).toBe(false)
+        expect(filePath!.startsWith(relativeOutputDir)).toBe(true)
+        expect(existsSync(filePath!)).toBe(true)
+      } finally {
+        rmSync(relativeOutputDir, { recursive: true, force: true })
+      }
+    })
+
+    it('uses reversible trace id encoding so separator-like ids do not overwrite distinct reports', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const signalTimestamp = 1_700_000_000_000
+      const firstPath = await gen.generate(makeTraceWithId('run\\1'), makeSignal('run\\1', { timestamp: signalTimestamp }))
+      const secondPath = await gen.generate(makeTraceWithId('run_1'), makeSignal('run_1', { timestamp: signalTimestamp }))
+
+      expect(firstPath).not.toBeNull()
+      expect(secondPath).not.toBeNull()
+      expect(firstPath).not.toBe(secondPath)
+      expect(existsSync(firstPath!)).toBe(true)
+      expect(existsSync(secondPath!)).toBe(true)
+    })
+
+    it('does not throw when encoding malformed UTF-16 trace ids', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const malformedTraceId = 'run-\uD800'
+      const filePath = await gen.generate(makeTraceWithId(malformedTraceId), makeSignal(malformedTraceId))
+
+      expect(filePath).not.toBeNull()
+      expect(isInsideDirectory(outputDir, filePath!)).toBe(true)
       expect(existsSync(filePath!)).toBe(true)
     })
   })
@@ -193,8 +325,8 @@ describe('PostMortemGenerator', () => {
 
       const postMortemDone = new Promise<string>(resolve => {
         emitter.on('interrupt', async signal => {
-          const path = await gen.generate(trace, signal)
-          resolve(path)
+          const generatedPath = await gen.generate(trace, signal)
+          if (typeof generatedPath === 'string') resolve(generatedPath)
         })
       })
 
