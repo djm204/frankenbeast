@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.8](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.7...franken-planner-v0.4.8) (2026-07-06)
+
+
+### Bug Fixes
+
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+
+
+### Refactoring
+
+* **planner:** extract fix-it injection logic ([fb2579c](https://github.com/djm204/frankenbeast/commit/fb2579c4f1980a1fb6572d16b89c8a1424ba5e63)), closes [#642](https://github.com/djm204/frankenbeast/issues/642)
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.4 to 0.7.5
+
 ## [0.4.7](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.6...franken-planner-v0.4.7) (2026-07-05)
 
 

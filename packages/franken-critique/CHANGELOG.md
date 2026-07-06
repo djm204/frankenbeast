@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.10](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.9...franken-critique-v0.6.10) (2026-07-06)
+
+
+### Bug Fixes
+
+* **critique:** remove literal fixme markers ([#793](https://github.com/djm204/frankenbeast/issues/793)) ([d2f1e2d](https://github.com/djm204/frankenbeast/commit/d2f1e2d88c873a5f6733424b7f5810f41ba334f4))
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+* **repo:** remove literal todo markers ([ee3026b](https://github.com/djm204/frankenbeast/commit/ee3026ba9e8a753d378fd69818b2e4d868398f7f)), closes [#563](https://github.com/djm204/frankenbeast/issues/563)
+* **security:** remove Function usage ([#796](https://github.com/djm204/frankenbeast/issues/796)) ([b2f3c7f](https://github.com/djm204/frankenbeast/commit/b2f3c7f5199348c110056c7356d0b599f09b014b))
+
+
+### Miscellaneous
+
+* **docs:** remove todo marker literals ([c960582](https://github.com/djm204/frankenbeast/commit/c960582583d30a91c883bd4de160127987f2cdf1)), closes [#594](https://github.com/djm204/frankenbeast/issues/594)
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+
+
+### Tests
+
+* **security:** remove eval fixtures from tests ([f222ef9](https://github.com/djm204/frankenbeast/commit/f222ef91bc6468fea4c33eee83d9b3dba75d9403)), closes [#559](https://github.com/djm204/frankenbeast/issues/559)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.4 to 0.7.5
+
 ## [0.6.9](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.8...franken-critique-v0.6.9) (2026-07-05)
 
 

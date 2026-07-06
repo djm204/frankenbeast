@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.10](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.9...franken-observer-v0.7.10) (2026-07-06)
+
+
+### Bug Fixes
+
+* **observer:** optimize trace summaries ([#781](https://github.com/djm204/frankenbeast/issues/781)) ([447ef1c](https://github.com/djm204/frankenbeast/commit/447ef1c9041c6256ac64b3d25aba131f2c79eb9f))
+* **observer:** validate replay content refs ([5f8c120](https://github.com/djm204/frankenbeast/commit/5f8c1201da8dee267486dde3f0ebb7799a0e4ff7)), closes [#618](https://github.com/djm204/frankenbeast/issues/618)
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+* **test:** validate Vitest environment flags ([1479dce](https://github.com/djm204/frankenbeast/commit/1479dcefc5bedfd065667fba75e2bd48b7a1ba5e)), closes [#557](https://github.com/djm204/frankenbeast/issues/557)
+
+
+### Refactoring
+
+* **observer:** unify content hashing and cache token totals ([#789](https://github.com/djm204/frankenbeast/issues/789)) ([0fe0c02](https://github.com/djm204/frankenbeast/commit/0fe0c02cf35d2f71b19436dbddef7d217f6e0a0e))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Tests
+
+* replace secret-looking fixture literals ([#787](https://github.com/djm204/frankenbeast/issues/787)) ([e9b5d8a](https://github.com/djm204/frankenbeast/commit/e9b5d8af10d7144290ce0e513658c3b41b8f9597))
+* **security:** avoid password literals in fixtures ([#788](https://github.com/djm204/frankenbeast/issues/788)) ([f411648](https://github.com/djm204/frankenbeast/commit/f41164879b1b35152d7bdc02b5e83dd586dd2344))
+
 ## [0.7.9](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.8...franken-observer-v0.7.9) (2026-07-05)
 
 
