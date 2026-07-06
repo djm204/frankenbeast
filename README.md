@@ -512,7 +512,8 @@ cd packages/franken-orchestrator && npm run test:e2e
 cp .env.example .env
 $EDITOR .env  # uncomment GRAFANA_USER=admin and set a unique GRAFANA_PASSWORD
 
-# Start supporting services (ChromaDB, Grafana, Tempo)
+# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
+# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
 # Seed ChromaDB with initial collections

@@ -56,6 +56,24 @@ describe('local setup scripts', () => {
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
   });
 
+  it('pins local compose images and mounts an explicit Tempo config', () => {
+    const compose = read('docker-compose.yml');
+    const tempoConfig = read('tempo.yaml');
+
+    expect(compose).toContain('image: chromadb/chroma:1.3.5');
+    expect(compose).toContain('image: grafana/grafana:12.3.0');
+    expect(compose).toContain('image: grafana/tempo:2.9.0');
+    expect(compose).not.toContain(':latest');
+    expect(compose).toContain('- ./tempo.yaml:/etc/tempo.yaml:ro');
+    expect(compose).toContain("command: ['-config.file=/etc/tempo.yaml']");
+
+    expect(tempoConfig).toContain('http_listen_port: 3200');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4317');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4318');
+    expect(tempoConfig).toContain('path: /tmp/tempo/wal');
+    expect(tempoConfig).toContain('path: /tmp/tempo/blocks');
+  });
+
   it('requires explicit non-default Grafana admin credentials for local compose', () => {
     const compose = read('docker-compose.yml');
 
