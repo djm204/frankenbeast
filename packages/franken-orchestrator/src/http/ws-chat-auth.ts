@@ -1,7 +1,9 @@
 import { TransportSecurityService } from './security/transport-security.js';
 
+export const CHAT_SOCKET_TOKEN_TTL_MS = 5 * 60 * 1000;
+
 export interface IssueSessionTokenOptions {
-  expiresInMs?: number;
+  expiresInMs: number;
   secret: string;
   sessionId: string;
 }
@@ -28,11 +30,15 @@ export function createSessionTokenSecret(): string {
 }
 
 export function issueSessionToken(options: IssueSessionTokenOptions): string {
+  if (!Number.isFinite(options.expiresInMs) || options.expiresInMs <= 0) {
+    throw new Error('expiresInMs must be a positive finite number');
+  }
+
   return transportSecurity.issueSignedToken({
     secret: options.secret,
     subject: options.sessionId,
     scope: SESSION_SCOPE,
-    ...(options.expiresInMs !== undefined ? { expiresInMs: options.expiresInMs } : {}),
+    expiresInMs: options.expiresInMs,
   });
 }
 
