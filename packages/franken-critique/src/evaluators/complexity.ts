@@ -129,7 +129,11 @@ function maskStructuralLiterals(content: string): string {
       continue;
     }
 
-    if (char === '/' && hasRegexTerminatorBeforeLineEnd(content, i)) {
+    if (
+      char === '/' &&
+      isStructuralRegexPrefix(content, i) &&
+      hasRegexTerminatorBeforeLineEnd(content, i)
+    ) {
       const end = findRegexLiteralEnd(content, i);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
@@ -150,6 +154,17 @@ function maskStructuralLiterals(content: string): string {
   }
 
   return sanitized;
+}
+
+function isStructuralRegexPrefix(content: string, slashIndex: number): boolean {
+  let previousIndex = slashIndex - 1;
+  while (previousIndex >= 0 && /\s/.test(content[previousIndex] ?? '')) {
+    previousIndex--;
+  }
+  if (previousIndex < 0) return true;
+
+  const previous = content[previousIndex] ?? '';
+  return '=([{,:;,!+-*?/&|^~<>}'.includes(previous);
 }
 
 function findLineEnd(content: string, start: number): number {
