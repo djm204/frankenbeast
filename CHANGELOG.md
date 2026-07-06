@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.41.1](https://github.com/djm204/frankenbeast/compare/v0.41.0...v0.41.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* **cli:** surface non-interactive HITL remedy ([02d65d9](https://github.com/djm204/frankenbeast/commit/02d65d993e533df5bb001f06a57abb9dad657805)), closes [#748](https://github.com/djm204/frankenbeast/issues/748)
+* **critique:** remove literal fixme markers ([#793](https://github.com/djm204/frankenbeast/issues/793)) ([d2f1e2d](https://github.com/djm204/frankenbeast/commit/d2f1e2d88c873a5f6733424b7f5810f41ba334f4))
+* **orchestrator:** validate telegram webhook secret token ([#805](https://github.com/djm204/frankenbeast/issues/805)) ([b6c9cb5](https://github.com/djm204/frankenbeast/commit/b6c9cb5efbc6059e63eaf8356a573d8db8df341a))
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* **release:** publish npm packages from releases ([#764](https://github.com/djm204/frankenbeast/issues/764)) ([e25ca62](https://github.com/djm204/frankenbeast/commit/e25ca62602289193297976ce92548c92930b67cf)), closes [#741](https://github.com/djm204/frankenbeast/issues/741)
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+* **repo:** remove literal todo markers ([ee3026b](https://github.com/djm204/frankenbeast/commit/ee3026ba9e8a753d378fd69818b2e4d868398f7f)), closes [#563](https://github.com/djm204/frankenbeast/issues/563)
+* **runtime:** proxy chat-server when beast daemon is live ([#767](https://github.com/djm204/frankenbeast/issues/767)) ([7a1669a](https://github.com/djm204/frankenbeast/commit/7a1669a9f909356355bf7fb0df4ace468458bb98))
+* **scripts:** update local setup checks for Chroma v2 ([d1e14c3](https://github.com/djm204/frankenbeast/commit/d1e14c3d3a90652eae491ec57aaa0a58e22efe2d))
+* **security:** redact Telegram bot token URLs ([fdda455](https://github.com/djm204/frankenbeast/commit/fdda455f88d4f720f8221030857b1594f39482f1))
+* **security:** reject non-loopback plaintext endpoints ([#733](https://github.com/djm204/frankenbeast/issues/733)) ([78741d1](https://github.com/djm204/frankenbeast/commit/78741d1c3c779e4baced6acd75190f36cb445435))
+* **security:** remove Function usage ([#796](https://github.com/djm204/frankenbeast/issues/796)) ([b2f3c7f](https://github.com/djm204/frankenbeast/commit/b2f3c7f5199348c110056c7356d0b599f09b014b))
+* serve dashboard from production build ([#775](https://github.com/djm204/frankenbeast/issues/775)) ([7a4f8ab](https://github.com/djm204/frankenbeast/commit/7a4f8ab272c5c3dc5d06749d90f86284c63629d6))
+* **test:** centralize token literals ([606f2db](https://github.com/djm204/frankenbeast/commit/606f2db3059d9fe33874cf2a8355658395f700b5)), closes [#610](https://github.com/djm204/frankenbeast/issues/610)
+* **test:** validate Vitest environment flags ([1479dce](https://github.com/djm204/frankenbeast/commit/1479dcefc5bedfd065667fba75e2bd48b7a1ba5e)), closes [#557](https://github.com/djm204/frankenbeast/issues/557)
+
+
+### Miscellaneous
+
+* **docs:** remove todo marker literals ([c960582](https://github.com/djm204/frankenbeast/commit/c960582583d30a91c883bd4de160127987f2cdf1)), closes [#594](https://github.com/djm204/frankenbeast/issues/594)
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Documentation
+
+* **env:** reconcile local environment example ([cf5f16b](https://github.com/djm204/frankenbeast/commit/cf5f16b2f9b207479f6e38c91d12774d55143cf9)), closes [#755](https://github.com/djm204/frankenbeast/issues/755)
+* **mcp-suite:** align walkthrough with current behavior ([47f217f](https://github.com/djm204/frankenbeast/commit/47f217f822431d22bdfb09958cb9f9250052d611)), closes [#515](https://github.com/djm204/frankenbeast/issues/515)
+* refresh agent ramp-up guidance ([de6861e](https://github.com/djm204/frankenbeast/commit/de6861eb115e6187deeb857d33c8cf5f72f393d1)), closes [#511](https://github.com/djm204/frankenbeast/issues/511)
+* **tasks:** record Codex final-gate lesson ([6a288e9](https://github.com/djm204/frankenbeast/commit/6a288e96da7470e83f2c2d28d90abd6eb97f5ede))
+
+
+### Tests
+
+* **orchestrator:** cover live comms route mounting ([#765](https://github.com/djm204/frankenbeast/issues/765)) ([0779e89](https://github.com/djm204/frankenbeast/commit/0779e897f56a1cd4c0ae90fd161115513b856e30))
+* replace secret-looking fixture literals ([#787](https://github.com/djm204/frankenbeast/issues/787)) ([e9b5d8a](https://github.com/djm204/frankenbeast/commit/e9b5d8af10d7144290ce0e513658c3b41b8f9597))
+* **security:** cover exposed unsigned webhook startup guard ([#724](https://github.com/djm204/frankenbeast/issues/724)) ([5f2b2c1](https://github.com/djm204/frankenbeast/commit/5f2b2c1096140a1b125f017f3b73314308d0a503))
+* **security:** remove dynamic eval fixture from e2e beast loop ([bfb0ea0](https://github.com/djm204/frankenbeast/commit/bfb0ea0ca077a6faaa9d709ade1500e3e87ace9c)), closes [#556](https://github.com/djm204/frankenbeast/issues/556)
+* **security:** remove eval fixtures from tests ([f222ef9](https://github.com/djm204/frankenbeast/commit/f222ef91bc6468fea4c33eee83d9b3dba75d9403)), closes [#559](https://github.com/djm204/frankenbeast/issues/559)
+
 ## [0.41.0](https://github.com/djm204/frankenbeast/compare/v0.40.5...v0.41.0) (2026-07-05)
 
 

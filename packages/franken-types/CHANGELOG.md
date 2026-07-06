@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.5](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.4...franken-types-v0.7.5) (2026-07-06)
+
+
+### Bug Fixes
+
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
 ## [0.7.4](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.3...franken-types-v0.7.4) (2026-07-05)
 
 

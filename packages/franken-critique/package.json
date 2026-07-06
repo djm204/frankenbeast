@@ -1,6 +1,6 @@
 {
   "name": "@franken/critique",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "description": "MOD-06: Self-Critique & Reflection — evaluator pipeline, circuit breakers, and critique loop for the Frankenbeast orchestrator",
   "type": "module",
   "main": "./dist/index.js",
@@ -52,7 +52,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.7.4",
+    "@franken/types": "0.7.5",
     "hono": "^4.12.27",
     "zod": "^3.24.0"
   }

@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.39.1](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.39.0...franken-orchestrator-v0.39.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* **cli:** guide run users when no plan exists ([#778](https://github.com/djm204/frankenbeast/issues/778)) ([c0b334f](https://github.com/djm204/frankenbeast/commit/c0b334f8e48bad431feb4196a76364b0eecb4b3e))
+* **cli:** pass provider override extra args ([6180dc9](https://github.com/djm204/frankenbeast/commit/6180dc972f66525b283e78e9e34af16a6356f39c))
+* **cli:** surface non-interactive HITL remedy ([02d65d9](https://github.com/djm204/frankenbeast/commit/02d65d993e533df5bb001f06a57abb9dad657805)), closes [#748](https://github.com/djm204/frankenbeast/issues/748)
+* **orchestrator:** handle missing provider CLIs ([#762](https://github.com/djm204/frankenbeast/issues/762)) ([6a9235d](https://github.com/djm204/frankenbeast/commit/6a9235dfca6538a27023c836473c9e0ea639a8c0))
+* **orchestrator:** redact configured Beast log secrets ([f81b2e7](https://github.com/djm204/frankenbeast/commit/f81b2e79d379de5ce4b5f0abcd0046ead72aa7a0))
+* **orchestrator:** reuse beast control services ([#807](https://github.com/djm204/frankenbeast/issues/807)) ([590e82c](https://github.com/djm204/frankenbeast/commit/590e82c4dabc17098f943b808e88796bc3a5b683))
+* **orchestrator:** validate Slack interactive payloads ([766b75e](https://github.com/djm204/frankenbeast/commit/766b75ec623619a4b9f6e8dd9da09a35b955a7ca))
+* **orchestrator:** validate telegram webhook secret token ([#805](https://github.com/djm204/frankenbeast/issues/805)) ([b6c9cb5](https://github.com/djm204/frankenbeast/commit/b6c9cb5efbc6059e63eaf8356a573d8db8df341a))
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+* **runtime:** proxy chat-server when beast daemon is live ([#767](https://github.com/djm204/frankenbeast/issues/767)) ([7a1669a](https://github.com/djm204/frankenbeast/commit/7a1669a9f909356355bf7fb0df4ace468458bb98))
+* **security:** move chat socket tokens out of URLs ([#721](https://github.com/djm204/frankenbeast/issues/721)) ([71fd2f7](https://github.com/djm204/frankenbeast/commit/71fd2f76b7655f9ecbed802452b554b7f5835b02))
+* **security:** redact Telegram bot token URLs ([fdda455](https://github.com/djm204/frankenbeast/commit/fdda455f88d4f720f8221030857b1594f39482f1))
+* **security:** reject non-loopback plaintext endpoints ([#733](https://github.com/djm204/frankenbeast/issues/733)) ([78741d1](https://github.com/djm204/frankenbeast/commit/78741d1c3c779e4baced6acd75190f36cb445435))
+* **security:** ticket dashboard SSE streams ([#740](https://github.com/djm204/frankenbeast/issues/740)) ([6950ed8](https://github.com/djm204/frankenbeast/commit/6950ed84dfef95f4e3de474dd8928e896727b28e)), closes [#622](https://github.com/djm204/frankenbeast/issues/622)
+* serve dashboard from production build ([#775](https://github.com/djm204/frankenbeast/issues/775)) ([7a4f8ab](https://github.com/djm204/frankenbeast/commit/7a4f8ab272c5c3dc5d06749d90f86284c63629d6))
+* **test:** validate orchestrator Vitest environment flags ([102e0e4](https://github.com/djm204/frankenbeast/commit/102e0e4145cb7ba784be2344fbf6371441156667)), closes [#555](https://github.com/djm204/frankenbeast/issues/555)
+* **test:** validate Vitest environment flags ([1479dce](https://github.com/djm204/frankenbeast/commit/1479dcefc5bedfd065667fba75e2bd48b7a1ba5e)), closes [#557](https://github.com/djm204/frankenbeast/issues/557)
+* **web:** fail closed for dashboard SSE auth ([#739](https://github.com/djm204/frankenbeast/issues/739)) ([04e3b19](https://github.com/djm204/frankenbeast/commit/04e3b19de77c56be9d7ef5a7f383efd33694cc11))
+
+
+### Refactoring
+
+* **orchestrator:** share analytics sqlite handle ([d9a6b69](https://github.com/djm204/frankenbeast/commit/d9a6b6904be9b193d67d1c4ee2c843a54c001bae)), closes [#681](https://github.com/djm204/frankenbeast/issues/681)
+* **orchestrator:** unify CLI availability checks ([#792](https://github.com/djm204/frankenbeast/issues/792)) ([b1ea513](https://github.com/djm204/frankenbeast/commit/b1ea513275fc6cd5d5efd376d4ccc0ffe3131a86))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+
+
+### Tests
+
+* **orchestrator:** cover live comms route mounting ([#765](https://github.com/djm204/frankenbeast/issues/765)) ([0779e89](https://github.com/djm204/frankenbeast/commit/0779e897f56a1cd4c0ae90fd161115513b856e30))
+* **orchestrator:** guard chat attach console output ([#799](https://github.com/djm204/frankenbeast/issues/799)) ([f67c39a](https://github.com/djm204/frankenbeast/commit/f67c39a558a64f54b2bfeb794f6f9aed1d47d57e)), closes [#558](https://github.com/djm204/frankenbeast/issues/558)
+* replace secret-looking fixture literals ([#787](https://github.com/djm204/frankenbeast/issues/787)) ([e9b5d8a](https://github.com/djm204/frankenbeast/commit/e9b5d8af10d7144290ce0e513658c3b41b8f9597))
+* **security:** avoid password literals in fixtures ([#788](https://github.com/djm204/frankenbeast/issues/788)) ([f411648](https://github.com/djm204/frankenbeast/commit/f41164879b1b35152d7bdc02b5e83dd586dd2344))
+* **security:** cover exposed unsigned webhook startup guard ([#724](https://github.com/djm204/frankenbeast/issues/724)) ([5f2b2c1](https://github.com/djm204/frankenbeast/commit/5f2b2c1096140a1b125f017f3b73314308d0a503))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.9 to 0.6.10
+    * @franken/governor bumped from 0.5.7 to 0.5.8
+    * @franken/types bumped from 0.7.4 to 0.7.5
+    * @frankenbeast/observer bumped from 0.7.9 to 0.7.10
+    * franken-planner bumped from 0.4.7 to 0.4.8
+    * franken-brain bumped from 0.6.5 to 0.6.6
+
 ## [0.39.0](https://github.com/djm204/frankenbeast/compare/franken-orchestrator-v0.38.1...franken-orchestrator-v0.39.0) (2026-07-05)
 
 

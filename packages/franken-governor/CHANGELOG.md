@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.5.8](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.7...franken-governor-v0.5.8) (2026-07-06)
+
+
+### Bug Fixes
+
+* **governor:** preserve error causes ([754b29a](https://github.com/djm204/frankenbeast/commit/754b29aac2810b0fc869c633a225135045349e31)), closes [#643](https://github.com/djm204/frankenbeast/issues/643)
+* **governor:** use deterministic signature payloads ([20c8313](https://github.com/djm204/frankenbeast/commit/20c8313619a2442427bb1ab4327f8ac37cbd6915)), closes [#689](https://github.com/djm204/frankenbeast/issues/689)
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Tests
+
+* replace secret-looking fixture literals ([#787](https://github.com/djm204/frankenbeast/issues/787)) ([e9b5d8a](https://github.com/djm204/frankenbeast/commit/e9b5d8af10d7144290ce0e513658c3b41b8f9597))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.4 to 0.7.5
+
 ## [0.5.7](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.6...franken-governor-v0.5.7) (2026-07-05)
 
 
