@@ -108,6 +108,43 @@ function maskIgnored(content: string, start: number, end: number): string {
   return content.slice(start, end).replace(/[^\n]/g, ' ');
 }
 
+function maskStructuralLiterals(content: string): string {
+  let sanitized = '';
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '/' && next === '/' && !isUrlSchemeSlash(content, i)) {
+      const end = findLineEnd(content, i + 2);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      const end = findBlockCommentEnd(content, i + 2);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      const end =
+        char === '`'
+          ? findTemplateLiteralEnd(content, i)
+          : findQuotedStringEnd(content, i, char);
+      sanitized += maskIgnored(content, i, end);
+      i = end - 1;
+      continue;
+    }
+
+    sanitized += char;
+  }
+
+  return sanitized;
+}
+
 function findLineEnd(content: string, start: number): number {
   const newline = content.indexOf('\n', start);
   return newline === -1 ? content.length : newline;
@@ -425,10 +462,13 @@ function isLikelyStatementBlockEnd(
   content: string,
   closeBraceIndex: number,
 ): boolean {
+  const structuralContent = maskStructuralLiterals(
+    content.slice(0, closeBraceIndex + 1),
+  );
   let depth = 0;
 
   for (let i = closeBraceIndex; i >= 0; i--) {
-    const char = content[i];
+    const char = structuralContent[i];
     if (char === '}') {
       depth++;
       continue;
@@ -436,12 +476,16 @@ function isLikelyStatementBlockEnd(
     if (char === '{') {
       depth--;
       if (depth === 0) {
-        const previousIndex = findPreviousRegexLookbehindIndex(content, i);
+        const previousIndex = findPreviousRegexLookbehindIndex(
+          structuralContent,
+          i,
+        );
         if (previousIndex === -1) return true;
-        const previous = content[previousIndex] ?? '';
+        const previous = structuralContent[previousIndex] ?? '';
         return (
           previous === ')' ||
-          isBlockOpeningKeywordPrefix(content, previousIndex)
+          isBlockOpeningKeywordPrefix(structuralContent, previousIndex) ||
+          isNamedClassBlockPrefix(structuralContent, previousIndex)
         );
       }
     }
@@ -468,9 +512,33 @@ function isBlockOpeningKeywordPrefix(
   return /^(?:else|try|finally|do|class|function|switch)$/.test(word ?? '');
 }
 
+function isNamedClassBlockPrefix(content: string, endIndex: number): boolean {
+  const classNameStart = findWordStart(content, endIndex);
+  const beforeNameIndex = findPreviousRegexLookbehindIndex(
+    content,
+    classNameStart,
+  );
+  if (beforeNameIndex === -1) return false;
+
+  return keywordBefore(content, beforeNameIndex) === 'class';
+}
+
 function isTemplateKeywordPrefix(content: string, endIndex: number): boolean {
   const word = keywordBefore(content, endIndex);
-  return /^(?:return|throw|yield|await)$/.test(word ?? '');
+  if (!/^(?:return|throw|yield|await)$/.test(word ?? '')) return false;
+  return isSourceKeywordContext(content, endIndex, word ?? '');
+}
+
+function isSourceKeywordContext(
+  content: string,
+  endIndex: number,
+  word: string,
+): boolean {
+  const wordStart = endIndex - word.length + 1;
+  const beforeWordIndex = findPreviousRegexLookbehindIndex(content, wordStart);
+  if (beforeWordIndex === -1) return true;
+
+  return '=([{,:;,!+-*?/&|^~<>}'.includes(content[beforeWordIndex] ?? '');
 }
 
 function isStringKeywordPrefix(content: string, endIndex: number): boolean {
@@ -503,7 +571,24 @@ function isSourceColonPrefix(content: string, colonIndex: number): boolean {
   );
   if (beforeTokenIndex === -1) return false;
 
+  if (
+    isTypeAnnotationColonPrefix(content, beforeColonIndex, beforeTokenIndex)
+  ) {
+    return true;
+  }
+
   return '{[,('.includes(content[beforeTokenIndex] ?? '');
+}
+
+function isTypeAnnotationColonPrefix(
+  content: string,
+  tokenEndIndex: number,
+  beforeTokenIndex: number,
+): boolean {
+  if (!/[\w$]/.test(content[tokenEndIndex] ?? '')) return false;
+
+  const word = keywordBefore(content, beforeTokenIndex);
+  return /^(?:let|const|var|type|interface)$/.test(word ?? '');
 }
 
 function isQuotedSourceKeyPrefix(
@@ -632,10 +717,13 @@ function isControlHeaderPrefix(
   content: string,
   closeParenIndex: number,
 ): boolean {
+  const structuralContent = maskStructuralLiterals(
+    content.slice(0, closeParenIndex + 1),
+  );
   let depth = 0;
 
   for (let i = closeParenIndex; i >= 0; i--) {
-    const char = content[i];
+    const char = structuralContent[i];
 
     if (char === ')') {
       depth++;
@@ -645,10 +733,13 @@ function isControlHeaderPrefix(
     if (char === '(') {
       depth--;
       if (depth === 0) {
-        const previousIndex = findPreviousRegexLookbehindIndex(content, i);
+        const previousIndex = findPreviousRegexLookbehindIndex(
+          structuralContent,
+          i,
+        );
         if (previousIndex === -1) return false;
 
-        const keyword = keywordBefore(content, previousIndex);
+        const keyword = keywordBefore(structuralContent, previousIndex);
         return /^(?:if|while|for|with)$/.test(keyword ?? '');
       }
     }
