@@ -316,6 +316,32 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('infinite loop');
   });
 
+  it('trims prose after embedded code snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { doWork(); }\nThis hangs.';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('does not treat commented snippets as executable fallback code', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'const ok = true; // while (true) { doWork(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('detects infinite loops in TSX snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function C() { while (true) { doWork(); } return <div />; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('detects unguarded recursion in named function expressions', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `const f = function loop() { loop(); };`;

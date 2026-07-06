@@ -31,7 +31,7 @@ type AstNode = Node & Record<string, unknown>;
 
 type AcornPlugin = (BaseParser: typeof Parser) => typeof Parser;
 
-const TypeScriptParser = Parser.extend(tsPlugin() as unknown as AcornPlugin);
+const TypeScriptParser = Parser.extend(tsPlugin({ jsx: { allowNamespaces: true } }) as unknown as AcornPlugin);
 
 function isNode(value: unknown): value is AstNode {
   return Boolean(value && typeof value === 'object' && typeof (value as AstNode).type === 'string');
@@ -60,6 +60,32 @@ function childNodes(node: AstNode): AstNode[] {
   return children;
 }
 
+function isInsideComment(code: string, index: number): boolean {
+  const lineStart = code.lastIndexOf('\n', index - 1) + 1;
+  if (code.slice(lineStart, index).includes('//')) return true;
+
+  const lastBlockStart = code.lastIndexOf('/*', index);
+  const lastBlockEnd = code.lastIndexOf('*/', index);
+  return lastBlockStart > lastBlockEnd;
+}
+
+function trimToBalancedSnippet(candidate: string): string {
+  const firstOpen = candidate.indexOf('{');
+  if (firstOpen < 0) return candidate;
+
+  let depth = 0;
+  for (let index = firstOpen; index < candidate.length; index += 1) {
+    const char = candidate[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return candidate.slice(0, index + 1);
+    }
+  }
+
+  return candidate;
+}
+
 function codeCandidates(code: string): string[] {
   const fencedBlocks = Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g), (match) => match[1]).filter(
     (block): block is string => typeof block === 'string' && block.trim().length > 0,
@@ -68,8 +94,11 @@ function codeCandidates(code: string): string[] {
 
   for (const keyword of ['while', 'for', 'function', 'async function', 'class']) {
     let index = code.indexOf(keyword);
-    while (index > 0) {
-      candidates.push(code.slice(index));
+    while (index >= 0) {
+      if (!isInsideComment(code, index)) {
+        const snippet = code.slice(index);
+        candidates.push(snippet, trimToBalancedSnippet(snippet));
+      }
       index = code.indexOf(keyword, index + keyword.length);
     }
   }
