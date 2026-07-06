@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { OrchestratorConfigSchema, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { FileInitStateStore } from './init-state-store.js';
 import { runInitWizard } from './init-wizard.js';
 import type { InitState } from './init-types.js';
@@ -18,14 +18,20 @@ interface RunInteractiveInitOptions {
   stateStore: FileInitStateStore;
   io: InterviewIO;
   secretStore?: ISecretStore | undefined;
+  allowTrustedProviderCommandOverrides?: boolean | undefined;
 }
 
 type RunRepairInitOptions = RunInteractiveInitOptions;
 
-async function loadExistingConfig(configFile: string): Promise<OrchestratorConfig> {
+async function loadExistingConfig(
+  configFile: string,
+  options: { allowTrustedProviderCommandOverrides?: boolean | undefined } = {},
+): Promise<OrchestratorConfig> {
   try {
     const raw = await readFile(configFile, 'utf-8');
-    return OrchestratorConfigSchema.parse(JSON.parse(raw));
+    return parseOrchestratorConfig(JSON.parse(raw), {
+      allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return defaultConfig();
@@ -41,12 +47,15 @@ async function saveConfig(configFile: string, config: OrchestratorConfig): Promi
 
 export async function runInteractiveInit(options: RunInteractiveInitOptions): Promise<InitEngineResult> {
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = await loadExistingConfig(options.configFile);
+  const baseConfig = await loadExistingConfig(options.configFile, {
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+  });
   const result = await runInitWizard({
     io: options.io,
     initialState,
     baseConfig,
     secretStore: options.secretStore,
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
   });
 
   await saveConfig(options.configFile, result.config);
@@ -62,6 +71,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   const verification = await verifyInit({
     configFile: options.configFile,
     stateStore: options.stateStore,
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
   });
 
   if (verification.ok) {
@@ -79,7 +89,9 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   }
 
   const initialState = await options.stateStore.load(options.configFile);
-  const baseConfig = await loadExistingConfig(options.configFile);
+  const baseConfig = await loadExistingConfig(options.configFile, {
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+  });
   const scope = verification.issues.flatMap((issue) => {
     switch (issue.code) {
       case 'slack-incomplete':
@@ -100,6 +112,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
     baseConfig,
     scope,
     secretStore: options.secretStore,
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
   });
 
   await saveConfig(options.configFile, result.config);

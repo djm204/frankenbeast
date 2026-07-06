@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { mkdir, open, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
-import { OrchestratorConfigSchema, type OrchestratorConfig } from '../../config/orchestrator-config.js';
+import { parseOrchestratorConfig, type OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../../network/network-config-paths.js';
 import { filterNetworkServices, resolveNetworkServices } from '../../network/network-registry.js';
 import { NetworkLogStore } from '../../network/network-logs.js';
@@ -50,6 +50,14 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
     healthcheck: healthcheckNetworkService,
     preflightService: preflightNetworkService,
   });
+}
+
+function hasTrustedProviderCommandOverrides(config: OrchestratorConfig): boolean {
+  const providerOverrides = Object.values(config.providers.overrides ?? {});
+  const consolidatedProviders = config.consolidatedProviders ?? [];
+  return [...providerOverrides, ...consolidatedProviders].some((provider) =>
+    provider.trustCommandOverride === true || (provider.trustedCommandPaths?.length ?? 0) > 0,
+  );
 }
 
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
@@ -144,8 +152,10 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
 
   app.post('/v1/network/config', async (c) => {
     const body = validateBody(ConfigBody, await parseJsonBody(c));
-    const nextConfig = OrchestratorConfigSchema.parse(
-      applyNetworkConfigSets(deps.getConfig(), body.assignments ?? []),
+    const currentConfig = deps.getConfig();
+    const nextConfig = parseOrchestratorConfig(
+      applyNetworkConfigSets(currentConfig, body.assignments ?? []),
+      { allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(currentConfig) },
     );
     deps.setConfig(nextConfig);
     await mkdir(dirname(deps.configFile), { recursive: true });

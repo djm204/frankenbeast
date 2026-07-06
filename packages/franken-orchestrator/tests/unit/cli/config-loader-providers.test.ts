@@ -99,6 +99,29 @@ describe('Config loader providers passthrough', () => {
     await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
   });
 
+  it('honors CLI approval for trusted overrides in the default config path', async () => {
+    const filePath = join(tmpdir(), `beast-repo-provider-trust-approved-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          claude: {
+            command: '/usr/local/bin/claude',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/usr/local/bin'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(makeArgs({ trustProviderCommandOverrides: true }), filePath);
+    expect(config.providers.overrides['claude']).toMatchObject({
+      command: '/usr/local/bin/claude',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/usr/local/bin'],
+    });
+  });
+
   it('does not let repository-local consolidated providers self-approve trust', async () => {
     const filePath = join(tmpdir(), `beast-repo-consolidated-trust-${Date.now()}.json`);
     tmpFiles.push(filePath);

@@ -116,7 +116,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
-      if (!args.config) {
+      if (!args.config && !args.trustProviderCommandOverrides) {
         fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
       }
     } catch (error) {
