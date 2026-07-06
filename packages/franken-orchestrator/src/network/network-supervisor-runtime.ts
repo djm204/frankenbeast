@@ -28,6 +28,9 @@ export async function startNetworkService(
       detached: true,
       stdio: ['ignore', handle.fd, handle.fd],
     });
+    child.once('error', (error) => {
+      console.error(`[${service.id}] Process spawn failed for ${processSpec.command}: ${error.message}`);
+    });
     child.unref();
     await handle.close();
     if (!child.pid) {
@@ -45,6 +48,10 @@ export async function startNetworkService(
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  child.once('error', (error) => {
+    console.error(`[${service.id}] Process spawn failed for ${processSpec.command}: ${error.message}`);
+  });
+
   child.stdout?.on('data', (chunk) => process.stdout.write(`[${service.id}] ${chunk}`));
   child.stderr?.on('data', (chunk) => process.stderr.write(`[${service.id}] ${chunk}`));
 
@@ -55,7 +62,7 @@ export async function startNetworkService(
   return { pid: child.pid };
 }
 
-export async function stopNetworkService(service: { pid: number }): Promise<void> {
+export async function stopNetworkService(service: { pid: number; detached?: boolean | undefined }): Promise<void> {
   if (service.pid <= 0) {
     return;
   }
