@@ -237,6 +237,23 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('does not treat exits inside class methods as exits from the containing loop', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { class Worker { run() { return work(); } } doWork(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('does not treat a nested function call as outer unguarded recursion', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { function inner() { loop(); } return inner; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
   // Regression for PR #385 round 2 (Codex F6): real code inside a template
   // interpolation must remain visible to recursion detection.
   it('detects recursion that occurs inside a template interpolation', async () => {
