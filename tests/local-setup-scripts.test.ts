@@ -58,11 +58,12 @@ describe('local setup scripts', () => {
 
     expect(compose).toContain('Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.');
     expect(compose).toContain('Refusing to start Grafana with admin/admin credentials.');
+    expect(compose).toContain('admin reset-admin-password "$${GF_SECURITY_ADMIN_PASSWORD}"');
     expect(compose).toContain('GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}');
     expect(compose).toContain('GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}');
     expect(compose).not.toContain('${GRAFANA_USER:-admin}');
     expect(compose).not.toContain('${GRAFANA_PASSWORD:-admin}');
-    expect(compose).toContain('reset the\n  # Grafana password or recreate the volume');
+    expect(compose).toContain('startup guard resets the persisted admin password');
   });
 
   it('.env.example documents current local env vars without removed service knobs', () => {
@@ -103,6 +104,6 @@ describe('local setup scripts', () => {
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
-    expect(envExample).toContain('Generate unique local values before uncommenting');
+    expect(envExample).toContain('Generate a unique local password before uncommenting');
   });
 });

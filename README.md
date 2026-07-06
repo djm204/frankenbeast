@@ -507,8 +507,12 @@ cd packages/franken-orchestrator && npm run test:e2e
 ## Local Dev Environment
 
 ```bash
-# Start supporting services (ChromaDB, Grafana, Tempo)
+# Configure local services. Generate a unique Grafana password before starting
+# the full compose stack; Grafana refuses the old admin/admin default pair.
 cp .env.example .env
+$EDITOR .env  # uncomment GRAFANA_USER=admin and set a unique GRAFANA_PASSWORD
+
+# Start supporting services (ChromaDB, Grafana, Tempo)
 docker compose up -d
 
 # Seed ChromaDB with initial collections
