@@ -51,23 +51,9 @@ function isLocalPlaintextOrSecureUrl(value: string, secureProtocols: string[], l
   }
 }
 
+const DASHBOARD_API_URL_DEFAULT = 'http://127.0.0.1:3737';
+
 const UrlSchema = z.string().url();
-
-function defaultDashboardApiUrl(): string {
-  return process.env.NODE_ENV === 'production'
-    ? 'https://127.0.0.1:3737'
-    : 'http://127.0.0.1:3737';
-}
-
-const DashboardApiUrlSchema = z.preprocess(
-  (value) => {
-    if (value === undefined) {
-      return defaultDashboardApiUrl();
-    }
-    return value;
-  },
-  UrlSchema,
-);
 
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
@@ -109,7 +95,7 @@ export const DashboardServiceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   host: HostSchema,
   port: PortSchema.default(5173),
-  apiUrl: DashboardApiUrlSchema,
+  apiUrl: UrlSchema.default(DASHBOARD_API_URL_DEFAULT),
 }).superRefine((value, ctx) => {
   if (!value.enabled) return;
   requireLoopbackServiceHost(ctx, value.host);

@@ -24,21 +24,6 @@ describe('NetworkConfigSchema', () => {
     expect(config.comms.orchestratorWsUrl).toBe('ws://127.0.0.1:3737/v1/chat/ws');
   });
 
-  it('defaults dashboard API URL to HTTPS for production env', () => {
-    const originalNodeEnv = process.env.NODE_ENV;
-    try {
-      process.env.NODE_ENV = 'production';
-      const config = defaultNetworkConfig();
-
-      expect(config.dashboard.apiUrl).toBe('https://127.0.0.1:3737');
-    } finally {
-      if (originalNodeEnv === undefined) {
-        delete process.env.NODE_ENV;
-      } else {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
-    }
-  });
 
   it('accepts partial overrides for services and URLs', () => {
     const config = NetworkConfigSchema.parse({

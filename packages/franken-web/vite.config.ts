@@ -82,8 +82,7 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
 export default defineConfig(async ({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   assertNoBrowserOperatorToken(loadProxyEnv(loadEnv, mode, repoRootDir, process.cwd()));
-  const defaultProxyProtocol = mode === 'production' ? 'https' : 'http';
-  const proxyTarget = env.VITE_API_PROXY_TARGET || `${defaultProxyProtocol}://127.0.0.1:3737`;
+  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:3737';
   const beastProxyTarget = env.VITE_BEAST_API_PROXY_TARGET || proxyTarget;
   assertSecureProxyTarget('VITE_API_PROXY_TARGET', proxyTarget);
   assertSecureProxyTarget('VITE_BEAST_API_PROXY_TARGET', beastProxyTarget);
