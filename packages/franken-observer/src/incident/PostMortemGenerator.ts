@@ -80,7 +80,10 @@ without reaching a terminal condition. Possible causes:
    */
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
     const timestamp = signal.timestamp
-    const filename = `post-mortem-${trace.id}-${timestamp}.md`
+    // Sanitize trace.id and timestamp to avoid path traversal or unsafe characters
+    const safeId = String(trace.id).replace(/[^a-zA-Z0-9_-]/g, '_')
+    const safeTimestamp = String(timestamp).replace(/[^0-9]/g, '')
+    const filename = `post-mortem-${safeId}-${safeTimestamp}.md`
     const filePath = join(this.outputDir, filename)
     const content = this.generateContent(trace, signal)
 
