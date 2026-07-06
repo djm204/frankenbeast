@@ -60,6 +60,15 @@ function childNodes(node: AstNode): AstNode[] {
   return children;
 }
 
+function codeCandidates(code: string): string[] {
+  const fencedBlocks = Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g), (match) => match[1]).filter(
+    (block): block is string => typeof block === 'string' && block.trim().length > 0,
+  );
+  const candidates = fencedBlocks.length > 0 ? [...fencedBlocks, code] : [code];
+
+  return candidates.flatMap((candidate) => [candidate, `${candidate}\n}`, `${candidate}\n}}`, `${candidate}\n}}}`]);
+}
+
 function parseJavaScript(code: string): AstNode | null {
   const baseOptions = {
     ecmaVersion: 'latest' as const,
@@ -68,7 +77,7 @@ function parseJavaScript(code: string): AstNode | null {
     allowHashBang: true,
   };
 
-  for (const candidate of [code, `${code}\n}`, `${code}\n}}`, `${code}\n}}}`]) {
+  for (const candidate of codeCandidates(code)) {
     for (const sourceType of ['module', 'script'] as const) {
       try {
         try {
@@ -142,14 +151,17 @@ function hasLoopExit(body: AstNode): boolean {
   return visit(body, 0);
 }
 
-function containsIfStatement(node: AstNode): boolean {
-  const visit = (current: AstNode): boolean => {
-    if (current !== node && (isFunctionLike(current) || isClassLike(current))) return false;
+function containsIfStatement(node: AstNode, enterFunction = false): boolean {
+  const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+    if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'IfStatement') return true;
-    return childNodes(current).some(visit);
+    if (current.type === 'CallExpression' && isNode(current.callee) && isFunctionLike(current.callee)) {
+      return visit(current.callee, true);
+    }
+    return childNodes(current).some((child) => visit(child));
   };
 
-  return visit(node);
+  return visit(node, enterFunction);
 }
 
 function identifierName(node: AstNode): string | undefined {
@@ -159,7 +171,7 @@ function identifierName(node: AstNode): string | undefined {
 
 function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
   const visit = (current: AstNode, enterFunction = false): number | null => {
-    if (current !== node && !enterFunction && (isFunctionLike(current) || isClassLike(current))) {
+    if (current !== node && !enterFunction && isFunctionLike(current)) {
       return null;
     }
 
@@ -186,14 +198,17 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
   return visit(node);
 }
 
-function hasReturnBefore(node: AstNode, position: number): boolean {
-  const visit = (current: AstNode): boolean => {
-    if (current !== node && (isFunctionLike(current) || isClassLike(current))) return false;
+function hasReturnBefore(node: AstNode, position: number, enterFunction = false): boolean {
+  const visit = (current: AstNode, allowFunctionBody = false): boolean => {
+    if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'ReturnStatement' && current.start < position) return true;
-    return childNodes(current).some(visit);
+    if (current.type === 'CallExpression' && isNode(current.callee) && isFunctionLike(current.callee)) {
+      return visit(current.callee, true);
+    }
+    return childNodes(current).some((child) => visit(child));
   };
 
-  return visit(node);
+  return visit(node, enterFunction);
 }
 
 export class LogicLoopEvaluator implements Evaluator {
@@ -237,10 +252,13 @@ export class LogicLoopEvaluator implements Evaluator {
 
   private checkUnguardedRecursion(ast: AstNode, findings: EvaluationFinding[]): void {
     const visit = (node: AstNode): void => {
-      if (node.type === 'FunctionDeclaration') {
-        const id = node.id;
-        const fnName = isNode(id) && id.type === 'Identifier' ? identifierName(id) : undefined;
+      const namedFunction =
+        (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') && isNode(node.id)
+          ? node.id
+          : null;
 
+      if (namedFunction?.type === 'Identifier') {
+        const fnName = identifierName(namedFunction);
         if (fnName) {
           const recursiveCallStart = findRecursiveCallStart(node, fnName);
           if (recursiveCallStart != null) {

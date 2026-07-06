@@ -280,6 +280,41 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('detects infinite loops inside markdown code fences', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = '```js\nwhile (true) { doWork(); }\n```';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('detects unguarded recursion in named function expressions', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `const f = function loop() { loop(); };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('honors guards inside recursive immediately invoked functions', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop(n) { (() => { if (n <= 0) return; loop(n - 1); })(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('detects unguarded recursion inside class static blocks', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { class C { static { loop(); } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   // Regression for PR #385 round 2 (Codex F6): real code inside a template
   // interpolation must remain visible to recursion detection.
   it('detects recursion that occurs inside a template interpolation', async () => {
