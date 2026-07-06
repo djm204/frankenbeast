@@ -771,7 +771,7 @@ describe('ChatShell', () => {
       expect(screen.getByText('agent-1')).toBeDefined();
     });
 
-    expect(screen.getByRole('heading', { name: 'Beasts' })).toBeDefined();
+    expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
   });
 

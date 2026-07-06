@@ -14,6 +14,13 @@ function setScrollMetrics(element: Element, metrics: { scrollHeight: number; scr
 }
 
 describe('TranscriptPane', () => {
+  it('renders Chat as a subordinate heading under the shell page title', () => {
+    render(<TranscriptPane messages={[]} showTypingIndicator={false} />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Chat' })).toBeDefined();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Chat' })).toBeNull();
+  });
+
   it('renders messages with role labels', () => {
     const messages = [
       { id: 'u1', role: 'user' as const, content: 'Hello', timestamp: new Date().toISOString() },
