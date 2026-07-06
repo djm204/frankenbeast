@@ -40,6 +40,16 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('useChatSession error banners', () => {
   afterEach(() => {
     cleanup();
@@ -231,6 +241,48 @@ describe('useChatSession error banners', () => {
       code: 'session_refresh_failed',
       actionLabel: 'Refresh chat',
     });
+  });
+
+  it('does not optimistically echo fallback HTTP messages before the server transcript refreshes', async () => {
+    const fallbackSend = deferred<Response>();
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse()))
+      .mockReturnValueOnce(fallbackSend.promise)
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({
+        transcript: [
+          {
+            id: 'server-user-1',
+            role: 'user',
+            content: 'launch beast',
+            timestamp: '2026-07-06T00:00:00.000Z',
+          },
+        ],
+      })));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    MockWebSocket.instances[0]!.readyState = 0;
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('launch beast');
+    });
+
+    expect(result.current.messages).toEqual([]);
+
+    await act(async () => {
+      fallbackSend.resolve(jsonResponse({ data: { tier: 'cheap' } }));
+      await sendPromise;
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({ id: 'server-user-1', role: 'user', content: 'launch beast' }),
+    ]);
   });
 
   it('does not offer retry for invalid socket payload errors', async () => {

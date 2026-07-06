@@ -912,6 +912,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
+                key={activeSessionId ?? selectedSessionId ?? 'anonymous'}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}

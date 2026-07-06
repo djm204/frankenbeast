@@ -763,21 +763,25 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     const clientMessageId = makeId('user');
+    const optimisticMessage: ChatMessage = {
+      id: clientMessageId,
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+      receipt: 'sending',
+    };
+    const optimisticAdd = Boolean(socket && socket.readyState === 1);
     lastMessageRef.current = { clientMessageId, content };
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
-    setMessages((current) => [
-      ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
-      {
-        id: clientMessageId,
-        role: 'user',
-        content,
-        timestamp: new Date().toISOString(),
-        receipt: 'sending',
-      },
-    ]);
+    if (optimisticAdd) {
+      setMessages((current) => [
+        ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+        optimisticMessage,
+      ]);
+    }
     setStatus('sending');
 
-    if (!socket || socket.readyState !== 1) {
+    if (!optimisticAdd) {
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
         setTier(result.tier);
@@ -793,7 +797,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setCostUsd(refreshed.costUsd);
           setStatus('idle');
         } catch (error) {
-          setMessages((current) => updateReceipt(current, clientMessageId, 'accepted'));
+          setMessages((current) => [
+            ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+            { ...optimisticMessage, receipt: 'accepted' },
+          ]);
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',
             errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
@@ -821,13 +828,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
+    const liveSocket = socket as WebSocket;
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
       }, SOCKET_SEND_ACK_TIMEOUT_MS);
       pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
       try {
-        socket.send(JSON.stringify({
+        liveSocket.send(JSON.stringify({
           type: 'message.send',
           clientMessageId,
           content,
