@@ -156,12 +156,8 @@ async function fetchServiceIdentity(url: string): Promise<string | undefined> {
       signal: AbortSignal.timeout(HTTP_CHECK_TIMEOUT_MS),
     });
     const headerIdentity = response.headers.get('x-frankenbeast-service');
-    if (headerIdentity) {
+    if (response.ok && headerIdentity) {
       return headerIdentity;
-    }
-
-    if (!response.ok) {
-      return undefined;
     }
 
     const contentType = response.headers.get('content-type') ?? '';
@@ -169,7 +165,10 @@ async function fetchServiceIdentity(url: string): Promise<string | undefined> {
       return undefined;
     }
 
-    const body = await response.json() as { service?: string };
+    const body = await response.json() as { service?: string; reason?: string };
+    if (!response.ok) {
+      return body.reason === 'dashboard-build-building' ? (headerIdentity ?? body.service) : undefined;
+    }
     return body.service;
   } catch {
     return undefined;
