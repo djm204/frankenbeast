@@ -131,11 +131,15 @@ function findQuotedStringEnd(
   quote: string,
 ): number {
   for (let i = start + 1; i < content.length; i++) {
-    if (content[i] === '\n') return i;
     if (content[i] === '\\') {
+      if (content[i + 1] === '\r' && content[i + 2] === '\n') {
+        i += 2;
+        continue;
+      }
       i++;
       continue;
     }
+    if (content[i] === '\n') return i;
     if (content[i] === quote) {
       return i + 1;
     }
@@ -172,10 +176,11 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   const previous = content[previousIndex] ?? '';
   if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
+  if (isRegexKeywordPrefix(content, previousIndex)) return true;
   if (previousIndex < start - 1) return false;
   if (/[\w$)\]]/.test(previous)) return true;
 
-  return isRegexKeywordPrefix(content, previousIndex);
+  return false;
 }
 
 function findTemplateLiteralEnd(content: string, start: number): number {
@@ -349,7 +354,11 @@ function isLikelyStatementBlockEnd(
         const previousIndex = findPreviousRegexLookbehindIndex(content, i);
         if (previousIndex === -1) return true;
         const previous = content[previousIndex] ?? '';
-        return previous === ')' || previous === ':';
+        return (
+          previous === ')' ||
+          previous === ':' ||
+          isBlockOpeningKeywordPrefix(content, previousIndex)
+        );
       }
     }
   }
@@ -357,16 +366,29 @@ function isLikelyStatementBlockEnd(
   return false;
 }
 
-function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
+function keywordBefore(content: string, endIndex: number): string | null {
   let start = endIndex;
   while (start >= 0 && /[\w$]/.test(content[start] ?? '')) start--;
 
-  const word = content.slice(start + 1, endIndex + 1);
   const beforeWord = content[start] ?? '';
-  if (beforeWord === '.' || /[\w$]/.test(beforeWord)) return false;
+  if (beforeWord === '.' || /[\w$]/.test(beforeWord)) return null;
 
-  return /^(?:return|throw|case|delete|typeof|void|in|of|yield|await|else)$/.test(
-    word,
+  return content.slice(start + 1, endIndex + 1);
+}
+
+function isBlockOpeningKeywordPrefix(
+  content: string,
+  endIndex: number,
+): boolean {
+  const word = keywordBefore(content, endIndex);
+  return /^(?:else|try|finally|do|class|function|switch)$/.test(word ?? '');
+}
+
+function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
+  const word = keywordBefore(content, endIndex);
+
+  return /^(?:return|throw|case|default|delete|typeof|void|in|of|yield|await|else)$/.test(
+    word ?? '',
   );
 }
 

@@ -356,6 +356,16 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('ignores braces inside regex literals after keyword-opened blocks', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `if (ok) {} else {} /{{{{{{/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('stops unterminated quoted strings at line breaks', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `users'\nif (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
@@ -379,6 +389,16 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
   it('keeps spaced template literals masked as template literals', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = 'const styles = `{{{{{{`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps keyword-prefixed template literals masked as template literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'function render() { return `{{{{{{`; }';
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
@@ -419,6 +439,26 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
   it('keeps escaped newlines inside quoted strings masked', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = 'const value = "\\\n{{{{{{";';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps CRLF escaped newlines inside quoted strings masked', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'const value = "\\\r\n{{{{{{";';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores braces inside regex literals after default exports', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `export default /{{{{{{/.test(input);`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
