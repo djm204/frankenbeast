@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProcessSupervisor } from '../../../../src/beasts/execution/process-supervisor.js';
@@ -126,6 +126,44 @@ describe('ProcessSupervisor', () => {
         'stderr:stack trace here',
         'exit:1:null',
       ]);
+    });
+
+    it('fires onExit promptly when a grandchild keeps inherited stdio open', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-grandchild-'));
+      const pidFile = join(workDir, 'grandchild.pid');
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          `const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+  detached: true,
+  stdio: 'inherit',
+});
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+child.unref();`,
+        ],
+      });
+
+      try {
+        await supervisor.spawn(spec, callbacks);
+
+        await vi.waitFor(() => {
+          expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+        }, { timeout: 500 });
+      } finally {
+        const grandchildPid = Number(await readFile(pidFile, 'utf8').catch(() => '0'));
+        if (grandchildPid > 0) {
+          try {
+            process.kill(grandchildPid, 'SIGKILL');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+              throw error;
+            }
+          }
+        }
+      }
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {

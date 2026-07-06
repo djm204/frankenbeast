@@ -85,34 +85,60 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let stdoutClosed = false;
     let stderrClosed = false;
     let exitInfo: { code: number | null; signal: string | null } | undefined;
+    let exitFired = false;
 
     const maybeFireExit = () => {
-      if (stdoutClosed && stderrClosed && exitInfo) {
+      if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
+        exitFired = true;
         this.processes.delete(pid);
         callbacks.onExit(exitInfo.code, exitInfo.signal);
       }
     };
 
-    if (child.stdout) {
-      const stdoutRl = createInterface({ input: child.stdout });
+    const markStdoutClosed = () => {
+      stdoutClosed = true;
+      maybeFireExit();
+    };
+    const markStderrClosed = () => {
+      stderrClosed = true;
+      maybeFireExit();
+    };
+
+    const stdoutRl = child.stdout
+      ? createInterface({ input: child.stdout })
+      : undefined;
+    if (stdoutRl) {
       stdoutRl.on('line', (line) => callbacks.onStdout(line));
-      stdoutRl.on('close', () => { stdoutClosed = true; maybeFireExit(); });
+      stdoutRl.on('close', markStdoutClosed);
     } else {
       stdoutClosed = true;
     }
 
-    if (child.stderr) {
-      const stderrRl = createInterface({ input: child.stderr });
+    const stderrRl = child.stderr
+      ? createInterface({ input: child.stderr })
+      : undefined;
+    if (stderrRl) {
       stderrRl.on('line', (line) => callbacks.onStderr(line));
-      stderrRl.on('close', () => { stderrClosed = true; maybeFireExit(); });
+      stderrRl.on('close', markStderrClosed);
     } else {
       stderrClosed = true;
     }
 
-    child.on('close', (code, signal) => {
+    const recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
-      maybeFireExit();
-    });
+      setImmediate(() => {
+        if (!stdoutClosed) {
+          stdoutRl?.close();
+        }
+        if (!stderrClosed) {
+          stderrRl?.close();
+        }
+        maybeFireExit();
+      });
+    };
+
+    child.on('exit', recordExit);
+    child.on('close', recordExit);
 
     return { pid };
   }
