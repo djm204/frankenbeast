@@ -20,6 +20,14 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Enable packageManager-pinned npm
+        run: |
+          corepack enable
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
+      - name: Verify npm matches packageManager
+        run: node scripts/check-package-manager.mjs
+
       - run: npm ci
 
       - name: Validate release before creating tags
@@ -91,6 +99,14 @@ jobs:
           node-version: '22'
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Enable packageManager-pinned npm
+        run: |
+          corepack enable
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
+      - name: Verify npm matches packageManager
+        run: node scripts/check-package-manager.mjs
 
       - run: npm ci
 
