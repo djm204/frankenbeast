@@ -114,11 +114,19 @@ function findQuotedStringEnd(
 
 function findTemplateLiteralEnd(content: string, start: number): number {
   for (let i = start + 1; i < content.length; i++) {
-    if (content[i] === '\\') {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '\\') {
       i++;
       continue;
     }
-    if (content[i] === '`') {
+    if (char === '$' && next === '{') {
+      const expression = readTemplateExpression(content, i + 2);
+      i = expression.end - 1;
+      continue;
+    }
+    if (char === '`') {
       return i + 1;
     }
   }
@@ -218,10 +226,19 @@ function readTemplateExpression(
 }
 
 function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
-  const before = content.slice(0, slashIndex).trimEnd();
+  const before = trimRegexLookbehind(content.slice(0, slashIndex));
   if (!before) return true;
 
   const previous = before.charAt(before.length - 1);
+  if (
+    (previous === '+' || previous === '-') &&
+    before.endsWith(`${previous}${previous}`)
+  ) {
+    return false;
+  }
+
+  if (previous === ')' && isControlHeaderPrefix(before)) return true;
+
   if (previous === '[') {
     const beforeBracket = before.slice(0, -1).trimEnd();
     if (!beforeBracket) return true;
@@ -244,6 +261,41 @@ function isRegexKeywordPrefix(content: string): boolean {
   return /\b(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
     content,
   );
+}
+
+function trimRegexLookbehind(content: string): string {
+  let before = content.trimEnd();
+
+  while (before.endsWith('*/')) {
+    const start = before.lastIndexOf('/*');
+    if (start === -1) break;
+    before = before.slice(0, start).trimEnd();
+  }
+
+  return before;
+}
+
+function isControlHeaderPrefix(content: string): boolean {
+  let depth = 0;
+
+  for (let i = content.length - 1; i >= 0; i--) {
+    const char = content[i];
+
+    if (char === ')') {
+      depth++;
+      continue;
+    }
+
+    if (char === '(') {
+      depth--;
+      if (depth === 0) {
+        const prefix = content.slice(0, i).trimEnd();
+        return /\b(?:if|while|for|with)$/.test(prefix);
+      }
+    }
+  }
+
+  return false;
 }
 
 function findRegexLiteralEnd(content: string, start: number): number {

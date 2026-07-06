@@ -125,6 +125,51 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('ignores braces inside regex literals after control headers', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `if (ok) /{{{{{{/.test(input);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not mistake postfix division for a regex literal', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `counter++ / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores comments before regex literals after keywords', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function matches(input) {
+  return /* note */ /{{{{{{/.test(input);
+}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not let nested template literals mask following code', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'const x = `' +
+      '${`outer ${`{{`}`}' +
+      '`; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
