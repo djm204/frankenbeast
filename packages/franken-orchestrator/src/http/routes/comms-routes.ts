@@ -11,10 +11,12 @@ import { TelegramAdapter } from '../../comms/channels/telegram/telegram-adapter.
 import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.js';
 import type { CommsConfig } from '../../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
+import { requestSizeLimit } from '../middleware.js';
 
 import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
 
 const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
+const DEFAULT_GENERIC_COMMS_BODY_SIZE = 16 * 1024;
 
 export interface CommsRoutesOptions {
   config: CommsConfig;
@@ -49,6 +51,8 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   const app = new Hono();
 
   app.get('/comms/health', (c) => c.json({ status: 'ok' }));
+  app.use('/v1/comms', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
+  app.use('/v1/comms/*', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
 
   const slack = config.channels.slack;
   if (slack?.enabled && slack.token && slack.signingSecret) {
@@ -102,7 +106,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
     }));
   }
 
-  app.post('/v1/comms/inbound', async (c) => {
+  app.post('/v1/comms/inbound', requestSizeLimit(16 * 1024), async (c) => {
     const body = await c.req.json();
     await gateway.handleInbound(body);
     return c.json({ accepted: true });

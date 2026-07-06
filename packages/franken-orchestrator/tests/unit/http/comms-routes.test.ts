@@ -76,6 +76,61 @@ describe('commsRoutes', () => {
     expect(body).toEqual({ accepted: true });
   });
 
+  it('rejects oversized generic comms inbound JSON before parsing', async () => {
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+    const oversizedBody = JSON.stringify({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'x'.repeat(20 * 1024),
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const res = await app.request('/v1/comms/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(oversizedBody.length) },
+      body: oversizedBody,
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body exceeds 16384 bytes',
+        details: { maxSize: 16384 },
+      },
+    });
+  });
+
+  it('rejects chunked generic comms action JSON without a content length when it exceeds the body limit', async () => {
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+    const oversizedBody = JSON.stringify({
+      channelType: 'slack',
+      sessionId: 's1',
+      actionId: 'approve',
+      padding: 'x'.repeat(20 * 1024),
+    });
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(0, 512)));
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(512)));
+        controller.close();
+      },
+    });
+
+    const res = await app.request('/v1/comms/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+  });
+
   it('does not register channel routes when channels are disabled', async () => {
     const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/webhooks/slack/events', { method: 'POST' });
