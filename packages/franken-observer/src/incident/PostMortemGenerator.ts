@@ -1,11 +1,20 @@
 import * as fs from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 
 export interface PostMortemOptions {
   /** Directory where post-mortem files are written. Default: './post-mortems' */
   outputDir?: string
+}
+
+function safeFilenameComponent(value: string): string {
+  return value.replace(/[\\/]+/g, '_')
+}
+
+function isInsideDirectory(baseDir: string, targetPath: string): boolean {
+  const relativePath = relative(baseDir, targetPath)
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
 /**
@@ -80,12 +89,20 @@ without reaching a terminal condition. Possible causes:
    */
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
     const timestamp = signal.timestamp
-    const filename = `post-mortem-${trace.id}-${timestamp}.md`
-    const filePath = join(this.outputDir, filename)
+    const filename = `post-mortem-${safeFilenameComponent(trace.id)}-${timestamp}.md`
     const content = this.generateContent(trace, signal)
+
+    let filePath = resolve(this.outputDir, filename)
 
     try {
       await fs.mkdir(this.outputDir, { recursive: true })
+      const outputDir = await fs.realpath(this.outputDir)
+      filePath = resolve(outputDir, filename)
+
+      if (!isInsideDirectory(outputDir, filePath)) {
+        throw new Error(`Resolved post-mortem path escapes output directory: ${filePath}`)
+      }
+
       await fs.writeFile(filePath, content, 'utf-8')
       return filePath
     } catch (err) {
