@@ -11,7 +11,7 @@ Get Frankenbeast running locally.
 ## 1. Install dependencies
 
 ```bash
-corepack enable
+corepack enable npm
 corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 npm run check:package-manager
 npm install

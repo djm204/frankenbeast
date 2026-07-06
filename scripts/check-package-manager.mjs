@@ -21,7 +21,7 @@ const actual = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
 
 if (actual !== expected) {
   console.error(`npm version mismatch: packageManager pins npm@${expected}, but npm --version returned ${actual}.`);
-  console.error(`Run \`corepack enable && corepack prepare npm@${expected} --activate\` before installing dependencies.`);
+  console.error(`Run \`corepack enable npm && corepack prepare npm@${expected} --activate\` before installing dependencies.`);
   process.exit(1);
 }
 

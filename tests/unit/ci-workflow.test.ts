@@ -50,7 +50,7 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
     });
 
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
-      expect(content).toContain('corepack enable');
+      expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
       expect(content).toContain('node scripts/check-package-manager.mjs');
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
@@ -119,7 +119,7 @@ describe('release-please.yml publishes released npm packages', () => {
 
   it('enforces the packageManager-pinned npm before release installs and publishes', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content.match(/corepack enable/g)?.length).toBe(2);
+    expect(content.match(/corepack enable npm/g)?.length).toBe(2);
     expect(content.match(/node scripts\/check-package-manager\.mjs/g)?.length).toBe(2);
     expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     expect(content.lastIndexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.lastIndexOf('npm ci'));

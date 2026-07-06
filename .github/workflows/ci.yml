@@ -19,7 +19,7 @@ jobs:
 
       - name: Enable packageManager-pinned npm
         run: |
-          corepack enable
+          corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 
       - name: Verify npm matches packageManager
