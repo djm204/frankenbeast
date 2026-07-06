@@ -311,6 +311,31 @@ describe('BatchAdapter — stop()', () => {
     expect(await batch.listTraceIds()).toEqual([])
   })
 
+  it('attempts appended traces before stop rejects an older in-flight drain failure', async () => {
+    const oldFailure = deferred()
+    const received: string[] = []
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        received.push(trace.id)
+        if (trace.id === 'old') return oldFailure.promise
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    await batch.flush(makeTrace('old'))
+    const inFlightDrain = batch.drain()
+    await batch.flush(makeTrace('appended'))
+    const stopPromise = batch.stop()
+    oldFailure.reject(new Error('old drain failed'))
+
+    await expect(inFlightDrain).rejects.toThrow('old drain failed')
+    await expect(stopPromise).rejects.toThrow('old drain failed')
+    expect(received).toEqual(['old', 'old', 'appended'])
+    expect(await batch.listTraceIds()).toEqual(['old'])
+  })
+
   it('does not call clearInterval when no timer was started', async () => {
     const clearFn = vi.fn()
     const batch = new BatchAdapter({

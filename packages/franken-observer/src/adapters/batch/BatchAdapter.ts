@@ -82,8 +82,16 @@ export class BatchAdapter implements ExportAdapter {
   async drain(): Promise<void> {
     if (this.drainPromise !== null) {
       const currentDrain = this.drainPromise
-      await currentDrain
+      let currentFailure: unknown = null
+      try {
+        await currentDrain
+      } catch (error) {
+        currentFailure = error
+      }
       if (this.buffer.length > 0) await this.drain()
+      if (currentFailure !== null) {
+        throw currentFailure instanceof Error ? currentFailure : new Error(String(currentFailure))
+      }
       return
     }
 
