@@ -56,6 +56,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Enable packageManager-pinned npm
+        # Use the repo's pinned npm (package.json packageManager) so npm audit
+        # advisory counts match the supported toolchain and stay deterministic,
+        # consistent with ci.yml / the release workflow.
+        run: |
+          corepack enable npm
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
