@@ -66,6 +66,17 @@ describe('ProcessSupervisor', () => {
       }, { timeout: 5000 });
     });
 
+    it('handles child process error events for missing commands without crashing', async () => {
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({ command: '/definitely/not-a-real-command-franken-698', args: [] });
+
+      await expect(supervisor.spawn(spec, callbacks)).rejects.toThrow(/Failed to spawn Beast process/);
+
+      await vi.waitFor(() => {
+        expect(callbacks.onStderr).toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+      }, { timeout: 5000 });
+    });
+
     it('captures stdout lines via onStdout callback', async () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({

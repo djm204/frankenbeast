@@ -63,6 +63,11 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   ): Promise<SpawnedProcessHandle> {
     this.validateCwd(spec.cwd);
 
+    let stdoutClosed = false;
+    let stderrClosed = false;
+    let exitInfo: { code: number | null; signal: string | null } | undefined;
+    let exitFired = false;
+
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
       env: {
@@ -70,6 +75,18 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
         ...spec.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    child.once('error', (error) => {
+      const failedPid = child.pid;
+      if (failedPid) {
+        this.processes.delete(failedPid);
+      }
+      callbacks.onStderr(`Process spawn failed for ${spec.command}: ${error.message}`);
+      if (!exitFired) {
+        exitFired = true;
+        callbacks.onExit(1, null);
+      }
     });
 
     if (!child.pid) {
@@ -80,11 +97,6 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     const pid = child.pid;
     this.processes.set(pid, child);
-
-    let stdoutClosed = false;
-    let stderrClosed = false;
-    let exitInfo: { code: number | null; signal: string | null } | undefined;
-    let exitFired = false;
 
     const maybeFireExit = () => {
       if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
