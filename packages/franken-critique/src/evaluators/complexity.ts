@@ -152,9 +152,8 @@ function isLikelyQuotedStringStart(
   if (quote !== "'") return true;
 
   const previous = content[start - 1] ?? '';
-  const next = content[start + 1] ?? '';
 
-  return !(/[A-Za-z0-9]/.test(previous) && /[A-Za-z]/.test(next));
+  return !/[A-Za-z0-9]/.test(previous);
 }
 
 function findInlineMarkdownCodeEnd(content: string, start: number): number {
@@ -171,8 +170,10 @@ function isLikelyTemplateLiteralStart(content: string, start: number): boolean {
   if (previousIndex === -1) return false;
 
   const previous = content[previousIndex] ?? '';
+  if (previousIndex < start - 1) return false;
   if ('=([{,:!+-*?/&|^~<>'.includes(previous)) return true;
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
+  if (/[\w$)\]]/.test(previous)) return true;
 
   return isRegexKeywordPrefix(content, previousIndex);
 }
@@ -310,7 +311,9 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
 
   if (previous === '>' && content[previousIndex - 1] === '=') return true;
 
-  if (previous === '}') return true;
+  if (previous === '}' && isLikelyStatementBlockEnd(content, previousIndex)) {
+    return true;
+  }
 
   if (previous === '[') return true;
 
@@ -326,6 +329,32 @@ function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
 
   return isRegexKeywordPrefix(content, previousIndex);
+}
+
+function isLikelyStatementBlockEnd(
+  content: string,
+  closeBraceIndex: number,
+): boolean {
+  let depth = 0;
+
+  for (let i = closeBraceIndex; i >= 0; i--) {
+    const char = content[i];
+    if (char === '}') {
+      depth++;
+      continue;
+    }
+    if (char === '{') {
+      depth--;
+      if (depth === 0) {
+        const previousIndex = findPreviousRegexLookbehindIndex(content, i);
+        if (previousIndex === -1) return true;
+        const previous = content[previousIndex] ?? '';
+        return previous === ')' || previous === '>' || previous === ':';
+      }
+    }
+  }
+
+  return false;
 }
 
 function isRegexKeywordPrefix(content: string, endIndex: number): boolean {

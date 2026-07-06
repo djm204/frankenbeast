@@ -366,6 +366,46 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('keeps tagged templates masked as template literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'const styles = css`{{{{{{`;';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not mistake division after object literals for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ratio = {} / denom; if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not mask plural possessive apostrophes as strings', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `users' nested code: if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps escaped newlines inside quoted strings masked', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = 'const value = "\\\n{{{{{{";';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
