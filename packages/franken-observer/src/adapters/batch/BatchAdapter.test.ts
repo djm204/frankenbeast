@@ -22,6 +22,20 @@ class FailingFlushAdapter implements ExportAdapter {
   }
 }
 
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 // ── buffering ─────────────────────────────────────────────────────────────────
 
 describe('BatchAdapter — buffering', () => {
@@ -126,6 +140,77 @@ describe('BatchAdapter — drain()', () => {
     await batch.flush(makeTrace('q'))
     await batch.drain()
     expect(received.sort()).toEqual(['p', 'q'])
+  })
+
+  it('waits for every flush in a failed batch before retrying only failed traces', async () => {
+    const slowSuccess = deferred()
+    const calls: string[] = []
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        calls.push(trace.id)
+        if (trace.id === 'slow-success') return slowSuccess.promise
+        throw new Error('fast failure')
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    await batch.flush(makeTrace('fast-fail'))
+    await batch.flush(makeTrace('slow-success'))
+    const drainPromise = batch.drain()
+    let rejectedBeforeSlowFlushSettled = false
+    drainPromise.catch(() => { rejectedBeforeSlowFlushSettled = true })
+    await Promise.resolve()
+
+    expect(rejectedBeforeSlowFlushSettled).toBe(false)
+
+    slowSuccess.resolve()
+    await expect(drainPromise).rejects.toThrow('fast failure')
+    expect(await batch.listTraceIds()).toEqual(['fast-fail'])
+
+    await expect(batch.drain()).rejects.toThrow('fast failure')
+    expect(calls).toEqual(['fast-fail', 'slow-success', 'fast-fail'])
+  })
+
+  it('does not fail a newly queued trace because an older drain rejects', async () => {
+    const oldFailure = deferred()
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        if (trace.id === 'old') return oldFailure.promise
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 1 })
+
+    const oldFlush = batch.flush(makeTrace('old'))
+    const newFlush = batch.flush(makeTrace('new'))
+
+    await expect(newFlush).resolves.toBeUndefined()
+    oldFailure.reject(new Error('old batch failed'))
+    await expect(oldFlush).rejects.toThrow('old batch failed')
+    expect((await batch.listTraceIds()).sort()).toEqual(['new', 'old'])
+  })
+
+  it('drains a snapshot instead of chasing traces appended during the drain', async () => {
+    const received: string[] = []
+    let batch!: BatchAdapter
+    const inner: ExportAdapter = {
+      async flush(trace) {
+        received.push(trace.id)
+        if (trace.id === 'initial') await batch.flush(makeTrace('appended'))
+      },
+      async queryByTraceId() { return null },
+      async listTraceIds() { return [] },
+    }
+    batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    await batch.flush(makeTrace('initial'))
+    await batch.drain()
+
+    expect(received).toEqual(['initial'])
+    expect(await batch.listTraceIds()).toEqual(['appended'])
   })
 })
 

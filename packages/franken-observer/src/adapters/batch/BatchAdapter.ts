@@ -53,6 +53,7 @@ export class BatchAdapter implements ExportAdapter {
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly clearIntervalFn: (id: ReturnType<typeof setInterval>) => void
   private drainPromise: Promise<void> | null = null
+  private drainRequestedDuringDrain = false
 
   constructor(options: BatchAdapterOptions) {
     this.inner = options.adapter
@@ -70,6 +71,10 @@ export class BatchAdapter implements ExportAdapter {
     warnIfTraceHasActiveSpans(trace, 'BatchAdapter')
     this.buffer.push(trace)
     if (this.buffer.length >= this.maxBatchSize) {
+      if (this.drainPromise !== null) {
+        this.drainRequestedDuringDrain = true
+        return
+      }
       await this.drain()
     }
   }
@@ -82,19 +87,41 @@ export class BatchAdapter implements ExportAdapter {
   async drain(): Promise<void> {
     if (this.drainPromise !== null) return this.drainPromise
 
+    this.drainRequestedDuringDrain = false
     this.drainPromise = this.drainBufferedTraces()
+    let drainSucceeded = false
     try {
       await this.drainPromise
+      drainSucceeded = true
     } finally {
       this.drainPromise = null
+      if (drainSucceeded && this.drainRequestedDuringDrain && this.buffer.length >= this.maxBatchSize) {
+        this.drainRequestedDuringDrain = false
+        void this.drain().catch(() => undefined)
+      }
     }
   }
 
   private async drainBufferedTraces(): Promise<void> {
-    while (this.buffer.length > 0) {
-      const batch = [...this.buffer]
-      await Promise.all(batch.map(t => this.inner.flush(t)))
-      this.buffer.splice(0, batch.length)
+    const batch = [...this.buffer]
+    if (batch.length === 0) return
+
+    const results = await Promise.allSettled(batch.map(t => this.inner.flush(t)))
+    const failures: unknown[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (result.status === 'fulfilled') {
+        const index = this.buffer.indexOf(batch[i]!)
+        if (index !== -1) this.buffer.splice(index, 1)
+      } else {
+        failures.push(result.reason)
+      }
+    }
+
+    if (failures.length > 0) {
+      const firstFailure = failures[0]
+      throw firstFailure instanceof Error ? firstFailure : new Error(String(firstFailure))
     }
   }
 
