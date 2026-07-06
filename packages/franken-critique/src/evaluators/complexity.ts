@@ -28,7 +28,6 @@ const REGEX_PREFIX_CHARS = new Set([
   '*',
   '~',
   '^',
-  '<',
   '>',
 ]);
 
@@ -53,7 +52,10 @@ function stripIgnoredBraceSyntax(content: string): string {
       continue;
     }
 
-    if (char === '"' || char === "'") {
+    if (
+      (char === '"' || char === "'") &&
+      isLikelyQuotedStringStart(content, i, char)
+    ) {
       const end = findQuotedStringEnd(content, i, char);
       sanitized += maskIgnored(content, i, end);
       i = end - 1;
@@ -110,6 +112,19 @@ function findQuotedStringEnd(
   }
 
   return content.length;
+}
+
+function isLikelyQuotedStringStart(
+  content: string,
+  start: number,
+  quote: string,
+): boolean {
+  if (quote !== "'") return true;
+
+  const previous = content[start - 1] ?? '';
+  const next = content[start + 1] ?? '';
+
+  return !(/[A-Za-z]/.test(previous) && /[A-Za-z]/.test(next));
 }
 
 function findTemplateLiteralEnd(content: string, start: number): number {
@@ -191,8 +206,10 @@ function readTemplateExpression(
     }
 
     if (char === '"' || char === "'") {
-      i = findQuotedStringEnd(content, i, char) - 1;
-      continue;
+      if (isLikelyQuotedStringStart(content, i, char)) {
+        i = findQuotedStringEnd(content, i, char) - 1;
+        continue;
+      }
     }
 
     if (char === '`') {
@@ -226,66 +243,89 @@ function readTemplateExpression(
 }
 
 function shouldStartRegexLiteral(content: string, slashIndex: number): boolean {
-  const before = trimRegexLookbehind(content.slice(0, slashIndex));
-  if (!before) return true;
+  const previousIndex = findPreviousRegexLookbehindIndex(content, slashIndex);
+  if (previousIndex === -1) return true;
 
-  const previous = before.charAt(before.length - 1);
+  const previous = content[previousIndex] ?? '';
   if (
     (previous === '+' || previous === '-') &&
-    before.endsWith(`${previous}${previous}`)
+    content[previousIndex - 1] === previous
   ) {
     return false;
   }
 
-  if (previous === ')' && isControlHeaderPrefix(before)) return true;
+  if (previous === ')' && isControlHeaderPrefix(content, previousIndex)) {
+    return true;
+  }
 
   if (previous === '[') {
-    const beforeBracket = before.slice(0, -1).trimEnd();
-    if (!beforeBracket) return true;
-
-    const previousBeforeBracket = beforeBracket.charAt(
-      beforeBracket.length - 1,
+    const previousBeforeBracketIndex = findPreviousRegexLookbehindIndex(
+      content,
+      previousIndex,
     );
+    if (previousBeforeBracketIndex === -1) return true;
+
+    const previousBeforeBracket = content[previousBeforeBracketIndex] ?? '';
     return (
       previousBeforeBracket === '[' ||
       REGEX_PREFIX_CHARS.has(previousBeforeBracket) ||
-      isRegexKeywordPrefix(beforeBracket)
+      isRegexKeywordPrefix(content, previousBeforeBracketIndex)
     );
   }
 
   if (previous === '!') {
-    const beforeBang = before.slice(0, -1).trimEnd();
-    return !/[\w$\])]$/.test(beforeBang);
+    const previousBeforeBangIndex = findPreviousRegexLookbehindIndex(
+      content,
+      previousIndex,
+    );
+    if (previousBeforeBangIndex === -1) return true;
+    return !/[\w$\])]$/.test(content[previousBeforeBangIndex] ?? '');
   }
 
   if (REGEX_PREFIX_CHARS.has(previous)) return true;
 
-  return isRegexKeywordPrefix(before);
+  return isRegexKeywordPrefix(content, previousIndex);
 }
 
-function isRegexKeywordPrefix(content: string): boolean {
-  return /\b(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
-    content,
+function isRegexKeywordPrefix(content: string, endIndex: number): boolean {
+  let start = endIndex;
+  while (start >= 0 && /[\w$]/.test(content[start] ?? '')) start--;
+
+  const word = content.slice(start + 1, endIndex + 1);
+  return /^(?:return|throw|case|delete|typeof|void|in|of|yield|await)$/.test(
+    word,
   );
 }
 
-function trimRegexLookbehind(content: string): string {
-  let before = content.trimEnd();
+function findPreviousRegexLookbehindIndex(
+  content: string,
+  beforeIndex: number,
+): number {
+  let index = beforeIndex - 1;
 
-  while (before.endsWith('*/')) {
-    const start = before.lastIndexOf('/*');
-    if (start === -1) break;
-    before = before.slice(0, start).trimEnd();
+  while (index >= 0) {
+    while (index >= 0 && /\s/.test(content[index] ?? '')) index--;
+    if (index < 0) return -1;
+
+    if (content[index] === '/' && content[index - 1] === '*') {
+      const start = content.lastIndexOf('/*', index - 2);
+      if (start === -1) return index;
+      index = start - 1;
+      continue;
+    }
+
+    const lineStart = content.lastIndexOf('\n', index) + 1;
+    const trailingLine = content.slice(lineStart, index + 1);
+    const trailingComment = findLineCommentStart(trailingLine);
+    if (trailingComment !== -1) {
+      index = lineStart + trailingComment - 1;
+      continue;
+    }
+
+    return index;
   }
 
-  const lastLineStart = before.lastIndexOf('\n') + 1;
-  const trailingLine = before.slice(lastLineStart);
-  const trailingComment = findLineCommentStart(trailingLine);
-  if (trailingComment !== -1) {
-    before = before.slice(0, lastLineStart + trailingComment).trimEnd();
-  }
-
-  return before;
+  return -1;
 }
 
 function findLineCommentStart(line: string): number {
@@ -315,10 +355,13 @@ function findLineCommentStart(line: string): number {
   return -1;
 }
 
-function isControlHeaderPrefix(content: string): boolean {
+function isControlHeaderPrefix(
+  content: string,
+  closeParenIndex: number,
+): boolean {
   let depth = 0;
 
-  for (let i = content.length - 1; i >= 0; i--) {
+  for (let i = closeParenIndex; i >= 0; i--) {
     const char = content[i];
 
     if (char === ')') {
@@ -329,8 +372,15 @@ function isControlHeaderPrefix(content: string): boolean {
     if (char === '(') {
       depth--;
       if (depth === 0) {
-        const prefix = content.slice(0, i).trimEnd();
-        return /\b(?:if|while|for|with)$/.test(prefix);
+        const previousIndex = findPreviousRegexLookbehindIndex(content, i);
+        if (previousIndex === -1) return false;
+
+        let keywordStart = previousIndex;
+        while (keywordStart >= 0 && /[\w$]/.test(content[keywordStart] ?? '')) {
+          keywordStart--;
+        }
+        const keyword = content.slice(keywordStart + 1, previousIndex + 1);
+        return /^(?:if|while|for|with)$/.test(keyword);
       }
     }
   }

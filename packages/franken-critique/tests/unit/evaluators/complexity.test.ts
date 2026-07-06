@@ -211,6 +211,41 @@ const ratio = values[i] / denom; if (a) { if (b) { if (c) { if (d) { if (e) { do
     );
   });
 
+  it('does not mistake JSX closing tags for regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const jsxPair = '<A>{a && <B>{b}</B>}</A>;';
+    const content = Array.from({ length: 6 }, () => jsxPair).join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      false,
+    );
+  });
+
+  it('does not mask prose contractions as quoted strings', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `Here's deeply nested code: if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('handles slash-heavy prose and URLs without hiding following braces', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const slashHeavy = Array.from(
+      { length: 300 },
+      (_, i) => `https://example.com/path/${i}/asset`,
+    ).join(' ');
+    const content = `${slashHeavy}\nif (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags very long functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i} = ${i};`);
