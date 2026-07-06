@@ -307,6 +307,15 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('infinite loop');
   });
 
+  it('tries later keyword occurrences when extracting prose snippets', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'This may run while the snippet is while (true) { doWork(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('detects unguarded recursion in named function expressions', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `const f = function loop() { loop(); };`;

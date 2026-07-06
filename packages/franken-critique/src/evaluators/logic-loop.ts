@@ -67,8 +67,11 @@ function codeCandidates(code: string): string[] {
   const candidates = fencedBlocks.length > 0 ? [...fencedBlocks, code] : [code];
 
   for (const keyword of ['while', 'for', 'function', 'async function', 'class']) {
-    const index = code.indexOf(keyword);
-    if (index > 0) candidates.push(code.slice(index));
+    let index = code.indexOf(keyword);
+    while (index > 0) {
+      candidates.push(code.slice(index));
+      index = code.indexOf(keyword, index + keyword.length);
+    }
   }
 
   return candidates.flatMap((candidate) => [candidate, `${candidate}\n}`, `${candidate}\n}}`, `${candidate}\n}}}`]);
