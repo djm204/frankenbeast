@@ -257,6 +257,33 @@ describe('PrCreator argv subprocess safety', () => {
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
+  it('surfaces GitHub Actions GH_TOKEN auth failures as actionable required-action errors', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (args.includes('--show-current')) return 'feature/actions-auth-warning\n';
+      if (command === 'gh' && args.includes('list')) {
+        const error = new Error('Command failed: gh pr list') as Error & { stderr: string; status: number };
+        error.stderr = 'gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable';
+        error.status = 4;
+        throw error;
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult())).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('GH_TOKEN'),
+      action: expect.stringContaining('GH_TOKEN'),
+      branch: 'feature/actions-auth-warning',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
   // Argument-injection and invalid-ref guards must still hold.
   it.each([
     '-evil',

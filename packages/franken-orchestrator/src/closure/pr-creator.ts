@@ -642,7 +642,7 @@ function isGhMissing(error: unknown): boolean {
   return message.includes('gh: command not found') || message.includes('ENOENT') || message.includes('not found');
 }
 
-const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|to get started with github cli/i;
+const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|to get started with github cli|set the GH_TOKEN environment variable|GH_TOKEN/i;
 
 function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: string }): boolean {
   const text = [
@@ -656,9 +656,23 @@ function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: st
 }
 
 function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreationRequiredActionError {
+  const detailText = [
+    stringifyError(details),
+    readErrorText((details as { stderr?: unknown }).stderr),
+    readErrorText((details as { stdout?: unknown }).stdout),
+    readErrorText((details as { summary?: unknown }).summary),
+  ].filter(Boolean).join('\n');
+  const isActionsTokenFailure = /GH_TOKEN|GitHub Actions workflow/i.test(detailText);
+  const action = isActionsTokenFailure
+    ? 'Set the `GH_TOKEN` environment variable with pull-request permissions, then retry PR creation for the pushed branch.'
+    : 'Run `gh auth login`, then retry PR creation for the pushed branch.';
+  const message = isActionsTokenFailure
+    ? `PR not created: set \`GH_TOKEN\` for GitHub CLI; branch ${branch} is pushed.`
+    : `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`;
+
   return new PrCreationRequiredActionError({
-    message: `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`,
-    action: 'Run `gh auth login`, then retry PR creation for the pushed branch.',
+    message,
+    action,
     branch,
     details,
   });

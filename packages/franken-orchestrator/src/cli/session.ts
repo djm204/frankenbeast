@@ -530,7 +530,9 @@ export class Session {
     }
     const passed = result.taskResults?.filter((t) => t.status === 'success').length ?? 0;
     const skipped = result.taskResults?.filter((t) => t.status === 'skipped').length ?? 0;
-    const failed = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
+    const failedTasks = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
+    const runFailed = result.status === 'failed' ? 1 : 0;
+    const failed = failedTasks + runFailed;
     const parts = [`${passed} passed`, `${failed} failed`];
     if (skipped > 0) parts.push(`${skipped} skipped`);
     printLine(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
@@ -561,6 +563,9 @@ export class Session {
       printLine(
         `  ${String(o.issueNumber).padStart(5)}  ${title.padEnd(TITLE_MAX)}  ${badge.padEnd(8)}  ${pr}`,
       );
+      if (o.error) {
+        printLine(`  ${''.padStart(5)}  ${A.dim}Error: ${o.error}${A.reset}`);
+      }
     }
 
     const fixed = outcomes.filter((o) => o.status === 'fixed').length;
