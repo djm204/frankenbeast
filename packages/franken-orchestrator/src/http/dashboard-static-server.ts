@@ -141,7 +141,14 @@ async function createProxyResponse(
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = await request.arrayBuffer();
   }
-  return fetch(targetUrl, init);
+  const upstreamResponse = await fetch(targetUrl, init);
+  const responseHeaders = new Headers(upstreamResponse.headers);
+  removeHopByHopHeaders(responseHeaders);
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    statusText: upstreamResponse.statusText,
+    headers: responseHeaders,
+  });
 }
 
 function resolveProxyTargetUrl(apiTarget: string, sourceUrl: URL): URL {

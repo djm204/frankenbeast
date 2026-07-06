@@ -328,11 +328,14 @@ export class NetworkSupervisor {
   }
 
   private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
-    for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
+    const startupAttempts = service.serviceIdentity === 'dashboard-web'
+      ? Math.max(this.startupAttempts, 240)
+      : this.startupAttempts;
+    for (let attempt = 0; attempt < startupAttempts; attempt += 1) {
       if (await this.deps.healthcheck(service)) {
         return true;
       }
-      if (attempt < this.startupAttempts - 1) {
+      if (attempt < startupAttempts - 1) {
         await sleep(this.startupDelayMs);
       }
     }

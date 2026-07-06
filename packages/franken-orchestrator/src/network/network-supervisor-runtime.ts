@@ -84,9 +84,6 @@ export async function healthcheckNetworkService(service: ManagedNetworkServiceSt
       });
       return response.ok;
     } catch {
-      if (service.serviceIdentity) {
-        return false;
-      }
       // Fall back to PID checks for services that have not opened HTTP yet.
     }
   }
