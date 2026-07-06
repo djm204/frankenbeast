@@ -668,6 +668,32 @@ describe('CliLlmAdapter', () => {
         expect(calls[2]!.cmd).toBe('claude');
       });
 
+      it('stops retrying when every configured provider remains rate limited beyond the retry cap', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stderr: 'claude retry-after: 1', exitCode: 1 },
+          { stderr: 'codex retry-after: 1', exitCode: 1 },
+          { stderr: 'claude still rate limited retry-after: 1', exitCode: 1 },
+          { stderr: 'codex still rate limited retry-after: 1', exitCode: 1 },
+          { stdout: 'would only happen if retry loop is unbounded', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          {
+            ...baseOpts,
+            providers: ['claude', 'codex'],
+            maxRateLimitRetries: 1,
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        await expect(adapter.execute({ prompt: 'test', maxTurns: 1 }))
+          .rejects.toThrow('All configured LLM providers remained rate limited after 1 retry cycle');
+        expect(sleepFn).toHaveBeenCalledTimes(1);
+        expect(calls).toHaveLength(4);
+      });
+
       it('does not forward the selected provider model to fallback providers in chat mode', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stderr: 'rate limit exceeded', exitCode: 1 },
