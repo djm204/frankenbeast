@@ -380,11 +380,24 @@ function invokedFunctionCallee(callee: AstNode): AstNode | null {
 }
 
 function containsIfStatement(node: AstNode, enterFunction = false): boolean {
+  const enteredHelpers = new Set<string>();
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'IfStatement') return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
-      const invokedFunction = invokedFunctionCallee(current.callee);
+      const callee = current.callee;
+      if (callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName);
+          if (helper) {
+            enteredHelpers.add(callName);
+            if (visit(helper, true)) return true;
+            enteredHelpers.delete(callName);
+          }
+        }
+      }
+      const invokedFunction = invokedFunctionCallee(callee);
       if (invokedFunction) return visit(invokedFunction, true);
     }
     return childNodes(current).some((child) => visit(child));
@@ -404,6 +417,11 @@ function localFunctionDeclaration(root: AstNode, name: string): AstNode | null {
       const id = current.id;
       if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return current;
       return null;
+    }
+
+    if (current.type === 'VariableDeclarator' && isNode(current.id) && identifierName(current.id) === name) {
+      const init = current.init;
+      if (isNode(init) && isFunctionLike(init)) return init;
     }
 
     for (const child of childNodes(current)) {
@@ -464,11 +482,24 @@ function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
 }
 
 function hasReturnBefore(node: AstNode, position: number, enterFunction = false): boolean {
+  const enteredHelpers = new Set<string>();
   const visit = (current: AstNode, allowFunctionBody = false): boolean => {
     if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
     if (current.type === 'ReturnStatement' && current.start < position) return true;
     if (current.type === 'CallExpression' && isNode(current.callee)) {
-      const invokedFunction = invokedFunctionCallee(current.callee);
+      const callee = current.callee;
+      if (callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName);
+          if (helper) {
+            enteredHelpers.add(callName);
+            if (visit(helper, true)) return true;
+            enteredHelpers.delete(callName);
+          }
+        }
+      }
+      const invokedFunction = invokedFunctionCallee(callee);
       if (invokedFunction) return visit(invokedFunction, true);
     }
     return childNodes(current).some((child) => visit(child));
@@ -479,7 +510,7 @@ function hasReturnBefore(node: AstNode, position: number, enterFunction = false)
 
 function syntaxMaskedText(code: string): string {
   const chars = [...code];
-  for (const range of ignoredSyntaxRanges(code, true)) {
+  for (const range of ignoredSyntaxRanges(code, false)) {
     for (let index = range.start; index < range.end && index < chars.length; index += 1) {
       chars[index] = ' ';
     }
@@ -487,8 +518,16 @@ function syntaxMaskedText(code: string): string {
   return chars.join('');
 }
 
+function hasFallbackLoopExit(snippet: string): boolean {
+  const withoutNestedFunctions = snippet
+    .replace(/=>\s*\{[\s\S]*?\}/g, '')
+    .replace(/function\b[^{}]*\{[\s\S]*?\}/g, '');
+  return /\b(break|return|throw|await|yield)\b/.test(withoutNestedFunctions);
+}
+
 function fallbackInfiniteLoopFindings(code: string): EvaluationFinding[] {
-  const masked = syntaxMaskedText(code);
+  const withoutFenceDelimiters = code.replace(/^```[^\n]*$/gm, '');
+  const masked = syntaxMaskedText(withoutFenceDelimiters);
   const findings: EvaluationFinding[] = [];
   const loopHeaders = [/while\s*\(\s*true\s*\)/g, /for\s*\(\s*;\s*;\s*\)/g];
 
@@ -496,7 +535,7 @@ function fallbackInfiniteLoopFindings(code: string): EvaluationFinding[] {
     for (const match of masked.matchAll(loopHeader)) {
       const start = match.index ?? 0;
       const snippet = trimToBalancedSnippet(masked.slice(start));
-      if (/\b(break|return|throw|await|yield)\b/.test(snippet)) continue;
+      if (hasFallbackLoopExit(snippet)) continue;
       findings.push({
         message: 'Potential infinite loop detected: loop has no break or return statement',
         severity: 'critical',
@@ -522,7 +561,7 @@ export class LogicLoopEvaluator implements Evaluator {
       this.checkUnguardedRecursion(ast, findings);
     }
 
-    if (asts.length === 0) {
+    if (!findings.some((finding) => finding.message.includes('infinite loop'))) {
       findings.push(...fallbackInfiniteLoopFindings(input.content));
     }
 
