@@ -262,4 +262,71 @@ describe('ws chat server', () => {
 
     rmSync(TMP, { recursive: true, force: true });
   });
+
+  it('emits execution events after an approved action runs', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn().mockResolvedValue({
+        displayMessages: [{ kind: 'execution', content: 'Done' }],
+        events: [
+          { type: 'start', sessionId: session.id, data: { taskDescription: 'deploy staging' } },
+          { type: 'complete', sessionId: session.id, data: { status: 'success' } },
+        ],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'premium_execution',
+        transcript: session.transcript,
+      }),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as unknown as ChatRuntime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    expect(runtime.run).toHaveBeenCalledWith('/approve', expect.objectContaining({
+      pendingApproval: true,
+      sessionId: session.id,
+    }));
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: true,
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+      data: { taskDescription: 'deploy staging' },
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.complete',
+      data: { status: 'success' },
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
 });

@@ -331,6 +331,9 @@ export class ChatSocketController {
       approved: true,
       timestamp: session.updatedAt,
     });
+    for (const event of result.events) {
+      this.emit(peer, mapTurnEvent(event));
+    }
     for (const display of result.displayMessages) {
       this.emit(peer, {
         type: 'assistant.message.complete',
