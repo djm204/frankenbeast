@@ -289,6 +289,24 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('infinite loop');
   });
 
+  it('detects infinite loops in later markdown code fences', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = '```js\nconst ok = true;\n```\n```js\nwhile (true) { doWork(); }\n```';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('detects infinite loop snippets embedded in prose', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'Here is the issue: while (true) { doWork(); }';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('detects unguarded recursion in named function expressions', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `const f = function loop() { loop(); };`;
@@ -313,6 +331,14 @@ describe('LogicLoopEvaluator', () => {
 
     expect(result.verdict).toBe('fail');
     expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('treats throws in class static blocks as loop exits', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `while (true) { class C { static { throw new Error('stop'); } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
   });
 
   // Regression for PR #385 round 2 (Codex F6): real code inside a template

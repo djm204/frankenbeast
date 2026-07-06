@@ -66,10 +66,17 @@ function codeCandidates(code: string): string[] {
   );
   const candidates = fencedBlocks.length > 0 ? [...fencedBlocks, code] : [code];
 
+  for (const keyword of ['while', 'for', 'function', 'async function', 'class']) {
+    const index = code.indexOf(keyword);
+    if (index > 0) candidates.push(code.slice(index));
+  }
+
   return candidates.flatMap((candidate) => [candidate, `${candidate}\n}`, `${candidate}\n}}`, `${candidate}\n}}}`]);
 }
 
-function parseJavaScript(code: string): AstNode | null {
+function parseJavaScript(code: string): AstNode[] {
+  const asts: AstNode[] = [];
+  const seen = new Set<string>();
   const baseOptions = {
     ecmaVersion: 'latest' as const,
     allowAwaitOutsideFunction: true,
@@ -78,16 +85,20 @@ function parseJavaScript(code: string): AstNode | null {
   };
 
   for (const candidate of codeCandidates(code)) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
     for (const sourceType of ['module', 'script'] as const) {
       try {
         try {
-          return TypeScriptParser.parse(candidate, {
+          asts.push(TypeScriptParser.parse(candidate, {
             ...baseOptions,
             sourceType,
             locations: true,
-          }) as unknown as AstNode;
+          }) as unknown as AstNode);
+          break;
         } catch {
-          return parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode;
+          asts.push(parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode);
+          break;
         }
       } catch {
         // Try the next source type or the next simple truncation repair.
@@ -95,15 +106,11 @@ function parseJavaScript(code: string): AstNode | null {
     }
   }
 
-  return null;
+  return asts;
 }
 
 function isFunctionLike(node: AstNode): boolean {
   return FUNCTION_NODE_TYPES.has(node.type);
-}
-
-function isClassLike(node: AstNode): boolean {
-  return node.type === 'ClassDeclaration' || node.type === 'ClassExpression';
 }
 
 function isInfiniteWhile(node: AstNode): boolean {
@@ -123,7 +130,7 @@ function isInfiniteFor(node: AstNode): boolean {
 
 function hasLoopExit(body: AstNode): boolean {
   const visit = (node: AstNode, nestedLoopOrSwitchDepth: number): boolean => {
-    if (isFunctionLike(node) || isClassLike(node)) return false;
+    if (isFunctionLike(node)) return false;
 
     if (node.type === 'ForOfStatement' && node.await === true) return true;
 
@@ -217,9 +224,9 @@ export class LogicLoopEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     const findings: EvaluationFinding[] = [];
-    const ast = parseJavaScript(input.content);
+    const asts = parseJavaScript(input.content);
 
-    if (ast) {
+    for (const ast of asts) {
       this.checkInfiniteLoops(ast, findings);
       this.checkUnguardedRecursion(ast, findings);
     }
