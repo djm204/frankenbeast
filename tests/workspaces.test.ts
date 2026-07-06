@@ -118,6 +118,61 @@ describe('npm workspaces configuration', () => {
         }
       }
     });
+
+    it('keeps the issue #498 npm audit packages on non-vulnerable locked versions', () => {
+      const lockfile = readJson('package-lock.json');
+      const packageFloors = {
+        '@anthropic-ai/sdk': '0.110.0',
+        '@babel/core': '7.29.1',
+        '@protobufjs/utf8': '1.1.1',
+        esbuild: '0.28.1',
+        'fast-uri': '3.1.3',
+        'form-data': '4.0.6',
+        hono: '4.12.27',
+        'ip-address': '10.2.0',
+        'js-yaml': '4.3.0',
+        postcss: '8.5.10',
+        protobufjs: '7.6.5',
+        qs: '6.15.3',
+        vite: '8.1.3',
+        'vite-node': '4.1.9',
+        vitest: minimumVitest,
+        '@vitest/coverage-v8': minimumVitest,
+        '@vitest/mocker': minimumVitest,
+        ws: '8.21.0',
+      };
+
+      for (const [packageName, minimumVersion] of Object.entries(packageFloors)) {
+        const lockedEntries = Object.entries(lockfile.packages ?? {})
+          .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
+
+        for (const [path, packageDetails] of lockedEntries) {
+          const lockedVersion = (packageDetails as { version?: string }).version;
+
+          expect(lockedVersion, `${packageName} at ${path} is missing a locked version`).toBeDefined();
+          expect(
+            isAtLeast(lockedVersion ?? '0.0.0', minimumVersion),
+            `${packageName} at ${path} must stay >= ${minimumVersion}`,
+          ).toBe(true);
+        }
+      }
+
+      const braceExpansionEntries = Object.entries(lockfile.packages ?? {})
+        .filter(([path]) => path === 'node_modules/brace-expansion' || path.endsWith('/node_modules/brace-expansion'));
+
+      expect(braceExpansionEntries.length, 'brace-expansion missing from package-lock.json').toBeGreaterThan(0);
+      for (const [path, packageDetails] of braceExpansionEntries) {
+        const lockedVersion = (packageDetails as { version?: string }).version;
+
+        expect(lockedVersion, `brace-expansion at ${path} is missing a locked version`).toBeDefined();
+        if ((lockedVersion ?? '').startsWith('5.')) {
+          expect(
+            isAtLeast(lockedVersion ?? '0.0.0', '5.0.7'),
+            `brace-expansion at ${path} must stay outside the vulnerable 5.0.2 - 5.0.5 range`,
+          ).toBe(true);
+        }
+      }
+    });
   });
 
   describe('cross-module dependencies use coherent internal versions', () => {
