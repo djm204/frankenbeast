@@ -66,7 +66,7 @@ walk(repoRoot);
 
 const rows = sourceFiles
   .map((file) => {
-    const path = relative(repoRoot, file).replaceAll('\\\\', '/');
+    const path = relative(repoRoot, file).replaceAll('\\', '/');
     const count = countAnyNodes(file);
     const scope = isTestPath(path) ? 'test' : 'production';
     return { path, package: packageName(path), scope, count };
