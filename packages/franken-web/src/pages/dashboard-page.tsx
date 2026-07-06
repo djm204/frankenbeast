@@ -51,6 +51,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillErrors, setSkillErrors] = useState<Record<string, SkillMutationError>>({});
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
+  const [dashboardConnectionRetry, setDashboardConnectionRetry] = useState(0);
 
   const setConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
     confirmedSnapshotRef.current = snapshot;
@@ -162,25 +163,31 @@ export function DashboardPage({ client }: DashboardPageProps) {
     }
     loadSnapshot();
     let unsub: (() => void) | undefined;
+    let streamActive = true;
     client.subscribeToDashboard((snap) => {
       if (!mountedRef.current) return;
+      if (!streamActive) return;
       if (clientGenerationRef.current !== subscriptionGeneration) return;
       setLoadError(null);
       applyServerSnapshot(snap);
     })
       .then((nextUnsub) => {
-        if (!mountedRef.current) {
+        if (!mountedRef.current || !streamActive || clientGenerationRef.current !== subscriptionGeneration) {
           nextUnsub();
           return;
         }
         unsub = nextUnsub;
       })
       .catch((error) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !streamActive || clientGenerationRef.current !== subscriptionGeneration) return;
         setLoadError(`Unable to stream dashboard updates. ${describeError(error)}`);
       });
-    return () => { mountedRef.current = false; unsub?.(); };
-  }, [applyServerSnapshot, client, loadSnapshot, setConfirmedSnapshot]);
+    return () => { streamActive = false; mountedRef.current = false; unsub?.(); };
+  }, [applyServerSnapshot, client, dashboardConnectionRetry, loadSnapshot, setConfirmedSnapshot]);
+
+  const retryDashboardConnection = useCallback(() => {
+    setDashboardConnectionRetry((retry) => retry + 1);
+  }, []);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
     const sequence = (issuedSkillMutationSequenceRef.current.get(name) ?? 0) + 1;
@@ -295,7 +302,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
           {loadError && (
             <div className="analytics-alert dashboard-alert" role="alert">
               <span>{loadError}</span>
-              <button type="button" onClick={loadSnapshot}>Retry loading dashboard</button>
+              <button type="button" onClick={retryDashboardConnection}>Retry loading dashboard</button>
             </div>
           )}
           {Object.values(skillErrors).map((skillError) => (

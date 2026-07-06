@@ -796,4 +796,63 @@ describe('DashboardPage', () => {
       expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('standard');
     });
   });
+
+  it('reopens the dashboard stream when retrying a stream failure', async () => {
+    const client = mockClient({
+      subscribeToDashboard: vi.fn()
+        .mockRejectedValueOnce(new Error('SSE unavailable'))
+        .mockResolvedValueOnce(() => undefined),
+    });
+
+    render(<DashboardPage client={client} />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to stream dashboard updates. SSE unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading dashboard' }));
+
+    await waitFor(() => {
+      expect(client.fetchSnapshot).toHaveBeenCalledTimes(2);
+      expect(client.subscribeToDashboard).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(/Unable to stream dashboard updates/)).toBeNull();
+    });
+  });
+
+  it('closes a stream subscription that resolves after it has been superseded', async () => {
+    const staleSubscription = deferred<() => void>();
+    const unsubscribeStale = vi.fn();
+    const firstClient = mockClient({
+      subscribeToDashboard: vi.fn().mockReturnValue(staleSubscription.promise),
+    });
+    const nextClient = mockClient();
+    const { rerender } = render(<DashboardPage client={firstClient} />);
+
+    await screen.findByRole('switch', { name: 'Enable shell' });
+    rerender(<DashboardPage client={nextClient} />);
+    await screen.findByRole('switch', { name: 'Enable shell' });
+
+    staleSubscription.resolve(unsubscribeStale);
+
+    await waitFor(() => {
+      expect(unsubscribeStale).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('ignores stream setup failures from a superseded dashboard client', async () => {
+    const staleSubscription = deferred<() => void>();
+    const firstClient = mockClient({
+      subscribeToDashboard: vi.fn().mockReturnValue(staleSubscription.promise),
+    });
+    const nextClient = mockClient();
+    const { rerender } = render(<DashboardPage client={firstClient} />);
+
+    await screen.findByRole('switch', { name: 'Enable shell' });
+    rerender(<DashboardPage client={nextClient} />);
+    await screen.findByRole('switch', { name: 'Enable shell' });
+
+    staleSubscription.reject(new Error('old SSE failed'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/old SSE failed/)).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
 });
