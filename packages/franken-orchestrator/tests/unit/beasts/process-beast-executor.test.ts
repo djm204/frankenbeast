@@ -806,6 +806,8 @@ describe('ProcessBeastExecutor', () => {
       try {
         mkdirSync(runConfigDir, { recursive: true });
         chmodSync(runConfigDir, 0o777);
+        writeFileSync(join(runConfigDir, `${run.id}.json`), 'stale snapshot');
+        chmodSync(join(runConfigDir, `${run.id}.json`), 0o666);
         await executor.start(run, martinLoopDefinition);
       } finally {
         process.umask(originalUmask);
@@ -815,6 +817,8 @@ describe('ProcessBeastExecutor', () => {
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
       expect(existsSync(configPath)).toBe(true);
+      expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
+      expect(readFileSync(configPath, 'utf8')).not.toContain('stale snapshot');
       expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
 
@@ -986,8 +990,8 @@ describe('ProcessBeastExecutor', () => {
         configSnapshot: {
           webhookUrl: configSecret,
           signingSecret: camelCaseSecret,
-          apiKey: ['pref-${{matrix}}', envSecret],
-          privateKey: `[REDACTED PRIVATE KEY]`,
+          apiKey: [arraySecret, envSecret],
+          privateKey: multilineSecretLine,
           normalOutput: visibleValue,
         },
         dispatchedBy: 'cli',
@@ -1009,104 +1013,105 @@ describe('ProcessBeastExecutor', () => {
       const cb = callbacks as ProcessCallbacks;
 
       cb.onStdout(`stdout ${envSecret} ${camelCaseSecret} ${multilineSecretLine} ${visibleValue}`);
-      cb.onStderr(`stderr ${configSecret} prefix-${arraySecret} ${visibleValue}`);
+      cb.onStderr(`stderr ${configSecret} ${arraySecret} ${visibleValue}`);
       cb.onExit(1, null);
       await new Promise((r) => setTimeout(r, 10));
 
-      const appendLines = appendSpy.mock.calls.map((call) => call[3]);
-      const loggedStdout = appendLines.find((line) => typeof line === 'string' && line.startsWith('stdout '));
-      const loggedStderr = appendLines.find((line) => typeof line === 'string' && line.startsWith('stderr '));
-
-      expect(loggedStdout).toBeDefined();
-      expect(loggedStderr).toBeDefined();
-
-      expect(loggedStdout).toContain(`stdout`);
-      expect(loggedStdout).toContain(visibleValue);
-      expect(loggedStdout).toContain('[REDACTED]');
-      expect(loggedStderr).toContain(`stderr`);
-      expect(loggedStderr).toContain(visibleValue);
-      expect(loggedStderr).toContain('[REDACTED]');
-      expect(loggedStdout).not.toContain(envSecret);
-      expect(loggedStdout).not.toContain(configSecret);
-      expect(loggedStdout).not.toContain(camelCaseSecret);
-      expect(loggedStderr).not.toContain(configSecret);
-      expect(loggedStderr).not.toContain(camelCaseSecret);
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        attempt.id,
+        'stdout',
+        `stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`,
+        expect.any(String),
+      );
+      expect(appendSpy).toHaveBeenCalledWith(
+        run.id,
+        attempt.id,
+        'stderr',
+        `stderr [REDACTED] [REDACTED] ${visibleValue}`,
+        expect.any(String),
+      );
       const failEvent = repo.listEvents(run.id).find((e) => e.type === 'attempt.failed');
-      expect(failEvent!.payload.lastStderrLines[0]).toContain('[REDACTED]');
-      expect(failEvent!.payload.lastStderrLines[0]).toContain(visibleValue);
-      expect(failEvent!.payload.lastStderrLines[0]).not.toContain(configSecret);
-      expect(failEvent!.payload.lastStderrLines[0]).not.toContain(camelCaseSecret);
+      expect(failEvent!.payload).toMatchObject({
+        lastStderrLines: [`stderr [REDACTED] [REDACTED] ${visibleValue}`],
+      });
+
       const publishedLogLines = publishSpy.mock.calls
         .map(([event]) => event)
         .filter((event) => event.type === 'run.log')
         .map((event) => event.data.line);
-      const publishedStdout = publishedLogLines.find((line) => typeof line === 'string' && line.startsWith('stdout '));
-      const publishedStderr = publishedLogLines.find((line) => typeof line === 'string' && line.startsWith('stderr '));
+      expect(publishedLogLines).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
+      expect(publishedLogLines).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
 
-      expect(publishedStdout).toBeDefined();
-      expect(publishedStdout).toContain('[REDACTED]');
-      expect(publishedStdout).toContain(visibleValue);
-      expect(publishedStdout).not.toContain(envSecret);
-      expect(publishedStdout).not.toContain(configSecret);
-      expect(publishedStdout).not.toContain(camelCaseSecret);
-
-      expect(publishedStderr).toBeDefined();
-      expect(publishedStderr).toContain('[REDACTED]');
-      expect(publishedStderr).toContain(visibleValue);
-      expect(publishedStderr).not.toContain(configSecret);
-      expect(publishedStderr).not.toContain(camelCaseSecret);
-      const persistedLogLines = await logs.read(run.id, attempt.id);
-      const persistedLogMessages = persistedLogLines.map((line) => {
+      const persistedLogLines = (await logs.read(run.id, attempt.id)).map((line) => {
         try {
-          return JSON.parse(line).message;
+          const parsed = JSON.parse(line);
+          return parsed.message ?? parsed.line ?? line;
         } catch {
           return line;
         }
       });
-      const persistedLogDump = persistedLogMessages.join('\\n');
-      expect(persistedLogDump).toContain(visibleValue);
-      expect(persistedLogDump).toContain('[REDACTED]');
+      const persistedLogDump = persistedLogLines.join('\\n');
+
+      expect(persistedLogDump).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
+      expect(persistedLogDump).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
       expect(persistedLogDump).not.toContain(envSecret);
       expect(persistedLogDump).not.toContain(configSecret);
       expect(persistedLogDump).not.toContain(camelCaseSecret);
+      expect(persistedLogDump).not.toContain(multilineSecretLine);
+      expect(persistedLogDump).not.toContain(arraySecret);
 
       const serializedPersistedEvents = JSON.stringify(repo.listEvents(run.id));
       expect(serializedPersistedEvents).not.toContain(envSecret);
       expect(serializedPersistedEvents).not.toContain(configSecret);
       expect(serializedPersistedEvents).not.toContain(camelCaseSecret);
+      expect(serializedPersistedEvents).not.toContain(multilineSecretLine);
+      expect(serializedPersistedEvents).not.toContain(arraySecret);
       expect(serializedPersistedEvents).toContain(visibleValue);
     });
 
     it('publishes early buffered lines to eventBus after attempt creation', async () => {
-
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
-      const appendSpy = vi.spyOn(logs, 'append');
+      const eventBus = new BeastEventBus();
+      const publishSpy = vi.spyOn(eventBus, 'publish');
       let capturedCallbacks: ProcessCallbacks | undefined;
 
       const supervisor = {
         spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
           capturedCallbacks = callbacks as ProcessCallbacks;
-          // Simulate stdout arriving during spawn (before attempt is created)
-          capturedCallbacks.onStdout('early line 1');
-          capturedCallbacks.onStdout('early line 2');
+          capturedCallbacks.onStdout('early stdout');
+          capturedCallbacks.onStderr('early stderr');
           return { pid: 4242 };
         }),
         stop: vi.fn(async () => {}),
         kill: vi.fn(async () => {}),
       };
 
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { eventBus });
       const run = createTestRun(repo);
 
       const attempt = await executor.start(run, martinLoopDefinition);
 
-      await new Promise((r) => setTimeout(r, 10));
+      const logEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'run.log');
+      const stdoutEvents = logEvents.filter(([e]) => e.data.stream === 'stdout' && e.data.line === 'early stdout');
+      const stderrEvents = logEvents.filter(([e]) => e.data.stream === 'stderr' && e.data.line === 'early stderr');
 
-      // Early lines should have been flushed after attempt creation
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1', expect.any(String));
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2', expect.any(String));
+      expect(stdoutEvents).toHaveLength(1);
+      expect(stdoutEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        attemptId: attempt.id,
+        stream: 'stdout',
+        line: 'early stdout',
+      });
+      expect(stderrEvents).toHaveLength(1);
+      expect(stderrEvents[0][0].data).toMatchObject({
+        runId: run.id,
+        attemptId: attempt.id,
+        stream: 'stderr',
+        line: 'early stderr',
+      });
     });
   });
 

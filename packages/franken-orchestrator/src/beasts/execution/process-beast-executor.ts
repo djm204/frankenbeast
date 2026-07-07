@@ -270,6 +270,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     mkdirSync(configDir, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
     chmodSync(configDir, RUN_CONFIG_DIR_MODE);
     const configFilePath = join(configDir, `${run.id}.json`);
+    if (existsSync(configFilePath)) {
+      unlinkSync(configFilePath);
+    }
     this.pendingConfigFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
