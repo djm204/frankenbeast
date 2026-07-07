@@ -455,6 +455,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       })
       .catch((error) => {
         setStatus('error');
+        setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
         addErrorBanner(makeBanner(
           'Unable to refresh chat session',
           errorMessage(error, 'The chat API did not return a refreshed session.'),
@@ -548,8 +549,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     function handleOnline() {
+      failAllPendingSends(new Error('Connection is reconnecting before the server acknowledged the message.'));
       setConnectionStatus('reconnecting');
-      setSocketGeneration((current) => current + 1);
+      refreshSession();
     }
 
     window.addEventListener('online', handleOnline);
@@ -768,7 +770,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         }
         setConnectionStatus('reconnecting');
-        setSocketGeneration((current) => current + 1);
+        refreshSession();
       } else {
         setConnectionStatus('disconnected');
       }
