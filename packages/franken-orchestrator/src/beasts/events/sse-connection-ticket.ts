@@ -10,18 +10,33 @@ interface TicketEntry {
 export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
   cleanupIntervalMs?: number;
+  /**
+   * How long a consumed ticket is remembered (for reused → 204 detection)
+   * after it is burned. Defaults to well beyond the issue TTL so long-lived
+   * EventSource reconnects still resolve as `reused`.
+   */
+  consumedRetentionMs?: number;
 }
 
 export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
 
 export class SseConnectionTicketStore {
   private readonly tickets = new Map<string, TicketEntry>();
-  private readonly consumedTickets = new Set<string>();
+  // Consumed tickets are remembered past the issue TTL so that an EventSource
+  // reconnecting on a long-lived stream is recognized as `reused` (→ 204) and
+  // its native retry loop stops, instead of falling through to `invalid` (401)
+  // and looping. Retention is bounded (well beyond any realistic reconnect
+  // window) so the set does not grow without limit. Maps ticket → expiry ts.
+  private readonly consumedTickets = new Map<string, number>();
   private readonly ttlMs: number;
+  private readonly consumedRetentionMs: number;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
 
   constructor(options?: SseConnectionTicketStoreOptions) {
     this.ttlMs = options?.ttlMs ?? 30_000;
+    // Cover EventSource's reconnect behaviour comfortably (>> ttl) while still
+    // bounding memory: at least 10 minutes, or 20× the issue TTL if larger.
+    this.consumedRetentionMs = options?.consumedRetentionMs ?? Math.max(this.ttlMs * 20, 600_000);
     const cleanupMs = options?.cleanupIntervalMs ?? 60_000;
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
     this.cleanupInterval.unref?.();
@@ -40,9 +55,13 @@ export class SseConnectionTicketStore {
   consume(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
     const entry = this.tickets.get(ticket);
     if (!entry) {
-      const consumed = this.consumedTickets.has(ticket);
-      if (consumed) {
-        return 'reused';
+      const consumedExpiry = this.consumedTickets.get(ticket);
+      if (consumedExpiry !== undefined) {
+        if (Date.now() <= consumedExpiry) {
+          return 'reused';
+        }
+        // Retention window elapsed — forget it and treat as invalid.
+        this.consumedTickets.delete(ticket);
       }
       return 'invalid';
     }
@@ -66,7 +85,7 @@ export class SseConnectionTicketStore {
       return 'invalid';
     }
 
-    this.consumedTickets.add(ticket);
+    this.consumedTickets.set(ticket, Date.now() + this.consumedRetentionMs);
     return 'valid';
   }
 
@@ -81,7 +100,11 @@ export class SseConnectionTicketStore {
         this.tickets.delete(ticket);
       }
     }
-    
+    for (const [ticket, expiry] of this.consumedTickets) {
+      if (now > expiry) {
+        this.consumedTickets.delete(ticket);
+      }
+    }
   }
 
   destroy(): void {
