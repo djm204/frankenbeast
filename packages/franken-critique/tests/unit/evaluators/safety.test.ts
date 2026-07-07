@@ -23,10 +23,10 @@ function createInput(content: string): EvaluationInput {
   return { content, metadata: {} };
 }
 
-const unsafeDynamicCallName = ['ev', 'al'].join('');
-const unsafeDynamicCallPattern = `${unsafeDynamicCallName}\\(`;
-function unsafeDynamicCall(argument: string): string {
-  return `${unsafeDynamicCallName}(${argument})`;
+const forbiddenInvocationName = 'unsafeCall';
+const forbiddenInvocationPattern = `${forbiddenInvocationName}\\(`;
+function forbiddenInvocation(argument: string): string {
+  return `${forbiddenInvocationName}(${argument})`;
 }
 
 describe('SafetyEvaluator', () => {
@@ -42,8 +42,8 @@ describe('SafetyEvaluator', () => {
     const port = createMockGuardrailsPort([
       {
         id: 'r1',
-        description: `no ${unsafeDynamicCallName}`,
-        pattern: unsafeDynamicCallPattern,
+        description: `no ${forbiddenInvocationName}`,
+        pattern: forbiddenInvocationPattern,
         severity: 'block',
       },
     ]);
@@ -60,20 +60,20 @@ describe('SafetyEvaluator', () => {
     const port = createMockGuardrailsPort([
       {
         id: 'r1',
-        description: `no ${unsafeDynamicCallName}`,
-        pattern: unsafeDynamicCallPattern,
+        description: `no ${forbiddenInvocationName}`,
+        pattern: forbiddenInvocationPattern,
         severity: 'block',
       },
     ]);
     const evaluator = new SafetyEvaluator(port);
 
-    const result = await evaluator.evaluate(createInput(unsafeDynamicCall('"code"')));
+    const result = await evaluator.evaluate(createInput(forbiddenInvocation('"code"')));
 
     expect(result.verdict).toBe('fail');
     expect(result.score).toBe(0);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.severity).toBe('critical');
-    expect(result.findings[0]!.message).toContain(`no ${unsafeDynamicCallName}`);
+    expect(result.findings[0]!.message).toContain(`no ${forbiddenInvocationName}`);
   });
 
   it('warns but passes on warning-severity rules', async () => {
@@ -243,8 +243,8 @@ describe('SafetyEvaluator', () => {
     const port = createMockGuardrailsPort([
       {
         id: 'r1',
-        description: `no ${unsafeDynamicCallName}`,
-        pattern: unsafeDynamicCallPattern,
+        description: `no ${forbiddenInvocationName}`,
+        pattern: forbiddenInvocationPattern,
         severity: 'block',
       },
       {
@@ -257,7 +257,7 @@ describe('SafetyEvaluator', () => {
     const evaluator = new SafetyEvaluator(port);
 
     const result = await evaluator.evaluate(
-      createInput(`${unsafeDynamicCall('\"x\"')}; exec("y")`),
+      createInput(`${forbiddenInvocation('"code"')}; exec("y")`),
     );
 
     expect(result.verdict).toBe('fail');
@@ -280,7 +280,7 @@ describe('SafetyEvaluator', () => {
       {
         id: 'bad-regex',
         description: 'bad regex',
-        pattern: `${unsafeDynamicCallName}(`,
+        pattern: `${forbiddenInvocationName}(`,
         severity: 'block',
       },
     ]);
