@@ -106,7 +106,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
     }));
   }
 
-  app.post('/v1/comms/inbound', requestSizeLimit(16 * 1024), async (c) => {
+  app.post('/v1/comms/inbound', async (c) => {
     const body = await c.req.json();
     await gateway.handleInbound(body);
     return c.json({ accepted: true });
