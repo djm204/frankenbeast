@@ -28,7 +28,8 @@
     "sharp": "^0.34.5",
     "turbo": "^2.10.3",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "yaml": "^2.9.0"
   },
   "packageManager": "npm@11.5.1",
   "engines": {
