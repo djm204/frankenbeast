@@ -195,6 +195,54 @@ describe('control-plane operator auth', () => {
     });
   });
 
+  describe('body-size limits', () => {
+    const oversizedJsonBody = JSON.stringify({ payload: 'x'.repeat(16 * 1024) });
+
+    it('rejects oversized network payloads before handlers mutate config', async () => {
+      const setConfig = vi.fn();
+      const app = buildApp({
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => defaultConfig(),
+          setConfig,
+        },
+      });
+
+      const res = await app.request('/v1/network/config', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setConfig).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized skill payloads before handlers install skills', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        install: vi.fn(),
+        installCustom: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(skillManager.install).not.toHaveBeenCalled();
+      expect(skillManager.installCustom).not.toHaveBeenCalled();
+    });
+  });
+
   describe('public comms surfaces stay reachable', () => {
     it('comms health is not gated', async () => {
       const app = buildApp();

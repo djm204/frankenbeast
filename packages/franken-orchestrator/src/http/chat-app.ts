@@ -138,7 +138,10 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       app.use('*', credentialedCorsForAllowedOrigins(allowedOrigins));
     }
   }
-  app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
+  for (const base of ['/v1/chat', '/v1/network', '/api/skills']) {
+    app.use(base, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
+    app.use(`${base}/*`, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
+  }
   // Chat /v1/chat/* is gated by an operator token whenever one is configured.
   // The same operator token authorizes the beast control plane and chat in
   // this codebase (matching the existing `VITE_BEAST_OPERATOR_TOKEN` pattern
