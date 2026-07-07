@@ -440,7 +440,7 @@ describe('ws chat server', () => {
     await expect(controller.receive(peer, JSON.stringify({
       type: 'approval.respond',
       approved: true,
-    }))).rejects.toThrow('executor offline');
+    }))).resolves.toBeUndefined();
 
     expect(store.get(session.id)?.state).toBe('pending_approval');
     expect(store.get(session.id)?.pendingApproval?.command).toBe('deploy staging');

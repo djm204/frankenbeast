@@ -371,7 +371,7 @@ export class ChatSocketController {
           ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
         });
       }
-      throw error;
+      return;
     }
     session.pendingApproval = null;
     session.state = result.state === 'active' ? 'approved' : result.state;
