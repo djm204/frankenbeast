@@ -51,11 +51,11 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -64,7 +64,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); 
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -86,7 +86,7 @@ set -e
 # denial, timeout (124), timeout-internal failure (125/126), kill (137), and
 # missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
-  SAFE_RESULT=$(printf '%s' "$RESULT" | $NODE_BIN -e "const fs = require('node:fs'); try { process.stdout.write(JSON.stringify(fs.readFileSync(0, 'utf8'))); } catch { process.stdout.write('\\"blocked by fbeast governor\\"'); }" 2>/dev/null || echo '"blocked by fbeast governor"')
+  SAFE_RESULT=$(printf '%s' "$RESULT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { process.stdout.write(JSON.stringify(fs.readFileSync(0, 'utf8'))); } catch { process.stdout.write('\\"blocked by fbeast governor\\"'); }" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"decision":"deny","reason":%s}\\n' "$SAFE_RESULT" >&1
   exit 2
 fi
@@ -104,7 +104,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
@@ -112,8 +112,8 @@ PAYLOAD_FILE=""
 trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
-TOOL_NAME=$($NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
-if ! $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
@@ -149,11 +149,11 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -162,7 +162,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); 
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -201,7 +201,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
@@ -209,8 +209,8 @@ PAYLOAD_FILE=""
 trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
-TOOL_NAME=$($NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
-if ! $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
@@ -246,11 +246,11 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
-TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_NAME=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 # Extract only policy-relevant COMMAND text as governor context. It is passed to
 # fbeast-hook via the FBEAST_TOOL_CONTEXT env var (never argv), so it cannot be
 # parsed as a CLI flag. It is not truncated; an over-limit command fails the exec
@@ -259,7 +259,7 @@ TOOL_NAME=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); 
 # string so patterns like 'rm -rf' still match. Path and file-content fields are
 # excluded to avoid false positives and persisting secrets. apply_patch patch
 # bodies (carried in tool_input.command) are also excluded for the same reason.
-TOOL_CONTEXT=$(printf '%s' "$INPUT" | $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
+TOOL_CONTEXT=$(printf '%s' "$INPUT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(0, 'utf8')); const ti = d?.tool_input; const tn = d?.tool_name || ''; const keys = ['command', 'cmd', 'commands', 'args', 'argv', 'script']; let out = ''; if (typeof ti === 'string') { out = ti; } else if (ti && typeof ti === 'object' && !Array.isArray(ti) && tn !== 'apply_patch') { const parts = []; for (const key of keys) { const value = ti[key]; if (value === undefined) continue; if (Array.isArray(value)) { parts.push(value.map(String).join(' ')); } else if (typeof value === 'string') { parts.push(value); } else { parts.push(JSON.stringify(value)); } } out = parts.join(' '); } process.stdout.write(tn === 'apply_patch' ? '' : out); } catch { process.stdout.write(''); }" 2>/dev/null || echo "")
 
 # Fail closed: a missing/unparseable tool name means we cannot govern the call.
 if [ -z "$TOOL_NAME" ]; then
@@ -281,7 +281,7 @@ set -e
 # denial, timeout (124), timeout-internal failure (125/126), kill (137), and
 # missing binary (127). Fail-open is never the default for the enforcement path.
 if [ "$STATUS" -ne 0 ]; then
-  SAFE_REASON=$(printf '%s' "$RESULT" | $NODE_BIN -e "const fs = require('node:fs'); try { process.stdout.write(JSON.stringify(fs.readFileSync(0, 'utf8'))); } catch { process.stdout.write('\\"blocked by fbeast governor\\"'); }" 2>/dev/null || echo '"blocked by fbeast governor"')
+  SAFE_REASON=$(printf '%s' "$RESULT" | "$NODE_BIN" -e "const fs = require('node:fs'); try { process.stdout.write(JSON.stringify(fs.readFileSync(0, 'utf8'))); } catch { process.stdout.write('\\"blocked by fbeast governor\\"'); }" 2>/dev/null || echo '"blocked by fbeast governor"')
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$SAFE_REASON" >&1
   exit 2
 fi
@@ -299,7 +299,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
-NODE_BIN="${JSON.stringify(process.execPath)}"
+NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
@@ -307,8 +307,8 @@ PAYLOAD_FILE=""
 trap 'rm -f "$INPUT_FILE" "$PAYLOAD_FILE"' EXIT
 PAYLOAD_FILE=$(mktemp -t fbeast-hook-response.XXXXXX) || exit 0
 cat > "$INPUT_FILE" || exit 0
-TOOL_NAME=$($NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
-if ! $NODE_BIN -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
+TOOL_NAME=$("$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(String(d?.tool_name || '')); } catch { process.stdout.write(''); }" "$INPUT_FILE" 2>/dev/null || echo "")
+if ! "$NODE_BIN" -e "const fs = require('node:fs'); try { const d = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(JSON.stringify(d?.tool_response || {})); } catch { process.exit(1); }" "$INPUT_FILE" > "$PAYLOAD_FILE" 2>/dev/null; then
   printf '{}' > "$PAYLOAD_FILE" 2>/dev/null || exit 0
 fi
 
