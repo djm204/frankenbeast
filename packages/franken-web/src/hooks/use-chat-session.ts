@@ -231,6 +231,10 @@ function markMessageFailed(messages: ChatMessage[], messageId: string, error: st
   ));
 }
 
+function isFailedUserDraftForContent(message: ChatMessage, content: string): boolean {
+  return message.role === 'user' && message.receipt === 'failed' && message.content === content;
+}
+
 function applySessionSnapshot(session: ChatSession): ChatMessage[] {
   return normalizeTranscript(session.transcript);
 }
@@ -775,7 +779,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
     if (optimisticAdd) {
       setMessages((current) => [
-        ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+        ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
         optimisticMessage,
       ]);
     }
@@ -789,7 +793,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           const refreshed = await clientRef.current.getSession(sessionId);
           readyRef.current = true;
           setMessages((current) => mergeSessionSnapshot(
-            current.filter((message) => message.id !== clientMessageId),
+            current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
             refreshed,
           ));
           setPendingApproval(refreshed.pendingApproval ?? null);
@@ -798,7 +802,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
         } catch (error) {
           setMessages((current) => [
-            ...current.filter((message) => message.id !== clientMessageId),
+            ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
             { ...optimisticMessage, receipt: 'accepted' },
           ]);
           addErrorBanner(makeBanner(
@@ -815,7 +819,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
         setMessages((current) => [
-          ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+          ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
           { ...optimisticMessage, receipt: 'failed', error: sendError.message, canRetry: true },
         ]);
         addErrorBanner(makeBanner(
