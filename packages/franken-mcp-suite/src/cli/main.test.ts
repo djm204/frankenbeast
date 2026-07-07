@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +18,7 @@ describe('fbeast main CLI', () => {
   afterEach(() => {
     process.argv = originalArgv;
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.resetModules();
     vi.doUnmock('./init.js');
     vi.doUnmock('./uninstall.js');
@@ -170,6 +171,7 @@ describe('fbeast main CLI', () => {
   });
 
   it('passes through non-mcp commands to frankenbeast', async () => {
+    vi.stubEnv('PATH', '');
     const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
@@ -186,17 +188,23 @@ describe('fbeast main CLI', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'frankenbeast',
       ['network', 'up'],
-      expect.objectContaining({ stdio: 'inherit', shell: process.platform === 'win32' }),
+      expect.objectContaining({ stdio: 'inherit', shell: false }),
     );
     mockExit.mockRestore();
   });
 
-  it('uses shell on Windows so npm .cmd shims are resolved', async () => {
+  it('launches Windows .cmd shims through cmd.exe without enabling shell mode', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const binDir = tmpDir();
+    const shimPath = join(binDir, 'frankenbeast.CMD');
+    writeFileSync(shimPath, '@echo off\r\n');
+    vi.stubEnv('PATH', binDir);
+    vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD');
+    vi.stubEnv('ComSpec', 'C:\\Windows\\System32\\cmd.exe');
     const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
-    process.argv = ['node', 'fbeast', 'network', 'up'];
+    process.argv = ['node', 'fbeast', 'network', 'up', 'name&whoami', '100%literal%'];
 
     const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
 
@@ -207,9 +215,9 @@ describe('fbeast main CLI', () => {
     }
 
     expect(mockSpawnSync).toHaveBeenCalledWith(
-      'frankenbeast',
-      ['network', 'up'],
-      expect.objectContaining({ shell: true }),
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', `"${shimPath}" "network" "up" "name^&whoami" "100^%literal^%"`],
+      expect.objectContaining({ stdio: 'inherit', shell: false }),
     );
     mockExit.mockRestore();
     platformSpy.mockRestore();
@@ -242,12 +250,13 @@ describe('fbeast main CLI', () => {
   it('maps Windows missing mcp beast handoff binary output to standalone install help', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir());
+    const enoent: NodeJS.ErrnoException = Object.assign(new Error('spawn frankenbeast ENOENT'), { code: 'ENOENT' });
     const mockSpawnSync = vi.fn().mockReturnValue({
-      status: 1,
+      status: null,
       signal: null,
-      error: undefined,
+      error: enoent,
       stdout: '',
-      stderr: "'frankenbeast' is not recognized as an internal or external command",
+      stderr: '',
     });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
@@ -261,7 +270,7 @@ describe('fbeast main CLI', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'frankenbeast',
       ['beasts', 'catalog'],
-      expect.objectContaining({ stdio: 'pipe', shell: true, encoding: 'utf8' }),
+      expect.objectContaining({ stdio: 'pipe', shell: false, encoding: 'utf8' }),
     );
     expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');
