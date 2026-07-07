@@ -26,6 +26,152 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('ignores imports and require calls inside comments', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `// import ghost from 'ghost-package';\n/* const hidden = require('unknown-lib'); */\nimport express from 'express';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('ignores import-like text inside string literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const message = "import ghost from 'ghost-package'";\nconst dynamic = 'require(\"unknown-lib\")';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('does not treat import.meta string comparisons as imports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `if (import.meta.env.MODE === 'production') {\n  console.log('ready');\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('detects require calls inside template literal interpolations', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = "const value = `${require('ghost-package')}`;";
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('reads static import specifiers after string-named bindings', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `import { "foo" as foo } from "ghost-package";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('reads static import specifiers after bindings named from', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `import { from } from "ghost-package";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('allows comments between from and the module specifier', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `import { x } from /* generated */ "ghost-package";`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('ignores object-literal import keys', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const cfg = { import: { from: 'ghost-package' } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('does not treat regex literal contents as comments', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const pattern = /[/*]/;\nimport ghost from 'ghost-package';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('recognizes regex literals after keywords', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `function check(source) { return /[/*]/.test(source); }\nrequire('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('recognizes awaited regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `async function check(source) { await /[//]/.test(source); require('ghost-package'); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('does not treat division after postfix operators as regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const ratio = count++ / total;\nrequire('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('does not treat JSX closing tags as regex literals', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const el = <div></div>; require('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('keeps scanning template interpolations after regex braces', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content =
+      "const value = `${/}/.test(source) && require('ghost-package')}`;";
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('ignores dynamic require expressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const adapter = require('adapter-' + target);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('fails when an unknown package is imported', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `import ghost from 'ghost-package';`;
