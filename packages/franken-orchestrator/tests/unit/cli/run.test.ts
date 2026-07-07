@@ -1960,14 +1960,18 @@ describe('main() execution', () => {
     expect(print).toHaveBeenCalledWith(`Saved network config to ${configFile}.`);
   });
 
-  it('dispatches network help without creating a Session', async () => {
+  it('dispatches network help without resolving the project root or creating a Session', async () => {
+    const resolveProjectRootMock = vi.mocked(resolveProjectRoot);
+    resolveProjectRootMock.mockImplementation(() => {
+      throw new Error('Project root does not exist: /missing/project');
+    });
     mockParseArgs.mockReturnValue({
       subcommand: 'network',
       networkAction: 'help',
       networkTarget: undefined,
       networkDetached: false,
       networkSet: undefined,
-      baseDir: '/mock/project',
+      baseDir: '/missing/project',
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
@@ -1991,8 +1995,13 @@ describe('main() execution', () => {
       initNonInteractive: false,
     });
 
-    await main();
+    try {
+      await main();
+    } finally {
+      resolveProjectRootMock.mockImplementation((dir: string) => dir);
+    }
 
+    expect(resolveProjectRoot).not.toHaveBeenCalled();
     expect(MockSession).not.toHaveBeenCalled();
   });
 
