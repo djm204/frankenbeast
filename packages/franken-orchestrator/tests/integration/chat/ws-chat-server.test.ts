@@ -99,6 +99,41 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('rejects replayed socket tokens after the first successful upgrade', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const url = `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`;
+    const protocols = [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`];
+    const firstSocket = new WebSocket(url, protocols);
+
+    await expect(onceSocket(firstSocket, 'open')).resolves.toEqual([]);
+
+    const replaySocket = new WebSocket(url, protocols);
+    await onceSocket(replaySocket, 'error');
+    expect(replaySocket.readyState).toBe(WebSocket.CLOSED);
+    expect(warn).toHaveBeenCalledWith(
+      'Rejected reused websocket chat session ticket',
+      { sessionId: session.id },
+    );
+
+    firstSocket.close();
+    httpServer.close();
+    warn.mockRestore();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('does not negotiate token pseudo-protocols when clients send them first', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

@@ -7,6 +7,7 @@ import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
 import {
+  ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
 import {
@@ -28,6 +29,7 @@ export interface ChatSocketControllerOptions {
   allowedOrigins?: string[];
   runtime: ChatRuntime;
   sessionStore: ISessionStore;
+  ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
 }
 
@@ -94,16 +96,18 @@ export class ChatSocketController {
   private readonly allowedOrigins: string[];
   private readonly runtime: ChatRuntime;
   private readonly sessionStore: ISessionStore;
+  private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
     this.runtime = options.runtime;
     this.sessionStore = options.sessionStore;
+    this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
   }
 
-  connect(peer: ChatSocketPeer, request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
+  authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
     const session = this.sessionStore.get(request.sessionId);
     if (!session) {
       return { ok: false, status: 404 };
@@ -120,6 +124,30 @@ export class ChatSocketController {
       return auth;
     }
 
+    if (request.token && this.ticketStore.isConsumed(request.token)) {
+      this.auditRejectedTicketReuse(request.sessionId);
+      return { ok: false, status: 401 };
+    }
+
+    return { ok: true };
+  }
+
+  connect(peer: ChatSocketPeer, request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
+    const auth = this.authorize(request);
+    if (!auth.ok) {
+      return auth;
+    }
+
+    if (!request.token || !this.ticketStore.consume(request.token)) {
+      this.auditRejectedTicketReuse(request.sessionId);
+      return { ok: false, status: 401 };
+    }
+
+    const session = this.sessionStore.get(request.sessionId);
+    if (!session) {
+      return { ok: false, status: 404 };
+    }
+
     createPeerState(peer, request.sessionId, this);
     this.emit(peer, {
       type: 'session.ready',
@@ -130,6 +158,10 @@ export class ChatSocketController {
       pendingApproval: session.pendingApproval ?? null,
     });
     return { ok: true };
+  }
+
+  private auditRejectedTicketReuse(sessionId: string): void {
+    console.warn('Rejected reused websocket chat session ticket', { sessionId });
   }
 
   disconnect(peer: ChatSocketPeer): void {
@@ -403,25 +435,15 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
     }
     const { token } = protocolAuth;
 
-    const auth = controller.connect(
-      {
-        close: () => socket.destroy(),
-        send: () => undefined,
-      },
-      {
-        origin: requestOrigin(request),
-        sessionId,
-        token,
-      },
-    );
+    const auth = controller.authorize({
+      origin: requestOrigin(request),
+      sessionId,
+      token,
+    });
     if (!auth.ok) {
       closeUnauthorized(socket, auth.status);
       return;
     }
-    controller.disconnect({
-      close: () => socket.destroy(),
-      send: () => undefined,
-    });
     request.headers['sec-websocket-protocol'] = CHAT_SOCKET_PROTOCOL;
 
     server.handleUpgrade(request, socket, head, (ws: WebSocket) => {
