@@ -773,12 +773,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     const optimisticAdd = Boolean(socket && socket.readyState === 1);
     lastMessageRef.current = { clientMessageId, content };
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
-    if (optimisticAdd) {
-      setMessages((current) => [
-        ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
-        optimisticMessage,
-      ]);
-    }
+    setMessages((current) => [
+      ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+      optimisticMessage,
+    ]);
     setStatus('sending');
 
     if (!optimisticAdd) {

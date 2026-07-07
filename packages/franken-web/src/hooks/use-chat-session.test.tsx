@@ -243,7 +243,7 @@ describe('useChatSession error banners', () => {
     });
   });
 
-  it('does not optimistically echo fallback HTTP messages before the server transcript refreshes', async () => {
+  it('optimistically appends fallback HTTP messages, then replaces with refreshed transcript', async () => {
     const fallbackSend = deferred<Response>();
     const fetch = vi.fn()
       .mockResolvedValueOnce(jsonResponse(sessionResponse()))
@@ -273,7 +273,13 @@ describe('useChatSession error banners', () => {
       sendPromise = result.current.send('launch beast');
     });
 
-    expect(result.current.messages).toEqual([]);
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: 'launch beast',
+        receipt: 'sending',
+      }),
+    ]);
 
     await act(async () => {
       fallbackSend.resolve(jsonResponse({ data: { tier: 'cheap' } }));
@@ -284,6 +290,7 @@ describe('useChatSession error banners', () => {
       expect.objectContaining({ id: 'server-user-1', role: 'user', content: 'launch beast' }),
     ]);
   });
+
 
   it('does not offer retry for invalid socket payload errors', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
