@@ -160,6 +160,36 @@ describe('Integration — RecursivePlanner', () => {
     ]);
   });
 
+  it('allows nested expanded tasks to depend on completed ancestor-frame tasks', async () => {
+    const prerequisite = makeTask('prerequisite');
+    const parent = makeTask('parent');
+    const child = makeTask('child');
+    const grandchild = makeTask('grandchild', {
+      dependsOn: [createTaskId('prerequisite'), createTaskId('parent')],
+    });
+    const graph = PlanGraph.empty()
+      .addTask(prerequisite)
+      .addTask(parent, [createTaskId('prerequisite')]);
+
+    const callOrder: string[] = [];
+    const executor = vi.fn().mockImplementation((t: Task) => {
+      callOrder.push(t.id);
+      if (t.id === createTaskId('parent')) return Promise.resolve(expand('parent', [child]));
+      if (t.id === createTaskId('child')) return Promise.resolve(expand('child', [grandchild]));
+      return Promise.resolve(ok(t.id));
+    });
+
+    const result = await buildRecursivePlanner(graph, executor).plan('...');
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('prerequisite'),
+      createTaskId('parent'),
+      createTaskId('child'),
+      createTaskId('grandchild'),
+    ]);
+  });
+
   it('rejects expanded tasks that depend on external tasks not completed yet', async () => {
     const parent = makeTask('parent');
     const laterSibling = makeTask('later-sibling');

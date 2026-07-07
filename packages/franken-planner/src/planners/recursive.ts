@@ -16,13 +16,14 @@ export class RecursivePlanner implements PlanningStrategy {
   constructor(private readonly maxDepth = 10) {}
 
   execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
-    return this._exec(graph, context, 0);
+    return this._exec(graph, context, 0, new Set());
   }
 
   private async _exec(
     graph: PlanGraph,
     context: PlanContext,
-    depth: number
+    depth: number,
+    completedTaskIds: ReadonlySet<TaskId>
   ): Promise<PlanResult> {
     if (depth > this.maxDepth) {
       throw new RecursionDepthExceededError(depth);
@@ -45,12 +46,13 @@ export class RecursivePlanner implements PlanningStrategy {
       }
 
       if (result.expand === true) {
-        const completedTaskIds = new Set<TaskId>([
+        const completedTaskIdsForExpansion = new Set<TaskId>([
+          ...completedTaskIds,
           ...allResults.map((taskResult) => taskResult.taskId),
           task.id,
         ]);
-        const subGraph = this._buildSubGraph(result.newTasks, completedTaskIds);
-        const subResult = await this._exec(subGraph, context, depth + 1);
+        const subGraph = this._buildSubGraph(result.newTasks, completedTaskIdsForExpansion);
+        const subResult = await this._exec(subGraph, context, depth + 1, completedTaskIdsForExpansion);
         if (subResult.status !== 'completed') {
           return subResult;
         }
