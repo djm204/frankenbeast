@@ -17,7 +17,7 @@ const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 
-const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhookurl)/i;
+const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhook)/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -94,6 +94,39 @@ function redactBeastLogLine(line: string, configuredSecrets: readonly string[] =
 
 function redactFailureStderrTail(stderrTail: readonly string[], configuredSecrets: readonly string[]): string[] {
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
+}
+
+function redactRunConfigValue(
+  input: unknown,
+  configuredSecrets: readonly string[],
+  path: readonly string[] = [],
+): unknown {
+  if (path.length > 0 && isConfiguredSecretKey(path.join('.'))) {
+    return REDACTED_SECRET;
+  }
+
+  if (typeof input === 'string') {
+    return redactBeastLogLine(input, configuredSecrets);
+  }
+
+  if (Array.isArray(input)) {
+    return input.map(item => redactRunConfigValue(item, configuredSecrets, path));
+  }
+
+  if (!input || typeof input !== 'object') return input;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    redacted[key] = redactRunConfigValue(value, configuredSecrets, [...path, key]);
+  }
+  return redacted;
+}
+
+function redactRunConfigSnapshot(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  configuredSecrets: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return redactRunConfigValue(configSnapshot, configuredSecrets) as Readonly<Record<string, unknown>>;
 }
 
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
@@ -226,7 +259,6 @@ export class ProcessBeastExecutor implements BeastExecutor {
     );
     mkdirSync(configDir, { recursive: true });
     const configFilePath = join(configDir, `${run.id}.json`);
-    writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
     this.pendingConfigFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
@@ -245,6 +277,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       mergedSpec.env,
       spawnedSpec.env,
     );
+    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2));
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
