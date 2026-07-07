@@ -68,6 +68,7 @@ export interface CliArgs {
   provider: string;
   providerSpecified?: boolean | undefined;
   providers?: string[] | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   designDoc?: string | undefined;
   planDir?: string | undefined;
   planName?: string | undefined;
@@ -137,6 +138,8 @@ Options:
   --budget <usd>          Budget limit in USD (default: 10)
   --provider <name>       Provider name (default: claude)
   --providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
+  --trust-provider-command-overrides
+                           Explicitly approve trusted repo-configured provider command overrides
   --design-doc <path>     Path to design document
   --plan-dir <path>       Path to chunk files directory
   --plan-name <name>      Plan name (default: auto-generated from date)
@@ -372,6 +375,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       budget: { type: 'string' },
       provider: { type: 'string' },
       providers: { type: 'string' },
+      'trust-provider-command-overrides': { type: 'boolean', default: false },
       'design-doc': { type: 'string' },
       'plan-dir': { type: 'string' },
       'plan-name': { type: 'string' },
@@ -583,6 +587,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     provider,
     providerSpecified: values.provider !== undefined,
     providers,
+    trustProviderCommandOverrides: values['trust-provider-command-overrides'] ?? false,
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],
     planName: values['plan-name'],

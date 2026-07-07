@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -236,7 +236,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -1905,6 +1905,59 @@ describe('main() execution', () => {
       }),
     }));
     expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('preserves provider command override approval when saving network config updates', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-trusted-network-save`);
+    const configFile = join(root, '.fbeast', 'config.json');
+    tempDirs.push(root);
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(configFile, JSON.stringify({
+      providers: {
+        overrides: {
+          codex: {
+            command: '/opt/frankenbeast/bin/codex',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/opt/frankenbeast/bin'],
+          },
+        },
+      },
+    }, null, 2));
+
+    const print = vi.fn();
+    await runNetworkCommand({
+      ...(mockParseArgs() as any),
+      subcommand: 'network',
+      networkAction: 'config',
+      networkSet: ['chat.model=gpt-5'],
+      config: configFile,
+      trustProviderCommandOverrides: true,
+    } as never, {
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: { enabled: false, host: '127.0.0.1', port: 3200, slack: { enabled: false }, discord: { enabled: false }, telegram: { enabled: false }, whatsapp: { enabled: false } },
+    } as never, root, {
+      configFile,
+      frankenbeastDir: join(root, '.fbeast'),
+    } as never, {
+      resolveServices: vi.fn(),
+      createSupervisor: vi.fn(() => ({ down: vi.fn(), status: vi.fn(), stop: vi.fn(), logs: vi.fn(), up: vi.fn(), stopAll: vi.fn() })),
+      print,
+      printError: vi.fn(),
+      renderHelp: vi.fn(() => 'network help'),
+      waitForShutdown: vi.fn(),
+    });
+
+    const saved = JSON.parse(readFileSync(configFile, 'utf-8'));
+    expect(saved.providers.overrides.codex).toMatchObject({
+      command: '/opt/frankenbeast/bin/codex',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/opt/frankenbeast/bin'],
+    });
+    expect(saved.chat.model).toBe('gpt-5');
+    expect(print).toHaveBeenCalledWith(`Saved network config to ${configFile}.`);
   });
 
   it('dispatches network help without creating a Session', async () => {

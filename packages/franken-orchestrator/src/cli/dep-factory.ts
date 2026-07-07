@@ -45,6 +45,7 @@ export interface CliDepOptions {
   provider: string;
   providers?: string[] | undefined;
   providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -783,15 +784,24 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const config = resolveEffectiveConfig(options);
-  assertTrustedProviderCommandOverrides(options.providersConfig);
+  const commandOverridePolicy = {
+    allowTrustedCommandOverrides: options.trustProviderCommandOverrides,
+  };
+  assertTrustedProviderCommandOverrides(options.providersConfig, commandOverridePolicy);
   const artifacts = createSessionArtifacts(options);
   clearSessionArtifacts(options, artifacts);
 
   const observer = await createObserverDeps(options, config, artifacts);
-  assertTrustedProviderCommandOverrides(options.providersConfig, { logger: observer.logger });
+  assertTrustedProviderCommandOverrides(options.providersConfig, {
+    ...commandOverridePolicy,
+    logger: observer.logger,
+  });
   assertTrustedProviderCommandOverrideEntries(
     consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders),
-    { logger: observer.logger },
+    {
+      ...commandOverridePolicy,
+      logger: observer.logger,
+    },
   );
   let finalize = createObserverFinalize(observer);
 

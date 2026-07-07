@@ -4,7 +4,8 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
-import { createDashboardStaticResponse, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
+import { createDashboardStaticResponse, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
+import { createSecretStore } from '../../../src/network/secret-store.js';
 
 async function createDashboardDist(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-dashboard-dist-'));
@@ -17,11 +18,22 @@ async function createDashboardDist(): Promise<string> {
 describe('dashboard static server', () => {
   let dirs: string[] = [];
   const originalFetch = globalThis.fetch;
+  const originalCwd = process.cwd();
+  const originalConfigFile = process.env.FRANKENBEAST_CONFIG_FILE;
+  const originalConfigPath = process.env.FRANKENBEAST_CONFIG_PATH;
+  const originalPassphrase = process.env.FRANKENBEAST_PASSPHRASE;
 
   afterEach(async () => {
     await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
     dirs = [];
     globalThis.fetch = originalFetch;
+    process.chdir(originalCwd);
+    if (originalConfigFile === undefined) delete process.env.FRANKENBEAST_CONFIG_FILE;
+    else process.env.FRANKENBEAST_CONFIG_FILE = originalConfigFile;
+    if (originalConfigPath === undefined) delete process.env.FRANKENBEAST_CONFIG_PATH;
+    else process.env.FRANKENBEAST_CONFIG_PATH = originalConfigPath;
+    if (originalPassphrase === undefined) delete process.env.FRANKENBEAST_PASSPHRASE;
+    else process.env.FRANKENBEAST_PASSPHRASE = originalPassphrase;
     vi.restoreAllMocks();
   });
 
@@ -82,6 +94,34 @@ describe('dashboard static server', () => {
     const [targetUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/base/api/dashboard?fresh=1');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer operator-token');
+  });
+
+  it('loads dashboard operator token from network config even when provider trust metadata is unapproved', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'franken-dashboard-config-'));
+    dirs.push(projectRoot);
+    process.chdir(projectRoot);
+    process.env.FRANKENBEAST_PASSPHRASE = 'dashboard-token-test-passphrase';
+    const configFile = join(projectRoot, 'frankenbeast.json');
+    process.env.FRANKENBEAST_CONFIG_FILE = configFile;
+    delete process.env.FRANKENBEAST_CONFIG_PATH;
+    const store = createSecretStore('local-encrypted', { projectRoot, passphrase: process.env.FRANKENBEAST_PASSPHRASE });
+    await store.store('dashboard-token', 'from-secret-store');
+    await writeFile(configFile, JSON.stringify({
+      network: {
+        secureBackend: 'local-encrypted',
+        operatorTokenRef: 'dashboard-token',
+      },
+      providers: {
+        overrides: {
+          custom: {
+            command: '/usr/local/bin/custom-provider',
+            trustCommandOverride: true,
+          },
+        },
+      },
+    }), 'utf8');
+
+    await expect(resolveDashboardOperatorToken()).resolves.toBe('from-secret-store');
   });
 
   it('rejects cross-site proxy requests when an operator token is configured', async () => {

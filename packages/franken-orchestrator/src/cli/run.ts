@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -750,6 +750,7 @@ async function createChatSurfaceDeps(
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
+    trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: true,
     verbose: args.verbose,
     reset: false,
@@ -1031,6 +1032,7 @@ export async function main(): Promise<void> {
           root,
           frankenbeastDir: paths.frankenbeastDir,
           configFile: paths.configFile,
+          allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
           getConfig: () => mutableConfig,
           setConfig: (nextConfig) => {
             mutableConfig = nextConfig;
@@ -1109,6 +1111,7 @@ export async function main(): Promise<void> {
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
+    trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: args.noPr,
     verbose: args.verbose,
     reset: args.reset,
@@ -1244,7 +1247,9 @@ async function persistNetworkConfigSets(args: CliArgs, paths: NetworkPaths): Pro
   }
 
   const updatedFileConfig = applyNetworkConfigSets(fileConfig, args.networkSet ?? []);
-  OrchestratorConfigSchema.parse(updatedFileConfig);
+  parseOrchestratorConfig(updatedFileConfig, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 
   await mkdir(dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(updatedFileConfig, null, 2) + '\n', 'utf-8');
@@ -1369,6 +1374,7 @@ export async function runNetworkCommand(
       repoRoot: root,
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
     }),
     action === 'up' ? undefined : args.networkTarget,
   );

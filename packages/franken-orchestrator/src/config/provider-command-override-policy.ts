@@ -11,6 +11,10 @@ export interface ProviderCommandOverrideAuditLogger {
   warn(message: string, component?: string): void;
 }
 
+export interface ProviderCommandOverridePolicyOptions {
+  readonly allowTrustedCommandOverrides?: boolean | undefined;
+}
+
 const BUILTIN_PROVIDER_COMMANDS: Record<string, readonly string[]> = {
   claude: ['claude', 'claude-code'],
   codex: ['codex'],
@@ -52,6 +56,7 @@ function normalizeTrustedDirectory(entry: string): string {
 export function validateProviderCommandOverride(
   provider: string,
   override: ProviderCommandOverridePolicyConfig,
+  options: ProviderCommandOverridePolicyOptions = {},
 ): string[] {
   const command = override.command ?? override.cliPath;
   if (!command) {
@@ -59,6 +64,12 @@ export function validateProviderCommandOverride(
   }
 
   const issues: string[] = [];
+  if (override.trustCommandOverride === true && options.allowTrustedCommandOverrides !== true) {
+    issues.push(
+      `provider command override for ${provider} requires explicit CLI approval with --trust-provider-command-overrides; repo config cannot self-approve command overrides`,
+    );
+  }
+
   if (override.trustCommandOverride !== true) {
     issues.push(
       `provider command override for ${provider} requires trustCommandOverride: true before a repo-configured command override may be used`,
@@ -79,7 +90,7 @@ export function validateProviderCommandOverride(
 
 export function assertTrustedProviderCommandOverrides(
   overrides: Record<string, ProviderCommandOverridePolicyConfig> | undefined,
-  options?: { readonly logger?: ProviderCommandOverrideAuditLogger | undefined },
+  options?: ProviderCommandOverridePolicyOptions & { readonly logger?: ProviderCommandOverrideAuditLogger | undefined },
 ): void {
   if (!overrides) return;
 
@@ -88,14 +99,14 @@ export function assertTrustedProviderCommandOverrides(
 
 export function assertTrustedProviderCommandOverrideEntries(
   overrides: Iterable<readonly [string, ProviderCommandOverridePolicyConfig]>,
-  options?: { readonly logger?: ProviderCommandOverrideAuditLogger | undefined },
+  options?: ProviderCommandOverridePolicyOptions & { readonly logger?: ProviderCommandOverrideAuditLogger | undefined },
 ): void {
   const entries = Array.from(overrides);
   if (entries.length === 0) return;
 
   const issues: string[] = [];
   for (const [provider, override] of entries) {
-    issues.push(...validateProviderCommandOverride(provider, override));
+    issues.push(...validateProviderCommandOverride(provider, override, options));
     const command = override.command ?? override.cliPath;
     if (command && override.trustCommandOverride === true) {
       options?.logger?.warn(
