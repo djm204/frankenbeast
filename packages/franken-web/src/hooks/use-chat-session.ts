@@ -362,6 +362,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   useEffect(() => {
     clientRef.current = new ChatApiClient(opts.baseUrl);
   }, [opts.baseUrl]);
+  const activeSessionIdRef = useRef<string | null>(sessionId);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingSendsRef = useRef<Map<string, PendingSend>>(new Map());
@@ -377,6 +378,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   function dismissError(id: string) {
     errorActionRef.current.delete(id);
     setErrorBanners((current) => current.filter((item) => item.id !== id));
+  }
+
+  function sessionStillCurrent(capturedSessionId: string): boolean {
+    return activeSessionIdRef.current === capturedSessionId;
   }
 
   function notifyClearedFailedDrafts(contents: string[]) {
@@ -468,6 +473,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     updateApprovalResolving(false);
     setMessages([]);
     lastMessageRef.current = null;
+    activeSessionIdRef.current = null;
     setSessionId(null);
     setSocketToken(null);
     setPendingApproval(null);
@@ -490,6 +496,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         }
 
+        activeSessionIdRef.current = session.id;
         setSocketToken(session.socketToken);
         setSessionId(session.id);
         setProjectId(session.projectId);
@@ -788,9 +795,15 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     if (!optimisticAdd) {
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
+        if (!sessionStillCurrent(sessionId)) {
+          return;
+        }
         setTier(result.tier);
         try {
           const refreshed = await clientRef.current.getSession(sessionId);
+          if (!sessionStillCurrent(sessionId)) {
+            return;
+          }
           readyRef.current = true;
           setMessages((current) => mergeSessionSnapshot(
             current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
@@ -801,6 +814,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setCostUsd(refreshed.costUsd);
           setStatus('idle');
         } catch (error) {
+          if (!sessionStillCurrent(sessionId)) {
+            return;
+          }
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
             { ...optimisticMessage, receipt: 'accepted' },
@@ -815,6 +831,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
         }
       } catch (error) {
+        if (!sessionStillCurrent(sessionId)) {
+          return;
+        }
         const sendError = error instanceof Error
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
