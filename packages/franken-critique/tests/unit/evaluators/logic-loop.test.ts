@@ -294,6 +294,17 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('recursion');
   });
 
+  it('keeps division visible when await is a sloppy-mode identifier after a semicolon', async () => {
+    // `var await = 1; await / loop() / 2` — here `await` is an identifier, so
+    // the slashes are division and `loop()` must remain a visible self-call.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { var await = 1; await / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('recognizes a regex after await at the start of a block in fallback scanning', async () => {
     // `{ await /if/.test(value); loop(); }` — `/if/` is a regex operand of the
     // await operator, so `if` inside it must NOT be seen as a base-case guard;

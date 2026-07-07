@@ -121,13 +121,18 @@ function contextualKeywordCanPrefixRegex(code: string, tokenStart: number, token
   if (token === 'of') return false;
 
   // `await`/`yield` are unary operators: a regex can follow them at an
-  // expression position — after an operator or opening bracket, after a `{`/`;`
-  // that begins a new statement, or after another regex-prefix keyword
-  // (e.g. `return await /re/.test(x)`).
+  // expression position — after an operator or opening bracket, after a block
+  // open `{`, or after another regex-prefix keyword (e.g. `return await /re/`).
+  //
+  // `;` is deliberately excluded: after a statement terminator these words may
+  // be plain identifiers in malformed/sloppy snippets (e.g.
+  // `var await = 1; await / loop() / 2`), where the `/` is division. Since a
+  // recursion detector must not hide a self-call, the ambiguous statement-start
+  // case is treated as division rather than masking it as a regex operand.
   let cursor = tokenStart - 1;
   while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
   if (cursor < 0) return true;
-  if ('([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+  if ('([{=,:!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
 
   const previous = previousToken(code, cursor);
   return previous != null && REGEX_PREFIX_KEYWORDS.has(previous);
