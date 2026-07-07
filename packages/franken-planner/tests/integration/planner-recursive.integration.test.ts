@@ -13,8 +13,15 @@ import type { GuardrailsModule } from '../../src/modules/mod01';
 import type { GraphBuilder, TaskExecutor } from '../../src/planners/types';
 import type { MemoryModule } from '../../src/modules/mod03';
 
-function makeTask(id: string): Task {
-  return { id: createTaskId(id), objective: `Objective for ${id}`, requiredSkills: [], dependsOn: [], status: 'pending' };
+function makeTask(id: string, overrides: Partial<Task> = {}): Task {
+  return {
+    id: createTaskId(id),
+    objective: `Objective for ${id}`,
+    requiredSkills: [],
+    dependsOn: [],
+    status: 'pending',
+    ...overrides,
+  };
 }
 function ok(id: string): TaskResult { return { status: 'success', taskId: createTaskId(id) }; }
 function expand(id: string, newTasks: Task[]): TaskResult {
@@ -110,7 +117,7 @@ describe('Integration — RecursivePlanner', () => {
 
   it('sub-tasks respect their declared dependency order', async () => {
     const sub1 = makeTask('sub-1');
-    const sub2: Task = { ...makeTask('sub-2'), dependsOn: [createTaskId('sub-1')] };
+    const sub2 = makeTask('sub-2', { dependsOn: [createTaskId('sub-1')] });
     const parent = makeTask('parent');
     const graph = PlanGraph.empty().addTask(parent);
 
@@ -125,6 +132,77 @@ describe('Integration — RecursivePlanner', () => {
 
     expect(callOrder.indexOf(createTaskId('sub-1'))).toBeLessThan(
       callOrder.indexOf(createTaskId('sub-2'))
+    );
+  });
+
+  it('allows expanded tasks to depend on already completed external tasks', async () => {
+    const prerequisite = makeTask('prerequisite');
+    const parent = makeTask('parent');
+    const sub = makeTask('sub', { dependsOn: [createTaskId('prerequisite')] });
+    const graph = PlanGraph.empty()
+      .addTask(prerequisite)
+      .addTask(parent, [createTaskId('prerequisite')]);
+
+    const callOrder: string[] = [];
+    const executor = vi.fn().mockImplementation((t: Task) => {
+      callOrder.push(t.id);
+      if (t.id === createTaskId('parent')) return Promise.resolve(expand('parent', [sub]));
+      return Promise.resolve(ok(t.id));
+    });
+
+    const result = await buildRecursivePlanner(graph, executor).plan('...');
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('prerequisite'),
+      createTaskId('parent'),
+      createTaskId('sub'),
+    ]);
+  });
+
+  it('allows nested expanded tasks to depend on completed ancestor-frame tasks', async () => {
+    const prerequisite = makeTask('prerequisite');
+    const parent = makeTask('parent');
+    const child = makeTask('child');
+    const grandchild = makeTask('grandchild', {
+      dependsOn: [createTaskId('prerequisite'), createTaskId('parent')],
+    });
+    const graph = PlanGraph.empty()
+      .addTask(prerequisite)
+      .addTask(parent, [createTaskId('prerequisite')]);
+
+    const callOrder: string[] = [];
+    const executor = vi.fn().mockImplementation((t: Task) => {
+      callOrder.push(t.id);
+      if (t.id === createTaskId('parent')) return Promise.resolve(expand('parent', [child]));
+      if (t.id === createTaskId('child')) return Promise.resolve(expand('child', [grandchild]));
+      return Promise.resolve(ok(t.id));
+    });
+
+    const result = await buildRecursivePlanner(graph, executor).plan('...');
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([
+      createTaskId('prerequisite'),
+      createTaskId('parent'),
+      createTaskId('child'),
+      createTaskId('grandchild'),
+    ]);
+  });
+
+  it('rejects expanded tasks that depend on external tasks not completed yet', async () => {
+    const parent = makeTask('parent');
+    const laterSibling = makeTask('later-sibling');
+    const sub = makeTask('sub', { dependsOn: [createTaskId('later-sibling')] });
+    const graph = PlanGraph.empty().addTask(parent).addTask(laterSibling);
+
+    const executor = vi.fn().mockImplementation((t: Task) => {
+      if (t.id === createTaskId('parent')) return Promise.resolve(expand('parent', [sub]));
+      return Promise.resolve(ok(t.id));
+    });
+
+    await expect(buildRecursivePlanner(graph, executor).plan('...')).rejects.toThrow(
+      /unresolved external dependency 'later-sibling'/
     );
   });
 });
