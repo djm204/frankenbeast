@@ -102,6 +102,14 @@ function redactRunConfigValue(
   path: readonly string[] = [],
 ): unknown {
   if (path.length > 0 && isConfiguredSecretKey(path.join('.'))) {
+    // Non-string scalar config values (e.g. numeric token budgets like
+    // `maxTotalTokens`, which matches the generic `token` key pattern) cannot
+    // carry string secrets and must keep their original type so the spawned
+    // CLI's RunConfigSchema validation still passes. Redact everything else —
+    // strings, objects, and arrays — wholesale. See PR #1064 Codex review.
+    if (input !== null && typeof input !== 'object' && typeof input !== 'string') {
+      return input;
+    }
     return REDACTED_SECRET;
   }
 

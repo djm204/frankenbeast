@@ -832,6 +832,7 @@ describe('ProcessBeastExecutor', () => {
           provider: 'claude',
           objective: 'keep this user-visible objective',
           chunkDirectory: '/tmp/chunks',
+          maxTotalTokens: 50000,
           nested: {
             apiKey: sensitiveTokenValue,
             authorization: `Bearer ${sensitiveTokenValue}`,
@@ -855,6 +856,9 @@ describe('ProcessBeastExecutor', () => {
         provider: 'claude',
         objective: 'keep this user-visible objective',
         chunkDirectory: '/tmp/chunks',
+        // Numeric token-budget field must survive redaction as a number even
+        // though its key matches the generic `token` secret pattern (PR #1064).
+        maxTotalTokens: 50000,
         nested: {
           apiKey: '[REDACTED]',
           authorization: '[REDACTED]',
@@ -864,6 +868,7 @@ describe('ProcessBeastExecutor', () => {
         tokenRefs: '[REDACTED]',
         notes: 'call [REDACTED] with [REDACTED]',
       });
+      expect(typeof persisted.maxTotalTokens).toBe('number');
       expect(serializedPersisted).not.toContain(sensitiveTokenValue);
       expect(serializedPersisted).not.toContain(sensitiveWebhookUrl);
       expect(serializedPersisted).not.toContain(sensitivePrivateCredential);
