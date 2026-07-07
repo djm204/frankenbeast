@@ -114,11 +114,20 @@ function previousToken(code: string, beforeIndex: number): string | null {
   return end === cursor + 1 ? null : code.slice(cursor + 1, end);
 }
 
-function contextualKeywordCanPrefixRegex(code: string, tokenStart: number): boolean {
+function contextualKeywordCanPrefixRegex(code: string, tokenStart: number, token: string): boolean {
+  // `of` is only a keyword inside `for (… of …)`; a `/` following `of` is
+  // division in all realistic code (`of` as an identifier, or the pathological
+  // `for (x of /re/)`), so it never introduces a regex here.
+  if (token === 'of') return false;
+
+  // `await`/`yield` are unary operators: a regex can follow them at an
+  // expression position — after an operator or opening bracket, after a `{`/`;`
+  // that begins a new statement, or after another regex-prefix keyword
+  // (e.g. `return await /re/.test(x)`).
   let cursor = tokenStart - 1;
   while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
-  if (cursor < 0) return false;
-  if ('([=,:!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+  if (cursor < 0) return true;
+  if ('([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
 
   const previous = previousToken(code, cursor);
   return previous != null && REGEX_PREFIX_KEYWORDS.has(previous);
@@ -134,11 +143,15 @@ function isRegexLiteralStart(code: string, index: number): boolean {
   const tokenEnd = cursor + 1;
   while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
   if (tokenEnd === cursor + 1 || code[cursor] === '.') return false;
+  // The token scan above is ASCII-only. If the run is preceded by a Unicode
+  // identifier character, the apparent keyword is really the tail of a longer
+  // identifier (e.g. `πreturn`), so the following `/` is division, not a regex.
+  if (cursor >= 0 && /[\p{ID_Continue}\u200C\u200D]/u.test(code[cursor]!)) return false;
 
   const token = code.slice(cursor + 1, tokenEnd);
   if (!REGEX_PREFIX_KEYWORDS.has(token)) return false;
   if (CONTEXTUAL_REGEX_PREFIX_KEYWORDS.has(token)) {
-    return contextualKeywordCanPrefixRegex(code, cursor + 1);
+    return contextualKeywordCanPrefixRegex(code, cursor + 1, token);
   }
   return true;
 }
@@ -820,7 +833,11 @@ function fallbackRecursionFindings(code: string): EvaluationFinding[] {
     const selfCall = new RegExp(`\\b${escapeRegExpLiteral(fnName)}\\s*\\(`).exec(snippet.slice(match[0].length));
     if (!selfCall) continue;
     const beforeCall = snippet.slice(0, match[0].length + selfCall.index);
-    if (/\b(if|return|throw)\b/.test(beforeCall)) continue;
+    // Unicode-aware keyword boundaries: ASCII `\b` treats a non-ASCII letter as
+    // a word boundary, so `\breturn\b` would false-match inside an identifier
+    // like `πreturn` and wrongly treat it as a base-case guard. Require the
+    // keyword not to be adjacent to any identifier-continue character.
+    if (/(?<![\p{ID_Continue}$])(?:if|return|throw)(?![\p{ID_Continue}$])/u.test(beforeCall)) continue;
     findings.push({
       message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
       severity: 'critical',

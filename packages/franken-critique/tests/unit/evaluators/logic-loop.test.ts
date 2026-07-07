@@ -272,6 +272,40 @@ describe('LogicLoopEvaluator', () => {
     expect(result.findings[0]!.message).toContain('recursion');
   });
 
+  it('does not treat `of` after another keyword as a regex prefix in fallback scanning', async () => {
+    // `new of / loop() / 2` — `of` is an identifier here, so the slashes are
+    // division and `loop()` must stay visible as an unguarded self-call.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { new of / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not treat a keyword suffix of a Unicode identifier as a regex prefix', async () => {
+    // `πreturn` is a single identifier; the trailing `return` must not be read
+    // as a keyword, so `/ loop() /` is division and the self-call stays visible.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { πreturn / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('recognizes a regex after await at the start of a block in fallback scanning', async () => {
+    // `{ await /if/.test(value); loop(); }` — `/if/` is a regex operand of the
+    // await operator, so `if` inside it must NOT be seen as a base-case guard;
+    // the unguarded self-call `loop()` must be reported.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `async function loop() { await /if/.test(value); loop(); bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
   it('ignores keywords inside template interpolation strings while fallback scanning', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = 'while (true) { log(`${({ value: "break }" })}`); doWork(); not javascript';
