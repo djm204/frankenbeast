@@ -53,8 +53,12 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    if (!ticketStore.validate(ticket, operatorToken)) {
+    const ticketStatus = ticketStore.consume(ticket, operatorToken);
+    if (ticketStatus === 'reused') {
       return c.body(null, 204);
+    }
+    if (ticketStatus === 'invalid') {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
 
     const lastEventId = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId');

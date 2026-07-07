@@ -6,13 +6,20 @@ interface TicketEntry {
   expiresAt: number;
 }
 
+interface ConsumedTicketEntry {
+  expiresAt: number;
+}
+
 export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
   cleanupIntervalMs?: number;
 }
 
+export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
+
 export class SseConnectionTicketStore {
   private readonly tickets = new Map<string, TicketEntry>();
+  private readonly consumedTickets = new Map<string, ConsumedTicketEntry>();
   private readonly ttlMs: number;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
 
@@ -33,20 +40,46 @@ export class SseConnectionTicketStore {
     return ticket;
   }
 
-  validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
+  consume(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
     const entry = this.tickets.get(ticket);
-    if (!entry) return false;
+    if (!entry) {
+      const consumed = this.consumedTickets.get(ticket);
+      if (consumed && consumed.expiresAt > Date.now()) {
+        return 'reused';
+      }
+      if (consumed) {
+        this.consumedTickets.delete(ticket);
+      }
+      return 'invalid';
+    }
 
     this.tickets.delete(ticket);
 
-    if (Date.now() > entry.expiresAt) return false;
-    if (entry.scope !== scope) return false;
+    if (Date.now() > entry.expiresAt) {
+      return 'invalid';
+    }
+    if (entry.scope !== scope) {
+      return 'invalid';
+    }
 
-    // Verify the ticket was issued for this operator token
     const bufA = Buffer.from(entry.token);
     const bufB = Buffer.from(operatorToken);
-    if (bufA.length !== bufB.length) return false;
-    return timingSafeEqual(bufA, bufB);
+    if (bufA.length !== bufB.length) {
+      return 'invalid';
+    }
+
+    if (!timingSafeEqual(bufA, bufB)) {
+      return 'invalid';
+    }
+
+    this.consumedTickets.set(ticket, {
+      expiresAt: Date.now() + this.ttlMs,
+    });
+    return 'valid';
+  }
+
+  validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
+    return this.consume(ticket, operatorToken, scope) === 'valid';
   }
 
   private cleanup(): void {
@@ -54,6 +87,11 @@ export class SseConnectionTicketStore {
     for (const [ticket, entry] of this.tickets) {
       if (now > entry.expiresAt) {
         this.tickets.delete(ticket);
+      }
+    }
+    for (const [ticket, entry] of this.consumedTickets) {
+      if (now > entry.expiresAt) {
+        this.consumedTickets.delete(ticket);
       }
     }
   }

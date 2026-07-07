@@ -38,4 +38,14 @@ describe('beast SSE routes', () => {
     expect(second.status).toBe(204);
     expect(await second.text()).toBe('');
   });
+
+  it('returns unauthorized for invalid stream tickets', async () => {
+    const app = createRoutes();
+
+    const res = await app.request('/v1/beasts/events/stream?ticket=bogus');
+
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error: { message: string } };
+    expect(body.error.message).toBe('Invalid or expired ticket');
+  });
 });
