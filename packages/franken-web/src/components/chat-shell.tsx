@@ -361,11 +361,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
 
   useEffect(() => {
-    if (!activeSessionId || preserveComposerDraft || selectedSessionId) {
+    if (!activeSessionId || selectedSessionId) {
       return;
     }
     setSelectedSessionId(activeSessionId);
-  }, [activeSessionId, preserveComposerDraft, selectedSessionId]);
+  }, [activeSessionId, selectedSessionId]);
 
   useEffect(() => {
     let cancelled = false;

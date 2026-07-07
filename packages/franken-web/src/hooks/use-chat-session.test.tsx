@@ -243,7 +243,7 @@ describe('useChatSession error banners', () => {
     });
   });
 
-  it('optimistically appends fallback HTTP messages, then replaces with refreshed transcript', async () => {
+  it('waits for fallback HTTP refresh before adding the sent message', async () => {
     const fallbackSend = deferred<Response>();
     const fetch = vi.fn()
       .mockResolvedValueOnce(jsonResponse(sessionResponse()))
@@ -273,13 +273,7 @@ describe('useChatSession error banners', () => {
       sendPromise = result.current.send('launch beast');
     });
 
-    expect(result.current.messages).toEqual([
-      expect.objectContaining({
-        role: 'user',
-        content: 'launch beast',
-        receipt: 'sending',
-      }),
-    ]);
+    expect(result.current.messages).toEqual([]);
 
     await act(async () => {
       fallbackSend.resolve(jsonResponse({ data: { tier: 'cheap' } }));
@@ -289,6 +283,48 @@ describe('useChatSession error banners', () => {
     expect(result.current.messages).toEqual([
       expect.objectContaining({ id: 'server-user-1', role: 'user', content: 'launch beast' }),
     ]);
+  });
+
+  it('keeps failed fallback HTTP messages retryable in the transcript', async () => {
+    const fallbackSend = deferred<Response>();
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse()))
+      .mockReturnValueOnce(fallbackSend.promise);
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    MockWebSocket.instances[0]!.readyState = 0;
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('launch beast');
+    });
+
+    expect(result.current.messages).toEqual([]);
+
+    await act(async () => {
+      fallbackSend.reject(new Error('fallback offline'));
+      await sendPromise.catch(() => undefined);
+    });
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: 'launch beast',
+        receipt: 'failed',
+        error: 'fallback offline',
+        canRetry: true,
+      }),
+    ]);
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Message was not sent',
+      actionLabel: 'Retry last message',
+    });
   });
 
 

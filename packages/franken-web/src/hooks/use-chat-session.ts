@@ -773,10 +773,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     const optimisticAdd = Boolean(socket && socket.readyState === 1);
     lastMessageRef.current = { clientMessageId, content };
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
-    setMessages((current) => [
-      ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
-      optimisticMessage,
-    ]);
+    if (optimisticAdd) {
+      setMessages((current) => [
+        ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+        optimisticMessage,
+      ]);
+    }
     setStatus('sending');
 
     if (!optimisticAdd) {
@@ -796,7 +798,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
         } catch (error) {
           setMessages((current) => [
-            ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+            ...current.filter((message) => message.id !== clientMessageId),
             { ...optimisticMessage, receipt: 'accepted' },
           ]);
           addErrorBanner(makeBanner(
@@ -812,7 +814,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         const sendError = error instanceof Error
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
-        setMessages((current) => markMessageFailed(current, clientMessageId, sendError.message));
+        setMessages((current) => [
+          ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
+          { ...optimisticMessage, receipt: 'failed', error: sendError.message, canRetry: true },
+        ]);
         addErrorBanner(makeBanner(
           'Message was not sent',
           sendError.message,
