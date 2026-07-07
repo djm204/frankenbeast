@@ -256,6 +256,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const wasSidebarOpenRef = useRef(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
+  const [preserveComposerDraft, setPreserveComposerDraft] = useState(!sessionId);
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
@@ -354,12 +355,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     });
   }, [baseUrl]);
 
+  const composerSessionKey = preserveComposerDraft
+    ? `anonymous:${sessionSeed}`
+    : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+
   useEffect(() => {
-    if (!activeSessionId) {
+    if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
       return;
     }
     setSelectedSessionId(activeSessionId);
-  }, [activeSessionId]);
+  }, [activeSessionId, preserveComposerDraft, selectedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -828,6 +833,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                       disabled={chatSessionsLoading}
                       onChange={(event) => {
                         const nextId = event.target.value.trim();
+                        setPreserveComposerDraft(false);
                         setSelectedSessionId(nextId || undefined);
                       }}
                       value={selectedSessionId ?? ''}
@@ -869,6 +875,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   <button
                     className="button button--secondary"
                     onClick={() => {
+                      setPreserveComposerDraft(true);
                       setSelectedSessionId(undefined);
                       setSessionSeed((current) => current + 1);
                     }}
@@ -911,6 +918,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
+                key={composerSessionKey}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}

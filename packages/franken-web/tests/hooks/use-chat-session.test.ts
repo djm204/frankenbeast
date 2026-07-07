@@ -286,6 +286,40 @@ describe('useChatSession', () => {
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
   });
 
+  it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    mockSendMessage.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      await expect(result.current.send('retry over HTTP')).rejects.toThrow('network down');
+    });
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'failed',
+      canRetry: true,
+    }));
+
+    mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
+    await act(async () => {
+      await result.current.send('retry over HTTP');
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages.filter((message) => message.content === 'retry over HTTP')).toHaveLength(1);
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'accepted',
+    }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'failed',
+    }));
+  });
+
   it('drops unmatched optimistic HTTP sends after the server snapshot refreshes', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
