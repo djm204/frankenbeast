@@ -458,6 +458,70 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('does not retry approved work when live event delivery fails', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const sent: Record<string, unknown>[] = [];
+    const peer = {
+      close: vi.fn(),
+      send: (data: string) => {
+        const event = JSON.parse(data) as Record<string, unknown>;
+        sent.push(event);
+        if (event.type === 'turn.execution.start') {
+          throw new Error('socket closed');
+        }
+      },
+    };
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('uses the legacy approve command for approvals without executable commands', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

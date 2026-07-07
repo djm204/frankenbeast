@@ -346,7 +346,14 @@ export class ChatSocketController {
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
       }, {
-        onEvent: (event) => this.emit(peer, mapTurnEvent(event)),
+        onEvent: (event) => {
+          try {
+            this.emit(peer, mapTurnEvent(event));
+          } catch {
+            // Socket delivery is best-effort; do not turn an already-running
+            // approved command into a retryable approval execution failure.
+          }
+        },
       });
     } catch (error) {
       session.pendingApproval = pendingApproval;
