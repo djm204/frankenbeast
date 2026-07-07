@@ -1032,6 +1032,7 @@ export async function main(): Promise<void> {
           root,
           frankenbeastDir: paths.frankenbeastDir,
           configFile: paths.configFile,
+          allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
           getConfig: () => mutableConfig,
           setConfig: (nextConfig) => {
             mutableConfig = nextConfig;

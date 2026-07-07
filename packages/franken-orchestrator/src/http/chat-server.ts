@@ -47,6 +47,7 @@ export interface StartChatServerOptions {
     root: string;
     frankenbeastDir: string;
     configFile: string;
+    allowTrustedProviderCommandOverrides?: boolean | undefined;
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };

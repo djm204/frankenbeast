@@ -31,6 +31,7 @@ export interface NetworkRoutesDeps {
   root: string;
   frankenbeastDir: string;
   configFile: string;
+  allowTrustedProviderCommandOverrides?: boolean | undefined;
   getConfig(): OrchestratorConfig;
   setConfig(config: OrchestratorConfig): void;
 }
@@ -52,14 +53,6 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
   });
 }
 
-function hasTrustedProviderCommandOverrides(config: OrchestratorConfig): boolean {
-  const providerOverrides = Object.values(config.providers.overrides ?? {});
-  const consolidatedProviders = config.consolidatedProviders ?? [];
-  return [...providerOverrides, ...consolidatedProviders].some((provider) =>
-    provider.trustCommandOverride === true || (provider.trustedCommandPaths?.length ?? 0) > 0,
-  );
-}
-
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   const app = new Hono();
 
@@ -70,7 +63,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const services = resolveNetworkServices(config, {
       repoRoot: deps.root,
       configFile: deps.configFile,
-      allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+      allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
     });
     const response: NetworkStatusResponse = {
       ...status,
@@ -92,7 +85,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const services = resolveNetworkServices(config, {
       repoRoot: deps.root,
       configFile: deps.configFile,
-      allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+      allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
     });
     const state = await supervisor.up({
       services,
@@ -117,7 +110,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
       resolveNetworkServices(config, {
         repoRoot: deps.root,
         configFile: deps.configFile,
-        allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+        allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
       }),
       body.target,
     );
@@ -146,7 +139,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
       resolveNetworkServices(config, {
         repoRoot: deps.root,
         configFile: deps.configFile,
-        allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(config),
+        allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
       }),
       body.target,
     );
@@ -175,7 +168,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const currentConfig = deps.getConfig();
     const nextConfig = parseOrchestratorConfig(
       applyNetworkConfigSets(currentConfig, body.assignments ?? []),
-      { allowTrustedProviderCommandOverrides: hasTrustedProviderCommandOverrides(currentConfig) },
+      { allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides },
     );
     deps.setConfig(nextConfig);
     await mkdir(dirname(deps.configFile), { recursive: true });

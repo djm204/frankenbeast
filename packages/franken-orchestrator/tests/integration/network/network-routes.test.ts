@@ -71,6 +71,7 @@ describe('network routes', () => {
         root: TMP,
         frankenbeastDir: TMP,
         configFile,
+        allowTrustedProviderCommandOverrides: true,
         getConfig: () => config,
         setConfig: (nextConfig) => {
           config = nextConfig;
