@@ -18,6 +18,13 @@ function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
 }
 
+function isRepoRelativeMarkdownDesignDocPath(value: string): boolean {
+  if (value.includes('\0')) return false;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return false;
+  if (value.split(/[\\/]+/).includes('..')) return false;
+  return /\.(?:md|mdx|markdown)$/i.test(value);
+}
+
 export function validateWizardStep(step: number, stepValues: WizardStepValues): WizardValidationErrors {
   const errors: WizardValidationErrors = {};
 
@@ -44,8 +51,11 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
     }
 
     if (values.workflowType === 'chunk-plan') {
-      if (isBlank(values.docPath)) {
+      const docPath = values.docPath;
+      if (isBlank(docPath)) {
         errors.docPath = 'Design doc path is required.';
+      } else if (typeof docPath !== 'string' || !isRepoRelativeMarkdownDesignDocPath(docPath)) {
+        errors.docPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
       }
       if (isBlank(values.outputDir)) {
         errors.outputDir = 'Output directory is required.';
