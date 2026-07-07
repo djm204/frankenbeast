@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.10](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.9...franken-governor-v0.5.10) (2026-07-07)
+
+
+### Bug Fixes
+
+* **governor:** authenticate approval requests ([ef60ce3](https://github.com/djm204/frankenbeast/commit/ef60ce39db4a705c6e30f1142101ccd2e9a15585)), closes [#769](https://github.com/djm204/frankenbeast/issues/769)
+* **governor:** guard signature buffer lengths ([39ef380](https://github.com/djm204/frankenbeast/commit/39ef380babb3d381674f547ee6b8b0b04910fdf5))
+* **publish:** add files allowlist to governor/planner/types so dist actually ships ([#844](https://github.com/djm204/frankenbeast/issues/844)) ([46cb1a1](https://github.com/djm204/frankenbeast/commit/46cb1a1f1517da3cf88d589894fdc30b863b8e99))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.5.9](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.8...franken-governor-v0.5.9) (2026-07-06)
 
 

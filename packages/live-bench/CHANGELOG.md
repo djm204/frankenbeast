@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.2](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.1...live-bench-v0.2.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **live-bench:** add tool-call evidence contract ([#883](https://github.com/djm204/frankenbeast/issues/883)) ([fb7f6c0](https://github.com/djm204/frankenbeast/commit/fb7f6c022d12eca67f0063569a3ac50299fe0805))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.11 to 0.7.12
+
 ## [0.2.1](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.0...live-bench-v0.2.1) (2026-07-06)
 
 
