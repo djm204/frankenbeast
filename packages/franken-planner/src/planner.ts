@@ -84,7 +84,8 @@ export class Planner {
       if (result.status !== 'failed') return result; // defensive: unexpected status
 
       // result.status === 'failed' — attempt recovery
-      const attempt = (recoveryAttemptsByTask.get(result.failedTaskId) ?? 0) + 1;
+      const failedTaskLineage = Planner.getRecoveryLineageRoot(result.failedTaskId);
+      const attempt = (recoveryAttemptsByTask.get(failedTaskLineage) ?? 0) + 1;
       try {
         currentGraph = await this.recovery.recover(
           result.failedTaskId,
@@ -92,7 +93,7 @@ export class Planner {
           currentGraph,
           attempt
         );
-        recoveryAttemptsByTask.set(result.failedTaskId, attempt);
+        recoveryAttemptsByTask.set(failedTaskLineage, attempt);
       } catch (recoveryErr) {
         if (
           recoveryErr instanceof MaxRecoveryAttemptsError ||
@@ -103,5 +104,26 @@ export class Planner {
         throw recoveryErr;
       }
     }
+  }
+
+  /**
+   * Collapse recovery-generated task IDs to their original lineage.
+   *
+   * Recovery tasks are named as:
+   *   `fix-<failedTaskId>-attempt-<n>`
+   * and can be generated repeatedly from prior recovery tasks. For attempt
+   * accounting, we track only the root task to avoid unbounded retries.
+   */
+  private static getRecoveryLineageRoot(taskId: TaskId): TaskId {
+    const recoveryPattern = /^fix-(.+)-attempt-\d+$/;
+
+    let current = taskId;
+    while (recoveryPattern.test(current)) {
+      const match = current.match(recoveryPattern);
+      if (!match?.[1]) break;
+      current = createTaskId(match[1]);
+    }
+
+    return current;
   }
 }
