@@ -39,4 +39,53 @@ describe('TransportSecurityService', () => {
       token,
     })).toEqual({ ok: false, status: 403 });
   });
+
+  it('issues distinct tokens for the same subject in the same validity window', () => {
+    const security = new TransportSecurityService();
+    const secret = security.createSecret();
+
+    const first = security.issueSignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      expiresInMs: 60_000,
+    });
+    const second = security.issueSignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      expiresInMs: 60_000,
+    });
+
+    expect(second).not.toBe(first);
+    expect(security.verifySignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      token: first,
+    })).toBe(true);
+    expect(security.verifySignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      token: second,
+    })).toBe(true);
+  });
+
+  it('rejects tokens with extra dot-separated segments', () => {
+    const security = new TransportSecurityService();
+    const secret = security.createSecret();
+    const token = security.issueSignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+    });
+
+    expect(security.verifySignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      token: `${token}.replay`,
+    })).toBe(false);
+  });
 });

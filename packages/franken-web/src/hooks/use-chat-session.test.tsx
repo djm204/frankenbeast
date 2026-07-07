@@ -84,6 +84,41 @@ describe('useChatSession error banners', () => {
     ]);
   });
 
+  it('fetches a fresh socket token before reconnecting a closed websocket', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-1' })))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-2' })));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    expect(MockWebSocket.instances[0]!.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.socket-token-1',
+    ]);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onclose?.();
+    });
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+    expect(fetch).toHaveBeenLastCalledWith(
+      'http://localhost:3000/v1/chat/sessions/session-1',
+      { credentials: 'same-origin', method: 'GET' },
+    );
+    expect(MockWebSocket.instances[1]!.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.socket-token-2',
+    ]);
+  });
+
   it('turns socket turn errors into visible retry banners', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
     vi.stubGlobal('WebSocket', MockWebSocket);
@@ -434,7 +469,10 @@ describe('useChatSession error banners', () => {
   });
 
   it('marks pending sends failed when reconnect cleanup races the server ack', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-1' })))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-2' })));
+    vi.stubGlobal('fetch', fetch);
     vi.stubGlobal('WebSocket', MockWebSocket);
 
     const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
@@ -460,7 +498,10 @@ describe('useChatSession error banners', () => {
   });
 
   it('reconnects when the browser returns online after an offline close', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-1' })))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-2' })));
+    vi.stubGlobal('fetch', fetch);
     vi.stubGlobal('WebSocket', MockWebSocket);
 
     const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));

@@ -48,13 +48,18 @@ export class TransportSecurityService {
 
   issueSignedToken(options: IssueSignedTokenOptions): string {
     const expiresAt = Date.now() + (options.expiresInMs ?? 5 * 60 * 1000);
-    const payload = `${options.subject}.${options.scope}.${expiresAt}`;
+    const nonce = randomBytes(16).toString('base64url');
+    const payload = `${options.subject}.${options.scope}.${expiresAt}.${nonce}`;
     const signature = signatureFor(payload, options.secret).toString('base64url');
     return `${encode(payload)}.${signature}`;
   }
 
   verifySignedToken(options: VerifySignedTokenOptions): boolean {
-    const [encodedPayload, encodedSignature] = options.token.split('.');
+    const tokenParts = options.token.split('.');
+    if (tokenParts.length !== 2) {
+      return false;
+    }
+    const [encodedPayload, encodedSignature] = tokenParts;
     if (!encodedPayload || !encodedSignature) {
       return false;
     }
