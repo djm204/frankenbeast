@@ -88,4 +88,28 @@ describe('TransportSecurityService', () => {
       token: `${token}.replay`,
     })).toBe(false);
   });
+
+  it('rejects non-canonical base64url token encodings', () => {
+    const security = new TransportSecurityService();
+    const secret = security.createSecret();
+    const token = security.issueSignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+    });
+
+    expect(security.verifySignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      token: `${token}!`,
+    })).toBe(false);
+
+    expect(security.verifySignedToken({
+      secret,
+      scope: 'chat:socket',
+      subject: 'session-1',
+      token: token.replace('.', '!.'),
+    })).toBe(false);
+  });
 });

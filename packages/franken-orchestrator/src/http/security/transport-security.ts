@@ -31,6 +31,11 @@ function decode(input: string): string {
   return Buffer.from(input, 'base64url').toString('utf8');
 }
 
+function isCanonicalBase64Url(input: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(input)
+    && Buffer.from(input, 'base64url').toString('base64url') === input;
+}
+
 function signatureFor(payload: string, secret: string): Buffer {
   return createHmac('sha256', secret).update(payload).digest();
 }
@@ -61,6 +66,9 @@ export class TransportSecurityService {
     }
     const [encodedPayload, encodedSignature] = tokenParts;
     if (!encodedPayload || !encodedSignature) {
+      return false;
+    }
+    if (!isCanonicalBase64Url(encodedPayload) || !isCanonicalBase64Url(encodedSignature)) {
       return false;
     }
 
