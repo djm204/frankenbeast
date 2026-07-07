@@ -81,7 +81,7 @@ export class CritiqueLoop {
   }
 
   private async checkBreakers(
-    state: LoopState,
+    state: InternalLoopState,
     config: LoopConfig,
     phase: 'pre' | 'post',
   ): Promise<CritiqueLoopResult | null> {
@@ -92,7 +92,7 @@ export class CritiqueLoop {
       if (breakerPhase !== phase && breakerPhase !== 'both') continue;
       // Sequential await preserves breaker ordering (e.g. halt short-circuits
       // before escalate). Do not parallelize.
-      const result = await breaker.check(state, config);
+      const result = await breaker.check(this.toPublicState(state), config);
       if (result.tripped) {
         if (result.action === 'escalate') {
           return {
@@ -109,6 +109,14 @@ export class CritiqueLoop {
       }
     }
     return null;
+  }
+
+  private toPublicState(state: InternalLoopState): LoopState {
+    return {
+      iterationCount: state.iterationCount,
+      iterations: [...state.iterations],
+      failureHistory: new Map(state.failureHistory),
+    };
   }
 
   private buildCorrection(
