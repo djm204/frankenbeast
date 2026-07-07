@@ -22,10 +22,18 @@ export interface ChatSocketPeer {
 
 interface ConnectionState {
   sessionId: string;
+  rateLimitKey: string;
+  running: boolean;
+}
+
+export interface ChatSocketMessageRateLimitOptions {
+  max: number;
+  windowMs: number;
 }
 
 export interface ChatSocketControllerOptions {
   allowedOrigins?: string[];
+  chatMessageRateLimit?: ChatSocketMessageRateLimitOptions;
   runtime: ChatRuntime;
   sessionStore: ISessionStore;
   tokenSecret: string;
@@ -48,6 +56,41 @@ export const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
 interface ChatSocketProtocolAuth {
   hasChatProtocol: boolean;
   token: string | null;
+}
+
+interface CounterState {
+  count: number;
+  resetAt: number;
+}
+
+const DEFAULT_CHAT_MESSAGE_RATE_LIMIT: ChatSocketMessageRateLimitOptions = {
+  max: 20,
+  windowMs: 10_000,
+};
+
+class ChatSocketMessageRateLimiter {
+  private readonly counters = new Map<string, CounterState>();
+
+  constructor(private readonly options: ChatSocketMessageRateLimitOptions) {}
+
+  take(key: string): { allowed: boolean; remaining: number } {
+    const now = Date.now();
+    const current = this.counters.get(key);
+    if (!current || current.resetAt <= now) {
+      this.counters.set(key, {
+        count: 1,
+        resetAt: now + this.options.windowMs,
+      });
+      return { allowed: true, remaining: this.options.max - 1 };
+    }
+
+    if (current.count >= this.options.max) {
+      return { allowed: false, remaining: 0 };
+    }
+
+    current.count += 1;
+    return { allowed: true, remaining: this.options.max - current.count };
+  }
 }
 
 function nowIso(): string {
@@ -82,9 +125,10 @@ function messageIdFromSession(session: ChatSession): string {
 function createPeerState(
   peer: ChatSocketPeer,
   sessionId: string,
+  rateLimitKey: string,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId };
+  const state = { sessionId, rateLimitKey, running: false };
   controller.connections.set(peer, state);
   return state;
 }
@@ -92,12 +136,16 @@ function createPeerState(
 export class ChatSocketController {
   readonly connections = new Map<ChatSocketPeer, ConnectionState>();
   private readonly allowedOrigins: string[];
+  private readonly messageRateLimiter: ChatSocketMessageRateLimiter;
   private readonly runtime: ChatRuntime;
   private readonly sessionStore: ISessionStore;
   private readonly tokenSecret: string;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
+    this.messageRateLimiter = new ChatSocketMessageRateLimiter(
+      options.chatMessageRateLimit ?? DEFAULT_CHAT_MESSAGE_RATE_LIMIT,
+    );
     this.runtime = options.runtime;
     this.sessionStore = options.sessionStore;
     this.tokenSecret = options.tokenSecret;
@@ -120,7 +168,7 @@ export class ChatSocketController {
       return auth;
     }
 
-    createPeerState(peer, request.sessionId, this);
+    createPeerState(peer, request.sessionId, this.rateLimitKey(request), this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -174,13 +222,7 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
-        await this.handleMessageSend(
-          peer,
-          session,
-          event.clientMessageId,
-          event.content,
-          'executionMode' in event ? event.executionMode : undefined,
-        );
+        await this.handleRateLimitedMessageSend(peer, connection, session, event);
         return;
       case 'approval.respond':
         await this.handleApproval(peer, session, event.approved);
@@ -195,6 +237,50 @@ export class ChatSocketController {
       case 'ping':
         this.emit(peer, { type: 'pong', timestamp: nowIso() });
         return;
+    }
+  }
+
+  private rateLimitKey(request: ChatSocketConnectRequest): string {
+    return `${request.sessionId}:${request.token ?? 'anonymous'}`;
+  }
+
+  private emitRateLimitError(peer: ChatSocketPeer, message: string): void {
+    this.emit(peer, {
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message,
+      timestamp: nowIso(),
+    });
+  }
+
+  private async handleRateLimitedMessageSend(
+    peer: ChatSocketPeer,
+    connection: ConnectionState,
+    session: ChatSession,
+    event: Extract<ClientSocketEvent, { type: 'message.send' }>,
+  ): Promise<void> {
+    if (connection.running) {
+      this.emitRateLimitError(peer, 'A chat turn is already running for this websocket connection.');
+      return;
+    }
+
+    const rateLimit = this.messageRateLimiter.take(connection.rateLimitKey);
+    if (!rateLimit.allowed) {
+      this.emitRateLimitError(peer, 'WebSocket chat message rate limit exceeded.');
+      return;
+    }
+
+    connection.running = true;
+    try {
+      await this.handleMessageSend(
+        peer,
+        session,
+        event.clientMessageId,
+        event.content,
+        'executionMode' in event ? event.executionMode : undefined,
+      );
+    } finally {
+      connection.running = false;
     }
   }
 

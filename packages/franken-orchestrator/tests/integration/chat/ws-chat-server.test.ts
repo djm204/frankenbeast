@@ -33,10 +33,12 @@ function createPeer() {
   };
 }
 
-function createTestRuntime(): ChatRuntime {
+function createTestRuntime(
+  llmComplete: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue('Working on it right now.'),
+): ChatRuntime {
   return new ChatRuntime({
     engine: new ConversationEngine({
-      llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
+      llm: { complete: llmComplete },
       projectName: 'proj',
     }),
     turnRunner: new TurnRunner({
@@ -197,6 +199,102 @@ describe('ws chat server', () => {
     expect(events.map((event) => event.type)).toContain('assistant.message.delta');
     expect(events.map((event) => event.type)).toContain('assistant.message.complete');
 
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rate limits websocket message floods before runtime execution', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const llmComplete = vi.fn().mockResolvedValue('Working on it right now.');
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(llmComplete),
+      sessionStore: store,
+      tokenSecret: secret,
+      chatMessageRateLimit: { max: 1, windowMs: 60_000 },
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'first message',
+    }));
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'second message',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'WebSocket chat message rate limit exceeded.',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rejects overlapping websocket turns before starting another runtime execution', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    let resolveLlm!: (value: string) => void;
+    const llmPending = new Promise<string>((resolve) => {
+      resolveLlm = resolve;
+    });
+    const llmComplete = vi.fn().mockReturnValue(llmPending);
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(llmComplete),
+      sessionStore: store,
+      tokenSecret: secret,
+      chatMessageRateLimit: { max: 10, windowMs: 60_000 },
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    const firstReceive = controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'first message',
+    }));
+    await vi.waitFor(() => expect(llmComplete).toHaveBeenCalledTimes(1));
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'second message',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'A chat turn is already running for this websocket connection.',
+    }));
+
+    resolveLlm('Working on it right now.');
+    await firstReceive;
     rmSync(TMP, { recursive: true, force: true });
   });
 
