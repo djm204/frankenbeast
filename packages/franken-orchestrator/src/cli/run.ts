@@ -797,6 +797,11 @@ export async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.subcommand === 'network' && (args.networkAction ?? 'help') === 'help') {
+    printLine(renderNetworkHelp());
+    return;
+  }
+
   const root = resolveProjectRoot(args.baseDir);
   if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
