@@ -2,6 +2,7 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { approvalRuntimeInput } from '../chat/approval-input.js';
 import { ChatRuntime } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
@@ -313,16 +314,20 @@ export class ChatSocketController {
       return;
     }
 
-    const result = await this.runtime.run('/approve', {
-      sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
-      projectId: session.projectId,
-      transcript: session.transcript,
-      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
-    });
+    if (!session.pendingApproval && session.state !== 'pending_approval') {
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: session.state !== 'rejected',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
+    const pendingApproval = session.pendingApproval ?? null;
+    const originalState = session.state;
+    const runtimeInput = approvalRuntimeInput(pendingApproval);
     session.pendingApproval = null;
-    session.state = result.state;
-    session.beastContext = result.beastContext ?? null;
+    session.state = 'approved';
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 
@@ -331,6 +336,56 @@ export class ChatSocketController {
       approved: true,
       timestamp: session.updatedAt,
     });
+
+    let result: Awaited<ReturnType<ChatRuntime['run']>>;
+    try {
+      result = await this.runtime.run(runtimeInput, {
+        sessionId: session.id,
+        pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        projectId: session.projectId,
+        transcript: session.transcript,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+      }, {
+        onEvent: (event) => {
+          try {
+            this.emit(peer, mapTurnEvent(event));
+          } catch {
+            // Socket delivery is best-effort; do not turn an already-running
+            // approved command into a retryable approval execution failure.
+          }
+        },
+      });
+    } catch (error) {
+      session.pendingApproval = pendingApproval;
+      session.state = originalState;
+      session.updatedAt = nowIso();
+      this.sessionStore.save(session);
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_EXECUTION_FAILED',
+        message: error instanceof Error ? error.message : 'Approved action failed to run.',
+        timestamp: session.updatedAt,
+      });
+      if (pendingApproval) {
+        this.emit(peer, {
+          type: 'turn.approval.requested',
+          description: pendingApproval.description,
+          timestamp: pendingApproval.requestedAt,
+          ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
+          ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
+          ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
+          ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
+          ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+        });
+      }
+      return;
+    }
+    session.pendingApproval = null;
+    session.state = result.state === 'active' ? 'approved' : result.state;
+    session.beastContext = result.beastContext ?? null;
+    session.updatedAt = nowIso();
+    this.sessionStore.save(session);
+
     for (const display of result.displayMessages) {
       this.emit(peer, {
         type: 'assistant.message.complete',

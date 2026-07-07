@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { approvalRuntimeInput } from '../../chat/approval-input.js';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import type { ChatRuntime } from '../../chat/runtime.js';
@@ -177,14 +178,31 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       return c.json({ data: { id: session.id, approved, state: session.state } });
     }
 
+    let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
     if (approved) {
-      const result = await runtime.run('/approve', {
-        sessionId: session.id,
-        pendingApproval: Boolean(session.pendingApproval) || session.state === 'pending_approval',
-        projectId: session.projectId,
-        transcript: session.transcript,
-        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
-      });
+      const pendingApproval = session.pendingApproval ?? null;
+      const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+      const runtimeInput = approvalRuntimeInput(pendingApproval);
+      const originalState = session.state;
+      session.pendingApproval = null;
+      session.state = 'approved';
+      session.updatedAt = new Date().toISOString();
+      sessionStore.save(session);
+      try {
+        result = await runtime.run(runtimeInput, {
+          sessionId: session.id,
+          pendingApproval: wasPendingApproval,
+          projectId: session.projectId,
+          transcript: session.transcript,
+          ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        });
+      } catch (error) {
+        session.pendingApproval = pendingApproval;
+        session.state = originalState;
+        session.updatedAt = new Date().toISOString();
+        sessionStore.save(session);
+        throw error;
+      }
 
       session.state = result.state === 'active' ? 'approved' : result.state;
       session.pendingApproval = null;
@@ -196,7 +214,16 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
-    return c.json({ data: { id: session.id, approved, state: session.state } } satisfies ApiDataEnvelope<ApproveResult>);
+    return c.json({
+      data: {
+        id: session.id,
+        approved,
+        state: session.state,
+        ...(result?.outcome ? { outcome: result.outcome } : {}),
+        ...(result?.tier ? { tier: result.tier } : {}),
+        ...(result ? { displayMessages: result.displayMessages, events: result.events } : {}),
+      },
+    } satisfies ApiDataEnvelope<ApproveResult>);
   });
 
   return app;

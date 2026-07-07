@@ -92,6 +92,10 @@ export const ApproveResultSchema = z.object({
   id: z.string(),
   approved: z.boolean(),
   state: z.string(),
+  outcome: TurnOutcomeSchema.optional(),
+  tier: z.string().optional(),
+  displayMessages: z.array(z.unknown()).optional(),
+  events: z.array(z.unknown()).optional(),
 });
 export type ApproveResult = z.infer<typeof ApproveResultSchema>;
 

@@ -42,7 +42,7 @@ function createTestRuntime(): ChatRuntime {
     }),
     turnRunner: new TurnRunner({
       execute: vi.fn().mockResolvedValue({
-        status: 'success',
+        status: 'success' as const,
         summary: 'Done',
         filesChanged: [],
         testsRun: 0,
@@ -165,7 +165,7 @@ describe('ws chat server', () => {
       }),
       turnRunner: new TurnRunner({
         execute: vi.fn().mockResolvedValue({
-          status: 'success',
+          status: 'success' as const,
           summary: 'Done',
           filesChanged: [],
           testsRun: 0,
@@ -259,6 +259,312 @@ describe('ws chat server', () => {
       command: 'deploy staging',
       risk: 'Requires explicit approval before execution.',
       sessionId: session.id,
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('emits execution events after an approved action runs', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    expect(execute).toHaveBeenCalledWith({ userInput: 'deploy staging' });
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: true,
+    }));
+    expect(events.findIndex((event) => event.type === 'turn.approval.resolved'))
+      .toBeLessThan(events.findIndex((event) => event.type === 'turn.execution.start'));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+      data: { taskDescription: 'deploy staging' },
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.complete',
+      data: { status: 'success' },
+    }));
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not execute the same approved action twice for duplicate approval frames', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    let finishExecution!: () => void;
+    const executionStarted = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await executionStarted;
+      return {
+        status: 'success' as const,
+        summary: 'Done',
+        filesChanged: [],
+        testsRun: 0,
+        errors: [],
+      };
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const first = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    const second = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    finishExecution();
+    await Promise.all([first, second]);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const executionStarts = sent
+      .map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'turn.execution.start');
+    expect(executionStarts).toHaveLength(1);
+    const approvalResolved = sent
+      .map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'turn.approval.resolved');
+    expect(approvalResolved).toHaveLength(2);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('restores pending approval and notifies clients when approved execution throws', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const execute = vi.fn(async () => {
+      throw new Error('executor offline');
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(store.get(session.id)?.state).toBe('pending_approval');
+    expect(store.get(session.id)?.pendingApproval?.command).toBe('deploy staging');
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_EXECUTION_FAILED',
+      message: 'executor offline',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.requested',
+      command: 'deploy staging',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not retry approved work when live event delivery fails', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const sent: Record<string, unknown>[] = [];
+    const peer = {
+      close: vi.fn(),
+      send: (data: string) => {
+        const event = JSON.parse(data) as Record<string, unknown>;
+        sent.push(event);
+        if (event.type === 'turn.execution.start') {
+          throw new Error('socket closed');
+        }
+      },
+    };
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('uses the legacy approve command for approvals without executable commands', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'Approve deployment?',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    expect(execute).not.toHaveBeenCalled();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'assistant.message.complete',
+      content: 'Approved.',
     }));
 
     rmSync(TMP, { recursive: true, force: true });
