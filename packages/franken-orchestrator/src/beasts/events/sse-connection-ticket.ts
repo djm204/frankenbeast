@@ -6,9 +6,6 @@ interface TicketEntry {
   expiresAt: number;
 }
 
-interface ConsumedTicketEntry {
-  expiresAt: number;
-}
 
 export interface SseConnectionTicketStoreOptions {
   ttlMs?: number;
@@ -19,7 +16,7 @@ export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
 
 export class SseConnectionTicketStore {
   private readonly tickets = new Map<string, TicketEntry>();
-  private readonly consumedTickets = new Map<string, ConsumedTicketEntry>();
+  private readonly consumedTickets = new Set<string>();
   private readonly ttlMs: number;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
 
@@ -43,12 +40,9 @@ export class SseConnectionTicketStore {
   consume(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
     const entry = this.tickets.get(ticket);
     if (!entry) {
-      const consumed = this.consumedTickets.get(ticket);
-      if (consumed && consumed.expiresAt > Date.now()) {
-        return 'reused';
-      }
+      const consumed = this.consumedTickets.has(ticket);
       if (consumed) {
-        this.consumedTickets.delete(ticket);
+        return 'reused';
       }
       return 'invalid';
     }
@@ -72,9 +66,7 @@ export class SseConnectionTicketStore {
       return 'invalid';
     }
 
-    this.consumedTickets.set(ticket, {
-      expiresAt: Date.now() + this.ttlMs,
-    });
+    this.consumedTickets.add(ticket);
     return 'valid';
   }
 
@@ -89,11 +81,7 @@ export class SseConnectionTicketStore {
         this.tickets.delete(ticket);
       }
     }
-    for (const [ticket, entry] of this.consumedTickets) {
-      if (now > entry.expiresAt) {
-        this.consumedTickets.delete(ticket);
-      }
-    }
+    
   }
 
   destroy(): void {
