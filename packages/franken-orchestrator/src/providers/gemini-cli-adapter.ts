@@ -4,6 +4,8 @@ import {
   readFileSync,
   writeFileSync,
   existsSync,
+  mkdtempSync,
+  rmSync,
   renameSync,
 } from 'node:fs';
 import type {
@@ -16,7 +18,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
@@ -51,21 +53,30 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    const systemPromptDir = mkdtempSync(join(tmpdir(), 'franken-gemini-system-'));
+    const systemPromptPath = join(systemPromptDir, 'system.md');
+
+    writeFileSync(systemPromptPath, request.systemPrompt, 'utf-8');
     const args = this.buildArgs(request);
-    const proc = spawn(this.binaryPath, args, {
-      cwd: this.workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    try {
+      const proc = spawn(this.binaryPath, args, {
+        cwd: this.workingDir,
+        env: { ...process.env, GEMINI_SYSTEM_MD: systemPromptPath },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-    const userContent = request.messages
-      .map((m) =>
-        typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      )
-      .join('\n');
-    proc.stdin!.write(userContent);
-    proc.stdin!.end();
+      const userContent = request.messages
+        .map((m) =>
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        )
+        .join('\n');
+      proc.stdin!.write(userContent);
+      proc.stdin!.end();
 
-    yield* this.parseStream(proc);
+      yield* this.parseStream(proc);
+    } finally {
+      rmSync(systemPromptDir, { recursive: true, force: true });
+    }
   }
 
   formatHandoff(snapshot: BrainSnapshot): string {
@@ -137,8 +148,8 @@ export class GeminiCliAdapter implements ILlmProvider {
     return this.options.workingDir ?? process.cwd();
   }
 
-  buildArgs(request: LlmRequest): string[] {
-    const args = ['-p', request.systemPrompt, '--output-format', 'stream-json'];
+  buildArgs(_request: LlmRequest): string[] {
+    const args = ['-p', '', '--output-format', 'stream-json'];
     if (this.options.model) {
       args.push('-m', this.options.model);
     }
