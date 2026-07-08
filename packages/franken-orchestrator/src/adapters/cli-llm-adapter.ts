@@ -451,7 +451,15 @@ export class CliLlmAdapter implements IAdapter {
         timedOut = true;
         child.kill('SIGTERM');
         hardKillTimer = setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch {}
+          try {
+            child.kill('SIGKILL');
+          } catch (error) {
+            console.warn('[CliLlmAdapter] Failed to hard-kill timed-out CLI process', {
+              signal: 'SIGKILL',
+              pid: child.pid,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }, 5_000);
         // Don't keep the event loop alive waiting on the hard-kill fallback;
         // short-lived invocations should exit promptly after a timeout reject.
