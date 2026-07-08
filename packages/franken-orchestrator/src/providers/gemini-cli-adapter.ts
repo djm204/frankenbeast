@@ -72,7 +72,12 @@ export class GeminiCliAdapter implements ILlmProvider {
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
-        env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
+        env: {
+          ...process.env,
+          GEMINI_CLI_SYSTEM_DEFAULTS_PATH:
+            process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
+          GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -130,7 +135,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private async discoverFromSettingsFile(): Promise<SkillCatalogEntry[]> {
     try {
-      const settingsPath = join(homedir(), '.gemini', 'settings.json');
+      const settingsPath = this.userSettingsPath();
       if (!existsSync(settingsPath)) return [];
       const raw = readFileSync(settingsPath, 'utf-8');
       const settings = JSON.parse(raw) as Record<string, unknown>;
@@ -220,7 +225,6 @@ export class GeminiCliAdapter implements ILlmProvider {
   private writeContextSettings(
     targetDir: string,
     includeDir: string,
-    workspaceDir = resolve(this.workingDir),
   ): { settingsPath: string; contextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
@@ -228,7 +232,7 @@ export class GeminiCliAdapter implements ILlmProvider {
     const existingContext = this.asObject(existing['context']) ?? {};
     const contextFileName = this.managedContextFileName();
     const includeDirectories = this.uniqueStrings([
-      ...this.inheritedIncludeDirectories(workspaceDir),
+      ...this.inheritedIncludeDirectories(),
       ...this.stringArray(existingContext['includeDirectories']),
       ...this.extraIncludeDirectories(),
       includeDir,
@@ -305,11 +309,10 @@ export class GeminiCliAdapter implements ILlmProvider {
     return '/etc/gemini-cli/system-defaults.json';
   }
 
-  private inheritedIncludeDirectories(workspaceDir: string): string[] {
+  private inheritedIncludeDirectories(): string[] {
     const settingsFiles = [
       process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
-      join(homedir(), '.gemini', 'settings.json'),
-      join(workspaceDir, '.gemini', 'settings.json'),
+      this.userSettingsPath(),
     ];
 
     return settingsFiles.flatMap((settingsPath) => {
@@ -317,6 +320,10 @@ export class GeminiCliAdapter implements ILlmProvider {
       const context = this.asObject(settings['context']) ?? {};
       return this.stringArray(context['includeDirectories']);
     });
+  }
+
+  private userSettingsPath(): string {
+    return join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'settings.json');
   }
 
   private readSettingsFile(path: string, description: string): Record<string, unknown> {

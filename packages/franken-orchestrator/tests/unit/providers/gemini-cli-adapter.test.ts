@@ -96,12 +96,19 @@ describe('GeminiCliAdapter', () => {
     it('merges inherited Gemini system settings while enabling include-dir memory', () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+      const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
       const existingSettings = join(tempDir, 'existing-settings.json');
       const systemDefaults = join(tempDir, 'system-defaults.json');
+      const geminiCliHome = join(tempDir, 'gemini-home');
       mkdirSync(join(tempDir, '.gemini'));
+      mkdirSync(join(geminiCliHome, '.gemini'), { recursive: true });
       writeFileSync(
         systemDefaults,
         `{ "context": { "includeDirectories": ["/default/docs"] }, "server": "https://default.example.com" }`,
+      );
+      writeFileSync(
+        join(geminiCliHome, '.gemini', 'settings.json'),
+        `{ "context": { "includeDirectories": ["/user/docs"] } }`,
       );
       writeFileSync(
         join(tempDir, '.gemini', 'settings.json'),
@@ -119,6 +126,7 @@ describe('GeminiCliAdapter', () => {
       });
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
       process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = systemDefaults;
+      process.env.GEMINI_CLI_HOME = geminiCliHome;
 
       try {
         const includeDir = join(tempDir, 'managed-context');
@@ -129,7 +137,7 @@ describe('GeminiCliAdapter', () => {
           server: 'https://example.com/gemini',
           context: {
             fileName: contextFileName,
-            includeDirectories: ['/default/docs', '/project/docs', '/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
+            includeDirectories: ['/default/docs', '/user/docs', '/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         });
@@ -143,6 +151,11 @@ describe('GeminiCliAdapter', () => {
           delete process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
         } else {
           process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = originalSystemDefaultsPath;
+        }
+        if (originalGeminiCliHome === undefined) {
+          delete process.env.GEMINI_CLI_HOME;
+        } else {
+          process.env.GEMINI_CLI_HOME = originalGeminiCliHome;
         }
       }
     });
@@ -198,6 +211,7 @@ describe('GeminiCliAdapter', () => {
       expect(spawnArgs).not.toContain('--include-directories');
       const settingsPath = spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       expect(settingsPath).toContain('franken-gemini-settings-');
+      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH).toBeTruthy();
       expect(settingsPath).not.toContain(tempDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
