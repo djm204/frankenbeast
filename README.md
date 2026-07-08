@@ -528,9 +528,12 @@ cd packages/franken-orchestrator && npm run test:e2e
 
 ```bash
 # Configure local services. Generate a unique Grafana password before starting
-# the full compose stack; Grafana refuses the old admin/admin default pair.
+# the full compose stack; Grafana requires GRAFANA_USER=admin with a non-default password.
 cp .env.example .env
-$EDITOR .env  # set CHROMA_URL if not using http://localhost:8000; set Grafana credentials
+$EDITOR .env  # set CHROMA_URL if not using http://localhost:8000; set GRAFANA_USER=admin and a unique GRAFANA_PASSWORD
+
+# Export .env so the seed and verify scripts read the same CHROMA_URL used for setup.
+set -a; source .env; set +a
 
 # Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
 # image versions and mounts ./tempo.yaml so local tracing starts deterministically.
