@@ -136,11 +136,13 @@ describe('GeminiCliAdapter', () => {
       mockSpawn([
         JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'hello ' }] } }),
         JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'world\n\n' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: '  \n' }] } }),
         JSON.stringify({ type: 'result', stats: { promptTokenCount: 1, candidatesTokenCount: 2 } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'hello ' });
       expect(events[1]).toEqual({ type: 'text', content: 'world\n\n' });
+      expect(events[2]).toEqual({ type: 'text', content: '  \n' });
     });
 
     it('fails closed when Gemini message_stop arrives without text', async () => {
@@ -173,6 +175,18 @@ describe('GeminiCliAdapter', () => {
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-2', name: 'search', input: { query: 'docs' } });
       expect(events[1]).toEqual({ type: 'text', content: 'done' });
+    });
+
+    it('allows top-level Gemini tool-only result frames to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_use', tool_id: 'tool-3', tool_name: 'search', parameters: { query: 'docs' } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 4, candidatesTokenCount: 0 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-3', name: 'search', input: { query: 'docs' } },
+        { type: 'done', usage: { inputTokens: 4, outputTokens: 0, totalTokens: 4 } },
+      ]);
     });
 
     it('ignores Gemini tool result output before final result text', async () => {

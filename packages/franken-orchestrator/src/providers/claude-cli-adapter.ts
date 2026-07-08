@@ -140,6 +140,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let emittedText = false;
+    let emittedToolUse = false;
 
     for await (const line of rl) {
       if (!line.trim()) continue;
@@ -170,7 +171,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           };
           return;
         }
-        if (resultText.trim().length > 0 && !emittedText) {
+        if (resultText.length > 0 && !emittedText) {
           yield { type: 'text', content: resultText };
           emittedText = true;
         }
@@ -185,7 +186,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           usage?.['outputTokens'] ??
           (parsed['total_output_tokens'] as number | undefined) ??
           totalOutputTokens;
-        if (!emittedText) {
+        if (!emittedText && !emittedToolUse) {
           yield {
             type: 'error',
             error: 'claude result frame contained no text output',
@@ -236,6 +237,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             name: currentToolUse.name,
             input,
           };
+          emittedToolUse = true;
           currentToolUse = null;
         }
       } else if (type === 'message_delta') {
@@ -263,26 +265,39 @@ export class ClaudeCliAdapter implements ILlmProvider {
           for (const block of content) {
             if (!block || typeof block !== 'object') continue;
             const record = block as Record<string, unknown>;
-            if (record['type'] === 'tool_use') {
+            if (record['type'] === 'text' && typeof record['text'] === 'string') {
+              yield { type: 'text', content: record['text'] };
+              emittedText = true;
+            } else if (record['type'] === 'tool_use') {
               yield {
                 type: 'tool_use',
                 id: (record['id'] as string) ?? crypto.randomUUID(),
                 name: record['name'] as string,
                 input: record['input'] ?? {},
               };
+              emittedToolUse = true;
             }
           }
-        }
-        const parts: string[] = [];
-        tryExtractTextFromNode(content ?? message ?? parsed, parts);
-        const text = parts.join('');
-        if (text.trim().length > 0) {
-          yield { type: 'text', content: text };
-          emittedText = true;
+        } else {
+          const parts: string[] = [];
+          tryExtractTextFromNode(content ?? message ?? parsed, parts);
+          const text = parts.join('');
+          if (text.length > 0) {
+            yield { type: 'text', content: text };
+            emittedText = true;
+          }
         }
       } else if (type === 'user') {
         continue;
       } else if (type === 'message_stop') {
+        if (!emittedText && !emittedToolUse) {
+          yield {
+            type: 'error',
+            error: 'claude stream completed without parseable text',
+            retryable: true,
+          };
+          return;
+        }
         yield {
           type: 'done',
           usage: {

@@ -182,6 +182,21 @@ describe('ClaudeCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } });
     });
 
+    it('allows Claude tool-only result frames to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'tool-only', name: 'Read', input: { file_path: 'README.md' } }] },
+        }),
+        JSON.stringify({ type: 'result', result: '', total_input_tokens: 5, total_output_tokens: 0 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-only', name: 'Read', input: { file_path: 'README.md' } },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 0, totalTokens: 5 } },
+      ]);
+    });
+
     it('emits Claude tool-use blocks from assistant frames', async () => {
       mockSpawn([
         JSON.stringify({
@@ -193,6 +208,29 @@ describe('ClaudeCliAdapter', () => {
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } });
       expect(events[1]).toEqual({ type: 'text', content: 'done' });
+    });
+
+    it('emits Claude assistant-frame content in provider order', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'text', text: 'I will read ' },
+              { type: 'tool_use', id: 'tool-ordered', name: 'Read', input: { file_path: 'README.md' } },
+              { type: 'text', text: ' after that.' },
+            ],
+          },
+        }),
+        JSON.stringify({ type: 'result', result: '' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'I will read ' },
+        { type: 'tool_use', id: 'tool-ordered', name: 'Read', input: { file_path: 'README.md' } },
+        { type: 'text', content: ' after that.' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
     });
 
     it('preserves Claude assistant-frame whitespace and usage', async () => {
@@ -248,6 +286,15 @@ describe('ClaudeCliAdapter', () => {
         error: 'claude process exited without producing a result frame or text output',
         retryable: false,
       });
+    });
+
+    it('fails closed when Claude message_stop arrives without text or tools', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'claude stream completed without parseable text', retryable: true });
     });
 
     it('parses tool_use events with accumulated input', async () => {

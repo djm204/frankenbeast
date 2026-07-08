@@ -210,7 +210,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           };
           return;
         }
-        if (text.trim().length > 0 && !emittedText) {
+        if (text.length > 0 && !emittedText) {
           yield { type: 'text', content: text };
           emittedText = true;
         }
@@ -231,7 +231,7 @@ export class GeminiCliAdapter implements ILlmProvider {
             usage['totalOutputTokens'] ??
             totalOutputTokens;
         }
-        if (!emittedText) {
+        if (!emittedText && !emittedToolUse) {
           yield {
             type: 'error',
             error: 'gemini result frame contained no text output',
@@ -289,12 +289,29 @@ export class GeminiCliAdapter implements ILlmProvider {
         const message = parsed['message'] as Record<string, unknown> | undefined;
         const role = (message?.['role'] ?? parsed['role']) as string | undefined;
         if (role === 'assistant') {
-          const parts: string[] = [];
-          tryExtractTextFromNode(message?.['content'] ?? parsed['content'] ?? parsed['parts'] ?? parsed, parts);
-          const text = parts.join('');
-          if (text.trim().length > 0) {
-            yield { type: 'text', content: text };
-            emittedText = true;
+          const content = message?.['content'] ?? parsed['content'] ?? parsed['parts'];
+          if (Array.isArray(content)) {
+            const parts = content
+              .map((part) => (part && typeof part === 'object' ? (part as Record<string, unknown>)['text'] : part))
+              .filter((part): part is string => typeof part === 'string');
+            const text = parts.join('');
+            if (text.length > 0) {
+              yield { type: 'text', content: text };
+              emittedText = true;
+            }
+          } else if (typeof content === 'string') {
+            if (content.length > 0) {
+              yield { type: 'text', content };
+              emittedText = true;
+            }
+          } else {
+            const parts: string[] = [];
+            tryExtractTextFromNode(parsed, parts);
+            const text = parts.join('');
+            if (text.length > 0) {
+              yield { type: 'text', content: text };
+              emittedText = true;
+            }
           }
         }
       } else if (type === 'message_stop') {
