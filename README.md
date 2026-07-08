@@ -325,6 +325,15 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 - **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
+### Beast project-root override
+
+Beast runtime code has two related project-root decisions:
+
+- **Service root:** `createBeastServices()` resolves `paths.root ?? process.env.FBEAST_ROOT ?? process.cwd()`. This root controls Beast service construction, host-process `cwd` containment, container `workspaceHostPath` mounts, worktree isolation, and run-config snapshots under `.fbeast/.build/run-configs`.
+- **Per-run child working directory:** built-in Beast definitions resolve `config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()` for the child process `cwd` when the run config omits `projectRoot`.
+
+For CLI entrypoints such as `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`, prefer passing the explicit project root (`--base-dir /absolute/path/to/project`) because the CLI parses `--base-dir` with a `process.cwd()` default before constructing services. Use `FBEAST_ROOT=/absolute/path/to/project` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit `paths.root`/`config.projectRoot`, and keep it aligned with `--base-dir` when both are present so the service root and child `cwd` stay inside the same checkout. Historical ADRs and plan documents may mention `FBEAST_ROOT`, but this section is the operator-facing supported configuration reference.
+
 ## Quick Start
 
 ```bash

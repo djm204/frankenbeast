@@ -58,6 +58,8 @@ fbeast mcp init --client=codex           # target Codex CLI
 
 This writes MCP entries into your client config (`~/.claude/settings.json`, `~/.gemini/settings.json`, etc.) and creates `.fbeast/beast.db`.
 
+`fbeast mcp init` and `fbeast mcp beast` operate on the current working directory. Run them from the target project checkout rather than relying on `FBEAST_ROOT`.
+
 ---
 
 ## 3. Activate beast mode (`fbeast mcp beast`)
@@ -106,6 +108,8 @@ frankenbeast interview                                # interview only, saves de
 frankenbeast plan --design-doc design.md              # planning only, saves chunks
 frankenbeast run                                      # execute chunks from .fbeast/
 ```
+
+When a wrapper or service manager starts `frankenbeast` from outside the target project, pass `--base-dir /absolute/path/to/project` for CLI-managed roots. See the README's [Beast project-root override](../../README.md#beast-project-root-override) for the narrower `FBEAST_ROOT` fallback used by Beast service construction and built-in run configs when no explicit root is supplied.
 
 ---
 
