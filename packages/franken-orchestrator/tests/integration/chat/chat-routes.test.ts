@@ -485,6 +485,98 @@ describe('Chat HTTP Routes', () => {
     expect(llmComplete).toHaveBeenCalledTimes(1);
   });
 
+  it('allows below-limit REST chat messages and rejects the over-limit request for the same client', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T00:00:00.000Z'));
+    try {
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id: 'chat-rest-rate-limit-message',
+        projectId: 'proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+        tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const sessionStore = {
+        create: vi.fn(),
+        get: vi.fn(() => session),
+        save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+        list: vi.fn(() => [session.id]),
+        listSessions: vi.fn(() => [session]),
+        delete: vi.fn(),
+      };
+      const runtime = {
+        run: vi.fn(async (content: string) => ({
+          displayMessages: [{ kind: 'reply' as const, content: `reply:${content}` }],
+          events: [],
+          pendingApproval: false,
+          state: 'active' as const,
+          tier: null,
+          transcript: [
+            ...session.transcript,
+            { role: 'user' as const, content },
+            { role: 'assistant' as const, content: `reply:${content}` },
+          ],
+        })),
+      };
+
+      app = createChatApp({
+        sessionStore,
+        engine: {} as never,
+        runtime: runtime as never,
+        turnRunner: {} as never,
+        sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+        chatRateLimit: { windowMs: 60_000, max: 2 },
+      });
+
+      const headers = { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '192.0.2.44' };
+      const first = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'first below limit' }),
+      });
+      const second = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'second below limit' }),
+      });
+      const overLimit = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'third over limit' }),
+      });
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(overLimit.status).toBe(429);
+      expect((await overLimit.json()).error).toMatchObject({
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded',
+      });
+      expect(runtime.run).toHaveBeenCalledTimes(2);
+      expect(runtime.run).toHaveBeenNthCalledWith(1, 'first below limit', expect.objectContaining({
+        sessionId: session.id,
+        projectId: 'proj',
+      }));
+      expect(runtime.run).toHaveBeenNthCalledWith(2, 'second below limit', expect.objectContaining({
+        sessionId: session.id,
+        projectId: 'proj',
+      }));
+      expect(session.transcript.map((message) => message.content)).toEqual([
+        'first below limit',
+        'reply:first below limit',
+        'second below limit',
+        'reply:second below limit',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('uses the client address for unauthenticated rate limits even when auth headers vary', async () => {
     app = createChatApp({
       sessionStoreDir: TMP,

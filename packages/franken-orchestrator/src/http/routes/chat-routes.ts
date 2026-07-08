@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput } from '../../chat/approval-input.js';
@@ -18,6 +17,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
+import { hashChatRateLimitPrincipal } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -71,7 +71,7 @@ function requestAddress(c: Context): string {
 }
 
 function hashPrincipal(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+  return hashChatRateLimitPrincipal(value);
 }
 
 function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
