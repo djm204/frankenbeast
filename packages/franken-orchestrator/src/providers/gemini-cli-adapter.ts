@@ -25,7 +25,7 @@ import type {
   SkillCatalogEntry,
 } from '@franken/types';
 import { homedir, platform, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
@@ -67,10 +67,10 @@ export class GeminiCliAdapter implements ILlmProvider {
 
     try {
       this.removeManagedGeminiMd();
-      const contextSettings = this.writeContextSettings(settingsWorkingDir);
+      const contextSettings = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
       const settingsPath = contextSettings.settingsPath;
       managedContextFileName = contextSettings.managedContextFileName;
-      this.writeGeminiMd(request.systemPrompt, undefined, workspaceDir, managedContextFileName);
+      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -92,7 +92,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       yield* this.parseStream(proc);
     } finally {
-      if (managedContextFileName) this.removeManagedGeminiMd(workspaceDir, managedContextFileName);
+      if (managedContextFileName) this.removeManagedGeminiMd(contextWorkingDir, managedContextFileName);
       rmSync(contextWorkingDir, { recursive: true, force: true });
       rmSync(settingsWorkingDir, { recursive: true, force: true });
     }
@@ -226,17 +226,13 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private writeContextSettings(
     targetDir: string,
+    managedContextDir: string,
   ): { settingsPath: string; managedContextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
 
     const existingContext = this.asObject(existing['context']) ?? {};
-    const existingIncludeDirectories = this.stringArray(existingContext['includeDirectories']);
     const managedContextFileName = this.managedContextFileName();
-    const includeDirectories = this.uniqueStrings([
-      ...existingIncludeDirectories,
-      ...this.extraIncludeDirectories(),
-    ]);
     const settingsPath = join(targetDir, 'settings.json');
     writeFileSync(
       settingsPath,
@@ -246,7 +242,8 @@ export class GeminiCliAdapter implements ILlmProvider {
           context: {
             ...existingContext,
             fileName: this.contextFileNames(existingContext, managedContextFileName),
-            includeDirectories,
+            includeDirectories: [managedContextDir],
+            loadMemoryFromIncludeDirectories: true,
           },
         },
         null,
@@ -255,22 +252,6 @@ export class GeminiCliAdapter implements ILlmProvider {
       { mode: 0o600 },
     );
     return { settingsPath, managedContextFileName };
-  }
-
-  private extraIncludeDirectories(): string[] {
-    const args = this.options.extraArgs ?? [];
-    const dirs: string[] = [];
-    for (let index = 0; index < args.length; index += 1) {
-      const arg = args[index]!;
-      if (arg === '--include-directories') {
-        const next = args[index + 1];
-        if (next) dirs.push(...this.splitIncludeDirectories(next));
-        index += 1;
-      } else if (arg.startsWith('--include-directories=')) {
-        dirs.push(...this.splitIncludeDirectories(arg.slice('--include-directories='.length)));
-      }
-    }
-    return dirs;
   }
 
   private managedContextFileName(): string {
@@ -301,15 +282,12 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private workspaceContextFileNames(): string[] {
-    if (process.env.GEMINI_CLI_TRUST_WORKSPACE !== 'true') return [];
+    if (!this.isWorkspaceTrustedForSettings()) return [];
     const workspaceSettings = this.readSettingsFile(join(resolve(this.workingDir), '.gemini', 'settings.json'), 'Gemini workspace settings');
     const workspaceContext = this.asObject(workspaceSettings['context']) ?? {};
     return this.stringArray(workspaceContext['fileName']);
   }
 
-  private splitIncludeDirectories(value: string): string[] {
-    return value.split(',').map((item) => item.trim()).filter(Boolean);
-  }
 
   private stringArray(value: unknown): string[] {
     if (typeof value === 'string') return [value];
@@ -336,14 +314,66 @@ export class GeminiCliAdapter implements ILlmProvider {
   private effectiveSystemDefaultsPath(): string {
     if (process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH) return process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
     if (process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH) {
-      const companionDefaultsPath = join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
-      if (existsSync(companionDefaultsPath)) return companionDefaultsPath;
+      return join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
     }
     return this.defaultSystemDefaultsPath();
   }
 
   private userSettingsPath(): string {
     return join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'settings.json');
+  }
+
+  private trustedFoldersPath(): string {
+    return process.env.GEMINI_CLI_TRUSTED_FOLDERS_PATH ?? join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'trustedFolders.json');
+  }
+
+  private isWorkspaceTrustedForSettings(): boolean {
+    if (process.env.GEMINI_CLI_TRUST_WORKSPACE === 'true') return true;
+
+    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
+    const security = this.asObject(userSettings['security']) ?? {};
+    const folderTrust = this.asObject(security['folderTrust']) ?? {};
+    const folderTrustEnabled = folderTrust['enabled'] !== false;
+    if (!folderTrustEnabled) return true;
+
+    const trustedFoldersPath = this.trustedFoldersPath();
+    if (!existsSync(trustedFoldersPath)) return false;
+
+    try {
+      const parsed = JSON.parse(this.stripJsonComments(readFileSync(trustedFoldersPath, 'utf-8'))) as Record<string, unknown>;
+      const workspaceDir = this.canonicalPath(resolve(this.workingDir));
+      let longestMatchLength = -1;
+      let longestTrust: unknown;
+
+      for (const [rulePath, trustLevel] of Object.entries(parsed)) {
+        const effectivePath = trustLevel === 'TRUST_PARENT' ? dirname(rulePath) : rulePath;
+        const normalizedRulePath = this.canonicalPath(effectivePath);
+        if (this.isSameOrParentPath(normalizedRulePath, workspaceDir) && rulePath.length > longestMatchLength) {
+          longestMatchLength = rulePath.length;
+          longestTrust = trustLevel;
+        }
+      }
+
+      if (longestTrust === 'TRUST_FOLDER' || longestTrust === 'TRUST_PARENT') return true;
+      if (longestTrust === 'DO_NOT_TRUST') return false;
+    } catch {
+      return false;
+    }
+
+    return false;
+  }
+
+  private canonicalPath(path: string): string {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  }
+
+  private isSameOrParentPath(parent: string, child: string): boolean {
+    const rel = relative(parent, child);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
   }
 
 

@@ -104,7 +104,7 @@ describe('GeminiCliAdapter', () => {
       mkdirSync(join(geminiCliHome, '.gemini'), { recursive: true });
       writeFileSync(
         systemDefaults,
-        `{ "context": { "includeDirectories": ["/default/docs"] }, "server": "https://default.example.com" }`,
+        `{ "context": { "fileName": ["CORP.md"], "includeDirectories": ["/default/docs"] }, "server": "https://default.example.com" }`,
       );
       writeFileSync(
         join(geminiCliHome, '.gemini', 'settings.json'),
@@ -136,14 +136,9 @@ describe('GeminiCliAdapter', () => {
           sandbox: true,
           server: 'https://example.com/gemini',
           context: {
-            fileName: [managedContextFileName, 'PROJECT.md', 'GEMINI.md'],
-            includeDirectories: [
-              '/shared/docs',
-              '/sibling/repo',
-              '/sibling/docs',
-              '/more/docs',
-              '/even-more/docs',
-            ],
+            fileName: [managedContextFileName, 'PROJECT.md', 'CORP.md', 'GEMINI.md'],
+            includeDirectories: [includeDir],
+            loadMemoryFromIncludeDirectories: true,
           },
         });
       } finally {
@@ -198,7 +193,8 @@ describe('GeminiCliAdapter', () => {
           sandbox: true,
           context: {
             fileName: [managedContextFileName, 'PROJECT.md', 'GEMINI.md'],
-            includeDirectories: [],
+            includeDirectories: [includeDir],
+            loadMemoryFromIncludeDirectories: true,
           },
         });
       } finally {
