@@ -51,6 +51,14 @@ describe('ScalabilityEvaluator', () => {
     expect(result.findings.some((f) => f.message.includes('hardcoded port number: 8080'))).toBe(true);
   });
 
+  it('does not treat non-port config keys containing port as port literals', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { transport: 443, viewport: 1024, support: 1000 };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(''));

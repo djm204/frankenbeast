@@ -2,10 +2,11 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?:port\w*|\w+Port\w*|\w*_PORT\w*|\w*_port\w*)`;
 const HARDCODED_PORT_PATTERNS = [
-  /(?:export\s+)?(?:const|let|var)\s+\w*port\w*\s*=\s*(\d{2,5})\b/gi,
-  /(?:^|[,{(])\s*["']?\w*port\w*["']?\s*:\s*(\d{2,5})\b/gi,
-  /\.\s*\w*port\w*\s*=\s*(\d{2,5})\b/gi,
+  new RegExp(String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
+  new RegExp(String.raw`(?:^|[,{(])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
+  new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
 ];
 
 export class ScalabilityEvaluator implements Evaluator {
