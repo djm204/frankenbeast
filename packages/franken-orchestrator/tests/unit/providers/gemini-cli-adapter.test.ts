@@ -98,17 +98,28 @@ describe('GeminiCliAdapter', () => {
       const existingSettings = join(tempDir, 'existing-settings.json');
       writeFileSync(
         existingSettings,
-        `// comment\n{\n  "sandbox": true,\n  "server": "https://example.com/gemini",\n  "context": { "fileName": "GEMINI.md" } /* trailing block */\n}`,
+        `// comment\n{\n  "sandbox": true,\n  "server": "https://example.com/gemini",\n  "context": { "fileName": "PROJECT.md", "includeDirectories": ["/shared/docs"] } /* trailing block */\n}`,
       );
+      adapter = new GeminiCliAdapter({
+        binaryPath: 'gemini',
+        model: 'gemini-2.5-flash',
+        workingDir: tempDir,
+        extraArgs: ['--include-directories', '/sibling/repo', '--include-directories=/more/docs'],
+      });
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
 
       try {
         const includeDir = join(tempDir, 'managed-context');
-        const settingsPath = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): string }).writeContextSettings(tempDir, includeDir);
+        const { settingsPath, contextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; contextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        expect(contextFileName).toBe('PROJECT.md');
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
           server: 'https://example.com/gemini',
-          context: { fileName: 'GEMINI.md', includeDirectories: [includeDir], loadMemoryFromIncludeDirectories: true },
+          context: {
+            fileName: 'PROJECT.md',
+            includeDirectories: ['/shared/docs', '/sibling/repo', '/more/docs', includeDir],
+            loadMemoryFromIncludeDirectories: true,
+          },
         });
       } finally {
         if (originalSettingsPath === undefined) {

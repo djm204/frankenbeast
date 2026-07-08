@@ -66,8 +66,8 @@ export class GeminiCliAdapter implements ILlmProvider {
 
     try {
       this.removeManagedGeminiMd();
-      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
-      const settingsPath = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+      const { settingsPath, contextFileName } = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, contextFileName);
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -216,7 +216,7 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
   }
 
-  private writeContextSettings(targetDir: string, includeDir: string): string {
+  private writeContextSettings(targetDir: string, includeDir: string): { settingsPath: string; contextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     let existing: Record<string, unknown> = {};
     if (existsSync(existingPath)) {
@@ -228,6 +228,12 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
 
     const existingContext = this.asObject(existing['context']) ?? {};
+    const contextFileName = this.firstContextFileName(existingContext['fileName']) ?? 'GEMINI.md';
+    const includeDirectories = this.uniqueStrings([
+      ...this.stringArray(existingContext['includeDirectories']),
+      ...this.extraIncludeDirectories(),
+      includeDir,
+    ]);
     const settingsPath = join(targetDir, 'settings.json');
     writeFileSync(
       settingsPath,
@@ -236,7 +242,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           ...existing,
           context: {
             ...existingContext,
-            includeDirectories: [includeDir],
+            includeDirectories,
             loadMemoryFromIncludeDirectories: true,
           },
         },
@@ -245,7 +251,39 @@ export class GeminiCliAdapter implements ILlmProvider {
       ),
       { mode: 0o600 },
     );
-    return settingsPath;
+    return { settingsPath, contextFileName };
+  }
+
+  private firstContextFileName(value: unknown): string | undefined {
+    if (typeof value === 'string' && value) return value;
+    if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0);
+    return undefined;
+  }
+
+  private extraIncludeDirectories(): string[] {
+    const args = this.options.extraArgs ?? [];
+    const dirs: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]!;
+      if (arg === '--include-directories') {
+        const next = args[index + 1];
+        if (next) dirs.push(next);
+        index += 1;
+      } else if (arg.startsWith('--include-directories=')) {
+        dirs.push(arg.slice('--include-directories='.length));
+      }
+    }
+    return dirs;
+  }
+
+  private stringArray(value: unknown): string[] {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+    return [];
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values.filter(Boolean)));
   }
 
   private defaultSystemSettingsPath(): string {
