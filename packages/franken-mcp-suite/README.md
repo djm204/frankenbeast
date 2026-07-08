@@ -92,6 +92,24 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
 
+### Central audit session ids
+
+The server-side central audit path records dispatched MCP tool calls even when
+`fbeast mcp init` registers standalone servers without client hooks. Those
+audit records use the first available session id in this order:
+
+1. `FBEAST_SESSION_ID`
+2. `CLAUDE_SESSION_ID`
+3. the fallback `fbeast-central-dispatch`
+
+Set `FBEAST_SESSION_ID` when you want all standalone MCP servers in a run to
+write under an explicit operator-chosen id. If neither env var is set, query the
+default central trail from the shared database with:
+
+```typescript
+fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
+```
+
 ## Combined server
 
 `fbeast-mcp` runs all 21 tools in a single MCP server process.
