@@ -16,6 +16,7 @@ import {
   type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
+import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -24,6 +25,7 @@ export interface ChatSocketPeer {
 
 interface ConnectionState {
   sessionId: string;
+  remoteAddress?: string | undefined;
 }
 
 export interface ChatSocketControllerOptions {
@@ -32,12 +34,15 @@ export interface ChatSocketControllerOptions {
   sessionStore: ISessionStore;
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
+  chatRateLimit?: BeastRateLimitOptions;
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 export interface ChatSocketConnectRequest {
   origin: string | null;
   sessionId: string;
   token: string | null;
+  remoteAddress?: string | undefined;
 }
 
 export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOptions {
@@ -85,9 +90,10 @@ function messageIdFromSession(session: ChatSession): string {
 function createPeerState(
   peer: ChatSocketPeer,
   sessionId: string,
+  remoteAddress: string | undefined,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId };
+  const state = { sessionId, remoteAddress };
   controller.connections.set(peer, state);
   return state;
 }
@@ -99,6 +105,7 @@ export class ChatSocketController {
   private readonly sessionStore: ISessionStore;
   private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
+  private readonly chatRateLimiter: InMemoryRateLimiter;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
@@ -106,6 +113,7 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
+    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? { windowMs: 60_000, max: 30 });
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -149,7 +157,7 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, this);
+    createPeerState(peer, request.sessionId, request.remoteAddress, this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -207,6 +215,9 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
+        if (!this.takeChatRateLimit(peer, connection, 'message')) {
+          return;
+        }
         await this.handleMessageSend(
           peer,
           session,
@@ -216,6 +227,9 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
+        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection, 'approval')) {
+          return;
+        }
         await this.handleApproval(peer, session, event.approved);
         return;
       case 'message.read':
@@ -320,6 +334,25 @@ export class ChatSocketController {
         timestamp: nowIso(),
       });
     }
+  }
+
+  private takeChatRateLimit(
+    peer: ChatSocketPeer,
+    connection: ConnectionState,
+    action: 'message' | 'approval',
+  ): boolean {
+    const principal = connection.remoteAddress?.trim() || connection.sessionId;
+    const result = this.chatRateLimiter.take(`chat:ws:${action}:${connection.sessionId}:${principal}`);
+    if (result.allowed) {
+      return true;
+    }
+    this.emit(peer, {
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'Rate limit exceeded',
+      timestamp: nowIso(),
+    });
+    return false;
   }
 
   private async handleApproval(
@@ -494,6 +527,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
       origin: requestOrigin(request),
       sessionId,
       token,
+      remoteAddress: request.socket.remoteAddress,
     });
     if (!auth.ok) {
       closeUnauthorized(socket, auth.status);
@@ -507,6 +541,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
         origin: requestOrigin(request),
         sessionId,
         token,
+        remoteAddress: request.socket.remoteAddress,
       });
       if (!result.ok) {
         ws.close();
