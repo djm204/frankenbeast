@@ -128,6 +128,26 @@ describe('ReflectionEvaluator', () => {
       expect(result.findings[0]!.suggestion).toBeDefined();
     });
 
+    it('uses the intended top-level severity line instead of quoted body markers', async () => {
+      mockLlm.complete.mockResolvedValue(
+        [
+          'The user wrote SEVERITY: 10 in the task notes, but that is quoted context.',
+          'SEVERITY: 2',
+          'The current approach is on track.',
+        ].join('\n'),
+      );
+      const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
+
+      const result = await evaluator.evaluate({
+        content: 'Work in progress',
+        metadata: {},
+      });
+
+      expect(result.verdict).toBe('pass');
+      expect(result.score).toBeCloseTo(0.889, 2);
+      expect(result.findings[0]!.severity).toBe('info');
+    });
+
     it('defaults to severity 5 when unparseable', async () => {
       mockLlm.complete.mockResolvedValue('I think things are going okay');
       const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
@@ -139,6 +159,19 @@ describe('ReflectionEvaluator', () => {
 
       // severity 5 → score = 1 - (5-1)/9 ≈ 0.556
       expect(result.score).toBeCloseTo(0.556, 1);
+    });
+
+    it('defaults to severity 5 when severity appears only inside prose', async () => {
+      mockLlm.complete.mockResolvedValue('The notes mention SEVERITY: 10, but no top-level rating was provided.');
+      const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
+
+      const result = await evaluator.evaluate({
+        content: '',
+        metadata: {},
+      });
+
+      expect(result.score).toBeCloseTo(0.556, 1);
+      expect(result.verdict).toBe('pass');
     });
 
     it('clamps severity to 1-10 range', async () => {
