@@ -158,7 +158,7 @@ describe('ClaudeCliAdapter', () => {
 
     it('reads top-level Claude result token totals', async () => {
       mockSpawn([
-        JSON.stringify({ type: 'result', result: 'Final answer', total_input_tokens: 21, total_output_tokens: 8 }),
+        JSON.stringify({ type: 'result', result: 'Final answer', usage: {}, total_input_tokens: 21, total_output_tokens: 8 }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 } });
@@ -166,10 +166,21 @@ describe('ClaudeCliAdapter', () => {
 
     it('treats Claude error result subtypes as failures', async () => {
       mockSpawn([
-        JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: '', error: 'turn limit reached' }),
+        JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: '', errors: ['turn limit reached'] }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'turn limit reached', retryable: false });
+    });
+
+    it('emits Claude result text even after assistant deltas', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'intermediate narration' } }),
+        JSON.stringify({ type: 'result', result: 'final answer', total_input_tokens: 4, total_output_tokens: 2 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'intermediate narration' });
+      expect(events[1]).toEqual({ type: 'text', content: 'final answer' });
+      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } });
     });
 
     it('ignores Claude user tool-result frames before the final result', async () => {

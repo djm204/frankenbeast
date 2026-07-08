@@ -158,10 +158,11 @@ export class ClaudeCliAdapter implements ILlmProvider {
           typeof parsed['error'] === 'string'
             ? parsed['error']
             : ((parsed['error'] as Record<string, unknown> | undefined)?.['message'] as string | undefined) ?? '';
+        const errors = Array.isArray(parsed['errors']) ? parsed['errors'].filter((value): value is string => typeof value === 'string') : [];
         const subtype = parsed['subtype'] as string | undefined;
         const isErrorResult = parsed['is_error'] === true || subtype === 'error' || subtype?.startsWith('error_') === true;
         if (isErrorResult) {
-          const message = resultText.trim() || errorText.trim() || 'claude returned an error result frame';
+          const message = resultText.trim() || errorText.trim() || errors.join('\n').trim() || 'claude returned an error result frame';
           yield {
             type: 'error',
             error: message,
@@ -169,18 +170,21 @@ export class ClaudeCliAdapter implements ILlmProvider {
           };
           return;
         }
-        if (resultText.trim().length > 0 && !emittedText) {
+        if (resultText.trim().length > 0) {
           yield { type: 'text', content: resultText };
           emittedText = true;
         }
         const usage = parsed['usage'] as Record<string, number> | undefined;
-        if (usage) {
-          totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
-          totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
-        } else {
-          totalInputTokens = (parsed['total_input_tokens'] as number | undefined) ?? totalInputTokens;
-          totalOutputTokens = (parsed['total_output_tokens'] as number | undefined) ?? totalOutputTokens;
-        }
+        totalInputTokens =
+          usage?.['input_tokens'] ??
+          usage?.['inputTokens'] ??
+          (parsed['total_input_tokens'] as number | undefined) ??
+          totalInputTokens;
+        totalOutputTokens =
+          usage?.['output_tokens'] ??
+          usage?.['outputTokens'] ??
+          (parsed['total_output_tokens'] as number | undefined) ??
+          totalOutputTokens;
         if (!emittedText) {
           yield {
             type: 'error',
