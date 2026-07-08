@@ -217,20 +217,18 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
   }
 
-  private writeContextSettings(targetDir: string, includeDir: string): { settingsPath: string; contextFileName: string } {
+  private writeContextSettings(
+    targetDir: string,
+    includeDir: string,
+    workspaceDir = resolve(this.workingDir),
+  ): { settingsPath: string; contextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
-    let existing: Record<string, unknown> = {};
-    if (existsSync(existingPath)) {
-      try {
-        existing = JSON.parse(this.stripJsonComments(readFileSync(existingPath, 'utf-8'))) as Record<string, unknown>;
-      } catch {
-        throw new Error(`Unable to parse Gemini system settings at ${existingPath}`);
-      }
-    }
+    const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
 
     const existingContext = this.asObject(existing['context']) ?? {};
     const contextFileName = this.managedContextFileName();
     const includeDirectories = this.uniqueStrings([
+      ...this.inheritedIncludeDirectories(workspaceDir),
       ...this.stringArray(existingContext['includeDirectories']),
       ...this.extraIncludeDirectories(),
       includeDir,
@@ -299,6 +297,35 @@ export class GeminiCliAdapter implements ILlmProvider {
     if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/settings.json';
     if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'settings.json');
     return '/etc/gemini-cli/settings.json';
+  }
+
+  private defaultSystemDefaultsPath(): string {
+    if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/system-defaults.json';
+    if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'system-defaults.json');
+    return '/etc/gemini-cli/system-defaults.json';
+  }
+
+  private inheritedIncludeDirectories(workspaceDir: string): string[] {
+    const settingsFiles = [
+      process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
+      join(homedir(), '.gemini', 'settings.json'),
+      join(workspaceDir, '.gemini', 'settings.json'),
+    ];
+
+    return settingsFiles.flatMap((settingsPath) => {
+      const settings = this.readSettingsFile(settingsPath, 'Gemini settings');
+      const context = this.asObject(settings['context']) ?? {};
+      return this.stringArray(context['includeDirectories']);
+    });
+  }
+
+  private readSettingsFile(path: string, description: string): Record<string, unknown> {
+    if (!existsSync(path)) return {};
+    try {
+      return JSON.parse(this.stripJsonComments(readFileSync(path, 'utf-8'))) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Unable to parse ${description} at ${path}`);
+    }
   }
 
   private stripJsonComments(value: string): string {

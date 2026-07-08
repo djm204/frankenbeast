@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync, lstatSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync, lstatSync, symlinkSync, mkdirSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -95,7 +95,18 @@ describe('GeminiCliAdapter', () => {
   describe('writeContextSettings()', () => {
     it('merges inherited Gemini system settings while enabling include-dir memory', () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+      const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
       const existingSettings = join(tempDir, 'existing-settings.json');
+      const systemDefaults = join(tempDir, 'system-defaults.json');
+      mkdirSync(join(tempDir, '.gemini'));
+      writeFileSync(
+        systemDefaults,
+        `{ "context": { "includeDirectories": ["/default/docs"] }, "server": "https://default.example.com" }`,
+      );
+      writeFileSync(
+        join(tempDir, '.gemini', 'settings.json'),
+        `{ "sandbox": false, "context": { "includeDirectories": ["/project/docs"] } }`,
+      );
       writeFileSync(
         existingSettings,
         `// comment\n{\n  "sandbox": true,\n  "server": "https://example.com/gemini",\n  "context": { "fileName": "PROJECT.md", "includeDirectories": ["/shared/docs"] } /* trailing block */\n}`,
@@ -107,6 +118,7 @@ describe('GeminiCliAdapter', () => {
         extraArgs: ['--include-directories', '/sibling/repo,/sibling/docs', '--include-directories=/more/docs,/even-more/docs'],
       });
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
+      process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = systemDefaults;
 
       try {
         const includeDir = join(tempDir, 'managed-context');
@@ -117,7 +129,7 @@ describe('GeminiCliAdapter', () => {
           server: 'https://example.com/gemini',
           context: {
             fileName: contextFileName,
-            includeDirectories: ['/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
+            includeDirectories: ['/default/docs', '/project/docs', '/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         });
@@ -126,6 +138,11 @@ describe('GeminiCliAdapter', () => {
           delete process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
         } else {
           process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = originalSettingsPath;
+        }
+        if (originalSystemDefaultsPath === undefined) {
+          delete process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+        } else {
+          process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = originalSystemDefaultsPath;
         }
       }
     });
