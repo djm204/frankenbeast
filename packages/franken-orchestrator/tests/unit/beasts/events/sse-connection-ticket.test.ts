@@ -28,6 +28,36 @@ describe('SseConnectionTicketStore', () => {
     expect(store.validate(ticket, 'operator-token-123')).toBe(false); // burned
   });
 
+  it('marks a validly used ticket as reused on second request', () => {
+    const ticket = store.issue('operator-token-123');
+
+    expect(store.consume(ticket, 'operator-token-123')).toBe('valid');
+    expect(store.consume(ticket, 'operator-token-123')).toBe('reused');
+  });
+
+  it('still reports reused after the issue TTL elapses (long-lived stream reconnect)', async () => {
+    // ttl=30ms for issuance, but the consumed marker is retained much longer,
+    // so a reconnect well past ttl is recognized as reused (→204), not invalid.
+    const s = new SseConnectionTicketStore({ ttlMs: 30 });
+    const ticket = s.issue('op');
+    expect(s.consume(ticket, 'op')).toBe('valid');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(s.consume(ticket, 'op')).toBe('reused');
+    s.destroy();
+  });
+
+  it('forgets a consumed ticket once the retention window elapses (bounded memory)', async () => {
+    // With a tiny retention, a reconnect after the window reads as invalid,
+    // proving consumedTickets does not grow without limit.
+    const s = new SseConnectionTicketStore({ ttlMs: 5, consumedRetentionMs: 30 });
+    const ticket = s.issue('op');
+    expect(s.consume(ticket, 'op')).toBe('valid');
+    expect(s.consume(ticket, 'op')).toBe('reused');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(s.consume(ticket, 'op')).toBe('invalid');
+    s.destroy();
+  });
+
   it('rejects expired tickets', async () => {
     const shortStore = new SseConnectionTicketStore({ ttlMs: 50 });
     const ticket = shortStore.issue('operator-token-123');

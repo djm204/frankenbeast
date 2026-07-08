@@ -142,7 +142,7 @@ describe('dashboard routes', () => {
       await res.body?.cancel();
     });
 
-    it('rejects a reused stream ticket', async () => {
+    it('rejects a reused stream ticket so EventSource stops retries', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
       const ticketRes = await app.request('/events/ticket', { method: 'POST' });
@@ -153,7 +153,19 @@ describe('dashboard routes', () => {
       await first.body?.cancel();
 
       const second = await app.request(`/events?ticket=${ticket}`);
-      expect(second.status).toBe(401);
+      expect(second.status).toBe(204);
+      expect(await second.text()).toBe('');
+    });
+
+    it('rejects invalid stream tickets', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events?ticket=bogus');
+
+      expect(res.status).toBe(401);
+      const body = await res.json() as { error: { message: string } };
+      expect(body.error.message).toBe('Invalid or expired ticket');
     });
 
     it('sends initial snapshot event in the stream', async () => {

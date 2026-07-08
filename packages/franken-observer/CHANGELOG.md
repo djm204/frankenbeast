@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.7.12](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.11...franken-observer-v0.7.12) (2026-07-07)
+
+
+### Bug Fixes
+
+* **observer:** bind trace server to loopback ([#837](https://github.com/djm204/frankenbeast/issues/837)) ([f0ab367](https://github.com/djm204/frankenbeast/commit/f0ab3678e197a77882ed7fe34c8071401b2e29a5))
+* **observer:** contain post-mortem report paths ([b647be6](https://github.com/djm204/frankenbeast/commit/b647be6d53cc62167b48d12b4a34df888e873782))
+* **observer:** hash trace ids in post-mortem filenames ([#874](https://github.com/djm204/frankenbeast/issues/874)) ([0aa2791](https://github.com/djm204/frankenbeast/commit/0aa27914af7fbafcf5e02ce53e39360e315f2501))
+* **observer:** retain batch queue on drain failure ([#855](https://github.com/djm204/frankenbeast/issues/855)) ([ec0e505](https://github.com/djm204/frankenbeast/commit/ec0e5053e3747f9a873a0fd26364238c6e4e9c34))
+* **observer:** set SQLite busy timeout ([50c5536](https://github.com/djm204/frankenbeast/commit/50c55361ed6515361707ce194c6e38b54fa94653))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Tests
+
+* externalize credential fixtures ([#910](https://github.com/djm204/frankenbeast/issues/910)) ([84ff583](https://github.com/djm204/frankenbeast/commit/84ff5830a23095a32339a1970a3e2d6d0a443dca)), closes [#519](https://github.com/djm204/frankenbeast/issues/519)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.7.11](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.10...franken-observer-v0.7.11) (2026-07-06)
 
 
