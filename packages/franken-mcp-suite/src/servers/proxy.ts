@@ -4,12 +4,25 @@ import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
-import { basename, dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
   if (explicitRoot) {
     return resolve(explicitRoot);
+  }
+
+  if (!isAbsolute(dbPath)) {
+    let candidateRoot = process.cwd();
+    while (true) {
+      if (existsSync(resolve(candidateRoot, dbPath))) {
+        return candidateRoot;
+      }
+      const parent = dirname(candidateRoot);
+      if (parent === candidateRoot) break;
+      candidateRoot = parent;
+    }
   }
 
   const dbDir = dirname(resolve(dbPath));

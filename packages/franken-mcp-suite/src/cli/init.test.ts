@@ -369,6 +369,17 @@ describe('fbeast init', () => {
     dirs.push(globalConfigDir, rootA, rootB);
 
     runInit({ root: rootA, claudeDir: globalConfigDir, hooks: false, servers: ['memory'] });
+    const staleHookSettings = {
+      ...JSON.parse(readFileSync(join(globalConfigDir, 'settings.json'), 'utf-8')),
+      hooks: {
+        PreToolUse: [
+          { matcher: '*', hooks: [{ type: 'command', command: shellQuote(join(rootA, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')) }] },
+          { matcher: '*', hooks: [{ type: 'command', command: '/usr/local/bin/my-pre-hook' }] },
+        ],
+      },
+    };
+    writeFileSync(join(globalConfigDir, 'settings.json'), JSON.stringify(staleHookSettings));
+
     runInit({ root: rootB, claudeDir: globalConfigDir, hooks: false, servers: ['memory'] });
 
     const settings = JSON.parse(readFileSync(join(globalConfigDir, 'settings.json'), 'utf-8'));
@@ -378,6 +389,8 @@ describe('fbeast init', () => {
     });
     expect(JSON.stringify(settings.mcpServers)).not.toContain(rootA);
     expect(JSON.stringify(settings.mcpServers)).not.toContain(rootB);
+    expect(JSON.stringify(settings.hooks)).not.toContain('fbeast');
+    expect(JSON.stringify(settings.hooks)).toContain('/usr/local/bin/my-pre-hook');
   });
 
   it('proxy mode writes single fbeast-proxy entry (not 7) for claude client', () => {

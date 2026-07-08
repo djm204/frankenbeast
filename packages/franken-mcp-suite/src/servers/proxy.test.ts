@@ -123,6 +123,35 @@ describe('proxy server', () => {
       expect(mockCreateAdapterSet).toHaveBeenCalledWith('/tmp/legacy-project/.fbeast/beast.db', { root: '/tmp/legacy-project' });
     });
 
+    it('walks up from nested cwd to derive root for relative proxy registrations', async () => {
+      const originalCwd = process.cwd();
+      const projectRoot = await import('node:fs').then(({ mkdtempSync, mkdirSync, writeFileSync }) => {
+        const root = mkdtempSync('/tmp/fbeast-proxy-relative-');
+        mkdirSync(`${root}/.fbeast`, { recursive: true });
+        mkdirSync(`${root}/packages/app`, { recursive: true });
+        writeFileSync(`${root}/.fbeast/beast.db`, '');
+        return root;
+      });
+      try {
+        process.chdir(`${projectRoot}/packages/app`);
+        const relativeServer = createProxyServer({
+          dbPath: '.fbeast/beast.db',
+          governance: { check: gateCheck },
+          audit: { record: auditRecord },
+        });
+        const relativeExecuteTool = relativeServer.tools.find((t) => t.name === 'execute_tool')!;
+        const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+        vi.mocked(mockRegistry.get('test_tool')!.makeHandler).mockReturnValue(fakeHandler);
+
+        await relativeExecuteTool.handler({ tool: 'test_tool', args: { key: 'val' } });
+
+        expect(mockCreateAdapterSet).toHaveBeenCalledWith('.fbeast/beast.db', { root: projectRoot });
+      } finally {
+        process.chdir(originalCwd);
+        await import('node:fs').then(({ rmSync }) => rmSync(projectRoot, { recursive: true, force: true }));
+      }
+    });
+
     it('returns isError response for unknown tool', async () => {
       const result = await executeToolDef.handler({ tool: 'nonexistent_tool', args: {} }) as { content: Array<{ type: string; text: string }>; isError: boolean };
       expect(result.isError).toBe(true);

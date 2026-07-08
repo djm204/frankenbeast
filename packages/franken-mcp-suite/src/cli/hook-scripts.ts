@@ -21,7 +21,11 @@ export function writeHookScripts(root: string, client: 'claude' | 'gemini' | 'co
     : join(root, '.fbeast', 'hooks');
   mkdirSync(hooksDir, { recursive: true });
 
-  const dbPath = join(root, '.fbeast', 'beast.db');
+  // Claude/Gemini hook entries can live in a global settings.json and be reused
+  // across project roots. Keep their database path cwd-relative so hooks govern
+  // the same project database as the globally registered MCP servers. Codex
+  // hooks remain project-scoped under <root>/.codex and can keep absolute paths.
+  const dbPath = client === 'codex' ? join(root, '.fbeast', 'beast.db') : join('.fbeast', 'beast.db');
 
   if (client === 'gemini') {
     return writeGeminiScripts(hooksDir, dbPath);
