@@ -21,7 +21,7 @@ describe('Vitest environment flags', () => {
   });
 
   it('rejects unexpected values without echoing raw environment contents', () => {
-    const unexpectedValue = process.env['TEST_UNEXPECTED_ENV_VALUE'] ?? 'secret-token-value';
+    const unexpectedValue = 'secret-token-value';
 
     expect(() => readVitestFlag({ E2E: unexpectedValue }, 'E2E')).toThrow(
       /E2E must be one of true, false, 1, 0, yes, no, on, or off/u,

@@ -14,10 +14,6 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
-import {
-  BEAST_OPERATOR_TOKEN,
-} from '../__fixtures__/operator-test-tokens.js';
-
 import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');

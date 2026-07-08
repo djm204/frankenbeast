@@ -18,6 +18,7 @@ const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/control-plane-auth');
 const OPERATOR_TOKEN = TEST_OPERATOR_TOKEN;
+const INVALID_OPERATOR_TOKEN = `${OPERATOR_TOKEN}-invalid`;
 
 function minimalCommsConfig(): CommsConfig {
   return { orchestrator: {}, channels: {} } as CommsConfig;
@@ -193,7 +194,7 @@ describe('control-plane operator auth', () => {
     it('rejects an invalid operator token', async () => {
       const app = buildApp();
       const res = await app.request('/v1/network/status', {
-        headers: { Authorization: 'Bearer wrong-token' },
+        headers: { Authorization: `Bearer ${INVALID_OPERATOR_TOKEN}` },
       });
       expect(res.status).toBe(401);
     });
