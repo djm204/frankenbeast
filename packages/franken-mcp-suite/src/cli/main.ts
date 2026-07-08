@@ -64,27 +64,10 @@ function resolveExecutable(command: string): string {
 }
 
 function quoteCmdArg(arg: string): string {
-  let quoted = '"';
-  let backslashes = 0;
-
-  for (const char of arg) {
-    if (char === '\\') {
-      backslashes += 1;
-      continue;
-    }
-
-    if (char === '"') {
-      quoted += `${'\\'.repeat(backslashes * 2 + 1)}"`;
-      backslashes = 0;
-      continue;
-    }
-
-    quoted += `${'\\'.repeat(backslashes)}${char}`;
-    backslashes = 0;
-  }
-
-  quoted += `${'\\'.repeat(backslashes * 2)}"`;
-  return quoted.replace(/%/g, '%%').replace(/[\^&|<>()!]/g, (char) => `^${char}`);
+  // This string is parsed first by cmd.exe and then forwarded by the npm .cmd shim
+  // via %*. Keep metacharacters literal by grouping every argv entry in quotes,
+  // not by caret-escaping characters that would then leak into the child argv.
+  return `"${arg.replace(/"/g, '""').replace(/%/g, '^%')}"`;
 }
 
 function isWindowsShellShim(command: string): boolean {

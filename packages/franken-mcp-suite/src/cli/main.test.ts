@@ -204,7 +204,18 @@ describe('fbeast main CLI', () => {
     const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
-    process.argv = ['node', 'fbeast', 'network', 'up', 'name&whoami', '100%literal%', 'C:\\tmp\\', 'with space'];
+    process.argv = [
+      'node',
+      'fbeast',
+      'network',
+      'up',
+      'name&whoami',
+      '100%literal%',
+      'C:\\tmp\\',
+      'with space',
+      '--set=a" b',
+      '(group)|pipe',
+    ];
 
     const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
 
@@ -214,7 +225,7 @@ describe('fbeast main CLI', () => {
       // process.exit throws in test
     }
 
-    const commandLine = `"${shimPath}" "network" "up" "name^&whoami" "100%%literal%%" "C:\\tmp\\\\" "with space"`;
+    const commandLine = `"${shimPath}" "network" "up" "name&whoami" "100^%literal^%" "C:\\tmp\\" "with space" "--set=a"" b" "(group)|pipe"`;
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'C:\\Windows\\System32\\cmd.exe',
       ['/d', '/s', '/c', `"${commandLine}"`],
