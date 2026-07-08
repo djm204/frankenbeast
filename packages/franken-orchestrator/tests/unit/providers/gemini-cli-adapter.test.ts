@@ -82,7 +82,10 @@ describe('GeminiCliAdapter', () => {
     it('merges inherited Gemini system settings while enabling include-dir memory', () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const existingSettings = join(tempDir, 'existing-settings.json');
-      writeFileSync(existingSettings, JSON.stringify({ sandbox: true, context: { fileName: 'GEMINI.md' } }));
+      writeFileSync(
+        existingSettings,
+        `// comment\n{\n  "sandbox": true,\n  "server": "https://example.com/gemini",\n  "context": { "fileName": "GEMINI.md" } /* trailing block */\n}`,
+      );
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
 
       try {
@@ -154,10 +157,13 @@ describe('GeminiCliAdapter', () => {
       const includeDir = spawnArgs[spawnArgs.indexOf('--include-directories') + 1];
       expect(includeDir).toContain('franken-gemini-context-');
       expect(includeDir).not.toContain(tempDir);
-      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBe(includeDir + '/settings.json');
+      const settingsPath = spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+      expect(settingsPath).toContain('franken-gemini-settings-');
+      expect(settingsPath).not.toContain(includeDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
       expect(existsSync(includeDir)).toBe(false);
+      expect(existsSync(settingsPath)).toBe(false);
     });
 
     it('removes a stale managed GEMINI.md block before launching', async () => {
@@ -229,14 +235,24 @@ describe('GeminiCliAdapter', () => {
     it('updates symlinked GEMINI.md targets without replacing the symlink', () => {
       const targetPath = join(tempDir, 'shared-GEMINI.md');
       const geminiPath = join(tempDir, 'GEMINI.md');
-      writeFileSync(targetPath, 'User notes');
+      writeFileSync(targetPath, 'user notes\n');
       symlinkSync(targetPath, geminiPath);
 
-      adapter.writeGeminiMd('New');
+      adapter.writeGeminiMd('System prompt here');
 
       expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
-      expect(readFileSync(targetPath, 'utf-8')).toContain('New');
-      expect(readFileSync(targetPath, 'utf-8')).toContain('User notes');
+      expect(readFileSync(targetPath, 'utf-8')).toContain('System prompt here');
+    });
+
+    it('creates the target for dangling symlinked GEMINI.md without replacing the link', () => {
+      const targetPath = join(tempDir, 'generated-later-GEMINI.md');
+      const geminiPath = join(tempDir, 'GEMINI.md');
+      symlinkSync(targetPath, geminiPath);
+
+      adapter.writeGeminiMd('System prompt here');
+
+      expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
+      expect(readFileSync(targetPath, 'utf-8')).toContain('System prompt here');
     });
 
     it('prepends managed content to user GEMINI.md content', () => {

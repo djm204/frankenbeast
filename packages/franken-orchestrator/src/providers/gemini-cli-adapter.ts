@@ -7,6 +7,7 @@ import {
   chmodSync,
   lstatSync,
   mkdtempSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   renameSync,
@@ -23,8 +24,8 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { homedir, platform, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
@@ -60,11 +61,12 @@ export class GeminiCliAdapter implements ILlmProvider {
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const workspaceDir = resolve(this.workingDir);
     const contextWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
+    const settingsWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-settings-')));
 
     try {
       this.removeManagedGeminiMd();
       this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
-      const settingsPath = this.writeContextSettings(contextWorkingDir);
+      const settingsPath = this.writeContextSettings(settingsWorkingDir);
       const args = this.buildArgs(request, contextWorkingDir);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -83,6 +85,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       yield* this.parseStream(proc);
     } finally {
       rmSync(contextWorkingDir, { recursive: true, force: true });
+      rmSync(settingsWorkingDir, { recursive: true, force: true });
     }
   }
 
@@ -202,13 +205,13 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private writeContextSettings(targetDir: string): string {
-    const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? '/etc/gemini-cli/settings.json';
+    const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     let existing: Record<string, unknown> = {};
     if (existsSync(existingPath)) {
       try {
-        existing = JSON.parse(readFileSync(existingPath, 'utf-8')) as Record<string, unknown>;
+        existing = JSON.parse(this.stripJsonComments(readFileSync(existingPath, 'utf-8'))) as Record<string, unknown>;
       } catch {
-        existing = {};
+        throw new Error(`Unable to parse Gemini system settings at ${existingPath}`);
       }
     }
 
@@ -230,6 +233,58 @@ export class GeminiCliAdapter implements ILlmProvider {
       { mode: 0o600 },
     );
     return settingsPath;
+  }
+
+  private defaultSystemSettingsPath(): string {
+    if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/settings.json';
+    if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'settings.json');
+    return '/etc/gemini-cli/settings.json';
+  }
+
+  private stripJsonComments(value: string): string {
+    let output = '';
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < value.length; i += 1) {
+      const current = value[i]!;
+      const next = value[i + 1];
+
+      if (inString) {
+        output += current;
+        if (escaped) {
+          escaped = false;
+        } else if (current === '\\') {
+          escaped = true;
+        } else if (current === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (current === '"') {
+        inString = true;
+        output += current;
+        continue;
+      }
+
+      if (current === '/' && next === '/') {
+        while (i < value.length && value[i] !== '\n') i += 1;
+        output += '\n';
+        continue;
+      }
+
+      if (current === '/' && next === '*') {
+        i += 2;
+        while (i < value.length && !(value[i] === '*' && value[i + 1] === '/')) i += 1;
+        i += 1;
+        continue;
+      }
+
+      output += current;
+    }
+
+    return output;
   }
 
   private removeManagedGeminiMd(targetDir = this.workingDir): void {
@@ -257,7 +312,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private writeFileAtomically(path: string, content: string): void {
-    const writePath = existsSync(path) && this.isSymlink(path) ? realpathSync(path) : path;
+    const writePath = this.isSymlink(path) ? this.resolveSymlinkTarget(path) : path;
     const tmpPath = `${writePath}.${process.pid}.${Date.now()}.tmp`;
     const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
     writeFileSync(tmpPath, content);
@@ -265,6 +320,15 @@ export class GeminiCliAdapter implements ILlmProvider {
       chmodSync(tmpPath, existingMode);
     }
     renameSync(tmpPath, writePath);
+  }
+
+  private resolveSymlinkTarget(path: string): string {
+    try {
+      return realpathSync(path);
+    } catch {
+      const target = readlinkSync(path);
+      return isAbsolute(target) ? target : resolve(dirname(path), target);
+    }
   }
 
   private isSymlink(path: string): boolean {
