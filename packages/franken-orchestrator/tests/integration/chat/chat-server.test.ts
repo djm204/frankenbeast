@@ -10,6 +10,13 @@ import {
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../../../src/http/ws-chat-server.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
+const TEST_CHAT_TOKEN = testCredential('TEST_CHAT_TOKEN');
+const TEST_SHARED_TOKEN = testCredential('TEST_SHARED_TOKEN');
+
+
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/chat-server');
 
@@ -30,6 +37,22 @@ function waitForSocketEvent(socket: WebSocket, type: string): Promise<Record<str
     };
 
     socket.addEventListener('message', onMessage);
+  });
+}
+
+function waitForSocketClose(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (socket.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(() => {
+      reject(new Error('Timed out waiting for websocket close'));
+    }, 2_000);
+    socket.addEventListener('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
   });
 }
 
@@ -91,6 +114,45 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('removes websocket upgrade listeners and closes active sockets on shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+    });
+
+    const createRes = await fetch(`${server.url}/v1/chat/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    expect(createRes.status).toBe(201);
+    const body = await createRes.json() as {
+      data: {
+        id: string;
+        socketToken: string;
+      };
+    };
+    const socket = new WebSocket(
+      `${server.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+    );
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener('error', (event) => reject(event.error ?? new Error('websocket error')), { once: true });
+    });
+
+    expect(server.server.listenerCount('upgrade')).toBe(1);
+
+    await server.close();
+    await waitForSocketClose(socket);
+
+    expect(server.server.listenerCount('upgrade')).toBe(0);
+  });
+
   it('mounts beast routes on the live server when beast control is configured', async () => {
     mkdirSync(TMP, { recursive: true });
     const llm = { complete: vi.fn().mockResolvedValue('Server reply') };
@@ -107,7 +169,9 @@ describe('chat server bootstrap', () => {
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'dashboard-operator-token',
+
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
+
         rateLimit: {
           windowMs: 60_000,
           max: 20,
@@ -118,7 +182,9 @@ describe('chat server bootstrap', () => {
     try {
       const response = await fetch(`${server.url}/v1/beasts/catalog`, {
         headers: {
-          authorization: 'Bearer dashboard-operator-token',
+
+          authorization: `Bearer ${TEST_DASHBOARD_OPERATOR_TOKEN}`,
+
         },
       });
 
@@ -196,6 +262,7 @@ describe('chat server bootstrap', () => {
 
   it('refuses to start when chat and beast operator tokens differ', async () => {
     mkdirSync(TMP, { recursive: true });
+    const mismatchedBeastToken = `${TEST_CHAT_TOKEN}-beast-mismatch`;
     const beastServices = createBeastServices({
       beastsDb: join(TMP, 'beasts.db'),
       beastLogsDir: join(TMP, 'beast-logs'),
@@ -207,11 +274,13 @@ describe('chat server bootstrap', () => {
         sessionStoreDir: join(TMP, 'chat'),
         llm: { complete: vi.fn().mockResolvedValue('') },
         projectName: 'test-project',
-        operatorToken: 'chat-token',
+
+        operatorToken: TEST_CHAT_TOKEN,
         beastControl: {
           ...beastServices,
           security: new TransportSecurityService(),
-          operatorToken: 'beast-token',
+          operatorToken: mismatchedBeastToken,
+
           rateLimit: { windowMs: 60_000, max: 20 },
         },
       })).rejects.toThrow(/different operator tokens/i);
@@ -232,11 +301,13 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+
+      operatorToken: TEST_SHARED_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: TEST_SHARED_TOKEN,
+
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
@@ -270,11 +341,13 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+
+      operatorToken: TEST_SHARED_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: TEST_SHARED_TOKEN,
+
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
@@ -297,23 +370,29 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+
+      operatorToken: TEST_SHARED_TOKEN,
       beastControl: {
         ...beastServices,
         security: new TransportSecurityService(),
-        operatorToken: 'shared-token',
+        operatorToken: TEST_SHARED_TOKEN,
+
         rateLimit: { windowMs: 60_000, max: 20 },
       },
     });
 
     const ticketResponse = await fetch(`${server.url}/v1/beasts/events/ticket`, {
       method: 'POST',
-      headers: { authorization: 'Bearer shared-token' },
+
+      headers: { authorization: `Bearer ${TEST_SHARED_TOKEN}` },
+
     });
     expect(ticketResponse.status).toBe(200);
     const ticketBody = await ticketResponse.json() as { ticket: string };
     const streamResponse = await fetch(`${server.url}/v1/beasts/events/stream?ticket=${ticketBody.ticket}`, {
-      headers: { authorization: 'Bearer shared-token' },
+
+      headers: { authorization: `Bearer ${TEST_SHARED_TOKEN}` },
+
     });
     expect(streamResponse.status).toBe(200);
 
@@ -332,7 +411,9 @@ describe('chat server bootstrap', () => {
       sessionStoreDir: TMP,
       llm: { complete: vi.fn().mockResolvedValue('') },
       projectName: 'test-project',
-      operatorToken: 'shared-token',
+
+      operatorToken: TEST_SHARED_TOKEN,
+
     })).rejects.toThrow(/non-loopback host/);
   });
 

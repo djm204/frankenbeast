@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHAT_SOCKET_TOKEN_TTL_MS,
   createSessionTokenSecret,
   issueSessionToken,
   verifyChatSocketRequest,
 } from '../../../src/http/ws-chat-auth.js';
 
 describe('websocket chat auth', () => {
+  it('requires callers to provide an explicit socket-token TTL', () => {
+    expect(() => issueSessionToken({
+      secret: createSessionTokenSecret(),
+      sessionId: 'sess-1',
+    } as Parameters<typeof issueSessionToken>[0])).toThrow(/expiresInMs/);
+  });
+
   it('rejects a connection when the Origin header is not allowlisted', () => {
     const secret = createSessionTokenSecret();
     const token = issueSessionToken({
+      expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret,
       sessionId: 'sess-1',
     });

@@ -49,8 +49,8 @@ export type {
 } from './types.js';
 
 // Config
-export { OrchestratorConfigSchema, defaultConfig } from './config/orchestrator-config.js';
-export type { OrchestratorConfig } from './config/orchestrator-config.js';
+export { OrchestratorConfigSchema, defaultConfig, parseOrchestratorConfig } from './config/orchestrator-config.js';
+export type { OrchestratorConfig, OrchestratorConfigParseOptions } from './config/orchestrator-config.js';
 
 // Context
 export { BeastContext } from './context/franken-context.js';

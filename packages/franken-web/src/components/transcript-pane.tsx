@@ -21,7 +21,7 @@ export function TranscriptPane({ messages, onRetryMessage, resetKey, retryDisabl
       <div className="transcript-pane__header">
         <div>
           <p className="eyebrow">Command Console</p>
-          <h1>Chat</h1>
+          <h2>Chat</h2>
         </div>
         <p className="transcript-pane__meta">CLI-parity conversation stream with live execution telemetry.</p>
       </div>

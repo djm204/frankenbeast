@@ -14,7 +14,9 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
+import { testCredential } from '../../support/test-credentials.js';
 
+const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-security');
 
@@ -50,7 +52,9 @@ function createSecuredApp(rateLimitMax = 1) {
       interviews: new BeastInterviewService(repository, catalog),
       metrics,
       security: new TransportSecurityService(),
-      operatorToken: 'super-secret-operator-token',
+
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+
       eventBus: new BeastEventBus(),
       ticketStore: new SseConnectionTicketStore(),
       rateLimit: {
@@ -77,7 +81,9 @@ describe('beast route security', () => {
   it('rate limits repeated dispatch attempts', async () => {
     const app = createSecuredApp(1);
     const headers = {
-      authorization: 'Bearer super-secret-operator-token',
+
+      authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+
       'content-type': 'application/json',
     };
 

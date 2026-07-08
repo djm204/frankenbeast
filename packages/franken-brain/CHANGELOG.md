@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.1...@franken/brain-v0.7.2) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+## [0.7.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.0...@franken/brain-v0.7.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.6.6...@franken/brain-v0.7.0) (2026-07-06)
 
 

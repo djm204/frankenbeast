@@ -25,8 +25,17 @@ export function slackRouter(options: SlackRouterOptions) {
 
   // Events API: https://api.slack.com/events-api
   app.post('/events', async (c) => {
-    const body = await c.req.json();
-    const parsed = SlackEventBaseSchema.parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Malformed Slack payload' }, 400);
+    }
+    const eventPayload = SlackEventBaseSchema.safeParse(body);
+    if (!eventPayload.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const parsed = eventPayload.data;
 
     // Handle Slack challenge (url_verification)
     if (parsed.type === 'url_verification') {

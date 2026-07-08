@@ -70,6 +70,8 @@ export interface CliLlmAdapterOpts {
   registry?: ProviderRegistry | undefined;
   /** Per-provider command/model overrides. */
   providerOverrides?: Record<string, ProviderOverride> | undefined;
+  /** Maximum all-provider rate-limit retry cycles before surfacing a terminal error. */
+  maxRateLimitRetries?: number | undefined;
   /** @internal Injectable sleep for tests. */
   _sleepFn?: ((durationMs: number) => Promise<void>) | undefined;
 }
@@ -87,6 +89,7 @@ export class CliLlmAdapter implements IAdapter {
     replayRunId?: ReplayRunId | undefined;
     providers?: readonly string[] | undefined;
     providerOverrides?: Record<string, ProviderOverride> | undefined;
+    maxRateLimitRetries: number;
     _sleepFn?: ((durationMs: number) => Promise<void>) | undefined;
   };
   private readonly _spawn: SpawnFn;
@@ -112,6 +115,7 @@ export class CliLlmAdapter implements IAdapter {
       ...(opts.replayRunId !== undefined ? { replayRunId: opts.replayRunId } : {}),
       ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
       ...(opts.providerOverrides !== undefined ? { providerOverrides: opts.providerOverrides } : {}),
+      maxRateLimitRetries: normalizeRateLimitRetryLimit(opts.maxRateLimitRetries),
       ...(opts._sleepFn !== undefined ? { _sleepFn: opts._sleepFn } : {}),
     };
     this._spawn = _spawnFn ?? (nodeSpawn as SpawnFn);
@@ -156,6 +160,7 @@ export class CliLlmAdapter implements IAdapter {
     const sleepFn = this.opts._sleepFn ?? defaultSleep;
     const initialProvider = this.provider.name;
     let activeProvider = initialProvider;
+    let rateLimitRetryCycles = 0;
 
     while (true) {
       const provider = this.resolveProvider(activeProvider);
@@ -214,8 +219,14 @@ export class CliLlmAdapter implements IAdapter {
             continue;
           }
           if (hasRateLimitedProvider(exhaustedProviders)) {
+            if (rateLimitRetryCycles >= this.opts.maxRateLimitRetries) {
+              throw new Error(buildRateLimitRetryExhaustedSummary(exhaustedProviders, rateLimitRetryCycles), {
+                cause: lastRateLimitedFailure(exhaustedProviders),
+              });
+            }
             const sleepMs = this.resolveSleepMs(exhaustedProviders);
             await sleepFn(sleepMs);
+            rateLimitRetryCycles++;
             exhaustedProviders.clear();
             activeProvider = initialProvider;
             continue;
@@ -285,7 +296,13 @@ export class CliLlmAdapter implements IAdapter {
       }
 
       const sleepMs = this.resolveSleepMs(exhaustedProviders);
+      if (rateLimitRetryCycles >= this.opts.maxRateLimitRetries) {
+        throw new Error(buildRateLimitRetryExhaustedSummary(exhaustedProviders, rateLimitRetryCycles), {
+          cause: lastRateLimitedFailure(exhaustedProviders),
+        });
+      }
       await sleepFn(sleepMs);
+      rateLimitRetryCycles++;
       exhaustedProviders.clear();
       activeProvider = initialProvider;
     }
@@ -434,7 +451,15 @@ export class CliLlmAdapter implements IAdapter {
         timedOut = true;
         child.kill('SIGTERM');
         hardKillTimer = setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch {}
+          try {
+            child.kill('SIGKILL');
+          } catch (error) {
+            console.warn('[CliLlmAdapter] Failed to hard-kill timed-out CLI process', {
+              signal: 'SIGKILL',
+              pid: child.pid,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }, 5_000);
         // Don't keep the event loop alive waiting on the hard-kill fallback;
         // short-lived invocations should exit promptly after a timeout reject.
@@ -477,6 +502,34 @@ function normalizeProviderChain(
 
 function hasRateLimitedProvider(exhaustedProviders: Map<string, CommandFailure>): boolean {
   return [...exhaustedProviders.values()].some((failure) => failure.rateLimited);
+}
+
+function lastRateLimitedFailure(exhaustedProviders: Map<string, CommandFailure>): CommandFailure | undefined {
+  return [...exhaustedProviders.values()].reverse().find((failure) => failure.rateLimited);
+}
+
+function normalizeRateLimitRetryLimit(limit: number | undefined): number {
+  if (limit === undefined) return 3;
+  if (!Number.isFinite(limit)) return 3;
+  return Math.max(0, Math.floor(limit));
+}
+
+function buildRateLimitRetryExhaustedSummary(
+  exhaustedProviders: Map<string, CommandFailure>,
+  retryCycles: number,
+): string {
+  const providerSummaries = [...exhaustedProviders.entries()]
+    .map(([provider, failure]) => {
+      const retryAfter = failure.retryAfterMs !== undefined ? `; retry after ${failure.retryAfterMs}ms` : '';
+      return `${provider}: ${failure.summary}${retryAfter}`;
+    })
+    .join(' | ');
+  const cycleLabel = retryCycles === 1 ? 'retry cycle' : 'retry cycles';
+  return [
+    `All configured LLM providers remained rate limited after ${retryCycles} ${cycleLabel}.`,
+    providerSummaries ? `Last failures: ${providerSummaries}.` : '',
+    'Wait for provider quota reset, reduce request concurrency, or configure an available fallback provider.',
+  ].filter(Boolean).join(' ');
 }
 
 function buildNoCliProvidersAvailableSummary(exhaustedProviders: Map<string, CommandFailure>): string {

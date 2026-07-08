@@ -61,9 +61,11 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('runs turbo run build test lint', () => {
+    it('builds before running package tests in CI', () => {
       expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run.*build.*test.*lint/);
+      expect(content).toMatch(/turbo run build lint[\s\S]*turbo run test/);
+      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('turbo run test'));
+      expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
     it('uses actions/setup-node with npm cache', () => {
@@ -119,7 +121,9 @@ describe('release-please.yml publishes released npm packages', () => {
     const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content).toContain('validate-release:');
     expect(content).toContain('release-please:\n    needs: validate-release');
-    expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run.*build.*typecheck.*test.*lint/);
+    expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run build typecheck lint[\s\S]*turbo run test/);
+    expect(content.indexOf('turbo run build typecheck lint')).toBeLessThan(content.indexOf('turbo run test'));
+    expect(content).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 
   it('enforces the packageManager-pinned npm before release installs and publishes', () => {

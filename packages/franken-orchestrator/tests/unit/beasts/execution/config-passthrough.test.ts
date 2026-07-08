@@ -23,9 +23,9 @@ describe('Config file passthrough', () => {
   let configFilePaths: string[] = [];
 
   afterEach(async () => {
-    // Clean up any config files written to cwd
+    // Clean up any config files written to cwd; fail loudly if cleanup itself breaks.
     for (const p of configFilePaths) {
-      try { if (existsSync(p)) { const { unlinkSync } = await import('node:fs'); unlinkSync(p); } } catch {}
+      await rm(p, { force: true });
     }
     configFilePaths = [];
     if (workDir) {

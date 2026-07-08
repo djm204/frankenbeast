@@ -24,6 +24,7 @@ describe('NetworkConfigSchema', () => {
     expect(config.comms.orchestratorWsUrl).toBe('ws://127.0.0.1:3737/v1/chat/ws');
   });
 
+
   it('accepts partial overrides for services and URLs', () => {
     const config = NetworkConfigSchema.parse({
       network: { mode: 'insecure' },

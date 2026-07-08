@@ -283,6 +283,21 @@ describe('Session', () => {
 
       expect(console.info).toHaveBeenCalledWith(expect.stringContaining('Result: 1 passed, 1 failed'));
     });
+
+    it('prints the created PR URL in the build summary when present', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockBeastRun.mockResolvedValueOnce({
+        ...mockBeastResult,
+        prUrl: 'https://github.com/org/repo/pull/123',
+      });
+      const config = makeConfig({ entryPhase: 'execute' });
+
+      await new Session(config).start();
+
+      expect(console.info).toHaveBeenCalledWith(
+        expect.stringContaining('PR:        https://github.com/org/repo/pull/123'),
+      );
+    });
   });
 
   describe('phase chaining', () => {

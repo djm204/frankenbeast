@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { FileInitStateStore } from './init-state-store.js';
 import type { ISecretStore } from '../network/secret-store.js';
 
@@ -40,6 +40,7 @@ export async function verifyInit(options: {
   configFile: string;
   stateStore: FileInitStateStore;
   secretStore?: ISecretStore | undefined;
+  allowTrustedProviderCommandOverrides?: boolean | undefined;
 }): Promise<InitVerificationResult> {
   const issues: InitVerificationIssue[] = [];
   const rawConfig = await tryReadJson<unknown>(options.configFile);
@@ -67,7 +68,9 @@ export async function verifyInit(options: {
     };
   }
 
-  const config = OrchestratorConfigSchema.parse(rawConfig);
+  const config = parseOrchestratorConfig(rawConfig, {
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+  });
 
   if (config.comms.slack.enabled) {
     const missing: string[] = [];

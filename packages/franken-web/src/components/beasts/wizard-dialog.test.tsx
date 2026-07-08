@@ -53,8 +53,8 @@ describe('WizardDialog validation', () => {
     expect(screen.getByRole('alert').textContent).toContain('Design doc path is required');
     expect(screen.getByRole('alert').textContent).toContain('Output directory is required');
 
-    fireEvent.change(screen.getByLabelText('Design Doc Path'), { target: { value: '/tmp/design.md' } });
-    fireEvent.change(screen.getByLabelText('Output Directory'), { target: { value: '/tmp/chunks' } });
+    fireEvent.change(screen.getByLabelText('Design Doc Path'), { target: { value: 'docs/design.md' } });
+    fireEvent.change(screen.getByLabelText('Output Directory'), { target: { value: 'tasks/chunks' } });
 
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', false);
   });

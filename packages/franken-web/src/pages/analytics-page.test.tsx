@@ -332,6 +332,41 @@ describe('AnalyticsPage', () => {
     expect(client.fetchEventDetail).toHaveBeenCalledWith('governor:1');
   });
 
+  it('announces when full event JSON is copied to the clipboard', async () => {
+    const client = mockClient();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('{\n  "decision": "denied"\n}');
+    });
+    expect(await screen.findByText('Copied JSON to clipboard.')).toBeTruthy();
+  });
+
+  it('shows a manual fallback when copying full event JSON fails', async () => {
+    const client = mockClient();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
+
+    expect(await screen.findByText('Clipboard is unavailable. Select the JSON below and copy it manually.')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Raw JSON manual copy fallback' })).toHaveProperty('value', '{\n  "decision": "denied"\n}');
+  });
+
   it('labels row data as partial and disables JSON copy until full detail loads', async () => {
     const client = mockClient();
     let resolveDetail!: (event: Awaited<ReturnType<AnalyticsApiClient['fetchEventDetail']>>) => void;

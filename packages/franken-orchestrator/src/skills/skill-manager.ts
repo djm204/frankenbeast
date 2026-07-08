@@ -67,14 +67,14 @@ export class SkillManager {
 
   async install(catalogEntry: SkillCatalogEntry): Promise<void> {
     this.validateName(catalogEntry.name);
-    const skillDir = join(this.skillsDir, catalogEntry.name);
-    mkdirSync(skillDir, { recursive: true });
-
-    const mcpConfig: McpConfig = {
+    const mcpConfig = McpConfigSchema.parse({
       mcpServers: {
         [catalogEntry.name]: catalogEntry.installConfig,
       },
-    };
+    });
+    const skillDir = join(this.skillsDir, catalogEntry.name);
+    mkdirSync(skillDir, { recursive: true });
+
     writeFileSync(
       join(skillDir, 'mcp.json'),
       JSON.stringify(mcpConfig, null, 2),
@@ -90,12 +90,12 @@ export class SkillManager {
 
   async installCustom(name: string, serverConfig: McpServerConfig): Promise<void> {
     this.validateName(name);
+    const mcpConfig = McpConfigSchema.parse({
+      mcpServers: { [name]: serverConfig },
+    });
     const skillDir = join(this.skillsDir, name);
     mkdirSync(skillDir, { recursive: true });
 
-    const mcpConfig: McpConfig = {
-      mcpServers: { [name]: serverConfig },
-    };
     writeFileSync(
       join(skillDir, 'mcp.json'),
       JSON.stringify(mcpConfig, null, 2),

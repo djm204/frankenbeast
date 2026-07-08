@@ -133,6 +133,27 @@ describe('RecursivePlanner — happy path', () => {
     );
   });
 
+  it('allows expanded sub-tasks to depend on already executed parent tasks outside the sub-graph', async () => {
+    const parent = makeTask('parent');
+    const child: Task = {
+      ...makeTask('child'),
+      dependsOn: [createTaskId('parent')],
+    };
+    const graph = PlanGraph.empty().addTask(parent);
+
+    const callOrder: string[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) return Promise.resolve(expand('parent', [child]));
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new RecursivePlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([createTaskId('parent'), createTaskId('child')]);
+  });
+
   it('handles nested expansion (depth 2)', async () => {
     const grandchild = makeTask('grandchild');
     const child = makeTask('child');

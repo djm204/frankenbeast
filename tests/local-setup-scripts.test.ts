@@ -52,8 +52,30 @@ describe('local setup scripts', () => {
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
     const compose = read('docker-compose.yml');
 
-    expect(compose).toContain('http://localhost:8000/api/v2/heartbeat');
+    expect(compose).toContain('/api/v2/heartbeat');
+    expect(compose).toContain("'bash',");
+    expect(compose).toContain('/dev/tcp/127.0.0.1/8000');
+    expect(compose).not.toContain("'curl'");
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
+  });
+
+  it('pins local compose images and mounts an explicit Tempo config', () => {
+    const compose = read('docker-compose.yml');
+    const tempoConfig = read('tempo.yaml');
+
+    expect(compose).toContain('image: chromadb/chroma:1.3.7');
+    expect(compose).toContain('- chromadb-data:/data');
+    expect(compose).toContain('image: grafana/grafana:12.3.8');
+    expect(compose).toContain('image: grafana/tempo:2.9.3');
+    expect(compose).not.toContain(':latest');
+    expect(compose).toContain('- ./tempo.yaml:/etc/tempo.yaml:ro');
+    expect(compose).toContain("command: ['-config.file=/etc/tempo.yaml']");
+
+    expect(tempoConfig).toContain('http_listen_port: 3200');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4317');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4318');
+    expect(tempoConfig).toContain('path: /tmp/tempo/wal');
+    expect(tempoConfig).toContain('path: /tmp/tempo/blocks');
   });
 
   it('requires explicit non-default Grafana admin credentials for local compose', () => {
@@ -71,6 +93,9 @@ describe('local setup scripts', () => {
 
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
+    const readme = read('README.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -108,5 +133,12 @@ describe('local setup scripts', () => {
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
     expect(envExample).toContain('Generate a unique local password before uncommenting');
+
+    for (const doc of [readme, quickstart, runCliBeastGuide]) {
+      expect(doc).toContain('ANTHROPIC_API_KEY');
+      expect(doc).toContain('OPENAI_API_KEY');
+      expect(doc).toContain('GOOGLE_API_KEY');
+      expect(doc).toContain('GEMINI_API_KEY');
+    }
   });
 });

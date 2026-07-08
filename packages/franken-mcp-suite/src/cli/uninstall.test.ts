@@ -39,17 +39,20 @@ describe('fbeast uninstall', () => {
     expect(settings.mcpServers['fbeast-planner']).toBeUndefined();
   });
 
-  it('preserves non-fbeast MCP entries', async () => {
+  it('preserves non-fbeast MCP entries in settings.json with comments and trailing commas', async () => {
     const root = tmpDir();
     dirs.push(root);
     const claudeDir = join(root, '.claude');
-
-    runInit({ root, claudeDir, hooks: false });
+    mkdirSync(claudeDir, { recursive: true });
 
     const settingsPath = join(claudeDir, 'settings.json');
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    settings.mcpServers['my-server'] = { command: 'my-cmd' };
-    writeFileSync(settingsPath, JSON.stringify(settings));
+    writeFileSync(settingsPath, `{
+      "mcpServers": {
+        "fbeast-memory": { "command": "fbeast-memory" },
+        // User-managed server must survive uninstall.
+        "my-server": { "command": "my-cmd" },
+      },
+    }`);
 
     await runUninstall({ root, claudeDir, purge: false });
 

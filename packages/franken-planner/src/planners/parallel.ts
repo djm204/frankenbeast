@@ -1,6 +1,6 @@
-import { RationaleRejectedError } from '../core/errors.js';
+import { RationaleRejectedError, RecursionDepthExceededError } from '../core/errors.js';
+import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, TaskId, TaskResult } from '../core/types.js';
-import type { PlanGraph } from '../core/dag.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
 /**
@@ -12,8 +12,20 @@ import type { PlanContext, PlanningStrategy } from './types.js';
 export class ParallelPlanner implements PlanningStrategy {
   readonly name = 'parallel' as const;
 
-  async execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
-    const tasks = graph.getTasks();
+  constructor(private readonly maxExpansionDepth = 10) {}
+
+  execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
+    return this._exec(graph, context, 0);
+  }
+
+  private async _exec(graph: PlanGraph, context: PlanContext, depth: number): Promise<PlanResult> {
+    if (depth > this.maxExpansionDepth) {
+      throw new RecursionDepthExceededError(depth);
+    }
+
+    // Validate the DAG up front so cyclic plans fail loudly instead of
+    // deadlocking the wave scheduler and returning partial success.
+    const tasks = graph.topoSort();
     const completedIds = new Set<TaskId>();
     const allResults: TaskResult[] = [];
 
@@ -78,6 +90,60 @@ export class ParallelPlanner implements PlanningStrategy {
             error: first.error,
           };
         }
+      }
+
+      const settledExpansionResults = await Promise.allSettled(
+        waveResults
+          .filter((r) => r.status === 'success' && r.expand === true)
+          .map(async (r) => {
+            const subGraph = PlanGraph.fromTasks(r.newTasks);
+            const subResult = await this._exec(subGraph, context, depth + 1);
+            return { parentTaskId: r.taskId, subResult };
+          })
+      );
+
+      const rejectedExpansionRationale = settledExpansionResults.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && result.reason instanceof RationaleRejectedError
+      );
+      if (rejectedExpansionRationale) {
+        throw rejectedExpansionRationale.reason;
+      }
+
+      const rejectedExpansion = settledExpansionResults.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
+      );
+      if (rejectedExpansion) {
+        throw rejectedExpansion.reason;
+      }
+
+      const expansionResults = settledExpansionResults.map((result) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        }
+        throw result.reason;
+      });
+
+      let firstExpansionFailure: { taskId: TaskId; error: Error } | undefined;
+      for (const { parentTaskId, subResult } of expansionResults) {
+        if (subResult.status === 'failed') {
+          allResults.push(...subResult.taskResults);
+          firstExpansionFailure ??= { taskId: parentTaskId, error: subResult.error };
+          continue;
+        }
+        if (subResult.status !== 'completed') {
+          return subResult;
+        }
+        allResults.push(...subResult.taskResults);
+      }
+
+      if (firstExpansionFailure) {
+        return {
+          status: 'failed',
+          taskResults: allResults,
+          failedTaskId: firstExpansionFailure.taskId,
+          error: firstExpansionFailure.error,
+        };
       }
 
       for (const r of waveResults) {

@@ -32,9 +32,10 @@ jobs:
 
       - name: Validate release before creating tags
         run: |
-          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts
+          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts tests/unit/web-dev-server-dependency-policy.test.ts
           npm run lint:security
-          npx turbo run build typecheck test lint
+          npx turbo run build typecheck lint
+          npx turbo run test
 
   release-please:
     needs: validate-release

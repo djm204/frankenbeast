@@ -59,12 +59,7 @@ export class BeastDaemonDispatchAdapter {
       return null;
     }
 
-    let definitions: BeastDefinitionSummary[];
-    try {
-      definitions = await this.listDefinitions();
-    } catch {
-      return null;
-    }
+    const definitions = await this.listDefinitions();
     const definition = this.matchDefinition(input, definitions);
     if (!definition) {
       return null;

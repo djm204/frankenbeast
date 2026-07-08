@@ -24,8 +24,17 @@ export function discordRouter(options: DiscordRouterOptions) {
   });
 
   app.post('/interactions', async (c) => {
-    const body = await c.req.json();
-    const interaction = DiscordInteractionSchema.parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Malformed Discord payload' }, 400);
+    }
+    const interactionPayload = DiscordInteractionSchema.safeParse(body);
+    if (!interactionPayload.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const interaction = interactionPayload.data;
 
     // 1. Handle PING for interaction endpoint verification
     if (interaction.type === DiscordInteractionType.PING) {

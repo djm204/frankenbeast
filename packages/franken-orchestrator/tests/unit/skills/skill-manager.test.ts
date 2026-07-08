@@ -87,6 +87,19 @@ describe('SkillManager', () => {
       expect(() => McpConfigSchema.parse(raw)).not.toThrow();
     });
 
+    it('rejects invalid catalog MCP configs before writing mcp.json', async () => {
+      await expect(manager.install({
+        name: 'broken-catalog',
+        description: 'Broken catalog entry',
+        provider: 'cli',
+        installConfig: { command: '' },
+        authFields: [],
+      })).rejects.toThrow();
+
+      expect(existsSync(join(skillsDir, 'broken-catalog', 'mcp.json'))).toBe(false);
+      expect(manager.listInstalled()).toEqual([]);
+    });
+
     it('writes tools.json when catalog entry includes toolDefinitions', async () => {
       await manager.install({
         name: 'github',
@@ -112,6 +125,16 @@ describe('SkillManager', () => {
       expect(manager.exists('my-tool')).toBe(true);
       const config = manager.readMcpConfig('my-tool');
       expect(config?.mcpServers['my-tool']?.command).toBe('node');
+    });
+
+    it('rejects invalid custom MCP configs before writing mcp.json', async () => {
+      await expect(manager.installCustom('broken-custom', {
+        command: 'node',
+        args: [123],
+      } as unknown as Parameters<SkillManager['installCustom']>[1])).rejects.toThrow();
+
+      expect(existsSync(join(skillsDir, 'broken-custom', 'mcp.json'))).toBe(false);
+      expect(manager.listInstalled()).toEqual([]);
     });
   });
 

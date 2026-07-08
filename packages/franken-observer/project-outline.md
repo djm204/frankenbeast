@@ -3,11 +3,13 @@
 ## 1. Overview
 MOD-05 provides the "Flight Data Recorder" for the Frankenbeast. It captures every trace, monitors token burn-rates in real-time, and runs "Agent Unit Tests" (Evals) to ensure that code refactors don't break established skills.
 
+Current status: this outline preserves the original MOD-era framing as historical design context. Current observer and audit surfaces are implemented through `@franken/observer`, `@franken/orchestrator`, and `@franken/mcp-suite`; the root `README.md` and root `package.json` workspaces are the authoritative package map.
+
 ## 2. Real-Time Tracing (The Trace-Map)
 Traditional logging is insufficient for agents. MOD-05 implements **Hierarchical Tracing**:
 - **Root Trace:** The high-level user goal.
 - **Spans:** Individual steps taken by the **Planner (MOD-04)**.
-- **Sub-Spans:** Each call to a tool in `@djm204/agent-skills` or an LLM adapter in **MOD-01**.
+- **Sub-Spans:** Calls to orchestrator skills/providers, MCP suite tools, or LLM adapters.
 - **Metadata:** Captures latency, token counts, and "Thought Blocks" for every step.
 
 
@@ -22,9 +24,9 @@ We move beyond string-matching tests. We use **"LLM-as-a-Judge"** and **Determin
 
 | Eval Type | Logic | Purpose |
 | :--- | :--- | :--- |
-| **Tool Call Accuracy** | Does the agent pass the *correct* params to the `@djm204/agent-skills` package? | Prevent "Ghost Param" hallucinations. |
+| **Tool Call Accuracy** | Does the agent pass the *correct* params to the current orchestrator or MCP tool surface? | Prevent "Ghost Param" hallucinations. |
 | **Architectural Adherence**| Does the output follow the **ADR** rules stored in **MOD-03**? | Ensure TS/React standards are met. |
-| **Regression Testing** | Rerunning a successful "Golden Trace" from the past against a new model version. | Ensure "GPT-5" doesn't lose skills GPT-4 had. |
+| **Regression Testing** | Rerunning a successful "Golden Trace" from the past against a new model version. | Ensure new model versions do not lose established behavior. |
 
 ## 5. Implementation Strategy: Open-Source First
 To keep the system modular and AI-agnostic, MOD-05 is designed to export data in **OpenTelemetry (OTEL)** format. This allows you to plug into:

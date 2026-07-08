@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { DEFAULT_AUDIT_SESSION_ID } from '../shared/central-enforcement.js';
 
 const PACKAGE_ROOT = process.cwd();
+const WORKSPACE_ROOT = join(PACKAGE_ROOT, '..', '..');
 const DIST_ROOT = join(PACKAGE_ROOT, 'dist');
 
 const SERVER_BINS = [
@@ -25,8 +26,8 @@ beforeAll(() => {
   if (process.env['CI'] === 'true' && existsSync(join(DIST_ROOT, 'beast.js'))) {
     return;
   }
-  execFileSync('npm', ['run', 'build'], {
-    cwd: PACKAGE_ROOT,
+  execFileSync('npx', ['turbo', 'run', 'build', '--filter=@franken/mcp-suite...'], {
+    cwd: WORKSPACE_ROOT,
     stdio: 'pipe',
   });
 }, 60_000);

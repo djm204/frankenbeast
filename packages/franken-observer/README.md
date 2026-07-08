@@ -536,7 +536,7 @@ const markdown = generator.generateContent(trace, signal)
 
 // Write to disk — returns the file path
 const filePath = await generator.generate(trace, signal)
-// → './post-mortems/post-mortem-<traceId>-<timestamp>.md'
+// → './post-mortems/post-mortem-<sha256-trace-id>-<timestamp>.md'
 ```
 
 **Full incident pipeline:**

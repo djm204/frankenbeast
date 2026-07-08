@@ -7,7 +7,10 @@ import { createBeastServices } from '../../../src/beasts/create-beast-services.j
 import { createBeastDaemonApp } from '../../../src/http/beast-daemon-app.js';
 import { startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
 
-const operatorToken = 'daemon-operator-token';
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DAEMON_OPERATOR_TOKEN = testCredential('TEST_DAEMON_OPERATOR_TOKEN');
+const operatorToken = TEST_DAEMON_OPERATOR_TOKEN;
 
 describe('beast daemon', () => {
   const tempDirs: string[] = [];
@@ -123,6 +126,38 @@ describe('beast daemon', () => {
         dispatchedByUser: 'chat-session:chat-1',
         trackedAgentId: agentBody.data.id,
       });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('authenticates daemon beast payloads before applying bounded body limits', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const app = createBeastDaemonApp({ services, operatorToken });
+    const oversizedRun = JSON.stringify({
+      definitionId: 'martin-loop',
+      config: { provider: 'codex', objective: 'x'.repeat(2 * 1024 * 1024), chunkDirectory: 'chunks' },
+      startNow: false,
+    });
+
+    try {
+      const unauthenticated = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: oversizedRun,
+      });
+      expect(unauthenticated.status).toBe(401);
+
+      const authorized = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: oversizedRun,
+      });
+      expect(authorized.status).toBe(413);
     } finally {
       services.dispose();
     }
