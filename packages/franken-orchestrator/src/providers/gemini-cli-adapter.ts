@@ -64,9 +64,9 @@ export class GeminiCliAdapter implements ILlmProvider {
     try {
       this.removeManagedGeminiMd();
       this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
-      const args = this.buildArgs(request, workspaceDir);
+      const args = this.buildArgs(request, contextWorkingDir);
       const proc = spawn(this.binaryPath, args, {
-        cwd: contextWorkingDir,
+        cwd: workspaceDir,
         env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -262,24 +262,30 @@ export class GeminiCliAdapter implements ILlmProvider {
       const type = parsed['type'] as string;
 
       if (type === 'message') {
+        if (!this.isAssistantGeminiMessage(parsed)) continue;
         for (const text of this.extractGeminiText(parsed)) {
           yield { type: 'text', content: text };
         }
       } else if (type === 'tool_use') {
         yield {
           type: 'tool_use',
-          id: (parsed['id'] as string) ?? crypto.randomUUID(),
-          name: (parsed['name'] as string) ?? '',
-          input: parsed['input'] ?? parsed['args'] ?? {},
+          id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
+          name: (parsed['tool_name'] as string) ?? (parsed['name'] as string) ?? '',
+          input: parsed['parameters'] ?? parsed['input'] ?? parsed['args'] ?? {},
         };
       } else if (type === 'tool_result') {
         yield {
           type: 'tool_result',
-          toolUseId: (parsed['toolUseId'] as string) ?? (parsed['tool_use_id'] as string) ?? (parsed['id'] as string) ?? '',
+          toolUseId: (parsed['tool_id'] as string) ?? (parsed['toolUseId'] as string) ?? (parsed['tool_use_id'] as string) ?? (parsed['id'] as string) ?? '',
           content: this.stringifyGeminiContent(parsed['content'] ?? parsed['result'] ?? ''),
           isError: Boolean(parsed['isError'] ?? parsed['is_error']),
         };
       } else if (type === 'result') {
+        if (parsed['status'] === 'error' || parsed['error']) {
+          const message = this.stringifyGeminiContent(parsed['error'] ?? parsed['message'] ?? 'Gemini CLI returned error status');
+          yield { type: 'error', error: message, retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED') };
+          return;
+        }
         const usage = this.extractGeminiUsage(parsed);
         totalInputTokens = usage.inputTokens ?? totalInputTokens;
         totalOutputTokens = usage.outputTokens ?? totalOutputTokens;
@@ -366,6 +372,12 @@ export class GeminiCliAdapter implements ILlmProvider {
     return this.extractTextParts(message['content'] ?? message['text']);
   }
 
+  private isAssistantGeminiMessage(event: Record<string, unknown>): boolean {
+    const message = this.asObject(event['message']) ?? event;
+    const role = message['role'] ?? event['role'];
+    return role === undefined || role === 'assistant' || role === 'model';
+  }
+
   private extractTextParts(value: unknown): string[] {
     if (typeof value === 'string') return value ? [value] : [];
     if (Array.isArray(value)) return value.flatMap((part) => this.extractTextParts(part));
@@ -378,7 +390,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private extractGeminiUsage(event: Record<string, unknown>): Partial<{ inputTokens: number; outputTokens: number; totalTokens: number }> {
-    const usage = this.asObject(event['usage']) ?? this.asObject(event['usageMetadata']) ?? this.asObject(event['usage_metadata']) ?? event;
+    const usage = this.asObject(event['usage']) ?? this.asObject(event['usageMetadata']) ?? this.asObject(event['usage_metadata']) ?? this.asObject(event['stats']) ?? event;
     const inputTokens = this.numberValue(usage['inputTokens'], usage['input_tokens'], usage['promptTokenCount'], usage['prompt_token_count']);
     const outputTokens = this.numberValue(usage['outputTokens'], usage['output_tokens'], usage['candidatesTokenCount'], usage['candidates_token_count']);
     const totalTokens = this.numberValue(usage['totalTokens'], usage['total_tokens'], usage['totalTokenCount'], usage['total_token_count']);

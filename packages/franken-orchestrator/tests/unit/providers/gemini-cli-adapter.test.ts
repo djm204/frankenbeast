@@ -94,15 +94,28 @@ describe('GeminiCliAdapter', () => {
     it('parses Gemini stream-json message and result events', async () => {
       mockSpawn([
         JSON.stringify({ type: 'init' }),
-        JSON.stringify({ type: 'message', content: { parts: [{ text: 'Gemini ' }, { text: 'native' }] } }),
-        JSON.stringify({ type: 'result', usage_metadata: { promptTokenCount: 12, candidatesTokenCount: 5 } }),
+        JSON.stringify({ type: 'message', role: 'user', content: { parts: [{ text: 'Hi' }] } }),
+        JSON.stringify({ type: 'message', role: 'assistant', content: { parts: [{ text: 'Gemini ' }, { text: 'native' }] } }),
+        JSON.stringify({ type: 'tool_use', tool_id: 'tool-1', tool_name: 'read_file', parameters: { path: 'README.md' } }),
+        JSON.stringify({ type: 'tool_result', tool_id: 'tool-1', result: 'ok' }),
+        JSON.stringify({ type: 'result', stats: { input_tokens: 12, output_tokens: 5, total_tokens: 17 } }),
       ]);
 
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
       expect(events[0]).toEqual({ type: 'text', content: 'Gemini ' });
       expect(events[1]).toEqual({ type: 'text', content: 'native' });
-      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } });
+      expect(events[2]).toEqual({ type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'README.md' } });
+      expect(events[3]).toEqual({ type: 'tool_result', toolUseId: 'tool-1', content: 'ok', isError: false });
+      expect(events[4]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } });
+    });
+
+    it('emits error on Gemini error result frames', async () => {
+      mockSpawn([JSON.stringify({ type: 'result', status: 'error', error: 'RESOURCE_EXHAUSTED' })]);
+
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED', retryable: true });
     });
 
     it('runs from an isolated context cwd while including the configured workspace', async () => {
@@ -113,14 +126,15 @@ describe('GeminiCliAdapter', () => {
       const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
       const spawnArgs = spawnCall[1] as string[];
       const spawnOptions = spawnCall[2] as { cwd: string; env: Record<string, string> };
-      expect(spawnOptions.cwd).toContain('franken-gemini-context-');
-      expect(spawnOptions.cwd).not.toContain(tempDir);
+      expect(spawnOptions.cwd).toBe(tempDir);
       expect(spawnArgs).toContain('--include-directories');
-      expect(spawnArgs[spawnArgs.indexOf('--include-directories') + 1]).toBe(tempDir);
+      const includeDir = spawnArgs[spawnArgs.indexOf('--include-directories') + 1];
+      expect(includeDir).toContain('franken-gemini-context-');
+      expect(includeDir).not.toContain(tempDir);
       expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
-      expect(existsSync(spawnOptions.cwd)).toBe(false);
+      expect(existsSync(includeDir)).toBe(false);
     });
 
     it('removes a stale managed GEMINI.md block before launching', async () => {
