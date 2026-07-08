@@ -322,7 +322,7 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM API key** — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ## Quick Start
@@ -474,6 +474,26 @@ frankenbeast issues --label bug --repo owner/repo
 --allow-origin <url>    CORS origin for dashboard
 ```
 
+### Runtime config and environment overrides
+
+`frankenbeast run` loads orchestrator config from defaults, an optional JSON config file (`--config <path>` or the project-local `.fbeast/config.json`), `FRANKEN_*` environment variables, and CLI flags. When the same field is set in more than one place, precedence is: CLI flags > `FRANKEN_*` env vars > config file > built-in defaults.
+
+| Environment variable | Config field | Type and accepted values | Default / validation |
+|----------------------|--------------|--------------------------|----------------------|
+| `FRANKEN_MAX_TOTAL_TOKENS` | `maxTotalTokens` | integer token budget | default `100000`; must be at least `10000` |
+| `FRANKEN_MAX_DURATION_MS` | `maxDurationMs` | integer milliseconds | default `300000`; must be at least `1000` and at least `maxCritiqueIterations * 10000` |
+| `FRANKEN_MAX_CRITIQUE_ITERATIONS` | `maxCritiqueIterations` | integer critique passes | default `3`; valid range `1` through `10` |
+| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; only `true` enables it | default `false`; `--verbose` also enables tracing and wins over env/config |
+| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
+
+Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+
+### Operator environment variables
+
+Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
+
 ### Project Layout
 
 Running `frankenbeast` in any project creates:
@@ -598,6 +618,8 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 |----------|--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | MOD-01 | Runtime only | Claude adapter API key |
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
+| `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
+| `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `CHROMA_HOST` | MOD-03 | If using semantic memory | ChromaDB server host (default: `localhost`) |
 | `CHROMA_PORT` | MOD-03 | If using semantic memory | ChromaDB server port (default: `8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |

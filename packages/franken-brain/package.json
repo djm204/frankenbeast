@@ -1,6 +1,6 @@
 {
   "name": "@franken/brain",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "MOD-03: Memory Systems for the Frankenbeast AI agent",
   "type": "module",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.8.0",
+    "@franken/types": "0.8.1",
     "better-sqlite3": "^12.6.2"
   },
   "engines": {

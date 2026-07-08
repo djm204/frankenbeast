@@ -93,6 +93,9 @@ describe('local setup scripts', () => {
 
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
+    const readme = read('README.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -130,5 +133,26 @@ describe('local setup scripts', () => {
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
     expect(envExample).toContain('Generate a unique local password before uncommenting');
+
+    for (const doc of [readme, quickstart, runCliBeastGuide]) {
+      expect(doc).toContain('ANTHROPIC_API_KEY');
+      expect(doc).toContain('OPENAI_API_KEY');
+      expect(doc).toContain('GOOGLE_API_KEY');
+      expect(doc).toContain('GEMINI_API_KEY');
+    }
+
+    expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(readme).toContain(frankenOverride);
+    }
   });
 });

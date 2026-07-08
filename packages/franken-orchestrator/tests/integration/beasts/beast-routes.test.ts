@@ -19,6 +19,9 @@ import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-po
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-routes');
 
@@ -101,7 +104,7 @@ function createBeastApp(options?: { rateLimitMax?: number; failStart?: boolean; 
   const interviews = new BeastInterviewService(repository, catalog);
   const agents = new AgentService(repository, () => '2026-03-10T00:00:00.000Z');
   const security = new TransportSecurityService();
-  const operatorToken = 'super-secret-operator-token';
+  const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
 
   const app = createChatApp({
     sessionStoreDir: join(TMP, 'chat'),

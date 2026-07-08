@@ -108,6 +108,7 @@ describe('createLlmProvider', () => {
       '-p',
       '--output-format',
       'stream-json',
+      '--verbose',
       '--append-system-prompt',
       'test',
       '--model',

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.44.0](https://github.com/djm204/frankenbeast/compare/v0.43.1...v0.44.0) (2026-07-08)
+
+
+### Features
+
+* **credentials:** externalize test credential placeholders ([#909](https://github.com/djm204/frankenbeast/issues/909)) ([b50ae79](https://github.com/djm204/frankenbeast/commit/b50ae797be6cbb77ea092c1ab3c8e30ed5274555)), closes [#518](https://github.com/djm204/frankenbeast/issues/518)
+
+
+### Miscellaneous
+
+* **repo:** track code comment debt markers ([#1278](https://github.com/djm204/frankenbeast/issues/1278)) ([158e522](https://github.com/djm204/frankenbeast/commit/158e522e41199286af5ff7e9d17490aa6615f534)), closes [#1077](https://github.com/djm204/frankenbeast/issues/1077)
+
+
+### Documentation
+
+* **cli:** document plain banner env toggle ([739438f](https://github.com/djm204/frankenbeast/commit/739438fb103988a06f2756cd88bf6827c7497ff9)), closes [#1264](https://github.com/djm204/frankenbeast/issues/1264)
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+* document Gemini API env keys ([1e41b8e](https://github.com/djm204/frankenbeast/commit/1e41b8edfbf37319c1f718cfe34bebf40def99f3))
+
 ## [0.43.1](https://github.com/djm204/frankenbeast/compare/v0.43.0...v0.43.1) (2026-07-08)
 
 

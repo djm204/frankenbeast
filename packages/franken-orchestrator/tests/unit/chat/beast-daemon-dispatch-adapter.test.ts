@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BeastDaemonDispatchAdapter } from '../../../src/chat/beast-daemon-dispatch-adapter.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DAEMON_TOKEN = testCredential('TEST_DAEMON_TOKEN');
 const definitions = [
   { id: 'martin-loop', label: 'Martin Loop' },
 ];
@@ -59,7 +62,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     const interview = await adapter.handle('spawn a martin beast', {
@@ -87,7 +90,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     });
     for (const call of fetchMock.mock.calls) {
       const headers = new Headers(call[1]?.headers);
-      expect(headers.get('authorization')).toBe('Bearer daemon-token');
+      expect(headers.get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
     }
   });
 
@@ -96,7 +99,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     await expect(adapter.handle('hello there', {
@@ -105,5 +108,39 @@ describe('BeastDaemonDispatchAdapter', () => {
       transcript: [],
     })).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates daemon catalog failures for launch requests', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: 'unauthorized' }, { status: 401, statusText: 'Unauthorized' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+
+    await expect(adapter.handle('spawn a martin beast', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+    })).rejects.toThrow('Beast daemon request failed: 401 Unauthorized');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null for launch requests only after a reachable daemon has no matching definition', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: [{ id: 'chunk-plan', label: 'Chunk Plan' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+
+    await expect(adapter.handle('spawn a martin beast', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+    })).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -93,6 +93,35 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('detects ghost dependencies in named re-exports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `export { pluginFactory } from 'ghost-package';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('detects ghost dependencies in namespace re-exports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `export * from 'unknown-lib';`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('unknown-lib');
+  });
+
+  it('continues to explicitly skip dynamic import expressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const plugin = await import('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('ignores object-literal import keys', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const cfg = { import: { from: 'ghost-package' } };`;

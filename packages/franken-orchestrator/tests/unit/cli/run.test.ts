@@ -4,6 +4,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
+const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
+const TEST_DISCORD_BOT_TOKEN = testCredential('TEST_DISCORD_BOT_TOKEN');
+const TEST_ROOT_ENV_TOKEN = testCredential('TEST_ROOT_ENV_TOKEN');
+const TEST_DASHBOARD_FILE_TOKEN = testCredential('TEST_DASHBOARD_FILE_TOKEN');
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
 const {
@@ -781,7 +788,7 @@ describe('main() execution', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.VITE_BEAST_OPERATOR_TOKEN = 'dashboard-operator-token';
+    process.env.VITE_BEAST_OPERATOR_TOKEN = TEST_DASHBOARD_OPERATOR_TOKEN;
     mockParseArgs.mockReturnValue({
       subcommand: undefined,
       networkAction: undefined,
@@ -1248,9 +1255,9 @@ describe('main() execution', () => {
       allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
       sessionStoreDir: '/mock/project/.fbeast/chat',
       projectName: 'project',
-      operatorToken: 'dashboard-operator-token',
+      operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
@@ -1266,7 +1273,7 @@ describe('main() execution', () => {
 
   it('passes literal uppercase Discord public keys into managed comms config', async () => {
     const publicKey = 'A'.repeat(64);
-    process.env.DISCORD_BOT_TOKEN = 'discord-token';
+    process.env.DISCORD_BOT_TOKEN = TEST_DISCORD_TOKEN;
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,
       maxDurationMs: 600_000,
@@ -1327,7 +1334,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       commsConfig: expect.objectContaining({
         channels: expect.objectContaining({
-          discord: expect.objectContaining({ token: 'discord-token', publicKey }),
+          discord: expect.objectContaining({ token: TEST_DISCORD_TOKEN, publicKey }),
         }),
       }),
     }));
@@ -1340,11 +1347,11 @@ describe('main() execution', () => {
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
     writeFileSync(
       join(root, '.env'),
-      'FRANKENBEAST_BEAST_OPERATOR_TOKEN=root-env-token\n',
+      `FRANKENBEAST_BEAST_OPERATOR_TOKEN=${TEST_ROOT_ENV_TOKEN}\n`,
     );
     writeFileSync(
       join(root, 'packages', 'franken-web', '.env.local'),
-      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+      `VITE_BEAST_OPERATOR_TOKEN=${TEST_DASHBOARD_FILE_TOKEN}\n`,
     );
 
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
@@ -1385,9 +1392,9 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      operatorToken: 'root-env-token',
+      operatorToken: TEST_ROOT_ENV_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'root-env-token',
+        operatorToken: TEST_ROOT_ENV_TOKEN,
       }),
     }));
   });
@@ -1402,7 +1409,7 @@ describe('main() execution', () => {
     );
     writeFileSync(
       join(root, 'packages', 'franken-web', '.env.local'),
-      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+      `VITE_BEAST_OPERATOR_TOKEN=${TEST_DASHBOARD_FILE_TOKEN}\n`,
     );
 
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
@@ -1443,9 +1450,9 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      operatorToken: 'dashboard-file-token',
+      operatorToken: TEST_DASHBOARD_FILE_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-file-token',
+        operatorToken: TEST_DASHBOARD_FILE_TOKEN,
       }),
     }));
   });
@@ -1454,7 +1461,7 @@ describe('main() execution', () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-discord-public-key`);
     tempDirs.push(root);
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
-    process.env.DISCORD_BOT_TOKEN = 'discord-bot-token';
+    process.env.DISCORD_BOT_TOKEN = TEST_DISCORD_BOT_TOKEN;
     delete process.env.DISCORD_PUBLIC_KEY;
 
     vi.mocked(loadConfig).mockImplementationOnce(async () => ({
@@ -1555,7 +1562,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastDaemon: expect.objectContaining({
         baseUrl: 'http://127.0.0.1:4999',
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1617,7 +1624,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastDaemon: expect.objectContaining({
         baseUrl: 'http://127.0.0.1:4050',
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1676,7 +1683,7 @@ describe('main() execution', () => {
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1734,7 +1741,7 @@ describe('main() execution', () => {
 
     expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ root }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      beastControl: expect.objectContaining({ operatorToken: 'dashboard-operator-token' }),
+      beastControl: expect.objectContaining({ operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
       beastDaemon: expect.anything(),
@@ -1820,7 +1827,7 @@ describe('main() execution', () => {
       beastLogsDir: '/mock/project/.fbeast/.build/beasts/logs',
       host: '127.0.0.1',
       port: 4050,
-      operatorToken: 'dashboard-operator-token',
+      operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
     }));
     expect(MockSession).not.toHaveBeenCalled();
   });

@@ -28,6 +28,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -345,6 +346,9 @@ export class GeminiCliAdapter implements ILlmProvider {
     const rl = createInterface({ input: proc.stdout! });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let emittedText = false;
+    let emittedToolUse = false;
+    let sawTerminalFrame = false;
 
     for await (const line of rl) {
       if (!line.trim()) continue;
@@ -357,40 +361,60 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       const type = parsed['type'] as string;
 
-      if (type === 'message') {
-        if (!this.isAssistantGeminiMessage(parsed)) continue;
-        for (const text of this.extractGeminiText(parsed)) {
-          yield { type: 'text', content: text };
-        }
-      } else if (type === 'tool_use') {
-        yield {
-          type: 'tool_use',
-          id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
-          name: (parsed['tool_name'] as string) ?? (parsed['name'] as string) ?? '',
-          input: parsed['parameters'] ?? parsed['input'] ?? parsed['args'] ?? {},
-        };
-      } else if (type === 'tool_result') {
-        yield {
-          type: 'tool_result',
-          toolUseId: (parsed['tool_id'] as string) ?? (parsed['toolUseId'] as string) ?? (parsed['tool_use_id'] as string) ?? (parsed['id'] as string) ?? '',
-          content: this.stringifyGeminiContent(parsed['content'] ?? parsed['result'] ?? parsed['output'] ?? ''),
-          isError: Boolean(parsed['isError'] ?? parsed['is_error'] ?? parsed['status'] === 'error'),
-        };
-      } else if (type === 'result') {
-        if (parsed['status'] === 'error' || parsed['error']) {
-          const message = this.stringifyGeminiContent(parsed['error'] ?? parsed['message'] ?? 'Gemini CLI returned error status');
-          yield { type: 'error', error: message, retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED') };
+      if (type === 'result') {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed['result'] ?? parsed, parts);
+        const text = parts.join('');
+        const error = parsed['error'] as Record<string, unknown> | string | undefined;
+        const errorText = typeof error === 'string' ? error : ((error?.['message'] as string | undefined) ?? '');
+        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error' || parsed['status'] === 'error';
+        if (isErrorResult) {
+          const message = text || errorText || 'gemini returned an error result frame';
+          yield {
+            type: 'error',
+            error: message,
+            retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
+          };
           return;
         }
-        const usage = this.extractGeminiUsage(parsed);
-        totalInputTokens = usage.inputTokens ?? totalInputTokens;
-        totalOutputTokens = usage.outputTokens ?? totalOutputTokens;
+        if (text.length > 0 && !emittedText) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
+        const usage = (parsed['usage'] ?? parsed['stats']) as Record<string, number> | undefined;
+        if (usage) {
+          totalInputTokens =
+            usage['input_tokens'] ??
+            usage['inputTokens'] ??
+            usage['prompt_tokens'] ??
+            usage['promptTokenCount'] ??
+            usage['totalInputTokens'] ??
+            totalInputTokens;
+          totalOutputTokens =
+            usage['output_tokens'] ??
+            usage['outputTokens'] ??
+            usage['completion_tokens'] ??
+            usage['candidatesTokenCount'] ??
+            usage['totalOutputTokens'] ??
+            totalOutputTokens;
+        }
+        if (!emittedText && !emittedToolUse) {
+          yield {
+            type: 'error',
+            error: 'gemini result frame contained no text output',
+            retryable: false,
+          };
+          return;
+        }
+        sawTerminalFrame = true;
+
         yield {
           type: 'done',
           usage: {
             inputTokens: totalInputTokens,
             outputTokens: totalOutputTokens,
-            totalTokens: usage.totalTokens ?? totalInputTokens + totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+
           },
         };
         return;
@@ -398,6 +422,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         const delta = parsed['delta'] as Record<string, unknown>;
         if (delta?.['type'] === 'text_delta') {
           yield { type: 'text', content: delta['text'] as string };
+          emittedText = true;
         }
       } else if (type === 'content_block_start') {
         const block = parsed['content_block'] as Record<string, unknown>;
@@ -408,7 +433,16 @@ export class GeminiCliAdapter implements ILlmProvider {
             name: block['name'] as string,
             input: block['input'] ?? {},
           };
+          emittedToolUse = true;
         }
+      } else if (type === 'tool_use') {
+        yield {
+          type: 'tool_use',
+          id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
+          name: (parsed['tool_name'] as string) ?? (parsed['name'] as string),
+          input: parsed['parameters'] ?? parsed['input'] ?? {},
+        };
+        emittedToolUse = true;
       } else if (type === 'message_delta') {
         const usage = parsed['usage'] as Record<string, number> | undefined;
         if (usage) {
@@ -420,7 +454,45 @@ export class GeminiCliAdapter implements ILlmProvider {
         if (usage) {
           totalInputTokens = usage['input_tokens'] ?? 0;
         }
+      } else if (type === 'message') {
+        const message = parsed['message'] as Record<string, unknown> | undefined;
+        const role = (message?.['role'] ?? parsed['role']) as string | undefined;
+        if (role === 'assistant') {
+          const content = message?.['content'] ?? parsed['content'] ?? parsed['parts'];
+          if (Array.isArray(content)) {
+            const parts = content
+              .map((part) => (part && typeof part === 'object' ? (part as Record<string, unknown>)['text'] : part))
+              .filter((part): part is string => typeof part === 'string');
+            const text = parts.join('');
+            if (text.length > 0) {
+              yield { type: 'text', content: text };
+              emittedText = true;
+            }
+          } else if (typeof content === 'string') {
+            if (content.length > 0) {
+              yield { type: 'text', content };
+              emittedText = true;
+            }
+          } else {
+            const parts: string[] = [];
+            tryExtractTextFromNode(parsed, parts);
+            const text = parts.join('');
+            if (text.length > 0) {
+              yield { type: 'text', content: text };
+              emittedText = true;
+            }
+          }
+        }
       } else if (type === 'message_stop') {
+        sawTerminalFrame = true;
+        if (!emittedText && !emittedToolUse) {
+          yield {
+            type: 'error',
+            error: 'gemini stream completed without parseable text',
+            retryable: true,
+          };
+          return;
+        }
         yield {
           type: 'done',
           usage: {
@@ -438,6 +510,16 @@ export class GeminiCliAdapter implements ILlmProvider {
           retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
         };
         return;
+      } else if (type === 'tool_result') {
+        continue;
+      } else if (!emittedText) {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed, parts);
+        const text = parts.join('').trim();
+        if (text.length > 0) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
       }
     }
 
@@ -451,7 +533,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         error: `gemini process exited with code ${exitCode}`,
         retryable: false,
       };
-    } else {
+    } else if (sawTerminalFrame && (emittedText || emittedToolUse)) {
       yield {
         type: 'done',
         usage: {
@@ -459,6 +541,12 @@ export class GeminiCliAdapter implements ILlmProvider {
           outputTokens: totalOutputTokens,
           totalTokens: totalInputTokens + totalOutputTokens,
         },
+      };
+    } else {
+      yield {
+        type: 'error',
+        error: 'gemini process exited without producing a result frame or text output',
+        retryable: false,
       };
     }
   }

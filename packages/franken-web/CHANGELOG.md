@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.3](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.2...franken-web-v0.2.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **web:** hide placeholder dashboard routes ([#1272](https://github.com/djm204/frankenbeast/issues/1272)) ([4af005d](https://github.com/djm204/frankenbeast/commit/4af005d584a9468e77fade5921eee65c3c926269))
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
 ## [0.2.2](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.1...franken-web-v0.2.2) (2026-07-07)
 
 

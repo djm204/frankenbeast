@@ -11,9 +11,14 @@ import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-por
 import type { SkillManager } from '../../../src/skills/skill-manager.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_CONTROL_PLANE_OPERATOR_TOKEN');
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/control-plane-auth');
-const OPERATOR_TOKEN = 'test-operator-token';
+const OPERATOR_TOKEN = TEST_OPERATOR_TOKEN;
+const INVALID_OPERATOR_TOKEN = `${OPERATOR_TOKEN}-invalid`;
 
 function minimalCommsConfig(): CommsConfig {
   return { orchestrator: {}, channels: {} } as CommsConfig;
@@ -189,7 +194,7 @@ describe('control-plane operator auth', () => {
     it('rejects an invalid operator token', async () => {
       const app = buildApp();
       const res = await app.request('/v1/network/status', {
-        headers: { Authorization: 'Bearer wrong-token' },
+        headers: { Authorization: `Bearer ${INVALID_OPERATOR_TOKEN}` },
       });
       expect(res.status).toBe(401);
     });
@@ -329,7 +334,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+            slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),
@@ -367,7 +372,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+            slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),

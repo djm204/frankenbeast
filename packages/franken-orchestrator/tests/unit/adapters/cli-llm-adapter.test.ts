@@ -474,6 +474,51 @@ describe('CliLlmAdapter', () => {
         }
       });
 
+      it('warns when the timeout hard-kill fallback fails', async () => {
+        vi.useFakeTimers();
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+        try {
+          const killError = new Error('operation not permitted');
+          const spawnFn = (): ChildProcess => {
+            const proc = new EventEmitter() as ChildProcess;
+            Object.defineProperty(proc, 'stdin', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stdout', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stderr', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'pid', { value: 24680, writable: false });
+            Object.defineProperty(proc, 'kill', {
+              value: vi.fn((signal?: NodeJS.Signals | number) => {
+                if (signal === 'SIGKILL') throw killError;
+                return true;
+              }),
+              writable: false,
+            });
+            return proc;
+          };
+          const adapter = new CliLlmAdapter(
+            claudeProvider,
+            { ...baseOpts, timeoutMs: 50 },
+            spawnFn,
+          );
+
+          const result = adapter.execute({ prompt: 'test', maxTurns: 1 });
+          const assertion = expect(result).rejects.toThrow('CLI timeout after 50ms');
+
+          await vi.advanceTimersByTimeAsync(50);
+          await assertion;
+          await vi.advanceTimersByTimeAsync(5_000);
+
+          expect(warnSpy).toHaveBeenCalledWith('[CliLlmAdapter] Failed to hard-kill timed-out CLI process', {
+            signal: 'SIGKILL',
+            pid: 24680,
+            error: 'operation not permitted',
+          });
+        } finally {
+          warnSpy.mockRestore();
+          vi.useRealTimers();
+        }
+      });
+
       it('sets cwd to opts.workingDir', async () => {
         const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
         const adapter = new CliLlmAdapter(

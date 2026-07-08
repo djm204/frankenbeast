@@ -7,7 +7,10 @@ import { createBeastServices } from '../../../src/beasts/create-beast-services.j
 import { createBeastDaemonApp } from '../../../src/http/beast-daemon-app.js';
 import { startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
 
-const operatorToken = 'daemon-operator-token';
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DAEMON_OPERATOR_TOKEN = testCredential('TEST_DAEMON_OPERATOR_TOKEN');
+const operatorToken = TEST_DAEMON_OPERATOR_TOKEN;
 
 describe('beast daemon', () => {
   const tempDirs: string[] = [];

@@ -451,8 +451,12 @@ describe('ChatShell', () => {
     expect(nav?.textContent).toContain('Overview');
     expect(nav?.textContent).toContain('Chat');
     expect(nav?.textContent).toContain('Beasts');
-    expect(nav?.textContent).toContain('Sessions');
+    expect(nav?.textContent).toContain('Network');
     expect(nav?.textContent).toContain('Analytics');
+    expect(nav?.textContent).not.toContain('Sessions');
+    expect(nav?.textContent).not.toContain('Costs');
+    expect(nav?.textContent).not.toContain('Safety');
+    expect(nav?.textContent).not.toContain('Settings');
   });
 
   it('mounts the dashboard overview as a first-class navigation route', async () => {
