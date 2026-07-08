@@ -55,6 +55,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -108,6 +122,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -153,6 +181,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -205,6 +247,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -250,6 +306,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -303,6 +373,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 

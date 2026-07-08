@@ -4,33 +4,12 @@ import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
-import { existsSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
-  if (explicitRoot) {
-    return resolve(explicitRoot);
-  }
-
-  if (!isAbsolute(dbPath)) {
-    let candidateRoot = process.cwd();
-    while (true) {
-      if (existsSync(resolve(candidateRoot, dbPath))) {
-        return candidateRoot;
-      }
-      const parent = dirname(candidateRoot);
-      if (parent === candidateRoot) break;
-      candidateRoot = parent;
-    }
-  }
-
-  const dbDir = dirname(resolve(dbPath));
-  if (basename(dbDir) === '.fbeast') {
-    return dirname(dbDir);
-  }
-
-  return undefined;
+  return deriveProjectRootFromDbPath(dbPath, explicitRoot);
 }
 
 export interface ProxyServerDeps {
@@ -45,9 +24,7 @@ export interface ProxyServerDeps {
 
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const root = deriveProxyRoot(deps.dbPath, deps.root);
-  const dbPath = !isAbsolute(deps.dbPath) && root && basename(dirname(deps.dbPath)) === '.fbeast'
-    ? resolve(root, deps.dbPath)
-    : deps.dbPath;
+  const dbPath = resolveProjectDbPath(deps.dbPath, root);
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding

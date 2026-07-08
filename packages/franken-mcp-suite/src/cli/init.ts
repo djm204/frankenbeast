@@ -123,12 +123,6 @@ function initJsonClient(options: {
       config.hooks = true;
       config.save();
     }
-  } else if (settings['hooks'] !== undefined) {
-    // A global settings.json can already contain fbeast hook commands generated
-    // by an older project. When this init is not explicitly enabling hooks for
-    // the current project, remove only fbeast-owned hook entries so stale hooks
-    // do not keep governing/logging tool calls against the first project's DB.
-    settings['hooks'] = stripFbeastHooks(settings['hooks']);
   }
 
   writeJsonFileAtomic(settingsPath, settings);
@@ -443,35 +437,6 @@ function isFbeastHook(value: unknown): boolean {
   return inner.some(
     (h) => isObjectRecord(h) && typeof h['command'] === 'string' && h['command'].includes('fbeast'),
   );
-}
-
-function stripFbeastHooks(existing: unknown): Record<string, unknown[]> | unknown {
-  if (!isObjectRecord(existing)) return existing;
-  const hooks: Record<string, unknown[]> = {};
-  for (const [hookType, value] of Object.entries(existing)) {
-    if (Array.isArray(value)) {
-      hooks[hookType] = value
-        .map(pruneFbeastFromHookEntry)
-        .filter((entry): entry is unknown => entry !== null);
-    }
-  }
-  return hooks;
-}
-
-function pruneFbeastFromHookEntry(entry: unknown): unknown | null {
-  if (!isObjectRecord(entry)) return entry;
-  if (typeof entry['command'] === 'string') return entry['command'].includes('fbeast') ? null : entry;
-  if (typeof entry['description'] === 'string' && entry['description'].includes('fbeast')) return null;
-
-  const inner = entry['hooks'];
-  if (!Array.isArray(inner)) return entry;
-
-  const remaining = inner.filter((hook) => {
-    if (!isObjectRecord(hook)) return true;
-    return !(typeof hook['command'] === 'string' && hook['command'].includes('fbeast'));
-  });
-  if (remaining.length === 0) return null;
-  return { ...entry, hooks: remaining };
 }
 
 function shellQuote(value: string): string {

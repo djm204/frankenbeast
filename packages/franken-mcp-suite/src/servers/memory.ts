@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createBrainAdapter, type BrainAdapter } from '../adapters/brain-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface MemoryServerDeps {
   brain: BrainAdapter;
@@ -19,8 +20,9 @@ if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const brain = createBrainAdapter(values['db']!);
-  const server = createMemoryServer({ brain }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const brain = createBrainAdapter(dbPath);
+  const server = createMemoryServer({ brain }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-memory failed to start:', err);
     process.exit(1);
