@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { Socket } from 'node:net';
-import { dirname, delimiter, join } from 'node:path';
+import { dirname, delimiter, join, sep } from 'node:path';
 import type { ManagedNetworkServiceState } from './network-state-store.js';
 import type { ResolvedNetworkService } from './network-registry.js';
 import type { PreflightServiceResult, StartServiceOptions } from './network-supervisor.js';
@@ -136,14 +136,53 @@ function validateNetworkServiceEnv(service: ResolvedNetworkService): void {
   }
 }
 
+// Resolve the `npm` binary on PATH to its real target. Distro packages that
+// ship npm separately from node (e.g. Debian's /usr/bin/npm) symlink the
+// launcher to the real `npm-cli.js`, so following the link yields a trusted
+// CLI script we can run directly with node — without spawning a shell or an
+// npm shim. Returns null if npm is absent or does not resolve to an npm-cli.js.
+function resolveNpmCliFromPath(): string | null {
+  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
+    const candidate = join(dir, 'npm');
+    if (!existsSync(candidate)) continue;
+    try {
+      const real = realpathSync(candidate);
+      if (real.endsWith(`${sep}npm-cli.js`) && existsSync(real)) {
+        return real;
+      }
+    } catch {
+      // ignore unreadable/broken symlinks and keep searching
+    }
+  }
+  return null;
+}
+
 function resolveNpmCliPath(): string {
+  const execDir = dirname(process.execPath);
+  // Also consider the realpath of node itself (nvm/distro symlink node into a
+  // versioned dir); npm is colocated relative to the real binary, not the link.
+  let realExecDir = execDir;
+  try {
+    realExecDir = dirname(realpathSync(process.execPath));
+  } catch {
+    // fall back to the symlinked location
+  }
   const npmCliPathCandidates = [
-    join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    // Bundled node+npm (nvm, official installers, most images).
+    join(execDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(execDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(realExecDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(realExecDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    // Common distro layouts where npm is packaged separately from node.
+    join('/usr', 'share', 'nodejs', 'npm', 'bin', 'npm-cli.js'),
+    join('/usr', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   ];
-  const npmCliPath = npmCliPathCandidates.find((candidate) => existsSync(candidate));
+  const npmCliPath = npmCliPathCandidates.find((candidate) => existsSync(candidate)) ?? resolveNpmCliFromPath();
   if (!npmCliPath) {
-    throw new Error(`Unable to locate trusted npm CLI next to ${process.execPath}`);
+    throw new Error(
+      `Unable to locate a trusted npm CLI (checked locations relative to ${process.execPath}, common distro paths, and the npm launcher on PATH)`,
+    );
   }
   return npmCliPath;
 }
