@@ -73,8 +73,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         cwd: workspaceDir,
         env: {
           ...process.env,
-          GEMINI_CLI_SYSTEM_DEFAULTS_PATH:
-            process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
+          GEMINI_CLI_SYSTEM_DEFAULTS_PATH: this.effectiveSystemDefaultsPath(),
           GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -246,7 +245,7 @@ export class GeminiCliAdapter implements ILlmProvider {
             ...existingContext,
             fileName: this.contextFileNames(existingContext, managedContextFileName),
             includeDirectories,
-            loadMemoryFromIncludeDirectories: true,
+            loadMemoryFromIncludeDirectories: this.loadMemoryFromIncludeDirectories(existingContext),
           },
         },
         null,
@@ -282,6 +281,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       managedContextFileName,
       ...this.stringArray(context['fileName']),
       ...this.userContextFileNames(),
+      ...this.workspaceContextFileNames(),
       'GEMINI.md',
     ]);
   }
@@ -290,6 +290,24 @@ export class GeminiCliAdapter implements ILlmProvider {
     const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
     const userContext = this.asObject(userSettings['context']) ?? {};
     return this.stringArray(userContext['fileName']);
+  }
+
+  private workspaceContextFileNames(): string[] {
+    const workspaceSettings = this.readSettingsFile(join(resolve(this.workingDir), '.gemini', 'settings.json'), 'Gemini workspace settings');
+    const workspaceContext = this.asObject(workspaceSettings['context']) ?? {};
+    return this.stringArray(workspaceContext['fileName']);
+  }
+
+  private loadMemoryFromIncludeDirectories(context: Record<string, unknown>): boolean {
+    if (typeof context['loadMemoryFromIncludeDirectories'] === 'boolean') {
+      return context['loadMemoryFromIncludeDirectories'];
+    }
+    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
+    const userContext = this.asObject(userSettings['context']) ?? {};
+    if (typeof userContext['loadMemoryFromIncludeDirectories'] === 'boolean') {
+      return userContext['loadMemoryFromIncludeDirectories'];
+    }
+    return true;
   }
 
   private splitIncludeDirectories(value: string): string[] {
@@ -316,6 +334,12 @@ export class GeminiCliAdapter implements ILlmProvider {
     if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/system-defaults.json';
     if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'system-defaults.json');
     return '/etc/gemini-cli/system-defaults.json';
+  }
+
+  private effectiveSystemDefaultsPath(): string {
+    if (process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH) return process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+    if (process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH) return join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
+    return this.defaultSystemDefaultsPath();
   }
 
   private userSettingsPath(): string {
