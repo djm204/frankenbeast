@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -18,6 +18,11 @@ const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
+
+export interface RunConfigSnapshotOwner {
+  readonly uid: number;
+  readonly gid: number;
+}
 
 const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhook)/i;
 
@@ -204,6 +209,7 @@ export interface ProcessBeastExecutorOptions {
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
   runConfigDir?: string;
+  runConfigOwner?: RunConfigSnapshotOwner;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -216,6 +222,18 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+}
+
+function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
+  if (!owner) {
+    return;
+  }
+  const currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  const currentGid = typeof process.getgid === 'function' ? process.getgid() : undefined;
+  if (currentUid === owner.uid && currentGid === owner.gid) {
+    return;
+  }
+  chownSync(path, owner.uid, owner.gid);
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -267,7 +285,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
       this.options.runConfigDir ??
       join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
     );
+    const runConfigOwner = this.options.runConfigOwner;
     mkdirSync(configDir, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
+    applyRunConfigOwnership(configDir, runConfigOwner);
     chmodSync(configDir, RUN_CONFIG_DIR_MODE);
     const configFilePath = join(configDir, `${run.id}.json`);
     if (existsSync(configFilePath)) {
@@ -293,6 +313,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     );
     const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
     writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    applyRunConfigOwnership(configFilePath, runConfigOwner);
     chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
