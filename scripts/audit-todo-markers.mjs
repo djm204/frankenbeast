@@ -2,13 +2,14 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const defaultRoot = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const root = process.env.FRANKENBEAST_DEBT_SCAN_ROOT ?? defaultRoot;
 const selfPath = fileURLToPath(import.meta.url);
 const selfRepoPath = 'scripts/audit-todo-markers.mjs';
 const sourceRoots = ['packages', 'scripts'];
-const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
 const ignoredPathParts = new Set([
   '.git',
   'node_modules',
@@ -44,6 +45,21 @@ function shouldScan(path) {
   return scannedExtensions.has(extname(path));
 }
 
+function scriptKindFor(path) {
+  switch (extname(path)) {
+    case '.tsx':
+      return ts.ScriptKind.TSX;
+    case '.jsx':
+      return ts.ScriptKind.JSX;
+    case '.js':
+    case '.mjs':
+    case '.cjs':
+      return ts.ScriptKind.JS;
+    default:
+      return ts.ScriptKind.TS;
+  }
+}
+
 async function* walk(dir) {
   let entries;
   try {
@@ -68,85 +84,68 @@ async function* walk(dir) {
 }
 
 function normalizeExcerpt(comment) {
-  return comment.trim().replace(/\s+/g, ' ').slice(0, 160);
+  return comment.trim().replace(/^\*\s?/gm, '').replace(/\s+/g, ' ').slice(0, 160);
 }
 
-function recordComment(comment, file, lineNumber, findings) {
-  const match = markerPattern.exec(comment);
+function commentText(source, range) {
+  const raw = source.slice(range.pos, range.end);
+  if (raw.startsWith('//')) {
+    return raw.slice(2);
+  }
+  if (raw.startsWith('/*') && raw.endsWith('*/')) {
+    return raw.slice(2, -2);
+  }
+  return raw;
+}
+
+function recordComment(sourceFile, source, range, file, findings) {
+  const text = commentText(source, range);
+  const match = markerPattern.exec(text);
   if (!match) return;
+  const { line } = sourceFile.getLineAndCharacterOfPosition(range.pos);
   findings.push({
     path: toRepoPath(file),
-    line: lineNumber,
+    line: line + 1,
     marker: match[1].toUpperCase(),
-    excerpt: normalizeExcerpt(comment),
+    excerpt: normalizeExcerpt(text),
   });
 }
 
-async function scanFile(file) {
-  const content = await readFile(file, 'utf8');
-  const lines = content.split(/\r?\n/);
+function collectComments(sourceFile, source, file) {
   const findings = [];
-  const state = { quote: null, escaped: false, inBlock: false };
+  const seen = new Set();
 
-  for (const [index, line] of lines.entries()) {
-    const lineNumber = index + 1;
-    let comment = '';
-
-    for (let cursor = 0; cursor < line.length; cursor += 1) {
-      const char = line[cursor];
-      const next = line[cursor + 1];
-
-      if (state.inBlock) {
-        if (char === '*' && next === '/') {
-          recordComment(comment, file, lineNumber, findings);
-          comment = '';
-          state.inBlock = false;
-          cursor += 1;
-          continue;
-        }
-        comment += char;
-        continue;
-      }
-
-      if (state.quote) {
-        if (state.escaped) {
-          state.escaped = false;
-        } else if (char === '\\') {
-          state.escaped = true;
-        } else if (char === state.quote) {
-          state.quote = null;
-        }
-        continue;
-      }
-
-      if (char === '"' || char === "'" || char === '`') {
-        state.quote = char;
-        continue;
-      }
-
-      if (char === '/' && next === '/') {
-        recordComment(line.slice(cursor + 2), file, lineNumber, findings);
-        break;
-      }
-
-      if (char === '/' && next === '*') {
-        state.inBlock = true;
-        comment = '';
-        cursor += 1;
-      }
-    }
-
-    if (state.inBlock && comment) {
-      recordComment(comment, file, lineNumber, findings);
-    }
-
-    if (state.quote !== '`') {
-      state.quote = null;
-      state.escaped = false;
+  function collectRanges(ranges) {
+    for (const range of ranges ?? []) {
+      const key = `${range.pos}:${range.end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recordComment(sourceFile, source, range, file, findings);
     }
   }
 
+  collectRanges(ts.getLeadingCommentRanges(source, 0));
+
+  function visit(node) {
+    collectRanges(ts.getLeadingCommentRanges(source, node.pos));
+    collectRanges(ts.getTrailingCommentRanges(source, node.end));
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
   return findings;
+}
+
+async function scanFile(file) {
+  const source = await readFile(file, 'utf8');
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindFor(file),
+  );
+  return collectComments(sourceFile, source, file);
 }
 
 const findings = [];
