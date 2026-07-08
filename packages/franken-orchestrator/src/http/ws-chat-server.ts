@@ -17,6 +17,7 @@ import {
   type ServerSocketEvent,
 } from '@franken/types';
 import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
+import { DEFAULT_CHAT_RATE_LIMIT, chatRateLimitPrincipalFromAddress } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -113,7 +114,7 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
-    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? { windowMs: 60_000, max: 30 });
+    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -215,7 +216,7 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
-        if (!this.takeChatRateLimit(peer, connection, 'message')) {
+        if (!this.takeChatRateLimit(peer, connection)) {
           return;
         }
         await this.handleMessageSend(
@@ -227,7 +228,7 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
-        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection, 'approval')) {
+        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection)) {
           return;
         }
         await this.handleApproval(peer, session, event.approved);
@@ -339,10 +340,9 @@ export class ChatSocketController {
   private takeChatRateLimit(
     peer: ChatSocketPeer,
     connection: ConnectionState,
-    action: 'message' | 'approval',
   ): boolean {
-    const principal = connection.remoteAddress?.trim() || connection.sessionId;
-    const result = this.chatRateLimiter.take(`chat:ws:${action}:${connection.sessionId}:${principal}`);
+    const principal = chatRateLimitPrincipalFromAddress(connection.remoteAddress);
+    const result = this.chatRateLimiter.take(`chat:ws:principal:${principal}`);
     if (result.allowed) {
       return true;
     }

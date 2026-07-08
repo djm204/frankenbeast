@@ -37,6 +37,7 @@ import { createSkillRoutes } from './routes/skill-routes.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
+import { DEFAULT_CHAT_RATE_LIMIT } from './chat-rate-limit.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -80,7 +81,6 @@ export interface ChatAppOptions {
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
-const DEFAULT_CHAT_RATE_LIMIT: BeastRateLimitOptions = { windowMs: 60_000, max: 20 };
 const CORS_ALLOW_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-frankenbeast-operator-token'];
 

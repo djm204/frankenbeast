@@ -661,6 +661,121 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('shares websocket rate limits across sessions for the same client address', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const firstSession = store.create('proj');
+    const secondSession = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const firstToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: firstSession.id });
+    const secondToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: secondSession.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+    const first = createPeer();
+    const second = createPeer();
+    const remoteAddress = '198.51.100.20';
+
+    expect(controller.connect(first.peer, {
+      origin: null,
+      sessionId: firstSession.id,
+      token: firstToken,
+      remoteAddress,
+    }).ok).toBe(true);
+    expect(controller.connect(second.peer, {
+      origin: null,
+      sessionId: secondSession.id,
+      token: secondToken,
+      remoteAddress,
+    }).ok).toBe(true);
+
+    await controller.receive(first.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'run expensive work',
+    }));
+    await controller.receive(second.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'run more expensive work',
+    }));
+
+    const secondEvents = second.sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(secondEvents).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('uses the REST chat default rate limit for websocket messages', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+      remoteAddress: '198.51.100.21',
+    }).ok).toBe(true);
+
+    for (let index = 0; index < 20; index += 1) {
+      await controller.receive(peer, JSON.stringify({
+        type: 'message.send',
+        clientMessageId: `client-${index}`,
+        content: `run expensive work ${index}`,
+      }));
+    }
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-over-limit',
+      content: 'run too much expensive work',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(20);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('rate limits websocket approvals before mutating approval state', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
