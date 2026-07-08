@@ -833,6 +833,7 @@ describe('ProcessBeastExecutor', () => {
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
       const supervisor = createSupervisorMock();
+      mkdirSync(join(workDir, 'project-root', '.fbeast', '.build'), { recursive: true });
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
       const sensitiveTokenValue = 'configured-token-value-12345';
       const sensitiveWebhookUrl = 'https://discord.com/api/webhooks/1234567890/opaque-webhook-value';
@@ -911,8 +912,6 @@ describe('ProcessBeastExecutor', () => {
         'Refusing to use symlinked run config directory',
       );
       expect(supervisor.spawn).not.toHaveBeenCalled();
-    });
-
     });
 
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {
