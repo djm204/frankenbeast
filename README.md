@@ -322,7 +322,7 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM API key** — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ## Quick Start
@@ -598,6 +598,8 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 |----------|--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | MOD-01 | Runtime only | Claude adapter API key |
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
+| `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
+| `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `CHROMA_HOST` | MOD-03 | If using semantic memory | ChromaDB server host (default: `localhost`) |
 | `CHROMA_PORT` | MOD-03 | If using semantic memory | ChromaDB server port (default: `8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
