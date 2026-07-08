@@ -11,6 +11,7 @@ import { agentRoutes } from './routes/agent-routes.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
+import type { BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
@@ -67,11 +68,14 @@ export interface ChatAppOptions {
   analyticsDeps?: AnalyticsRouteDeps;
   /** Optional owner-managed ticket store for browser EventSource chat streams. */
   chatStreamTicketStore?: SseConnectionTicketStore;
+  /** Rate/concurrency guard for chat message and approval REST mutations. */
+  chatRateLimit?: BeastRateLimitOptions;
   /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
+const DEFAULT_CHAT_RATE_LIMIT: BeastRateLimitOptions = { windowMs: 60_000, max: 20 };
 const CORS_ALLOW_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-frankenbeast-operator-token'];
 
@@ -213,6 +217,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     turnRunner: runtimeBundle.turnRunner,
     operatorToken: effectiveOperatorToken,
     streamTicketStore: chatStreamTicketStore,
+    chatRateLimit: opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT,
     issueSocketToken: (sessionId) => issueSessionToken({
       expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,
