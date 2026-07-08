@@ -202,10 +202,31 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private writeContextSettings(targetDir: string): string {
+    const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? '/etc/gemini-cli/settings.json';
+    let existing: Record<string, unknown> = {};
+    if (existsSync(existingPath)) {
+      try {
+        existing = JSON.parse(readFileSync(existingPath, 'utf-8')) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+
+    const existingContext = this.asObject(existing['context']) ?? {};
     const settingsPath = join(targetDir, 'settings.json');
     writeFileSync(
       settingsPath,
-      JSON.stringify({ context: { loadMemoryFromIncludeDirectories: true } }, null, 2),
+      JSON.stringify(
+        {
+          ...existing,
+          context: {
+            ...existingContext,
+            loadMemoryFromIncludeDirectories: true,
+          },
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
     return settingsPath;

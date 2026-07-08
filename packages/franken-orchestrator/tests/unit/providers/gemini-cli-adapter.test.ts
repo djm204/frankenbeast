@@ -78,6 +78,29 @@ describe('GeminiCliAdapter', () => {
     });
   });
 
+  describe('writeContextSettings()', () => {
+    it('merges inherited Gemini system settings while enabling include-dir memory', () => {
+      const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+      const existingSettings = join(tempDir, 'existing-settings.json');
+      writeFileSync(existingSettings, JSON.stringify({ sandbox: true, context: { fileName: 'GEMINI.md' } }));
+      process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
+
+      try {
+        const settingsPath = (adapter as unknown as { writeContextSettings(dir: string): string }).writeContextSettings(tempDir);
+        expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
+          sandbox: true,
+          context: { fileName: 'GEMINI.md', loadMemoryFromIncludeDirectories: true },
+        });
+      } finally {
+        if (originalSettingsPath === undefined) {
+          delete process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+        } else {
+          process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = originalSettingsPath;
+        }
+      }
+    });
+  });
+
   describe('execute()', () => {
     it('parses stream-json text events', async () => {
       mockSpawn([
