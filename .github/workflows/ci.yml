@@ -33,6 +33,9 @@ jobs:
 
       - run: npm run lint:security
 
+      - name: Track code comment debt markers
+        run: npm run audit:todos
+
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
