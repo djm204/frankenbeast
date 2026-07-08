@@ -14,7 +14,6 @@ import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
 const TEST_CHAT_TOKEN = testCredential('TEST_CHAT_TOKEN');
-const TEST_BEAST_TOKEN = testCredential('TEST_BEAST_TOKEN');
 const TEST_SHARED_TOKEN = testCredential('TEST_SHARED_TOKEN');
 
 
@@ -263,6 +262,7 @@ describe('chat server bootstrap', () => {
 
   it('refuses to start when chat and beast operator tokens differ', async () => {
     mkdirSync(TMP, { recursive: true });
+    const mismatchedBeastToken = `${TEST_CHAT_TOKEN}-beast-mismatch`;
     const beastServices = createBeastServices({
       beastsDb: join(TMP, 'beasts.db'),
       beastLogsDir: join(TMP, 'beast-logs'),
@@ -279,7 +279,7 @@ describe('chat server bootstrap', () => {
         beastControl: {
           ...beastServices,
           security: new TransportSecurityService(),
-          operatorToken: TEST_BEAST_TOKEN,
+          operatorToken: mismatchedBeastToken,
 
           rateLimit: { windowMs: 60_000, max: 20 },
         },

@@ -21,7 +21,8 @@ function loadTestEnv(): void {
 
 export function testCredential(name: string): string {
   loadTestEnv();
-  return process.env[name] ?? generatedTestCredential(name);
+  const configured = process.env[name]?.trim();
+  return configured ? configured : generatedTestCredential(name);
 }
 
 function generatedTestCredential(name: string): string {
