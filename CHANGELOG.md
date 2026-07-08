@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.43.1](https://github.com/djm204/frankenbeast/compare/v0.43.0...v0.43.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* harden Beast run config snapshot permissions ([#895](https://github.com/djm204/frankenbeast/issues/895)) ([2b681cf](https://github.com/djm204/frankenbeast/commit/2b681cf5b111e883aa31001a898820ae30bf18e1))
+* **security:** pin Anthropic SDK override ([366972d](https://github.com/djm204/frankenbeast/commit/366972d6e386e7673ca059fd72614c67381be688)), closes [#587](https://github.com/djm204/frankenbeast/issues/587)
+
+
+### Documentation
+
+* record late codex follow-up lesson ([7efef5b](https://github.com/djm204/frankenbeast/commit/7efef5be68ff6a7c9da6a38e1552ccf96c9f0235))
+* refresh README project tree guides description ([#1142](https://github.com/djm204/frankenbeast/issues/1142)) ([823e5f5](https://github.com/djm204/frankenbeast/commit/823e5f5bc840149aca0ea3dcb87ebe43a745a3fc))
+
+
+### Tests
+
+* **web:** guard dev-server dependency upgrades ([#1060](https://github.com/djm204/frankenbeast/issues/1060)) ([7921136](https://github.com/djm204/frankenbeast/commit/792113659ced632c44f6208f9120cd61fa7e6632))
+
 ## [0.43.0](https://github.com/djm204/frankenbeast/compare/v0.42.0...v0.43.0) (2026-07-07)
 
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.3](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.2...franken-mcp-suite-v0.2.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **mcp-suite:** remove Windows shell passthrough ([#1063](https://github.com/djm204/frankenbeast/issues/1063)) ([53f4f3b](https://github.com/djm204/frankenbeast/commit/53f4f3bbf739c9416853d894356e27bcf8de4595))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.7.1 to 0.7.2
+    * @franken/critique bumped from 0.6.12 to 0.6.13
+    * @franken/governor bumped from 0.5.10 to 0.5.11
+    * @franken/observer bumped from 0.7.12 to 0.7.13
+    * @franken/orchestrator bumped from 0.41.0 to 0.41.1
+    * @franken/planner bumped from 0.4.10 to 0.4.11
+
 ## [0.2.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.1...franken-mcp-suite-v0.2.2) (2026-07-07)
 
 

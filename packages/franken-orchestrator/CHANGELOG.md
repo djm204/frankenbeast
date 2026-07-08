@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.41.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.41.0...@franken/orchestrator-v0.41.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* harden Beast run config snapshot permissions ([#895](https://github.com/djm204/frankenbeast/issues/895)) ([2b681cf](https://github.com/djm204/frankenbeast/commit/2b681cf5b111e883aa31001a898820ae30bf18e1))
+* **orchestrator:** add body limits to control APIs ([74a5c15](https://github.com/djm204/frankenbeast/commit/74a5c15344f09eacb514fff262cb8760b2c08c3c)), closes [#605](https://github.com/djm204/frankenbeast/issues/605)
+* **orchestrator:** allow trusted override network launches ([#1260](https://github.com/djm204/frankenbeast/issues/1260)) ([3bb95c1](https://github.com/djm204/frankenbeast/commit/3bb95c140aedbae8c18eb37132d4a504dd183c1c))
+* **orchestrator:** escape Beast metric label values ([#1024](https://github.com/djm204/frankenbeast/issues/1024)) ([72ceda4](https://github.com/djm204/frankenbeast/commit/72ceda4901693bf1da0326f821da0be0d21762d5))
+* **orchestrator:** rate limit chat REST mutations ([#1062](https://github.com/djm204/frankenbeast/issues/1062)) ([e3cd756](https://github.com/djm204/frankenbeast/commit/e3cd7566ec0a3fb2e2d56f44a806ab26404c7c6d))
+* **orchestrator:** redact beast run config snapshots ([#1064](https://github.com/djm204/frankenbeast/issues/1064)) ([f0323a5](https://github.com/djm204/frankenbeast/commit/f0323a533a75c97c75b46ef3003e860747f27268)), closes [#603](https://github.com/djm204/frankenbeast/issues/603)
+* **orchestrator:** validate network subprocess specs ([#912](https://github.com/djm204/frankenbeast/issues/912)) ([4048ca9](https://github.com/djm204/frankenbeast/commit/4048ca941d5de21784862d9c170f4420033f5df2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.12 to 0.6.13
+    * @franken/governor bumped from 0.5.10 to 0.5.11
+    * @franken/observer bumped from 0.7.12 to 0.7.13
+    * @franken/planner bumped from 0.4.10 to 0.4.11
+    * @franken/brain bumped from 0.7.1 to 0.7.2
+
 ## [0.41.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.40.0...@franken/orchestrator-v0.41.0) (2026-07-07)
 
 
