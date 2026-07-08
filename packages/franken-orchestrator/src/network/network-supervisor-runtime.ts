@@ -25,6 +25,7 @@ const ALLOWED_NETWORK_SERVICE_ENV_KEYS: Partial<Record<ResolvedNetworkService['i
     'FRANKENBEAST_DASHBOARD_API_URL',
     'FRANKENBEAST_DASHBOARD_HOST',
     'FRANKENBEAST_DASHBOARD_PORT',
+    'FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES',
   ],
 };
 
@@ -68,11 +69,20 @@ function validateNpmServiceArgs(serviceId: 'beasts-daemon' | 'chat-server', args
     return;
   }
 
-  for (let index = 10; index < args.length; index += 2) {
+  let trustedOverrideFlagSeen = false;
+  for (let index = 10; index < args.length;) {
     const flag = args[index];
+    if (flag === '--trust-provider-command-overrides') {
+      assertExpectedArg(!trustedOverrideFlagSeen, serviceId);
+      trustedOverrideFlagSeen = true;
+      index += 1;
+      continue;
+    }
+
     const value = args[index + 1];
     assertExpectedArg(value !== undefined, serviceId);
     assertExpectedArg(flag === '--config' || flag === '--set', serviceId);
+    index += 2;
   }
 }
 

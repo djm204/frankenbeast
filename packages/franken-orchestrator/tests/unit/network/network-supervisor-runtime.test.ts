@@ -1,6 +1,19 @@
+import { spawn } from 'node:child_process';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { startNetworkService, stopNetworkService } from '../../../src/network/network-supervisor-runtime.js';
 import type { ResolvedNetworkService } from '../../../src/network/network-registry.js';
+
+const spawnMock = vi.hoisted(() => vi.fn(() => ({
+  pid: 4242,
+  stdout: { on: vi.fn() },
+  stderr: { on: vi.fn() },
+  once: vi.fn(),
+  unref: vi.fn(),
+})));
+
+vi.mock('node:child_process', () => ({
+  spawn: spawnMock,
+}));
 
 const CHAT_SERVER_ARGS = [
   '--silent',
@@ -66,6 +79,7 @@ describe('startNetworkService', () => {
 
   afterEach(() => {
     errorSpy.mockClear();
+    spawnMock.mockClear();
   });
 
   it('rejects service commands outside the registry allowlist before spawning', async () => {
@@ -144,6 +158,54 @@ describe('startNetworkService', () => {
     })).rejects.toThrow('Unsafe network service arguments for chat-server');
 
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
+  it('allows approved trust-override flags for managed chat services', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      args: [
+        ...CHAT_SERVER_ARGS,
+        '--config',
+        '/repo/frankenbeast/.fbeast/config.json',
+        '--trust-provider-command-overrides',
+        '--set',
+        'providers.openai.enabled=true',
+      ],
+    }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('rejects duplicate trust-override flags for managed chat services', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      args: [
+        ...CHAT_SERVER_ARGS,
+        '--trust-provider-command-overrides',
+        '--trust-provider-command-overrides',
+      ],
+    }), {
+      detached: false,
+    })).rejects.toThrow('Unsafe network service arguments for chat-server');
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
+  it('allows the approved trust-override environment for managed dashboard services', async () => {
+    await expect(startNetworkService(makeService('node', {
+      args: DASHBOARD_ARGS,
+      env: {
+        FRANKENBEAST_CONFIG_FILE: '/repo/frankenbeast/.fbeast/config.json',
+        FRANKENBEAST_DASHBOARD_API_URL: 'http://127.0.0.1:3737',
+        FRANKENBEAST_DASHBOARD_HOST: '127.0.0.1',
+        FRANKENBEAST_DASHBOARD_PORT: '5173',
+        FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES: '1',
+      },
+    }, { id: 'dashboard-web' }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   it('rejects dashboard build commands outside the nested build allowlist', async () => {
