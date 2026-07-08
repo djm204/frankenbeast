@@ -114,7 +114,7 @@ function redactRunConfigValue(
   }
 
   if (typeof input === 'string') {
-    return redactBeastLogLine(input, configuredSecrets);
+    return redactConfiguredSecretValues(input, configuredSecrets);
   }
 
   if (Array.isArray(input)) {

@@ -841,6 +841,9 @@ describe('ProcessBeastExecutor', () => {
           },
           tokenRefs: ['op://vault/item/token', { privateKey: sensitivePrivateCredential }],
           notes: `call ${sensitiveWebhookUrl} with ${sensitiveTokenValue}`,
+          promptConfig: {
+            text: `Read https://docs.example.test/webhook/setup and use ${sensitiveTokenValue}`,
+          },
         },
         dispatchedBy: 'cli',
         dispatchedByUser: 'pfk',
@@ -867,6 +870,9 @@ describe('ProcessBeastExecutor', () => {
         },
         tokenRefs: '[REDACTED]',
         notes: 'call [REDACTED] with [REDACTED]',
+        promptConfig: {
+          text: 'Read https://docs.example.test/webhook/setup and use [REDACTED]',
+        },
       });
       expect(typeof persisted.maxTotalTokens).toBe('number');
       expect(serializedPersisted).not.toContain(sensitiveTokenValue);
