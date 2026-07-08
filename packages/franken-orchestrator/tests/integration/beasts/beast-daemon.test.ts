@@ -128,6 +128,38 @@ describe('beast daemon', () => {
     }
   });
 
+  it('authenticates daemon beast payloads before applying bounded body limits', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const app = createBeastDaemonApp({ services, operatorToken });
+    const oversizedRun = JSON.stringify({
+      definitionId: 'martin-loop',
+      config: { provider: 'codex', objective: 'x'.repeat(2 * 1024 * 1024), chunkDirectory: 'chunks' },
+      startNow: false,
+    });
+
+    try {
+      const unauthenticated = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: oversizedRun,
+      });
+      expect(unauthenticated.status).toBe(401);
+
+      const authorized = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: oversizedRun,
+      });
+      expect(authorized.status).toBe(413);
+    } finally {
+      services.dispose();
+    }
+  });
+
   it('claims and releases a pid file while serving HTTP', async () => {
     const paths = await makePaths();
     const daemon = await startBeastDaemon({

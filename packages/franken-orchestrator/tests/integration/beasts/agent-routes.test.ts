@@ -221,6 +221,94 @@ describe('agent routes integration', () => {
     });
   });
 
+  it('rejects unauthenticated large wizard launch payloads before buffering up to the beast cap', async () => {
+    const { app } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Start later',
+            chunkDirectory: 'docs/chunks',
+            promptConfig: { text: 'x'.repeat(20 * 1024) },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Start later',
+          chunkDirectory: 'docs/chunks',
+          promptConfig: { text: 'x'.repeat(20 * 1024) },
+        },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('allows wizard launch payloads above the small control API body cap', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Start later',
+            chunkDirectory: 'docs/chunks',
+            promptConfig: { text: 'x'.repeat(20 * 1024) },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Start later',
+          chunkDirectory: 'docs/chunks',
+          promptConfig: { text: 'x'.repeat(20 * 1024) },
+        },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('rejects unauthenticated large beast payloads before applying the large body cap', async () => {
+    const { app } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        },
+        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
   it('creates, dispatches, and lists tracked agents for authorized operators', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {

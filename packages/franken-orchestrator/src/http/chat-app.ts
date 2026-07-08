@@ -17,7 +17,13 @@ import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
 import { createSecurityRoutes } from './routes/security-routes.js';
 import type { SecurityConfig } from '../middleware/security-profiles.js';
-import { errorHandler, requestId, requestSizeLimit } from './middleware.js';
+import {
+  DEFAULT_MAX_BODY_SIZE,
+  SKILL_CONTEXT_MAX_BODY_SIZE,
+  errorHandler,
+  requestId,
+  requestSizeLimit,
+} from './middleware.js';
 import { CHAT_SOCKET_TOKEN_TTL_MS, createSessionTokenSecret, issueSessionToken } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { TransportSecurityService } from './security/transport-security.js';
@@ -74,7 +80,6 @@ export interface ChatAppOptions {
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
 
-const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
 const DEFAULT_CHAT_RATE_LIMIT: BeastRateLimitOptions = { windowMs: 60_000, max: 20 };
 const CORS_ALLOW_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-frankenbeast-operator-token'];
@@ -100,6 +105,16 @@ function credentialedCorsForAllowedOrigins(allowedOrigins: Set<string>): Middlew
 function isChatSessionStreamPath(pathname: string): boolean {
   return /^\/v1\/chat\/sessions\/[^/]+\/stream$/.test(pathname);
 }
+
+const skillContextPathPattern = /^\/api\/skills\/[^/]+\/context$/;
+
+const controlRequestSizeLimit: MiddlewareHandler = (c, next) => {
+  const pathname = new URL(c.req.url).pathname;
+  const maxSize = skillContextPathPattern.test(pathname)
+    ? SKILL_CONTEXT_MAX_BODY_SIZE
+    : DEFAULT_MAX_BODY_SIZE;
+  return requestSizeLimit(maxSize)(c, next);
+};
 
 export function createChatApp(opts: ChatAppOptions): Hono {
   const sessionStore = opts.sessionStore
@@ -142,7 +157,6 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       app.use('*', credentialedCorsForAllowedOrigins(allowedOrigins));
     }
   }
-  app.use('/v1/chat/*', requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   // Chat /v1/chat/* is gated by an operator token whenever one is configured.
   // The same operator token authorizes the beast control plane and chat in
   // this codebase (matching the existing `VITE_BEAST_OPERATOR_TOKEN` pattern
@@ -207,6 +221,17 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       app.use(base, requireAuth());
       app.use(`${base}/*`, requireAuth());
     }
+  }
+  // Apply the JSON body cap to first-party control route groups that can parse
+  // request bodies. Registered after the optional operator-auth block so
+  // unauthenticated protected requests fail with a header-only 401 before large
+  // bodies are buffered. Provider webhooks keep their own signature-specific
+  // handling under /webhooks/* and are intentionally not included here. Beast
+  // control routes are capped inside their route modules after beast auth so the
+  // standalone beast daemon gets the same authenticated cap as this combined app.
+  for (const base of ['/v1/chat', '/v1/network', '/v1/comms', '/api/security', '/api/skills']) {
+    app.use(base, controlRequestSizeLimit);
+    app.use(`${base}/*`, controlRequestSizeLimit);
   }
   app.onError(errorHandler);
 

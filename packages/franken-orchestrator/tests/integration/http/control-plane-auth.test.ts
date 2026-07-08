@@ -195,6 +195,111 @@ describe('control-plane operator auth', () => {
     });
   });
 
+  describe('body-size limits', () => {
+    const oversizedJsonBody = JSON.stringify({ payload: 'x'.repeat(16 * 1024) });
+
+    it('rejects oversized network payloads before handlers mutate config', async () => {
+      const setConfig = vi.fn();
+      const app = buildApp({
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => defaultConfig(),
+          setConfig,
+        },
+      });
+
+      const res = await app.request('/v1/network/config', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setConfig).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized skill payloads before handlers install skills', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        install: vi.fn(),
+        installCustom: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(skillManager.install).not.toHaveBeenCalled();
+      expect(skillManager.installCustom).not.toHaveBeenCalled();
+    });
+
+    it('allows larger skill context Markdown payloads through the context endpoint', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        writeContext: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const content = 'x'.repeat(20 * 1024);
+      const res = await app.request('/api/skills/example/context', {
+        method: 'PUT',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(skillManager.writeContext).toHaveBeenCalledWith('example', content);
+    });
+
+    it.each(['/v1/comms/inbound', '/v1/comms/action'])(
+      'rejects oversized comms payloads for %s before gateway processing',
+      async (path) => {
+        const runtime = mockCommsRuntime();
+        const app = buildApp({ commsRuntime: runtime });
+
+        const res = await app.request(path, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: oversizedJsonBody,
+        });
+
+        expect(res.status).toBe(413);
+        expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+        expect(runtime.processInbound).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects oversized security config payloads before applying updates', async () => {
+      const setSecurityConfig = vi.fn();
+      const app = buildApp({
+        securityConfig: {
+          getSecurityConfig: () => resolveSecurityConfig('standard'),
+          setSecurityConfig,
+        },
+      });
+
+      const res = await app.request('/api/security', {
+        method: 'PATCH',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setSecurityConfig).not.toHaveBeenCalled();
+    });
+  });
+
   describe('public comms surfaces stay reachable', () => {
     it('comms health is not gated', async () => {
       const app = buildApp();
