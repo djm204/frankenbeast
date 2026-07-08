@@ -327,13 +327,12 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 
 ### Beast project-root override
 
-Beast services normally anchor runtime state and child execution to the project root supplied by the caller. The supported fallback order is:
+Beast runtime code has two related project-root decisions:
 
-1. explicit runtime paths such as `paths.root`, `config.projectRoot`, or CLI flags such as `--base-dir` when a command exposes one;
-2. `FBEAST_ROOT`;
-3. the current working directory (`process.cwd()`).
+- **Service root:** `createBeastServices()` resolves `paths.root ?? process.env.FBEAST_ROOT ?? process.cwd()`. This root controls Beast service construction, host-process `cwd` containment, container `workspaceHostPath` mounts, worktree isolation, and run-config snapshots under `.fbeast/.build/run-configs`.
+- **Per-run child working directory:** built-in Beast definitions resolve `config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()` for the child process `cwd` when the run config omits `projectRoot`.
 
-Set `FBEAST_ROOT=/absolute/path/to/project` only when a wrapper, daemon, or service manager starts `frankenbeast chat-server`, `frankenbeast network`, `frankenbeast beasts-daemon`, or Beast dispatch commands from a directory that is not the intended project root and the command path does not pass an explicit root. This override affects Beast service construction, host-process `cwd` containment, container `workspaceHostPath` mounts, run-config snapshots under `.fbeast/.build/run-configs`, and the default working directory used by built-in Beast definitions when their config omits `projectRoot`. Historical ADRs and plan documents may mention `FBEAST_ROOT`, but this section is the operator-facing supported configuration reference.
+For CLI entrypoints such as `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`, prefer passing the explicit project root (`--base-dir /absolute/path/to/project`) because the CLI parses `--base-dir` with a `process.cwd()` default before constructing services. Use `FBEAST_ROOT=/absolute/path/to/project` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit `paths.root`/`config.projectRoot`, and keep it aligned with `--base-dir` when both are present so the service root and child `cwd` stay inside the same checkout. Historical ADRs and plan documents may mention `FBEAST_ROOT`, but this section is the operator-facing supported configuration reference.
 
 ## Quick Start
 

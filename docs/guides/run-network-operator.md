@@ -6,7 +6,7 @@ This guide starts Frankenbeast through the new `frankenbeast network` operator i
 
 `frankenbeast network up` selects services from canonical config and starts the enabled request-serving surfaces.
 
-When running `network up` from a service manager or wrapper whose current directory is not the target project, set the project root explicitly where available or use the supported `FBEAST_ROOT` fallback documented in the README's [Beast project-root override](../../README.md#beast-project-root-override). That root is used before `process.cwd()` for Beast services, run-config snapshots, process/container execution roots, and built-in Beast child working directories.
+When running `network up` from a service manager or wrapper whose current directory is not the target project, pass the project root explicitly with `--base-dir /absolute/path/to/project`. The README's [Beast project-root override](../../README.md#beast-project-root-override) documents the narrower `FBEAST_ROOT` fallback for Beast service construction and built-in run configs when no explicit root is supplied; keep it aligned with `--base-dir` if both are set.
 
 Current default local surface:
 

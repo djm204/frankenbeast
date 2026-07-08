@@ -66,7 +66,7 @@ npm --workspace @franken/orchestrator run chat-server -- --provider codex
 npm --workspace @franken/orchestrator run chat-server -- --allow-origin http://localhost:5173
 ```
 
-If the daemon or chat server is launched by a wrapper from outside the intended checkout, pass an explicit project-root option such as `--base-dir` when available. Otherwise, set `FBEAST_ROOT=/absolute/path/to/project`; the README's [Beast project-root override](../../README.md#beast-project-root-override) documents its precedence before `process.cwd()` and the affected Beast service, process/container, run-config snapshot, and child working-directory surfaces.
+If the daemon or chat server is launched by a wrapper from outside the intended checkout, pass the explicit CLI root with `--base-dir /absolute/path/to/project`. The README's [Beast project-root override](../../README.md#beast-project-root-override) documents the narrower `FBEAST_ROOT` fallback used by Beast service construction and built-in run configs when no explicit root is supplied; keep it aligned with `--base-dir` if both are set.
 
 If you bind to a non-loopback host or run in managed network mode, the server refuses to start without an operator token.
 
