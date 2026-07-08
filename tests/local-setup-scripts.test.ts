@@ -140,5 +140,19 @@ describe('local setup scripts', () => {
       expect(doc).toContain('GOOGLE_API_KEY');
       expect(doc).toContain('GEMINI_API_KEY');
     }
+
+    expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(readme).toContain(frankenOverride);
+    }
   });
 });
