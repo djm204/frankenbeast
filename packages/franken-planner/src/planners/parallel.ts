@@ -3,16 +3,46 @@ import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, TaskId, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
+export interface ParallelPlannerOptions {
+  /** Maximum recursive dynamic-expansion depth. Defaults to 10. */
+  maxExpansionDepth?: number;
+
+  /**
+   * Maximum number of ready tasks to execute at once inside a dependency wave.
+   * Omit for the historical fully-parallel behavior.
+   */
+  maxWaveConcurrency?: number;
+}
+
 /**
  * Executes tasks in concurrent waves.
- * Within each wave every ready task (all deps completed) runs via Promise.all.
+ * Within each wave every ready task (all deps completed) runs with an optional concurrency limit.
  * Stops after a wave that contains at least one failure — subsequent waves are skipped.
  * All results accumulated up to and including the failing wave are preserved.
  */
 export class ParallelPlanner implements PlanningStrategy {
   readonly name = 'parallel' as const;
 
-  constructor(private readonly maxExpansionDepth = 10) {}
+  private readonly maxExpansionDepth: number;
+  private readonly maxWaveConcurrency: number;
+
+  constructor(maxExpansionDepth?: number, options?: ParallelPlannerOptions);
+  constructor(options?: ParallelPlannerOptions);
+  constructor(
+    maxExpansionDepthOrOptions: number | ParallelPlannerOptions = 10,
+    options: ParallelPlannerOptions = {}
+  ) {
+    if (typeof maxExpansionDepthOrOptions === 'number') {
+      this.maxExpansionDepth = maxExpansionDepthOrOptions;
+      this.maxWaveConcurrency = normalizeMaxWaveConcurrency(options.maxWaveConcurrency);
+      return;
+    }
+
+    this.maxExpansionDepth = maxExpansionDepthOrOptions.maxExpansionDepth ?? 10;
+    this.maxWaveConcurrency = normalizeMaxWaveConcurrency(
+      maxExpansionDepthOrOptions.maxWaveConcurrency
+    );
+  }
 
   execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
     return this._exec(graph, context, 0);
@@ -42,20 +72,18 @@ export class ParallelPlanner implements PlanningStrategy {
       // Run all ready tasks concurrently; convert ordinary task exceptions into
       // failures, but let governance rejections propagate to the Planner so they
       // retain first-class non-retryable semantics across strategies.
-      const settledWaveResults = await Promise.allSettled(
-        ready.map((task) =>
-          context.executor(task).catch((err: unknown) => {
-            if (err instanceof RationaleRejectedError) {
-              throw err;
-            }
+      const settledWaveResults = await this.runWaveSettled(ready, (task) =>
+        context.executor(task).catch((err: unknown) => {
+          if (err instanceof RationaleRejectedError) {
+            throw err;
+          }
 
-            return {
-              status: 'failure' as const,
-              taskId: task.id,
-              error: err instanceof Error ? err : new Error(String(err)),
-            };
-          })
-        )
+          return {
+            status: 'failure' as const,
+            taskId: task.id,
+            error: err instanceof Error ? err : new Error(String(err)),
+          };
+        })
       );
 
       const rejectedRationale = settledWaveResults.find(
@@ -153,4 +181,32 @@ export class ParallelPlanner implements PlanningStrategy {
 
     return { status: 'completed', taskResults: allResults };
   }
+
+  private async runWaveSettled<T, R>(
+    items: readonly T[],
+    runner: (item: T) => Promise<R>
+  ): Promise<PromiseSettledResult<R>[]> {
+    if (this.maxWaveConcurrency >= items.length) {
+      return Promise.allSettled(items.map((item) => runner(item)));
+    }
+
+    const settledResults: PromiseSettledResult<R>[] = [];
+    for (let start = 0; start < items.length; start += this.maxWaveConcurrency) {
+      const batch = items.slice(start, start + this.maxWaveConcurrency);
+      settledResults.push(...(await Promise.allSettled(batch.map((item) => runner(item)))));
+    }
+    return settledResults;
+  }
+}
+
+function normalizeMaxWaveConcurrency(value: number | undefined): number {
+  if (value === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError('ParallelPlanner maxWaveConcurrency must be a positive integer');
+  }
+
+  return value;
 }
