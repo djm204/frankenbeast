@@ -634,12 +634,24 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
 | `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
+| `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module toggle. Only the literal value `false` disables it; any other value, unset included, leaves it enabled when no explicit config is provided. |
+| `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module toggle. Only literal `false` disables it; otherwise it is enabled by default when no explicit config is provided. |
+| `FRANKENBEAST_MODULE_CRITIQUE` | MOD-06 | Optional | Critique safety module toggle. Only literal `false` disables it; otherwise it is enabled by default when no explicit config is provided. |
+| `FRANKENBEAST_MODULE_GOVERNOR` | MOD-07 | Optional | Governor safety module toggle. Only literal `false` disables it; otherwise it is enabled by default when no explicit config is provided. |
+| `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES` | MOD-06/MOD-07 | Unsafe override | Set to literal `1` to allow enabled critique/governor packages that cannot be imported to fall back to all-pass stubs. Leave unset unless intentionally accepting degraded safety in local/debug runs. |
+| `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL` | MOD-07 | Trusted CI/headless only | Set to literal `1` to allow required HITL approvals in non-interactive runs. Without it, required HITL gates fail closed outside an interactive TTY. |
 
-See [.env.example](.env.example) for the full list.
+See [.env.example](.env.example) for the full local-development list. Keep `.env.example` and this table aligned when adding operator-facing environment controls.
 
 ### Module Configuration
 
-All modules use **dependency injection** — configuration is passed via constructor arguments, not globals or environment variables.
+Runtime modules use **dependency injection** first: explicit constructor, CLI, or run-config inputs win over environment variables. For the local CLI path, selected operator controls then fall back to environment variables, and defaults apply last. Module enablement precedence is:
+
+1. Explicit module config (`modules` in run config or CLI dependency options).
+2. `FRANKENBEAST_MODULE_MEMORY`, `FRANKENBEAST_MODULE_PLANNER`, `FRANKENBEAST_MODULE_CRITIQUE`, or `FRANKENBEAST_MODULE_GOVERNOR` when no explicit module config is present.
+3. Enabled-by-default behavior when neither explicit config nor a literal `false` env toggle is provided.
+
+Safety-critical critique/governor imports fail closed when the module is enabled but its package is missing. `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the explicit unsafe escape hatch that keeps the run going with passthrough stubs; prefer installing the package or setting an explicit module config instead.
 
 ```typescript
 // Orchestrator — via config file or CLI flags
