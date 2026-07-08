@@ -367,6 +367,36 @@ describe('commsRoutes', () => {
     await expect(corrupt.json()).resolves.toEqual(corruptError);
   });
 
+  it('rejects oversized webhook JSON before provider parsing when content length is unknown', async () => {
+    const app = commsRoutes({
+      config: enabledWebhookConfig(),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+    const oversizedBody = JSON.stringify({
+      type: 'url_verification',
+      challenge: 'blocked',
+      padding: 'x'.repeat(20 * 1024),
+    });
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(0, 512)));
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(512)));
+        controller.close();
+      },
+    });
+
+    const res = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+  });
+
   it('throws when runtime is not provided', () => {
     expect(() => commsRoutes({ config: minimalConfig() })).toThrow('CommsRuntimePort');
   });
