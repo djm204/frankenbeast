@@ -42,6 +42,17 @@ interface TraceSummaryRow {
   spanCount: number
 }
 
+interface FlushedSpanState {
+  status: Span['status']
+  endedAt?: number
+  durationMs?: number
+  errorMessage?: string
+  metadata: Record<string, unknown>
+  metadataKeyCount: number
+  thoughtBlocks: string[]
+  thoughtBlockCount: number
+}
+
 /**
  * Parse a JSON column, returning a fallback instead of throwing when the
  * stored value is corrupt. A single bad row must not poison the whole trace
@@ -79,6 +90,7 @@ function rowToSpan(row: SpanRow): Span {
  */
 export class SQLiteAdapter implements ExportAdapter {
   private readonly db: Database.Database
+  private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
 
   constructor(filePath: string) {
     this.db = new Database(filePath)
@@ -102,6 +114,8 @@ export class SQLiteAdapter implements ExportAdapter {
         endedAt: t.endedAt ?? null,
       })
       for (const span of t.spans) {
+        if (!this.shouldFlushSpan(span)) continue
+
         upsertSpan.run({
           id: span.id,
           traceId: span.traceId,
@@ -115,10 +129,52 @@ export class SQLiteAdapter implements ExportAdapter {
           metadata: JSON.stringify(span.metadata),
           thoughtBlocks: JSON.stringify(span.thoughtBlocks),
         })
+        this.rememberFlushedSpan(span)
       }
     })
 
     transaction(trace)
+  }
+
+  private shouldFlushSpan(span: Span): boolean {
+    const byTrace = this.flushedSpans.get(span.traceId)
+    const previous = byTrace?.get(span.id)
+    if (previous === undefined) return true
+
+    // Active spans are still mutable: metadata/thought blocks can grow and the
+    // eventual endSpan() call changes status/timing. Re-flush them while active,
+    // but once completed/error spans have been persisted, skip them unless the
+    // small scalar dirty check below detects a state change.
+    if (span.status === 'active') return true
+
+    return (
+      previous.status !== span.status ||
+      previous.endedAt !== span.endedAt ||
+      previous.durationMs !== span.durationMs ||
+      previous.errorMessage !== span.errorMessage ||
+      previous.metadata !== span.metadata ||
+      previous.metadataKeyCount !== Object.keys(span.metadata).length ||
+      previous.thoughtBlocks !== span.thoughtBlocks ||
+      previous.thoughtBlockCount !== span.thoughtBlocks.length
+    )
+  }
+
+  private rememberFlushedSpan(span: Span): void {
+    let byTrace = this.flushedSpans.get(span.traceId)
+    if (byTrace === undefined) {
+      byTrace = new Map<string, FlushedSpanState>()
+      this.flushedSpans.set(span.traceId, byTrace)
+    }
+    byTrace.set(span.id, {
+      status: span.status,
+      endedAt: span.endedAt,
+      durationMs: span.durationMs,
+      errorMessage: span.errorMessage,
+      metadata: span.metadata,
+      metadataKeyCount: Object.keys(span.metadata).length,
+      thoughtBlocks: span.thoughtBlocks,
+      thoughtBlockCount: span.thoughtBlocks.length,
+    })
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {

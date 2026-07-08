@@ -31,6 +31,7 @@ export class PrometheusAdapter implements ExportAdapter {
   private tokenCounters = new Map<string, TokenCounts>()
   private spanCounters = new Map<string, number>()
   private costCounters = new Map<string, number>()
+  private flushedSpanIds = new Set<string>()
 
   constructor(options: PrometheusAdapterOptions = {}) {
     this.pricingTable = options.pricingTable
@@ -39,6 +40,9 @@ export class PrometheusAdapter implements ExportAdapter {
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
     for (const span of trace.spans) {
+      const spanKey = `${trace.id}\u0000${span.id}`
+      if (this.flushedSpanIds.has(spanKey) || span.status === 'active') continue
+
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)
 
@@ -70,6 +74,8 @@ export class PrometheusAdapter implements ExportAdapter {
           this.costCounters.set(model, (this.costCounters.get(model) ?? 0) + cost)
         }
       }
+
+      this.flushedSpanIds.add(spanKey)
     }
   }
 
@@ -120,6 +126,7 @@ export class PrometheusAdapter implements ExportAdapter {
     this.tokenCounters.clear()
     this.spanCounters.clear()
     this.costCounters.clear()
+    this.flushedSpanIds.clear()
   }
 
   async queryByTraceId(_traceId: string): Promise<Trace | null> {
