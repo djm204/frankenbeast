@@ -93,7 +93,7 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('writeContextSettings()', () => {
-    it('merges inherited Gemini system settings while enabling include-dir memory', () => {
+    it('merges inherited Gemini system settings while preserving scoped context files', () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
       const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
@@ -143,9 +143,7 @@ describe('GeminiCliAdapter', () => {
               '/sibling/docs',
               '/more/docs',
               '/even-more/docs',
-              includeDir,
             ],
-            loadMemoryFromIncludeDirectories: true,
           },
         });
       } finally {
@@ -200,8 +198,7 @@ describe('GeminiCliAdapter', () => {
           sandbox: true,
           context: {
             fileName: [managedContextFileName, 'PROJECT.md', 'GEMINI.md'],
-            includeDirectories: [includeDir],
-            loadMemoryFromIncludeDirectories: true,
+            includeDirectories: [],
           },
         });
       } finally {

@@ -63,11 +63,14 @@ export class GeminiCliAdapter implements ILlmProvider {
     const workspaceDir = resolve(this.workingDir);
     const contextWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
     const settingsWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-settings-')));
+    let managedContextFileName: string | undefined;
 
     try {
       this.removeManagedGeminiMd();
-      const { settingsPath, managedContextFileName } = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
-      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
+      const contextSettings = this.writeContextSettings(settingsWorkingDir);
+      const settingsPath = contextSettings.settingsPath;
+      managedContextFileName = contextSettings.managedContextFileName;
+      this.writeGeminiMd(request.systemPrompt, undefined, workspaceDir, managedContextFileName);
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -89,6 +92,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       yield* this.parseStream(proc);
     } finally {
+      if (managedContextFileName) this.removeManagedGeminiMd(workspaceDir, managedContextFileName);
       rmSync(contextWorkingDir, { recursive: true, force: true });
       rmSync(settingsWorkingDir, { recursive: true, force: true });
     }
@@ -222,7 +226,6 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private writeContextSettings(
     targetDir: string,
-    includeDir: string,
   ): { settingsPath: string; managedContextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
@@ -233,7 +236,6 @@ export class GeminiCliAdapter implements ILlmProvider {
     const includeDirectories = this.uniqueStrings([
       ...existingIncludeDirectories,
       ...this.extraIncludeDirectories(),
-      includeDir,
     ]);
     const settingsPath = join(targetDir, 'settings.json');
     writeFileSync(
@@ -245,7 +247,6 @@ export class GeminiCliAdapter implements ILlmProvider {
             ...existingContext,
             fileName: this.contextFileNames(existingContext, managedContextFileName),
             includeDirectories,
-            loadMemoryFromIncludeDirectories: this.loadMemoryFromIncludeDirectories(existingContext),
           },
         },
         null,
@@ -293,21 +294,10 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private workspaceContextFileNames(): string[] {
+    if (process.env.GEMINI_CLI_TRUST_WORKSPACE !== 'true') return [];
     const workspaceSettings = this.readSettingsFile(join(resolve(this.workingDir), '.gemini', 'settings.json'), 'Gemini workspace settings');
     const workspaceContext = this.asObject(workspaceSettings['context']) ?? {};
     return this.stringArray(workspaceContext['fileName']);
-  }
-
-  private loadMemoryFromIncludeDirectories(context: Record<string, unknown>): boolean {
-    if (typeof context['loadMemoryFromIncludeDirectories'] === 'boolean') {
-      return context['loadMemoryFromIncludeDirectories'];
-    }
-    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
-    const userContext = this.asObject(userSettings['context']) ?? {};
-    if (typeof userContext['loadMemoryFromIncludeDirectories'] === 'boolean') {
-      return userContext['loadMemoryFromIncludeDirectories'];
-    }
-    return true;
   }
 
   private splitIncludeDirectories(value: string): string[] {
@@ -338,7 +328,10 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private effectiveSystemDefaultsPath(): string {
     if (process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH) return process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
-    if (process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH) return join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
+    if (process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH) {
+      const companionDefaultsPath = join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
+      if (existsSync(companionDefaultsPath)) return companionDefaultsPath;
+    }
     return this.defaultSystemDefaultsPath();
   }
 
@@ -402,8 +395,8 @@ export class GeminiCliAdapter implements ILlmProvider {
     return output;
   }
 
-  private removeManagedGeminiMd(targetDir = this.workingDir): void {
-    const geminiMdPath = join(targetDir, 'GEMINI.md');
+  private removeManagedGeminiMd(targetDir = this.workingDir, fileName = 'GEMINI.md'): void {
+    const geminiMdPath = join(targetDir, fileName);
     if (!existsSync(geminiMdPath)) return;
 
     const existing = readFileSync(geminiMdPath, 'utf-8');
