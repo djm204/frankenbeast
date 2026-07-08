@@ -29,3 +29,5 @@
 - 2026-07-06 — When adding a config option to core runtime classes, wire it through every production config ingress before considering the issue fixed. For PR creator behavior this includes the strict run-config schema, effective CLI config resolution, dep-factory construction, and config passthrough/wiring tests; constructor-only support leaves CLI users without the feature.
 - 2026-07-06 — For CLI smoke stability, add tests for top-level help flags before merge: `fbeast --help`, `fbeast -h`, and `fbeast mcp --help` should exit 0 and not delegate to missing `frankenbeast` binaries in package-install smoke environments.
 - When Codex review triggers fail due to usage limit responses, treat this as an external blocker and stop retriggering; continue work only after explicit approval or when limits are restored.
+
+32|- 2026-07-08 — For chat runtime rate limiting, parse bearer token headers to canonical token before hashing limiter principals; storing raw `Authorization` headers allows arbitrary token suffix variations and bypasses intended request buckets. Always normalize with `extractOperatorToken` (or equivalent) at the limiter key boundary.
