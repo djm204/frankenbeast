@@ -66,7 +66,7 @@ describe('SqliteStore', () => {
     store.close();
   });
 
-  it('migrates existing cost ledgers with explicit source for legacy rows', () => {
+  it('migrates existing cost ledgers with legacy source for pre-column rows', () => {
     const dbPath = tracked(tmpDbPath());
     const db = new Database(dbPath);
     db.exec(`
@@ -87,7 +87,7 @@ describe('SqliteStore', () => {
     const store = createSqliteStore(dbPath);
     const row = store.db.prepare('SELECT cost_source FROM cost_ledger WHERE session_id = ?').get('legacy') as { cost_source: string };
 
-    expect(row.cost_source).toBe('explicit');
+    expect(row.cost_source).toBe('legacy');
     store.close();
   });
 

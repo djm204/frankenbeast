@@ -132,6 +132,16 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
+  if (row.cost_usd > 0 || row.cost_source === 'explicit') {
+    return false;
+  }
+  if (row.cost_source === 'legacy') {
+    return DEFAULT_PRICING[row.model] === undefined;
+  }
+  return true;
+}
+
 function assessAction(action: string, context: string): GovernorCheckResult {
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
@@ -195,13 +205,13 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
       for (const row of rows) {
         const hasPricing = DEFAULT_PRICING[row.model] !== undefined;
-        const costUsd = row.cost_source === 'explicit' || row.cost_usd > 0
-          ? row.cost_usd
-          : costCalculator.calculate({
+        const costUsd = shouldRepriceStoredCost(row)
+          ? costCalculator.calculate({
               model: row.model,
               promptTokens: row.prompt_tokens,
               completionTokens: row.completion_tokens,
-            });
+            })
+          : row.cost_usd;
         const current = grouped.get(row.model) ?? { model: row.model, costUsd: 0 };
 
         current.costUsd += costUsd;

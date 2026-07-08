@@ -75,7 +75,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   const costColumns = db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
   if (!costColumns.some((column) => column.name === 'cost_source')) {
     try {
-      db.exec("ALTER TABLE cost_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'explicit'");
+      db.exec("ALTER TABLE cost_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'legacy'");
     } catch (error) {
       if (!(error instanceof Error) || !/duplicate column name: cost_source/i.test(error.message)) {
         throw error;

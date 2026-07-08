@@ -75,6 +75,16 @@ function hasDefaultPricing(model: string): boolean {
   return DEFAULT_PRICING[model] !== undefined;
 }
 
+function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
+  if (row.cost_usd > 0 || row.cost_source === 'explicit') {
+    return false;
+  }
+  if (row.cost_source === 'legacy') {
+    return !hasDefaultPricing(row.model);
+  }
+  return true;
+}
+
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
@@ -170,13 +180,13 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
           current.unknownModel = true;
         }
-        current.costUsd += row.cost_source === 'explicit' || row.cost_usd > 0
-          ? row.cost_usd
-          : costCalculator.calculate({
+        current.costUsd += shouldRepriceStoredCost(row)
+          ? costCalculator.calculate({
               model: row.model,
               promptTokens: row.prompt_tokens,
               completionTokens: row.completion_tokens,
-            });
+            })
+          : row.cost_usd;
 
         grouped.set(row.model, current);
       }
