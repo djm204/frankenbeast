@@ -91,22 +91,21 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
-    it('runs from the configured workspace while loading an isolated prompt directory', async () => {
+    it('runs from the configured workspace while loading an isolated context file', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
       await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
       const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
       const spawnArgs = spawnCall[1] as string[];
-      const includeIndex = spawnArgs.indexOf('--include-directories');
-      const promptDir = spawnArgs[includeIndex + 1]!;
       const spawnOptions = spawnCall[2] as { cwd: string; env: Record<string, string> };
       expect(spawnOptions.cwd).toBe(tempDir);
-      expect(promptDir).not.toContain(tempDir);
-      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBe(join(promptDir, 'settings.json'));
+      expect(spawnArgs).not.toContain('--include-directories');
+      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toContain('franken-gemini-settings-');
+      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).not.toContain(tempDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
-      expect(existsSync(promptDir)).toBe(false);
+      expect(existsSync(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH)).toBe(false);
     });
 
     it('removes a stale managed GEMINI.md block before launching', async () => {
