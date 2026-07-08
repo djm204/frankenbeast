@@ -2,6 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from '../../../src/http/routes/dashboard-routes.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_TOKEN = testCredential('TEST_DASHBOARD_TOKEN');
 let ticketStore: SseConnectionTicketStore | undefined;
 
 function createMockDeps(): DashboardRouteDeps {
@@ -35,7 +38,7 @@ function createMockDeps(): DashboardRouteDeps {
     getProviders: vi.fn().mockReturnValue([
       { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
-    operatorToken: 'dashboard-token',
+    operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
 }

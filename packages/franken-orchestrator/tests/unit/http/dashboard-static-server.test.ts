@@ -7,6 +7,9 @@ import { gzipSync } from 'node:zlib';
 import { createDashboardStaticResponse, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
 import { createSecretStore } from '../../../src/network/secret-store.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 async function createDashboardDist(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-dashboard-dist-'));
   await mkdir(join(dir, 'assets'), { recursive: true });
@@ -87,13 +90,13 @@ describe('dashboard static server', () => {
         headers: { origin: 'http://dashboard.local' },
       }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242/base/', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242/base/', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(proxied.status).toBe(200);
     const [targetUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/base/api/dashboard?fresh=1');
-    expect(new Headers(init.headers).get('authorization')).toBe('Bearer operator-token');
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
   });
 
   it('loads dashboard operator token from network config even when provider trust metadata is unapproved', async () => {
@@ -135,7 +138,7 @@ describe('dashboard static server', () => {
         headers: { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
       }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(403);
@@ -151,7 +154,7 @@ describe('dashboard static server', () => {
     const response = await createDashboardStaticResponse(
       new Request('http://dashboard.local/api/dashboard'),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(403);
@@ -167,7 +170,7 @@ describe('dashboard static server', () => {
     const response = await createDashboardStaticResponse(
       new Request('http://dashboard.local/webhooks/telegram', { method: 'POST', body: '{}' }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(200);
@@ -197,7 +200,7 @@ describe('dashboard static server', () => {
       port: 0,
       staticDir,
       apiTarget: `http://127.0.0.1:${backendAddress.port}`,
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
     });
     const dashboardAddress = dashboard.address();
     if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');

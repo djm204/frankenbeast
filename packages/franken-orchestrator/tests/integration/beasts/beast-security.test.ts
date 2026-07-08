@@ -18,6 +18,9 @@ import {
   BEAST_OPERATOR_TOKEN,
 } from '../__fixtures__/operator-test-tokens.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/beast-security');
 
@@ -53,7 +56,9 @@ function createSecuredApp(rateLimitMax = 1) {
       interviews: new BeastInterviewService(repository, catalog),
       metrics,
       security: new TransportSecurityService(),
-      operatorToken: BEAST_OPERATOR_TOKEN,
+
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+
       eventBus: new BeastEventBus(),
       ticketStore: new SseConnectionTicketStore(),
       rateLimit: {
@@ -80,7 +85,9 @@ describe('beast route security', () => {
   it('rate limits repeated dispatch attempts', async () => {
     const app = createSecuredApp(1);
     const headers = {
-      authorization: ['Bearer', BEAST_OPERATOR_TOKEN].join(' '),
+
+      authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+
       'content-type': 'application/json',
     };
 

@@ -22,6 +22,9 @@ import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-po
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/http-chat');
 
@@ -57,7 +60,7 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['http://127.0.0.1:5173'],
     });
 
@@ -78,7 +81,7 @@ describe('Chat HTTP Routes', () => {
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'http://127.0.0.1:5173',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -91,7 +94,7 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['http://127.0.0.1:5173'],
     });
 
@@ -111,7 +114,7 @@ describe('Chat HTTP Routes', () => {
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'https://evil.example',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -125,14 +128,14 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['*'],
     });
 
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'https://dashboard.example',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -314,7 +317,7 @@ describe('Chat HTTP Routes', () => {
         agents,
         metrics,
         security: new TransportSecurityService(),
-        operatorToken: 'operator-token',
+        operatorToken: TEST_OPERATOR_TOKEN,
         eventBus: new BeastEventBus(),
         ticketStore: new SseConnectionTicketStore(),
         rateLimit: {
@@ -326,7 +329,7 @@ describe('Chat HTTP Routes', () => {
 
     const authHeaders = {
       'Content-Type': 'application/json',
-      authorization: 'Bearer operator-token',
+      authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
     };
 
     const createRes = await app.request('/v1/chat/sessions', {
@@ -373,7 +376,7 @@ describe('Chat HTTP Routes', () => {
     expect(dispatchBody.data.outcome.content).toContain('running');
 
     const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`, {
-      headers: { authorization: 'Bearer operator-token' },
+      headers: { authorization: `Bearer ${TEST_OPERATOR_TOKEN}` },
     });
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript.some((message: { content: string }) => message.content.includes('Ship Beast monitoring'))).toBe(true);
@@ -381,7 +384,7 @@ describe('Chat HTTP Routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
     const runsBody = await runsResponse.json();
@@ -1294,23 +1297,23 @@ describe('Chat HTTP Routes', () => {
     });
 
     it('rejects unauthenticated chat requests when an operator token is configured', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/v1/chat/sessions', { method: 'POST', body: '{}' });
       expect(res.status).toBe(401);
     });
 
     it('accepts chat requests with a valid bearer operator token', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/v1/chat/sessions', {
         method: 'POST',
-        headers: { authorization: 'Bearer secret-op-token', 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${TEST_OPERATOR_TOKEN}`, 'content-type': 'application/json' },
         body: '{}',
       });
       expect(res.status).not.toBe(401);
     });
 
     it('keeps /health public', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/health');
       expect(res.status).toBe(200);
     });

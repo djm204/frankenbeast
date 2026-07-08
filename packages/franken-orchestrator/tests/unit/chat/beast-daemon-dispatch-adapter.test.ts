@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BeastDaemonDispatchAdapter } from '../../../src/chat/beast-daemon-dispatch-adapter.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DAEMON_TOKEN = testCredential('TEST_DAEMON_TOKEN');
 const definitions = [
   { id: 'martin-loop', label: 'Martin Loop' },
 ];
@@ -59,7 +62,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     const interview = await adapter.handle('spawn a martin beast', {
@@ -87,7 +90,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     });
     for (const call of fetchMock.mock.calls) {
       const headers = new Headers(call[1]?.headers);
-      expect(headers.get('authorization')).toBe('Bearer daemon-token');
+      expect(headers.get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
     }
   });
 
@@ -96,7 +99,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     await expect(adapter.handle('hello there', {
