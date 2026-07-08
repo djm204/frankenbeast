@@ -110,6 +110,30 @@ describe('GovernorAdapter', () => {
     });
   });
 
+  it('reprices zero-cost rows before grouping budget status by model', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    const db = new Database(dbPath);
+    const insert = db.prepare(`
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    insert.run('sess-known-legacy', 'gpt-4o', 1_000_000, 1_000_000, 0);
+    insert.run('sess-known-explicit', 'gpt-4o', 0, 0, 3.5);
+    insert.run('sess-unknown-legacy', 'new-model-not-in-pricing', 1000, 500, 0);
+    insert.run('sess-unknown-explicit', 'new-model-not-in-pricing', 0, 0, 1.25);
+    db.close();
+
+    await expect(governor.budgetStatus()).resolves.toEqual({
+      totalSpendUsd: 24.75,
+      byModel: [
+        { model: 'gpt-4o', costUsd: 23.5 },
+        { model: 'new-model-not-in-pricing', costUsd: 1.25, unknownModel: true },
+      ],
+    });
+  });
+
   it('marks zero-cost unknown model rows in budget status', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

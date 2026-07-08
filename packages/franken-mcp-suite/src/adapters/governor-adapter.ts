@@ -187,27 +187,32 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
     async budgetStatus() {
       const rows = store.db.prepare(`
-        SELECT model, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as total_cost
+        SELECT model, prompt_tokens, completion_tokens, cost_usd
         FROM cost_ledger
-        GROUP BY model
-      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; total_cost: number }>;
+      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; cost_usd: number }>;
 
-      const byModel = rows.map((row) => {
+      const grouped = new Map<string, { model: string; costUsd: number; unknownModel?: boolean }>();
+
+      for (const row of rows) {
         const hasPricing = DEFAULT_PRICING[row.model] !== undefined;
-        const costUsd = row.total_cost > 0
-          ? row.total_cost
+        const costUsd = row.cost_usd > 0
+          ? row.cost_usd
           : costCalculator.calculate({
               model: row.model,
               promptTokens: row.prompt_tokens,
               completionTokens: row.completion_tokens,
             });
+        const current = grouped.get(row.model) ?? { model: row.model, costUsd: 0 };
 
-        return {
-          model: row.model,
-          costUsd,
-          ...(hasPricing || row.total_cost > 0 ? {} : { unknownModel: true }),
-        };
-      });
+        current.costUsd += costUsd;
+        if (row.cost_usd <= 0 && !hasPricing) {
+          current.unknownModel = true;
+        }
+
+        grouped.set(row.model, current);
+      }
+
+      const byModel = Array.from(grouped.values());
 
       return {
         totalSpendUsd: byModel.reduce((sum, row) => sum + row.costUsd, 0),
