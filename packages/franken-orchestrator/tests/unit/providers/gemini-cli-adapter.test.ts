@@ -143,6 +143,15 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'text', content: 'world\n\n' });
     });
 
+    it('fails closed when Gemini message_stop arrives without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'gemini stream completed without parseable text', retryable: true });
+    });
+
     it('ignores Gemini tool result output before final result text', async () => {
       mockSpawn([
         JSON.stringify({ type: 'tool_result', output: 'raw tool stdout' }),

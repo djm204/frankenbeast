@@ -195,6 +195,22 @@ describe('ClaudeCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'text', content: 'done' });
     });
 
+    it('preserves Claude assistant-frame whitespace and usage', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            usage: { input_tokens: 12, output_tokens: 6 },
+            content: [{ type: 'text', text: '  formatted answer\n' }],
+          },
+        }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: '  formatted answer\n' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } });
+    });
+
     it('ignores Claude user tool-result frames before the final result', async () => {
       mockSpawn([
         JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'secret tool stdout' }] } }),

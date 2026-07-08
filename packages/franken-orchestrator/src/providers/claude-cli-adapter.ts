@@ -253,6 +253,11 @@ export class ClaudeCliAdapter implements ILlmProvider {
         }
       } else if (type === 'assistant') {
         const message = parsed['message'] as Record<string, unknown> | undefined;
+        const usage = message?.['usage'] as Record<string, number> | undefined;
+        if (usage) {
+          totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
+          totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+        }
         const content = (message?.['content'] ?? parsed['content']) as unknown;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -270,8 +275,8 @@ export class ClaudeCliAdapter implements ILlmProvider {
         }
         const parts: string[] = [];
         tryExtractTextFromNode(content ?? message ?? parsed, parts);
-        const text = parts.join('').trim();
-        if (text.length > 0) {
+        const text = parts.join('');
+        if (text.trim().length > 0) {
           yield { type: 'text', content: text };
           emittedText = true;
         }

@@ -289,6 +289,14 @@ export class GeminiCliAdapter implements ILlmProvider {
         }
       } else if (type === 'message_stop') {
         sawTerminalFrame = true;
+        if (!emittedText) {
+          yield {
+            type: 'error',
+            error: 'gemini stream completed without parseable text',
+            retryable: true,
+          };
+          return;
+        }
         yield {
           type: 'done',
           usage: {
