@@ -106,4 +106,38 @@ describe('BeastDaemonDispatchAdapter', () => {
     })).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('propagates daemon catalog failures for launch requests', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: 'unauthorized' }, { status: 401, statusText: 'Unauthorized' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+
+    await expect(adapter.handle('spawn a martin beast', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+    })).rejects.toThrow('Beast daemon request failed: 401 Unauthorized');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null for launch requests only after a reachable daemon has no matching definition', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: [{ id: 'chunk-plan', label: 'Chunk Plan' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: 'daemon-token',
+    });
+
+    await expect(adapter.handle('spawn a martin beast', {
+      projectId: 'project',
+      sessionId: 'session-1',
+      transcript: [],
+    })).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
