@@ -63,10 +63,16 @@ export class GeminiCliAdapter implements ILlmProvider {
 
     this.removeManagedGeminiMd();
     this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
-    const args = [...this.buildArgs(request), '--include-directories', workspaceDir];
+    const settingsPath = join(promptWorkingDir, 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ context: { loadMemoryFromIncludeDirectories: true } }),
+    );
+    const args = [...this.buildArgs(request), '--include-directories', promptWorkingDir];
     try {
       const proc = spawn(this.binaryPath, args, {
-        cwd: promptWorkingDir,
+        cwd: workspaceDir,
+        env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
