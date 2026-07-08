@@ -13,6 +13,10 @@ function tmpDir(): string {
   return dir;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 describe('fbeast init', () => {
   const dirs: string[] = [];
 
@@ -444,9 +448,11 @@ describe('fbeast init', () => {
     expect(config).not.toContain('fbeast_memory_store');
   });
 
-  it('writes Codex hooks.json when --client=codex --hooks', () => {
-    const root = tmpDir();
-    dirs.push(root);
+  it('writes shell-quoted Codex hooks.json commands when --client=codex --hooks', () => {
+    const parent = tmpDir();
+    dirs.push(parent);
+    const root = join(parent, `project with spaces & semi;quote's`);
+    mkdirSync(root, { recursive: true });
     const mockSpawn = () => ({ status: 0 });
 
     runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
@@ -465,7 +471,8 @@ describe('fbeast init', () => {
     expect(Array.isArray(hooks.hooks?.PostToolUse)).toBe(true);
     const preEntry = hooks.hooks.PreToolUse[0];
     expect(preEntry.matcher).toBe('*');
-    expect(preEntry.hooks[0].command).toBe(preScript);
+    expect(preEntry.hooks[0].command).toBe(shellQuote(preScript));
+    expect(hooks.hooks.PostToolUse[0].hooks[0].command).toBe(shellQuote(postScript));
     expect(readFileSync(preScript, 'utf-8')).toContain('fbeast-hook pre-tool');
   });
 });

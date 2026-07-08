@@ -343,11 +343,11 @@ function writeCodexHooks(root: string, scripts: { preTool: string; postTool: str
     ...existingHooks,
     PreToolUse: [
       ...preToolUse,
-      { matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] },
+      { matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] },
     ],
     PostToolUse: [
       ...postToolUse,
-      { matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] },
+      { matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] },
     ],
   };
 
