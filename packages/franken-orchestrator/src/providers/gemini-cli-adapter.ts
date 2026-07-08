@@ -23,7 +23,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir, platform, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
@@ -59,18 +59,15 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const workspaceDir = resolve(this.workingDir);
-    const settingsWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-settings-')));
-    const contextFileName = `FRANKENBEAST_CONTEXT_${process.pid}_${Date.now()}.md`;
-    const contextPath = join(workspaceDir, contextFileName);
+    const contextWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
 
     try {
       this.removeManagedGeminiMd();
-      this.writeGeminiMd(request.systemPrompt, undefined, workspaceDir, contextFileName);
-      const settingsPath = this.writeTemporarySettings(settingsWorkingDir, contextFileName, workspaceDir);
-      const args = this.buildArgs(request);
+      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
+      const args = this.buildArgs(request, workspaceDir);
       const proc = spawn(this.binaryPath, args, {
-        cwd: workspaceDir,
-        env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
+        cwd: contextWorkingDir,
+        env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -84,8 +81,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       yield* this.parseStream(proc);
     } finally {
-      rmSync(contextPath, { force: true });
-      rmSync(settingsWorkingDir, { recursive: true, force: true });
+      rmSync(contextWorkingDir, { recursive: true, force: true });
     }
   }
 
@@ -158,8 +154,11 @@ export class GeminiCliAdapter implements ILlmProvider {
     return this.options.workingDir ?? process.cwd();
   }
 
-  buildArgs(_request: LlmRequest): string[] {
+  buildArgs(_request: LlmRequest, includeDirectory?: string): string[] {
     const args = ['-p', '', '--output-format', 'stream-json'];
+    if (includeDirectory) {
+      args.push('--include-directories', includeDirectory);
+    }
     if (this.options.model) {
       args.push('-m', this.options.model);
     }
@@ -210,83 +209,19 @@ export class GeminiCliAdapter implements ILlmProvider {
     const endIdx = existing.indexOf(MANAGED_END);
     if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return;
 
-    const next = (existing.slice(0, startIdx) + existing.slice(endIdx + MANAGED_END.length)).trim();
+    const before = existing.slice(0, startIdx);
+    let after = existing.slice(endIdx + MANAGED_END.length);
+    if (before.endsWith('\n') && after.startsWith('\n')) {
+      after = after.slice(1);
+    }
+    const next = before + after;
     if (next) {
-      this.writeFileAtomically(geminiMdPath, `${next}\n`);
+      this.writeFileAtomically(geminiMdPath, next);
     } else if (this.isSymlink(geminiMdPath)) {
       this.writeFileAtomically(geminiMdPath, '');
     } else {
       unlinkSync(geminiMdPath);
     }
-  }
-
-  private writeTemporarySettings(targetDir: string, contextFileName: string, workspaceDir: string): string {
-    const settingsPath = join(targetDir, 'settings.json');
-    const existingSettings = this.readExistingSystemSettings();
-    const existingContext = this.asRecord(existingSettings['context']);
-    const nextSettings = {
-      ...existingSettings,
-      context: {
-        ...existingContext,
-        fileName: this.collectContextFileNames(existingContext['fileName'], contextFileName, workspaceDir),
-      },
-    };
-    writeFileSync(settingsPath, JSON.stringify(nextSettings));
-    return settingsPath;
-  }
-
-  private readExistingSystemSettings(): Record<string, unknown> {
-    const explicitPath = process.env['GEMINI_CLI_SYSTEM_SETTINGS_PATH'];
-    const existingPath = explicitPath || this.defaultSystemSettingsPath();
-    if (!existingPath || !existsSync(existingPath)) return {};
-    return this.readSettingsFile(existingPath);
-  }
-
-  private defaultSystemSettingsPath(): string | undefined {
-    switch (platform()) {
-      case 'darwin':
-        return '/Library/Application Support/GeminiCli/settings.json';
-      case 'win32':
-        return 'C:\\ProgramData\\gemini-cli\\settings.json';
-      default:
-        return '/etc/gemini-cli/settings.json';
-    }
-  }
-
-  private collectContextFileNames(
-    systemFileName: unknown,
-    contextFileName: string,
-    workspaceDir: string,
-  ): string[] {
-    const names = [
-      'GEMINI.md',
-      ...this.toContextFileNames(systemFileName),
-      ...this.toContextFileNames(this.asRecord(this.readSettingsFile(join(homedir(), '.gemini', 'settings.json'))['context'])['fileName']),
-      ...this.toContextFileNames(this.asRecord(this.readSettingsFile(join(workspaceDir, '.gemini', 'settings.json'))['context'])['fileName']),
-      contextFileName,
-    ];
-    return [...new Set(names.filter((name) => name.trim()))];
-  }
-
-  private toContextFileNames(value: unknown): string[] {
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
-    return typeof value === 'string' ? [value] : [];
-  }
-
-  private readSettingsFile(path: string): Record<string, unknown> {
-    if (!existsSync(path)) return {};
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-      return this.asRecord(parsed);
-    } catch {
-      return {};
-    }
-  }
-
-  private asRecord(value: unknown): Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
   }
 
   private writeFileAtomically(path: string, content: string): void {
