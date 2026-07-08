@@ -214,9 +214,10 @@ describe('fbeast main CLI', () => {
       // process.exit throws in test
     }
 
+    const commandLine = `"${shimPath}" "network" "up" "name^&whoami" "100%%literal%%" "C:\\tmp\\\\" "with space"`;
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'C:\\Windows\\System32\\cmd.exe',
-      ['/d', '/c', `"${shimPath}" "network" "up" "name^&whoami" "100^%literal^%" "C:\\tmp\\\\" "with space"`],
+      ['/d', '/s', '/c', `"${commandLine}"`],
       expect.objectContaining({ stdio: 'inherit', shell: false, windowsVerbatimArguments: true }),
     );
     mockExit.mockRestore();
@@ -250,6 +251,12 @@ describe('fbeast main CLI', () => {
   it('maps Windows missing mcp beast handoff binary output to standalone install help', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir());
+    const binDir = tmpDir();
+    const shimPath = join(binDir, 'frankenbeast.CMD');
+    writeFileSync(shimPath, '@echo off\r\n');
+    vi.stubEnv('PATH', binDir);
+    vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD');
+    vi.stubEnv('ComSpec', 'C:\\Windows\\System32\\cmd.exe');
     const enoent: NodeJS.ErrnoException = Object.assign(new Error('spawn frankenbeast ENOENT'), { code: 'ENOENT' });
     const mockSpawnSync = vi.fn().mockReturnValue({
       status: null,
@@ -267,10 +274,11 @@ describe('fbeast main CLI', () => {
     await import('./main.js');
 
     const message = mockLog.mock.calls.map((c) => c.join(' ')).join('\n');
+    const commandLine = `"${shimPath}" "beasts" "catalog"`;
     expect(mockSpawnSync).toHaveBeenCalledWith(
-      'frankenbeast',
-      ['beasts', 'catalog'],
-      expect.objectContaining({ stdio: 'pipe', shell: false, encoding: 'utf8' }),
+      'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', `"${commandLine}"`],
+      expect.objectContaining({ stdio: 'pipe', shell: false, encoding: 'utf8', windowsVerbatimArguments: true }),
     );
     expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');

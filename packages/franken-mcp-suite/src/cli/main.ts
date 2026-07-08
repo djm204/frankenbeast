@@ -84,7 +84,7 @@ function quoteCmdArg(arg: string): string {
   }
 
   quoted += `${'\\'.repeat(backslashes * 2)}"`;
-  return quoted.replace(/[\^&|<>()%!]/g, (char) => `^${char}`);
+  return quoted.replace(/%/g, '%%').replace(/[\^&|<>()!]/g, (char) => `^${char}`);
 }
 
 function isWindowsShellShim(command: string): boolean {
@@ -100,7 +100,7 @@ function resolveCommand(command: string, args: string[]): ResolvedCommand {
 
   const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
   const commandLine = [executable, ...args].map(quoteCmdArg).join(' ');
-  return { command: comspec, args: ['/d', '/c', commandLine], windowsVerbatimArguments: true };
+  return { command: comspec, args: ['/d', '/s', '/c', `"${commandLine}"`], windowsVerbatimArguments: true };
 }
 
 function resolveClient(): McpClient {
@@ -237,7 +237,7 @@ switch (subcommand) {
           resolved.command,
           resolved.args,
           process.platform === 'win32'
-            ? { stdio: 'pipe', shell: false, encoding: 'utf8' }
+            ? { stdio: 'pipe', shell: false, encoding: 'utf8', windowsVerbatimArguments: resolved.windowsVerbatimArguments }
             : { stdio: 'inherit', shell: false },
         );
         if (result.error) {
