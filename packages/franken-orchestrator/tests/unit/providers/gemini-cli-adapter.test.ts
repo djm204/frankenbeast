@@ -92,6 +92,7 @@ describe('GeminiCliAdapter', () => {
         const settingsPath = (adapter as unknown as { writeContextSettings(dir: string): string }).writeContextSettings(tempDir);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
+          server: 'https://example.com/gemini',
           context: { fileName: 'GEMINI.md', loadMemoryFromIncludeDirectories: true },
         });
       } finally {
