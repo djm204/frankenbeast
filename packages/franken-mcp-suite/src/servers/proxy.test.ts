@@ -145,7 +145,7 @@ describe('proxy server', () => {
 
         await relativeExecuteTool.handler({ tool: 'test_tool', args: { key: 'val' } });
 
-        expect(mockCreateAdapterSet).toHaveBeenCalledWith('.fbeast/beast.db', { root: projectRoot });
+        expect(mockCreateAdapterSet).toHaveBeenCalledWith(`${projectRoot}/.fbeast/beast.db`, { root: projectRoot });
       } finally {
         process.chdir(originalCwd);
         await import('node:fs').then(({ rmSync }) => rmSync(projectRoot, { recursive: true, force: true }));

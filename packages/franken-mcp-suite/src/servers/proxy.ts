@@ -44,8 +44,10 @@ export interface ProxyServerDeps {
 }
 
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
-  const { dbPath } = deps;
-  const root = deriveProxyRoot(dbPath, deps.root);
+  const root = deriveProxyRoot(deps.dbPath, deps.root);
+  const dbPath = !isAbsolute(deps.dbPath) && root && basename(dirname(deps.dbPath)) === '.fbeast'
+    ? resolve(root, deps.dbPath)
+    : deps.dbPath;
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding

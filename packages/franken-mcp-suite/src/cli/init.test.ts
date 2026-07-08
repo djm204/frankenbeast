@@ -373,8 +373,14 @@ describe('fbeast init', () => {
       ...JSON.parse(readFileSync(join(globalConfigDir, 'settings.json'), 'utf-8')),
       hooks: {
         PreToolUse: [
-          { matcher: '*', hooks: [{ type: 'command', command: shellQuote(join(rootA, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')) }] },
-          { matcher: '*', hooks: [{ type: 'command', command: '/usr/local/bin/my-pre-hook' }] },
+          {
+            matcher: '*',
+            hooks: [
+              { type: 'command', command: shellQuote(join(rootA, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')) },
+              { type: 'command', command: '/usr/local/bin/my-pre-hook' },
+            ],
+          },
+          { command: 'fbeast-hook pre-tool --db /old/project/.fbeast/beast.db' },
         ],
       },
     };

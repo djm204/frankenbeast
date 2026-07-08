@@ -449,9 +449,29 @@ function stripFbeastHooks(existing: unknown): Record<string, unknown[]> | unknow
   if (!isObjectRecord(existing)) return existing;
   const hooks: Record<string, unknown[]> = {};
   for (const [hookType, value] of Object.entries(existing)) {
-    if (Array.isArray(value)) hooks[hookType] = value.filter((entry) => !isFbeastHook(entry));
+    if (Array.isArray(value)) {
+      hooks[hookType] = value
+        .map(pruneFbeastFromHookEntry)
+        .filter((entry): entry is unknown => entry !== null);
+    }
   }
   return hooks;
+}
+
+function pruneFbeastFromHookEntry(entry: unknown): unknown | null {
+  if (!isObjectRecord(entry)) return entry;
+  if (typeof entry['command'] === 'string') return entry['command'].includes('fbeast') ? null : entry;
+  if (typeof entry['description'] === 'string' && entry['description'].includes('fbeast')) return null;
+
+  const inner = entry['hooks'];
+  if (!Array.isArray(inner)) return entry;
+
+  const remaining = inner.filter((hook) => {
+    if (!isObjectRecord(hook)) return true;
+    return !(typeof hook['command'] === 'string' && hook['command'].includes('fbeast'));
+  });
+  if (remaining.length === 0) return null;
+  return { ...entry, hooks: remaining };
 }
 
 function shellQuote(value: string): string {
