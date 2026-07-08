@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { Socket } from 'node:net';
-import { dirname, join } from 'node:path';
+import { dirname, delimiter, join } from 'node:path';
 import type { ManagedNetworkServiceState } from './network-state-store.js';
 import type { ResolvedNetworkService } from './network-registry.js';
 import type { PreflightServiceResult, StartServiceOptions } from './network-supervisor.js';
@@ -137,21 +137,45 @@ function validateNetworkServiceEnv(service: ResolvedNetworkService): void {
 }
 
 function resolveNpmCliPath(): string {
-  const npmCliPath = join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  if (!existsSync(npmCliPath)) {
+  const npmCliPathCandidates = [
+    join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  const npmCliPath = npmCliPathCandidates.find((candidate) => existsSync(candidate));
+  if (!npmCliPath) {
     throw new Error(`Unable to locate trusted npm CLI next to ${process.execPath}`);
   }
   return npmCliPath;
 }
 
+function deleteUnsafeInheritedProcessEnv(env: NodeJS.ProcessEnv): void {
+  const deniedKeys = new Set([
+    'node_options',
+    'npm_config_node_options',
+    'npm_config_script_shell',
+    'npm_config_userconfig',
+  ]);
+  for (const key of Object.keys(env)) {
+    if (deniedKeys.has(key.toLowerCase())) {
+      delete env[key];
+    }
+  }
+}
+
+function buildNetworkProcessPath(): string {
+  const pathEntries = process.platform === 'win32'
+    ? [dirname(process.execPath)]
+    : [dirname(process.execPath), '/usr/bin', '/bin'];
+  return pathEntries.join(delimiter);
+}
+
 function buildNetworkProcessEnv(processSpecEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.NODE_OPTIONS;
-  delete env.npm_config_node_options;
+  deleteUnsafeInheritedProcessEnv(env);
   return {
     ...env,
     ...processSpecEnv,
-    PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+    PATH: buildNetworkProcessPath(),
   };
 }
 
