@@ -142,6 +142,7 @@ describe('local setup scripts', () => {
     }
 
     expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
     for (const frankenOverride of [
       'FRANKEN_MAX_TOTAL_TOKENS',
       'FRANKEN_MAX_DURATION_MS',
