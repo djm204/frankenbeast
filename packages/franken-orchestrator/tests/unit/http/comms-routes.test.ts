@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../../src/comms/channels/slack/slack-adapter.js', () => ({
@@ -29,6 +30,35 @@ function mockRuntime(): CommsRuntimePort {
   return {
     processInbound: vi.fn().mockResolvedValue({ text: 'ok', status: 'reply' }),
   };
+}
+
+function rawDiscordPublicKey(): string {
+  const { publicKey } = generateKeyPairSync('ed25519');
+  return publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
+}
+
+function enabledWebhookConfig(): CommsConfig {
+  return minimalConfig({
+    channels: {
+      slack: {
+        enabled: true,
+        token: 'xoxb-test',
+        signingSecret: ['test', 'slack', 'signing', 'fixture'].join('-'),
+      },
+      discord: {
+        enabled: true,
+        token: 'discord-bot-token',
+        publicKey: rawDiscordPublicKey(),
+      },
+      whatsapp: {
+        enabled: true,
+        accessToken: 'whatsapp-access-token',
+        phoneNumberId: 'phone-number-id',
+        appSecret: ['test', 'whatsapp', 'app', 'fixture'].join('-'),
+        verifyToken: 'whatsapp-verify-token',
+      },
+    },
+  });
 }
 
 describe('commsRoutes', () => {
@@ -74,6 +104,61 @@ describe('commsRoutes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ accepted: true });
+  });
+
+  it('rejects oversized generic comms inbound JSON before parsing', async () => {
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+    const oversizedBody = JSON.stringify({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'x'.repeat(20 * 1024),
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const res = await app.request('/v1/comms/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(oversizedBody.length) },
+      body: oversizedBody,
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body exceeds 16384 bytes',
+        details: { maxSize: 16384 },
+      },
+    });
+  });
+
+  it('rejects chunked generic comms action JSON without a content length when it exceeds the body limit', async () => {
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+    const oversizedBody = JSON.stringify({
+      channelType: 'slack',
+      sessionId: 's1',
+      actionId: 'approve',
+      padding: 'x'.repeat(20 * 1024),
+    });
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(0, 512)));
+        controller.enqueue(new TextEncoder().encode(oversizedBody.slice(512)));
+        controller.close();
+      },
+    });
+
+    const res = await app.request('/v1/comms/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
   });
 
   it('does not register channel routes when channels are disabled', async () => {
@@ -200,6 +285,86 @@ describe('commsRoutes', () => {
     });
     expect(nowRequired.status).toBe(401);
     expect(await nowRequired.json()).toEqual({ error: 'Missing security headers' });
+  });
+
+  it.each([
+    {
+      channel: 'Slack',
+      path: '/webhooks/slack/events',
+      body: { type: 'url_verification', challenge: 'blocked' },
+      missingError: { error: 'Missing security headers' },
+      corruptHeaders: {
+        'X-Slack-Request-Timestamp': Math.floor(Date.now() / 1000).toString(),
+        'X-Slack-Signature': `v0=${'0'.repeat(64)}`,
+      },
+      corruptError: { error: 'Invalid signature' },
+    },
+    {
+      channel: 'Discord',
+      path: '/webhooks/discord/interactions',
+      body: { type: 1, id: 'interaction-id', token: 'interaction-token', application_id: 'app-id' },
+      missingError: { error: 'Missing security headers or invalid server config' },
+      corruptHeaders: {
+        'X-Signature-Timestamp': Math.floor(Date.now() / 1000).toString(),
+        'X-Signature-Ed25519': '0'.repeat(128),
+      },
+      corruptError: { error: 'Invalid signature' },
+    },
+    {
+      channel: 'WhatsApp',
+      path: '/webhooks/whatsapp/webhook',
+      body: {
+        object: 'whatsapp_business_account',
+        entry: [{
+          id: 'entry-id',
+          changes: [{
+            field: 'messages',
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: { display_phone_number: '123', phone_number_id: '1' },
+              messages: [{
+                from: '123456',
+                id: 'message-id',
+                timestamp: Math.floor(Date.now() / 1000).toString(),
+                type: 'text',
+                text: { body: 'hello' },
+              }],
+            },
+          }],
+        }],
+      },
+      missingError: { error: 'Missing security header' },
+      corruptHeaders: { 'X-Hub-Signature-256': `sha256=${'0'.repeat(64)}` },
+      corruptError: { error: 'Invalid signature' },
+    },
+  ])('rejects unsigned and corrupt $channel webhooks when signature policy is required', async ({
+    path,
+    body,
+    missingError,
+    corruptHeaders,
+    corruptError,
+  }) => {
+    const app = commsRoutes({
+      config: enabledWebhookConfig(),
+      runtime: mockRuntime(),
+      webhookSignaturePolicy: 'required',
+    });
+
+    const unsigned = await app.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(unsigned.status).toBe(401);
+    await expect(unsigned.json()).resolves.toEqual(missingError);
+
+    const corrupt = await app.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...corruptHeaders },
+      body: JSON.stringify(body),
+    });
+    expect(corrupt.status).toBe(401);
+    await expect(corrupt.json()).resolves.toEqual(corruptError);
   });
 
   it('throws when runtime is not provided', () => {

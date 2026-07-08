@@ -7,6 +7,17 @@ function printLine(...args: unknown[]): void {
   console.info(...args);
 }
 const FRANKENBEAST_INSTALL_COMMAND = 'npm install -g @franken/orchestrator';
+const SUPPORTED_BEAST_PROVIDERS = new Set(['anthropic-api', 'codex-cli', 'claude-cli']);
+
+function parseProvider(argv: string[]): string {
+  const provider = argv.find((arg) => arg.startsWith('--provider='))?.split('=')[1] ?? 'anthropic-api';
+  if (!SUPPORTED_BEAST_PROVIDERS.has(provider)) {
+    throw new TypeError(
+      `Unsupported beast provider: ${provider}. Supported providers: anthropic-api, codex-cli, claude-cli`,
+    );
+  }
+  return provider;
+}
 
 export interface BeastModeDeps {
   root: string;
@@ -15,7 +26,7 @@ export interface BeastModeDeps {
 }
 
 export async function runBeastMode(argv: string[], deps: BeastModeDeps): Promise<void> {
-  const provider = argv.find((arg) => arg.startsWith('--provider='))?.split('=')[1] ?? 'anthropic-api';
+  const provider = parseProvider(argv);
 
   const config = existsSync(join(deps.root, '.fbeast', 'config.json'))
     ? FbeastConfig.load(deps.root)

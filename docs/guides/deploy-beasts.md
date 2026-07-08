@@ -22,10 +22,10 @@ The dashboard talks to two local services when run through `frankenbeast network
 
 Use the operator token already configured for the repo, or update the configured token first and then reuse that same value for the backend and Vite dev proxy. In initialized repos, the backend may resolve `network.operatorTokenRef` from the configured secret store before it reads token environment variables, so exporting a throwaway value only for the dashboard proxy can make browser requests fail with 401s.
 
-For a new local-only setup without a stored token, set one shell variable and reuse it for both processes:
+For a new local-only setup without a stored token, generate one shell variable and reuse it for both processes:
 
 ```bash
-export OPERATOR_TOKEN='dev-operator-token'
+export OPERATOR_TOKEN="$(openssl rand -hex 32)"
 export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 ```
 

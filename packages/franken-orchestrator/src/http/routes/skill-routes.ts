@@ -1,6 +1,21 @@
 import { Hono } from 'hono';
+import { ZodError } from 'zod';
 import type { SkillManager } from '../../skills/skill-manager.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
+
+function isSkillInstallValidationError(err: unknown): boolean {
+  return err instanceof ZodError
+    || (err instanceof Error && err.message.startsWith('Invalid skill name '));
+}
+
+function skillInstallErrorMessage(err: unknown): string {
+  if (err instanceof ZodError) {
+    return err.issues
+      .map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`)
+      .join('; ');
+  }
+  return err instanceof Error ? err.message : 'Failed to install skill';
+}
 
 export function createSkillRoutes(deps: {
   skillManager: SkillManager;
@@ -35,18 +50,25 @@ export function createSkillRoutes(deps: {
   app.post('/', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
 
-    if (body['catalogEntry']) {
-      const entry = body['catalogEntry'] as Parameters<
-        SkillManager['install']
-      >[0];
-      await deps.skillManager.install(entry);
-      return c.json({ installed: entry.name }, 201);
-    }
+    try {
+      if (body['catalogEntry']) {
+        const entry = body['catalogEntry'] as Parameters<
+          SkillManager['install']
+        >[0];
+        await deps.skillManager.install(entry);
+        return c.json({ installed: entry.name }, 201);
+      }
 
-    if (body['custom']) {
-      const custom = body['custom'] as { name: string; config: Parameters<SkillManager['installCustom']>[1] };
-      await deps.skillManager.installCustom(custom.name, custom.config);
-      return c.json({ installed: custom.name }, 201);
+      if (body['custom']) {
+        const custom = body['custom'] as { name: string; config: Parameters<SkillManager['installCustom']>[1] };
+        await deps.skillManager.installCustom(custom.name, custom.config);
+        return c.json({ installed: custom.name }, 201);
+      }
+    } catch (err) {
+      if (!isSkillInstallValidationError(err)) {
+        throw err;
+      }
+      return c.json({ error: skillInstallErrorMessage(err) }, 400);
     }
 
     return c.json({ error: 'Must provide catalogEntry or custom' }, 400);

@@ -5,9 +5,7 @@ import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governo
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
-import type { ToolInputSchema } from './server-factory.js';
-
-export type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
   brain: BrainAdapter;
@@ -19,9 +17,11 @@ export interface AdapterSet {
   skills: SkillsAdapter;
 }
 
+export type ToolServer = 'memory' | 'planner' | 'critique' | 'firewall' | 'observer' | 'governor' | 'skills';
+
 interface ToolStub {
   name: string;
-  server: 'memory' | 'planner' | 'critique' | 'firewall' | 'observer' | 'governor' | 'skills';
+  server: ToolServer;
   description: string;
 }
 
@@ -29,6 +29,8 @@ interface ToolFull extends ToolStub {
   inputSchema: ToolInputSchema;
   makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
 }
+
+export type ServerAdapterDeps = Partial<AdapterSet>;
 
 function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined {
   if (value === undefined) return fallback;
@@ -514,6 +516,17 @@ const TOOLS: ToolFull[] = [
 export const TOOL_STUBS: ToolStub[] = TOOLS.map(({ name, server, description }) => ({ name, server, description }));
 
 export const TOOL_REGISTRY: Map<string, ToolFull> = new Map(TOOLS.map((t) => [t.name, t]));
+
+export function createToolDefsForServer(server: ToolServer, adapters: ServerAdapterDeps): ToolDef[] {
+  return TOOLS
+    .filter((tool) => tool.server === server)
+    .map(({ name, description, inputSchema, makeHandler }) => ({
+      name,
+      description,
+      inputSchema,
+      handler: makeHandler(adapters as AdapterSet),
+    }));
+}
 
 export function searchTools(query?: string): ToolStub[] {
   if (!query) return TOOL_STUBS;

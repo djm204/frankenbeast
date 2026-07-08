@@ -18,6 +18,11 @@ export interface HookDeps {
    * rather than stdin is also non-blocking.
    */
   readContext(): string;
+  /**
+   * Reads a streamed post-tool payload. Generated client hook scripts use stdin
+   * for tool responses so large outputs never become argv/env exec payloads.
+   */
+  readPostToolPayload?(): Promise<string>;
 }
 
 export function defaultHookDeps(dbPath?: string): HookDeps {
@@ -51,6 +56,18 @@ export function redactSecrets(text: string): string {
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
 }
 
+async function readStdinPayload(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export async function runHook(
   argv: string[] = process.argv.slice(2),
   deps?: HookDeps,
@@ -59,6 +76,7 @@ export async function runHook(
   // option parsing so any following token (e.g. an untrusted tool name) is never
   // interpreted as a flag.
   let dbPath: string | undefined;
+  let streamPostToolPayload = false;
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -70,6 +88,8 @@ export async function runHook(
       dbPath = argv[++i];
     } else if (arg.startsWith('--db=')) {
       dbPath = arg.slice(5);
+    } else if (arg === '--stdin-payload') {
+      streamPostToolPayload = true;
     } else {
       positionals.push(arg);
     }
@@ -99,9 +119,15 @@ export async function runHook(
   }
 
   if (phase === 'post-tool') {
+    // Generated hook scripts pass --stdin-payload and stream large tool responses
+    // on stdin instead of argv, avoiding ARG_MAX/E2BIG audit bypasses. Keep stdin
+    // opt-in so direct/legacy callers that omit payload keep empty-payload behavior.
+    const streamedPayload = payload === '' && streamPostToolPayload
+      ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
+      : '';
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload, phase }),
+      metadata: JSON.stringify({ toolName, payload: payload || streamedPayload, phase }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');

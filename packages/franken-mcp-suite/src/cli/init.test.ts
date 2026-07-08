@@ -65,14 +65,19 @@ describe('fbeast init', () => {
     expect(settings.mcpServers['fbeast-skills']).toBeDefined();
   });
 
-  it('merges with existing settings.json without overwriting', () => {
+  it('merges with existing settings.json comments and trailing commas without overwriting', () => {
     const root = tmpDir();
     dirs.push(root);
     const claudeDir = join(root, '.claude');
     mkdirSync(claudeDir, { recursive: true });
     const settingsPath = join(claudeDir, 'settings.json');
-    const existing = { mcpServers: { 'my-other-server': { command: 'other' } }, customKey: true };
-    writeFileSync(settingsPath, JSON.stringify(existing));
+    writeFileSync(settingsPath, `{
+      // Existing user-managed MCP server.
+      "mcpServers": {
+        "my-other-server": { "command": "other" },
+      },
+      "customKey": true,
+    }`);
 
     runInit({ root, claudeDir, hooks: false });
 

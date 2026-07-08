@@ -22,6 +22,7 @@ function mockSkillManager(): SkillManager {
     listInstalled: vi.fn().mockReturnValue([
       { name: 'test-skill', enabled: true },
     ]),
+    writeContext: vi.fn(),
   } as unknown as SkillManager;
 }
 
@@ -72,5 +73,25 @@ describe('skill routes mounting in createChatApp', () => {
     // Without providerRegistry, routes should not mount
     const res = await app.request('/api/skills');
     expect(res.status).toBe(404);
+  });
+
+  it('allows skill context writes above the small control API body cap', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const sm = mockSkillManager();
+    const app = createChatApp({
+      ...baseChatOpts(),
+      skillManager: sm,
+      providerRegistry: mockProviderRegistry(),
+    });
+
+    const content = '# Context\n' + 'x'.repeat(20 * 1024);
+    const res = await app.request('/api/skills/test-skill/context', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(sm.writeContext).toHaveBeenCalledWith('test-skill', content);
   });
 });

@@ -1,10 +1,17 @@
 import type { BeastDispatchSource } from '../types.js';
 import type { BeastMetrics } from './beast-metrics.js';
 
+function escapeLabelValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/"/g, '\\"');
+}
+
 function key(parts: Record<string, string>): string {
   return Object.entries(parts)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, value]) => `${name}="${value}"`)
+    .map(([name, value]) => `${name}="${escapeLabelValue(value)}"`)
     .join(',');
 }
 

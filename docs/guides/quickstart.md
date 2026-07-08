@@ -29,7 +29,9 @@ npm run audit:security
 
 ```bash
 cp .env.example .env
-# Edit .env with provider API keys or local runtime settings as needed.
+# Edit .env with provider API keys or local runtime settings as needed:
+#   ANTHROPIC_API_KEY for Claude, OPENAI_API_KEY for OpenAI,
+#   or GOOGLE_API_KEY / GEMINI_API_KEY for Gemini.
 # Before starting the full Docker stack, uncomment GRAFANA_USER=admin and set a
 # unique GRAFANA_PASSWORD; Grafana refuses the old admin/admin default pair.
 ```
@@ -45,6 +47,9 @@ This starts the services defined in `docker-compose.yml`:
 - **ChromaDB** (port 8000)
 - **Grafana** (port 3000)
 - **Tempo** (ports 3200, 4317, 4318)
+
+The compose stack pins image versions and mounts `tempo.yaml` into Tempo so the
+optional tracing backend does not depend on floating tags or an implicit config.
 
 There is no `firewall` Docker service in the current compose file.
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.6.13](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.12...franken-critique-v0.6.13) (2026-07-08)
+
+
+### Bug Fixes
+
+* **critique:** harden logic-loop syntax masking ([#925](https://github.com/djm204/frankenbeast/issues/925)) ([bf2f0dc](https://github.com/djm204/frankenbeast/commit/bf2f0dc28c5115539e627f3bb15a751c84436d29))
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+## [0.6.12](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.11...franken-critique-v0.6.12) (2026-07-07)
+
+
+### Bug Fixes
+
+* **critique:** ignore inert source text in evaluators ([#863](https://github.com/djm204/frankenbeast/issues/863)) ([99dbda1](https://github.com/djm204/frankenbeast/commit/99dbda1b9414200f9b54eb4394c09ea03531427e))
+* **orchestrator:** log pr creator fallback errors ([#840](https://github.com/djm204/frankenbeast/issues/840)) ([e49fa8d](https://github.com/djm204/frankenbeast/commit/e49fa8dc89bac80440cf2aee3bd42407b6db2cb7))
+* remove unsafe eval test fixtures in critique tests ([#906](https://github.com/djm204/frankenbeast/issues/906)) ([d0f13fc](https://github.com/djm204/frankenbeast/commit/d0f13fc2fed79a55040cd5a569444b6ee65f29e0))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### CI/CD
+
+* add publish-smoke + workspace-dep guards to lock the boundary ([#860](https://github.com/djm204/frankenbeast/issues/860)) ([1e64b6f](https://github.com/djm204/frankenbeast/commit/1e64b6f65852302f416fac864748a47636c4f21a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.6.11](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.10...franken-critique-v0.6.11) (2026-07-06)
 
 

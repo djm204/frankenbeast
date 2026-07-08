@@ -22,13 +22,112 @@ describe('ComplexityEvaluator', () => {
     expect(result.score).toBeGreaterThan(0.5);
   });
 
+  it('ignores braces and nested patterns inside comments', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function sample(value: boolean) {\n  // if (value) {\n  //   doThing();\n  // }\n  return value ? 'ok' : 'skip';\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('ignores braces in string literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function sample(value: boolean) {\n  const marker = '{ { { { {';\n  const other = "{ }";\n  return value ? marker : other;\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('preserves active code inside template literal interpolations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'function sample() {\n  return `${(() => { if (a) { if (b) { if (c) { if (d) { work(); } } } } })()}`;\n}';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not let regex literals hide later active code', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const pattern = /[/*]/;\nif (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('recognizes regex literals after keywords', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function check(source) { return /[/*]/.test(source); }\nif (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('recognizes awaited regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `async function check(source) { await /[//]/.test(source); if (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat division after postfix operators as regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const ratio = count++ / total;\nif (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('does not treat JSX closing tags as regex literals', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const el = <div></div>; if (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps template interpolation code after regex braces', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content =
+      'function sample() {\n  return `${/}/.test(source) && (() => { if (a) { if (b) { if (c) { if (d) { work(); } } } } })()}`;\n}';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
   });
 
   it('flags deeply nested code', async () => {
@@ -37,7 +136,9 @@ describe('ComplexityEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
   });
 
   it('flags very long functions', async () => {

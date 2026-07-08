@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
+import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -91,7 +92,7 @@ function initJsonClient(options: {
   const settingsPath = join(claudeDir, 'settings.json');
   let settings: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
-    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
   }
 
   // Add MCP server entries
@@ -122,7 +123,7 @@ function initJsonClient(options: {
     }
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  writeJsonFileAtomic(settingsPath, settings);
 
   printLine(`fbeast initialized in ${root}`);
   printLine(`  Config:     ${config.configPath}`);

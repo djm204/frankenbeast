@@ -16,13 +16,16 @@ export function SkillCatalogBrowser({ skills, onToggle }: SkillCatalogBrowserPro
   return (
     <div className="skill-catalog">
       <div className="skill-catalog__search">
-        <input
-          type="text"
-          placeholder="Filter skills..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="field-control"
-        />
+        <label className="field-stack">
+          <span>Filter skills</span>
+          <input
+            type="text"
+            placeholder="Filter skills..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="field-control"
+          />
+        </label>
       </div>
       <div className="skill-catalog__list">
         {filtered.length === 0 && (

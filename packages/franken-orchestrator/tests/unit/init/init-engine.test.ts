@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { runInteractiveInit } from '../../../src/init/init-engine.js';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
 import { createEmptyInitState } from '../../../src/init/init-types.js';
+import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 
 function scriptedIo(...answers: string[]) {
   const prompts: string[] = [];
@@ -93,6 +94,35 @@ describe('runInteractiveInit', () => {
     expect(result.config.comms.enabled).toBe(false);
     expect(prompts.some((prompt) => prompt.includes('Slack'))).toBe(false);
     expect(prompts.some((prompt) => prompt.includes('Discord'))).toBe(false);
+  });
+
+  it('preserves a CLI-provided init secret backend in the saved config', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const { io } = scriptedIo(
+      'n', // chat
+      'y', // dashboard
+      'n', // comms
+      'claude', // provider
+      'secure', // security mode
+    );
+    const baseConfig = defaultConfig();
+
+    const result = await runInteractiveInit({
+      configFile,
+      stateStore,
+      io,
+      baseConfig: {
+        ...baseConfig,
+        network: {
+          ...baseConfig.network,
+          secureBackend: '1password',
+        },
+      },
+    });
+
+    expect(result.config.network.secureBackend).toBe('1password');
   });
 
   it('resumes from saved init state defaults instead of starting from scratch', async () => {

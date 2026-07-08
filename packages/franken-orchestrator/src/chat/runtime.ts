@@ -74,6 +74,10 @@ function stateFromRunResult(runResult: TurnRunResult): string {
   }
 }
 
+export interface ChatRuntimeRunOptions {
+  onEvent?: ((event: TurnEvent) => void) | undefined;
+}
+
 export class ChatRuntime {
   private readonly engine: ConversationEngine;
   private readonly beastDispatchAdapter: BeastDispatchPort | undefined;
@@ -85,22 +89,23 @@ export class ChatRuntime {
     this.turnRunner = options.turnRunner;
   }
 
-  async run(input: string, state: ChatRuntimeState): Promise<ChatRuntimeResult> {
+  async run(input: string, state: ChatRuntimeState, options?: ChatRuntimeRunOptions): Promise<ChatRuntimeResult> {
     const trimmed = input.trim();
     if (trimmed.startsWith('/')) {
       const command = trimmed.split(/\s+/)[0]?.toLowerCase();
       if (command && SLASH_COMMANDS.has(command)) {
-        return this.runSlashCommand(command, trimmed, state);
+        return this.runSlashCommand(command, trimmed, state, options);
       }
     }
 
-    return this.runTurn(trimmed, state);
+    return this.runTurn(trimmed, state, options);
   }
 
   private async runSlashCommand(
     command: string,
     raw: string,
     state: ChatRuntimeState,
+    options?: ChatRuntimeRunOptions,
   ): Promise<ChatRuntimeResult> {
     const description = raw.slice(command.length).trim();
 
@@ -116,7 +121,7 @@ export class ChatRuntime {
           kind: 'plan',
           planSummary: description,
           chunkCount: 0,
-        }, { sessionId: state.sessionId });
+        }, { sessionId: state.sessionId, onEvent: options?.onEvent });
         return this.result(state, [
           { kind: 'plan', content: runResult.summary },
         ], {
@@ -140,6 +145,7 @@ export class ChatRuntime {
           },
           state,
           'premium_execution',
+          options,
         );
       }
       case '/status':
@@ -171,7 +177,11 @@ export class ChatRuntime {
     }
   }
 
-  private async runTurn(input: string, state: ChatRuntimeState): Promise<ChatRuntimeResult> {
+  private async runTurn(
+    input: string,
+    state: ChatRuntimeState,
+    options?: ChatRuntimeRunOptions,
+  ): Promise<ChatRuntimeResult> {
     if (this.beastDispatchAdapter) {
       const beastResult = await this.beastDispatchAdapter.handle(input, {
         projectId: state.projectId,
@@ -248,7 +258,7 @@ export class ChatRuntime {
           },
         );
       case 'execute':
-        return this.runExecuteOutcome(result.outcome, { ...state, transcript }, result.tier);
+        return this.runExecuteOutcome(result.outcome, { ...state, transcript }, result.tier, options);
     }
   }
 
@@ -256,8 +266,12 @@ export class ChatRuntime {
     outcome: ExecuteOutcome,
     state: ChatRuntimeState,
     tier: string,
+    options?: ChatRuntimeRunOptions,
   ): Promise<ChatRuntimeResult> {
-    const runResult = await this.turnRunner.run(outcome, { sessionId: state.sessionId });
+    const runResult = await this.turnRunner.run(outcome, {
+      sessionId: state.sessionId,
+      onEvent: options?.onEvent,
+    });
     const pendingApproval = runResult.status === 'pending_approval';
     const pendingApprovalContext: PendingApprovalContext = {
       tool: 'execution',

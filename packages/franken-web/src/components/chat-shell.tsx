@@ -117,9 +117,8 @@ function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
   return (
     <section className="placeholder-page">
       <p className="eyebrow">Dashboard Module</p>
-      <h1>{route.label}</h1>
+      <h2>{route.label}</h2>
       <p>{route.summary}</p>
-      <span>Chat is the only live section in this first Frankenbeast dashboard cut.</span>
     </section>
   );
 }
@@ -257,6 +256,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const wasSidebarOpenRef = useRef(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
+  const [preserveComposerDraft, setPreserveComposerDraft] = useState(!sessionId);
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
@@ -355,12 +355,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     });
   }, [baseUrl]);
 
+  const composerSessionKey = preserveComposerDraft
+    ? `anonymous:${sessionSeed}`
+    : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+
   useEffect(() => {
-    if (!activeSessionId) {
+    if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
       return;
     }
     setSelectedSessionId(activeSessionId);
-  }, [activeSessionId]);
+  }, [activeSessionId, preserveComposerDraft, selectedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -779,10 +783,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             </button>
 
             <div className="topbar__title">
-              <p className="eyebrow">Project</p>
-              <h1>{activeProjectId}</h1>
+              <p className="eyebrow">Project: {activeProjectId}</p>
+              <h1>{activeRoute.label}</h1>
               <p className="topbar__summary">
-                <span>{activeRoute.label}</span>
                 <span>{activeRoute.summary}</span>
               </p>
             </div>
@@ -830,6 +833,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                       disabled={chatSessionsLoading}
                       onChange={(event) => {
                         const nextId = event.target.value.trim();
+                        setPreserveComposerDraft(false);
                         setSelectedSessionId(nextId || undefined);
                       }}
                       value={selectedSessionId ?? ''}
@@ -871,6 +875,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   <button
                     className="button button--secondary"
                     onClick={() => {
+                      setPreserveComposerDraft(true);
                       setSelectedSessionId(undefined);
                       setSessionSeed((current) => current + 1);
                     }}
@@ -913,6 +918,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
+                key={composerSessionKey}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
                 disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}

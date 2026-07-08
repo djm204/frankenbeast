@@ -40,7 +40,7 @@ export function NetworkPage({
       <section className="network-page__header rail-card">
         <div>
           <p className="eyebrow">Operator Control</p>
-          <h2>Network</h2>
+          <h2>Service controls</h2>
         </div>
         <button className="button button--secondary" type="button" onClick={onRefresh}>Refresh</button>
       </section>

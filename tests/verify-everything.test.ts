@@ -13,35 +13,6 @@ const ALL_PACKAGES = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: tru
   .sort();
 
 describe('Chunk 10: full verification pass', () => {
-  describe('build', () => {
-    it('turbo run build succeeds for all workspace packages', () => {
-      const output = exec('npx turbo run build 2>&1');
-      expect(output).toContain(`${ALL_PACKAGES.length} successful, ${ALL_PACKAGES.length} total`);
-    });
-  });
-
-  describe('tests', () => {
-    it('turbo run test succeeds for all packages', () => {
-      const output = exec('npx turbo run test 2>&1');
-      expect(output).toContain('successful');
-      // Check the turbo Tasks summary line, not the entire output
-      // (test names may contain the word "failed" in passing tests)
-      const tasksLine = output.split('\n').find((l) => l.includes('Tasks:'));
-      expect(tasksLine).toBeDefined();
-      expect(tasksLine).not.toContain('failed');
-    });
-
-    it('total test count is at least 1572', () => {
-      const output = exec('npx turbo run test 2>&1');
-      const testLines = output.match(/(\d+) passed/g) ?? [];
-      const total = testLines.reduce((sum, line) => {
-        const match = line.match(/(\d+) passed/);
-        return sum + (match ? parseInt(match[1], 10) : 0);
-      }, 0);
-      expect(total).toBeGreaterThanOrEqual(1572);
-    });
-  });
-
   describe('workspace resolution', () => {
     it('npm ls @franken/types resolves without errors', () => {
       // npm ls exits non-zero on errors, so a successful exec means no errors

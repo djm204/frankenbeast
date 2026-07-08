@@ -1,11 +1,36 @@
+import { constants as fsConstants } from 'node:fs'
 import * as fs from 'node:fs/promises'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { join, resolve } from 'node:path'
+import { resolveContainedPath } from '@franken/types/path-containment'
 import type { Trace } from '../core/types.js'
 import type { InterruptSignal } from './InterruptEmitter.js'
 
 export interface PostMortemOptions {
   /** Directory where post-mortem files are written. Default: './post-mortems' */
   outputDir?: string
+}
+
+function traceIdHashForFilename(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+function timestampForFilename(timestamp: number): string {
+  return Number.isFinite(timestamp) ? String(Math.trunc(timestamp)) : 'invalid-timestamp'
+}
+
+async function writeNewReportFile(filePath: string, content: string): Promise<void> {
+  const fileHandle = await fs.open(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o600,
+  )
+
+  try {
+    await fileHandle.writeFile(content, 'utf-8')
+  } finally {
+    await fileHandle.close()
+  }
 }
 
 /**
@@ -23,7 +48,9 @@ export class PostMortemGenerator {
   }
 
   generateContent(trace: Trace, signal: InterruptSignal): string {
-    const detectedAt = new Date(signal.timestamp).toISOString()
+    const detectedAt = Number.isFinite(signal.timestamp)
+      ? new Date(signal.timestamp).toISOString()
+      : 'Invalid timestamp'
     const patternList = signal.detectedPattern.map(p => `  - \`${p}\``).join('\n')
 
     const spansTable = trace.spans
@@ -79,19 +106,23 @@ without reaching a terminal condition. Possible causes:
    * the post-mortem was meant to diagnose.
    */
   async generate(trace: Trace, signal: InterruptSignal): Promise<string | null> {
-    const timestamp = signal.timestamp
-    const filename = `post-mortem-${trace.id}-${timestamp}.md`
-    const filePath = join(this.outputDir, filename)
+    const timestamp = timestampForFilename(signal.timestamp)
+    const filename = `post-mortem-${traceIdHashForFilename(trace.id)}-${timestamp}.md`
+    const configuredFilePath = join(this.outputDir, filename)
     const content = this.generateContent(trace, signal)
+
+    let writeFilePath = resolve(this.outputDir, filename)
 
     try {
       await fs.mkdir(this.outputDir, { recursive: true })
-      await fs.writeFile(filePath, content, 'utf-8')
-      return filePath
+      writeFilePath = resolveContainedPath(this.outputDir, filename, 'postMortemPath')
+
+      await writeNewReportFile(writeFilePath, content)
+      return configuredFilePath
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       console.warn(
-        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${filePath}: ${reason}. Continuing without persisting the report.`,
+        `[PostMortemGenerator] Failed to write post-mortem for trace ${trace.id} to ${writeFilePath}: ${reason}. Continuing without persisting the report.`,
       )
       return null
     }

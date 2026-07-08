@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Hono } from 'hono';
 import { SkillManager } from '../../../src/skills/skill-manager.js';
 import { createSkillRoutes } from '../../../src/http/routes/skill-routes.js';
+import { errorHandler } from '../../../src/http/middleware.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
 function mockProviderRegistry(): ProviderRegistry {
@@ -123,6 +124,50 @@ describe('Skill API routes', () => {
       });
       expect(res.status).toBe(201);
       expect(manager.exists('my-tool')).toBe(true);
+    });
+
+    it('rejects invalid custom MCP configs without poisoning the skills list', async () => {
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: { name: 'broken-tool', config: { command: 'node', args: [123] } },
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('mcpServers.broken-tool.args.0');
+      expect(existsSync(join(skillsDir, 'broken-tool', 'mcp.json'))).toBe(false);
+
+      const listRes = await app.request('/api/skills');
+      expect(listRes.status).toBe(200);
+      const listBody = await listRes.json();
+      expect(listBody.skills).toEqual([]);
+    });
+
+    it('propagates operational install failures to the error handler', async () => {
+      const failingManager = {
+        installCustom: vi.fn().mockRejectedValue(new Error('EACCES: permission denied')),
+      } as unknown as SkillManager;
+      const failingApp = new Hono();
+      failingApp.onError(errorHandler);
+      failingApp.route('/api/skills', createSkillRoutes({
+        skillManager: failingManager,
+        providerRegistry: mockProviderRegistry(),
+      }));
+
+      const res = await failingApp.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: { name: 'valid-tool', config: { command: 'node' } },
+        }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error.code).toBe('INTERNAL_ERROR');
+      expect(JSON.stringify(body)).not.toContain('EACCES');
     });
 
     it('returns 400 when neither provided', async () => {

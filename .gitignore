@@ -26,3 +26,4 @@ dist
 /franken-types
 /frankenfirewall
 .env
+.env.test

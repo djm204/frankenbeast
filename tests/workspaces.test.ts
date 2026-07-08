@@ -47,6 +47,11 @@ describe('npm workspaces configuration', () => {
       expect(isAtLeast(rootPkg.overrides.vite, '8.1.3')).toBe(true);
     });
 
+    it('pins Anthropic SDK above the vulnerable memory-tool advisory ranges', () => {
+      expect(rootPkg.overrides?.['@anthropic-ai/sdk']).toBeDefined();
+      expect(isAtLeast(rootPkg.overrides['@anthropic-ai/sdk'], '0.110.0')).toBe(true);
+    });
+
     it('keeps Turbo above the local execution/session advisory range', () => {
       expect(rootPkg.devDependencies?.turbo).toBeDefined();
       expect(isAtLeast(rootPkg.devDependencies.turbo, '2.10.3')).toBe(true);
@@ -145,6 +150,10 @@ describe('npm workspaces configuration', () => {
       for (const [packageName, minimumVersion] of Object.entries(packageFloors)) {
         const lockedEntries = Object.entries(lockfile.packages ?? {})
           .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
+
+        if (packageName === '@anthropic-ai/sdk') {
+          expect(lockedEntries.length, `${packageName} missing from package-lock.json`).toBeGreaterThan(0);
+        }
 
         for (const [path, packageDetails] of lockedEntries) {
           const lockedVersion = (packageDetails as { version?: string }).version;

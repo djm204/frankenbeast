@@ -85,6 +85,8 @@ describe('workspace provisioning', () => {
     expect(existsSync(join(result.workspaceDir, 'package.json'))).toBe(true);
     expect(readFileSync(join(result.workspaceDir, 'src', 'index.js'), 'utf8')).toContain('answer = 42');
     expect(existsSync(result.evidenceDir)).toBe(true);
+    expect(result.toolCallEvidencePath).toBe(join(result.evidenceDir, 'tool-calls.json'));
+    expect(JSON.parse(readFileSync(result.toolCallEvidencePath, 'utf8'))).toEqual([]);
 
     const environment = JSON.parse(readFileSync(result.environmentPath, 'utf8')) as Record<string, unknown>;
     expect(environment).toMatchObject({

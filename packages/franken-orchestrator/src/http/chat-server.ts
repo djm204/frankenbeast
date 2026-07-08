@@ -1,5 +1,4 @@
 import { createServer, type Server as HttpServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -27,6 +26,7 @@ import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } from '../network/network-url.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
+import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -47,6 +47,7 @@ export interface StartChatServerOptions {
     root: string;
     frankenbeastDir: string;
     configFile: string;
+    allowTrustedProviderCommandOverrides?: boolean | undefined;
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
@@ -295,6 +296,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ?? (options.commsConfig
       ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName)
       : undefined);
+  const chatStreamTicketStore = effectiveOperatorToken ? new SseConnectionTicketStore() : undefined;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -312,19 +314,21 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
     ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
     ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+    ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
   });
 
-  attachChatWebSocketServer({
+  const webSocketServer = attachChatWebSocketServer({
     server,
     path,
     runtime: runtime.runtime,
     sessionStore,
     tokenSecret,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+    ...(options.beastControl?.rateLimit ? { chatRateLimit: options.beastControl.rateLimit } : {}),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -351,8 +355,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      webSocketServer.close();
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
+      chatStreamTicketStore?.destroy();
       options.disposeBeastControl?.();
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();

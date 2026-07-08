@@ -21,12 +21,12 @@ describe('Vitest environment flags', () => {
   });
 
   it('rejects unexpected values without echoing raw environment contents', () => {
-    expect(() => readVitestFlag({ E2E: 'secret-token-value' }, 'E2E')).toThrow(
+    const unexpectedValue = 'invalid-redacted-vitest-flag-value';
+
+    expect(() => readVitestFlag({ E2E: unexpectedValue }, 'E2E')).toThrow(
       /E2E must be one of true, false, 1, 0, yes, no, on, or off/u,
     );
-    expect(() => readVitestFlag({ E2E: 'secret-token-value' }, 'E2E')).not.toThrow(
-      /secret-token-value/u,
-    );
+    expect(() => readVitestFlag({ E2E: unexpectedValue }, 'E2E')).not.toThrow(unexpectedValue);
   });
 
   it('keeps direct process environment reads out of the Vitest config', () => {

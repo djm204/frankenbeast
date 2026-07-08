@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useChatSession } from '../../src/hooks/use-chat-session';
 
 const mockCreateSession = vi.fn();
@@ -80,6 +80,12 @@ describe('useChatSession', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreateSession.mockReset();
+    mockGetSession.mockReset();
+    mockSendMessage.mockReset();
+    mockApprove.mockReset();
+    mockSocketUrl.mockReset();
+    mockSocketProtocols.mockReset();
     MockWebSocket.instances = [];
     mockCreateSession.mockResolvedValue({
       id: 'chat-1',
@@ -120,6 +126,7 @@ describe('useChatSession', () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     MockWebSocket.instances = [];
   });
@@ -279,6 +286,40 @@ describe('useChatSession', () => {
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
   });
 
+  it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    mockSendMessage.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      await expect(result.current.send('retry over HTTP')).rejects.toThrow('network down');
+    });
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'failed',
+      canRetry: true,
+    }));
+
+    mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
+    await act(async () => {
+      await result.current.send('retry over HTTP');
+    });
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages.filter((message) => message.content === 'retry over HTTP')).toHaveLength(1);
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'accepted',
+    }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
+      receipt: 'failed',
+    }));
+  });
+
   it('drops unmatched optimistic HTTP sends after the server snapshot refreshes', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -377,6 +418,10 @@ describe('useChatSession', () => {
       socket.shutdown();
     });
     await expect(failedSend).rejects.toThrow('Connection closed');
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
 
     const reconnect = MockWebSocket.instances[1]!;
     act(() => {
@@ -484,6 +529,10 @@ describe('useChatSession', () => {
       socket.shutdown();
     });
     await expect(secondSend).rejects.toThrow('Connection closed');
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
 
     const reconnect = MockWebSocket.instances[1]!;
     act(() => {
@@ -612,6 +661,10 @@ describe('useChatSession', () => {
       socket.shutdown();
     });
     await expect(failedSend).rejects.toThrow('Connection closed');
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
 
     const reconnect = MockWebSocket.instances[1]!;
     act(() => {
@@ -892,6 +945,21 @@ describe('useChatSession', () => {
       updatedAt: '2026-03-09T00:00:07Z',
     });
 
+    act(() => {
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'approval-prompt',
+        chunk: 'Approve deployment?',
+        modelTier: 'cheap',
+      });
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+      socket.readyState = 3;
+    });
+
     await act(async () => {
       await result.current.approve(true);
     });
@@ -944,21 +1012,6 @@ describe('useChatSession', () => {
       await sendPromise;
     });
 
-    act(() => {
-      socket.message({
-        type: 'assistant.message.delta',
-        messageId: 'approval-prompt',
-        chunk: 'Approve deployment?',
-        modelTier: 'cheap',
-      });
-      socket.message({
-        type: 'turn.approval.requested',
-        description: 'Deploy the generated fix',
-        timestamp: '2026-03-09T00:00:06Z',
-      });
-      socket.shutdown();
-    });
-
     mockGetSession.mockResolvedValueOnce({
       id: 'chat-1',
       projectId: 'test-proj',
@@ -975,6 +1028,21 @@ describe('useChatSession', () => {
       costUsd: 0.01,
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    act(() => {
+      socket.message({
+        type: 'assistant.message.delta',
+        messageId: 'approval-prompt',
+        chunk: 'Approve deployment?',
+        modelTier: 'cheap',
+      });
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+      socket.readyState = 3;
     });
 
     await act(async () => {
@@ -1093,7 +1161,7 @@ describe('useChatSession', () => {
       firstSocket.shutdown();
     });
 
-    expect(result.current.connectionStatus).toBe('connecting');
+    expect(result.current.connectionStatus).toBe('reconnecting');
 
     await act(async () => {
       await result.current.send('retry after reconnect');

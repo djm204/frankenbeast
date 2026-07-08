@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
 
@@ -103,6 +103,10 @@ function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
     cli.enableTracing = true;
   }
 
+  if (args.initBackend) {
+    cli.network = { secureBackend: args.initBackend } as Partial<OrchestratorConfig['network']> as OrchestratorConfig['network'];
+  }
+
   return cli;
 }
 
@@ -116,7 +120,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
-      if (!args.config) {
+      if (!args.config && !args.trustProviderCommandOverrides) {
         fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
       }
     } catch (error) {
@@ -139,5 +143,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
     merged = applyNetworkConfigSets(merged, args.networkSet);
   }
 
-  return OrchestratorConfigSchema.parse(merged);
+  return parseOrchestratorConfig(merged, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 }
