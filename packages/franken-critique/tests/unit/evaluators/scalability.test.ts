@@ -40,7 +40,9 @@ describe('ScalabilityEvaluator', () => {
 
   it.each([
     ['bare declaration', 'const port = 8080;'],
+    ['typed declaration', 'const port: number = 8080;'],
     ['exported declaration', 'export const DEFAULT_PORT = 8080;'],
+    ['typed exported declaration', 'export const DEFAULT_PORT: number = 8080;'],
     ['object literal property', 'const cfg = { port: 8080 };'],
     ['call-site options object', 'createServer({ host: "0.0.0.0", port: 8080 });'],
     ['property assignment', 'config.port = 8080;'],
@@ -53,10 +55,26 @@ describe('ScalabilityEvaluator', () => {
 
   it('does not treat non-port config keys containing port as port literals', async () => {
     const evaluator = new ScalabilityEvaluator();
-    const content = `const cfg = { transport: 443, viewport: 1024, support: 1000 };`;
+    const content = `const cfg = { transport: 443, viewport: 1024, support: 1000, portalId: 1234, portfolio: 1000 };`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('does not treat TypeScript parameter literal types as hardcoded runtime ports', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('function bind(port: 8080) {}'));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('uses env-focused guidance for config-shape hardcoded ports', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('const cfg = { port: 8080 };'));
+
+    expect(result.findings.find((f) => f.message.includes('hardcoded port number: 8080'))?.suggestion).toBe(
+      'Move port to environment variable or external configuration',
+    );
   });
 
   it('passes empty content', async () => {

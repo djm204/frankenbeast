@@ -2,11 +2,25 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?:port\w*|\w+Port\w*|\w*_PORT\w*|\w*_port\w*)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|\w+Port\w*|\w*_PORT\w*|\w*_port\w*)`;
+const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
+const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
-  new RegExp(String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
-  new RegExp(String.raw`(?:^|[,{(])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
-  new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
+  {
+    pattern: new RegExp(
+      String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;]+)?\s*=\s*(\d{2,5})\b`,
+      'g',
+    ),
+    suggestion: DECLARATION_PORT_SUGGESTION,
+  },
+  {
+    pattern: new RegExp(String.raw`(?:^|[,{}])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
+    suggestion: CONFIG_PORT_SUGGESTION,
+  },
+  {
+    pattern: new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
+    suggestion: CONFIG_PORT_SUGGESTION,
+  },
 ];
 
 export class ScalabilityEvaluator implements Evaluator {
@@ -55,12 +69,12 @@ export class ScalabilityEvaluator implements Evaluator {
   }
 
   private checkHardcodedPorts(content: string, findings: EvaluationFinding[]): void {
-    for (const pattern of HARDCODED_PORT_PATTERNS) {
+    for (const { pattern, suggestion } of HARDCODED_PORT_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
         findings.push({
           message: `Found hardcoded port number: ${match[1]}. Use environment variables or config.`,
           severity: 'warning',
-          suggestion: 'Use process.env.PORT or a config object instead',
+          suggestion,
         });
       }
     }
