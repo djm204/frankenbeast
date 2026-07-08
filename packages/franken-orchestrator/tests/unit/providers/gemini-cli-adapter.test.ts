@@ -130,16 +130,14 @@ describe('GeminiCliAdapter', () => {
 
       try {
         const includeDir = join(tempDir, 'managed-context');
-        const { settingsPath, contextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; contextFileName: string } }).writeContextSettings(tempDir, includeDir);
-        expect(contextFileName).toBe('PROJECT.md');
+        const { settingsPath, managedContextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; managedContextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        expect(managedContextFileName).toMatch(/^FRANKENBEAST_GEMINI_[0-9a-f-]+\.md$/);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
           server: 'https://example.com/gemini',
           context: {
-            fileName: contextFileName,
+            fileName: [managedContextFileName, 'PROJECT.md', 'GEMINI.md'],
             includeDirectories: [
-              '/default/docs',
-              '/user/docs',
               '/shared/docs',
               '/sibling/repo',
               '/sibling/docs',
@@ -169,7 +167,7 @@ describe('GeminiCliAdapter', () => {
       }
     });
 
-    it('leaves project settings to Gemini trust handling while inheriting user includes', () => {
+    it('leaves lower-scope include directories to Gemini trust handling', () => {
       const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
       const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
@@ -197,12 +195,12 @@ describe('GeminiCliAdapter', () => {
 
       try {
         const includeDir = join(tempDir, 'managed-context');
-        const { settingsPath } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; contextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        const { settingsPath, managedContextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; managedContextFileName: string } }).writeContextSettings(tempDir, includeDir);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toMatchObject({
           sandbox: true,
           context: {
-            fileName: 'PROJECT.md',
-            includeDirectories: ['/default/docs', '/user/docs', includeDir],
+            fileName: [managedContextFileName, 'PROJECT.md', 'GEMINI.md'],
+            includeDirectories: [includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         });

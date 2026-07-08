@@ -66,8 +66,8 @@ export class GeminiCliAdapter implements ILlmProvider {
 
     try {
       this.removeManagedGeminiMd();
-      const { settingsPath, contextFileName } = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
-      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, contextFileName);
+      const { settingsPath, managedContextFileName } = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -224,15 +224,14 @@ export class GeminiCliAdapter implements ILlmProvider {
   private writeContextSettings(
     targetDir: string,
     includeDir: string,
-  ): { settingsPath: string; contextFileName: string } {
+  ): { settingsPath: string; managedContextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
 
     const existingContext = this.asObject(existing['context']) ?? {};
     const existingIncludeDirectories = this.stringArray(existingContext['includeDirectories']);
-    const contextFileName = this.contextFileName(existingContext);
+    const managedContextFileName = this.managedContextFileName();
     const includeDirectories = this.uniqueStrings([
-      ...this.inheritedIncludeDirectories(),
       ...existingIncludeDirectories,
       ...this.extraIncludeDirectories(),
       includeDir,
@@ -245,7 +244,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           ...existing,
           context: {
             ...existingContext,
-            fileName: contextFileName,
+            fileName: this.contextFileNames(existingContext, managedContextFileName),
             includeDirectories,
             loadMemoryFromIncludeDirectories: true,
           },
@@ -255,7 +254,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       ),
       { mode: 0o600 },
     );
-    return { settingsPath, contextFileName };
+    return { settingsPath, managedContextFileName };
   }
 
   private extraIncludeDirectories(): string[] {
@@ -274,9 +273,23 @@ export class GeminiCliAdapter implements ILlmProvider {
     return dirs;
   }
 
-  private contextFileName(context: Record<string, unknown>): string {
-    const fileName = context['fileName'];
-    return typeof fileName === 'string' && fileName.length > 0 ? fileName : 'GEMINI.md';
+  private managedContextFileName(): string {
+    return `FRANKENBEAST_GEMINI_${crypto.randomUUID()}.md`;
+  }
+
+  private contextFileNames(context: Record<string, unknown>, managedContextFileName: string): string[] {
+    return this.uniqueStrings([
+      managedContextFileName,
+      ...this.stringArray(context['fileName']),
+      ...this.userContextFileNames(),
+      'GEMINI.md',
+    ]);
+  }
+
+  private userContextFileNames(): string[] {
+    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
+    const userContext = this.asObject(userSettings['context']) ?? {};
+    return this.stringArray(userContext['fileName']);
   }
 
   private splitIncludeDirectories(value: string): string[] {
@@ -303,19 +316,6 @@ export class GeminiCliAdapter implements ILlmProvider {
     if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/system-defaults.json';
     if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'system-defaults.json');
     return '/etc/gemini-cli/system-defaults.json';
-  }
-
-  private inheritedIncludeDirectories(): string[] {
-    const settingsFiles = [
-      process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
-      this.userSettingsPath(),
-    ];
-
-    return settingsFiles.flatMap((settingsPath) => {
-      const settings = this.readSettingsFile(settingsPath, 'Gemini settings');
-      const context = this.asObject(settings['context']) ?? {};
-      return this.stringArray(context['includeDirectories']);
-    });
   }
 
   private userSettingsPath(): string {
