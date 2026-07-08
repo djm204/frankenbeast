@@ -2,6 +2,38 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { startNetworkService, stopNetworkService } from '../../../src/network/network-supervisor-runtime.js';
 import type { ResolvedNetworkService } from '../../../src/network/network-registry.js';
 
+const CHAT_SERVER_ARGS = [
+  '--silent',
+  '--workspace',
+  '@franken/orchestrator',
+  'run',
+  'chat-server',
+  '--',
+  '--host',
+  '127.0.0.1',
+  '--port',
+  '4567',
+];
+
+const DASHBOARD_ARGS = [
+  'packages/franken-orchestrator/dist/http/dashboard-static-server.js',
+  '--host',
+  '127.0.0.1',
+  '--port',
+  '5173',
+  '--static-dir',
+  'packages/franken-web/dist',
+  '--api-target',
+  'http://127.0.0.1:4567',
+  '--build-command',
+  'npm',
+  '--build-args',
+  '--workspace',
+  '@franken/web',
+  'run',
+  'build',
+];
+
 function makeService(
   command: string,
   overrides: Partial<ResolvedNetworkService['runtimeConfig']['process']> = {},
@@ -21,7 +53,7 @@ function makeService(
     runtimeConfig: {
       process: {
         command,
-        args: [],
+        args: CHAT_SERVER_ARGS,
         cwd: process.cwd(),
         ...overrides,
       },
@@ -46,7 +78,7 @@ describe('startNetworkService', () => {
 
   it('rejects control characters in configured service arguments before spawning', async () => {
     await expect(startNetworkService(makeService('npm', {
-      args: ['run', 'chat-server', 'bad\n--extra-flag'],
+      args: [...CHAT_SERVER_ARGS, '--set', 'bad\n--extra-flag'],
     }), {
       detached: false,
     })).rejects.toThrow('Unsafe network service argument for chat-server');
@@ -84,15 +116,42 @@ describe('startNetworkService', () => {
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
   });
 
+  it('rejects process environment overrides that can redirect launcher resolution', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      env: { PATH: '/tmp/malicious-bin' },
+    }), {
+      detached: false,
+    })).rejects.toThrow('Unsafe network service environment key PATH for chat-server');
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
+  it('rejects Node option environment overrides before launching npm services', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      env: { NODE_OPTIONS: '--require /tmp/hook' },
+    }), {
+      detached: false,
+    })).rejects.toThrow('Unsafe network service environment key NODE_OPTIONS for chat-server');
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
+  it('rejects unexpected npm launcher subcommands for managed services', async () => {
+    await expect(startNetworkService(makeService('npm', {
+      args: ['exec', 'sh', '-c', 'touch /tmp/pwned'],
+    }), {
+      detached: false,
+    })).rejects.toThrow('Unsafe network service arguments for chat-server');
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
+  });
+
   it('rejects dashboard build commands outside the nested build allowlist', async () => {
     await expect(startNetworkService(makeService('node', {
       args: [
-        'packages/franken-orchestrator/dist/http/dashboard-static-server.js',
-        '--build-command',
+        ...DASHBOARD_ARGS.slice(0, 10),
         'sh',
-        '--build-args',
-        '-c',
-        'touch /tmp/pwned',
+        ...DASHBOARD_ARGS.slice(11),
       ],
     }, { id: 'dashboard-web' }), {
       detached: false,

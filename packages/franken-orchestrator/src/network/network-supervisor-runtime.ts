@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { Socket } from 'node:net';
+import { dirname, join } from 'node:path';
 import type { ManagedNetworkServiceState } from './network-state-store.js';
 import type { ResolvedNetworkService } from './network-registry.js';
 import type { PreflightServiceResult, StartServiceOptions } from './network-supervisor.js';
@@ -15,9 +17,62 @@ const ALLOWED_NETWORK_SERVICE_COMMANDS: Partial<Record<ResolvedNetworkService['i
   'dashboard-web': ['node', 'node.exe'],
 };
 
+const ALLOWED_NETWORK_SERVICE_ENV_KEYS: Partial<Record<ResolvedNetworkService['id'], readonly string[]>> = {
+  'beasts-daemon': ['FRANKENBEAST_NETWORK_MANAGED', 'FRANKENBEAST_BEAST_DAEMON_URL'],
+  'chat-server': ['FRANKENBEAST_NETWORK_MANAGED', 'FRANKENBEAST_BEAST_DAEMON_URL'],
+  'dashboard-web': [
+    'FRANKENBEAST_CONFIG_FILE',
+    'FRANKENBEAST_DASHBOARD_API_URL',
+    'FRANKENBEAST_DASHBOARD_HOST',
+    'FRANKENBEAST_DASHBOARD_PORT',
+  ],
+};
+
+interface ValidatedProcessSpec {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
 function assertSafeProcessValue(serviceId: string, field: string, value: string): void {
   if (!SAFE_PROCESS_VALUE_RE.test(value)) {
     throw new Error(`Unsafe network service ${field} for ${serviceId}`);
+  }
+}
+
+function assertExpectedArg(condition: boolean, serviceId: string): void {
+  if (!condition) {
+    throw new Error(`Unsafe network service arguments for ${serviceId}`);
+  }
+}
+
+function assertPortArg(serviceId: string, value: string): void {
+  assertExpectedArg(/^\d+$/.test(value), serviceId);
+}
+
+function validateNpmServiceArgs(serviceId: 'beasts-daemon' | 'chat-server', args: string[]): void {
+  assertExpectedArg(args.length >= 10, serviceId);
+  assertExpectedArg(args[0] === '--silent', serviceId);
+  assertExpectedArg(args[1] === '--workspace', serviceId);
+  assertExpectedArg(args[2] === '@franken/orchestrator', serviceId);
+  assertExpectedArg(args[3] === 'run', serviceId);
+  assertExpectedArg(args[4] === serviceId, serviceId);
+  assertExpectedArg(args[5] === '--', serviceId);
+  assertExpectedArg(args[6] === '--host', serviceId);
+  assertExpectedArg(args[8] === '--port', serviceId);
+  assertPortArg(serviceId, args[9] ?? '');
+
+  if (serviceId === 'beasts-daemon') {
+    assertExpectedArg(args.length === 10, serviceId);
+    return;
+  }
+
+  for (let index = 10; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    assertExpectedArg(value !== undefined, serviceId);
+    assertExpectedArg(flag === '--config' || flag === '--set', serviceId);
   }
 }
 
@@ -32,6 +87,98 @@ function validateDashboardBuildCommand(service: ResolvedNetworkService): void {
   if (!buildCommand || !['npm', 'npm.cmd'].includes(buildCommand)) {
     throw new Error(`Unsafe dashboard build command for ${service.id}: ${buildCommand ?? '<missing>'}`);
   }
+}
+
+function validateDashboardArgs(args: string[]): void {
+  const serviceId = 'dashboard-web';
+  assertExpectedArg(args.length === 16, serviceId);
+  assertExpectedArg(args[0] === 'packages/franken-orchestrator/dist/http/dashboard-static-server.js', serviceId);
+  assertExpectedArg(args[1] === '--host', serviceId);
+  assertExpectedArg(args[3] === '--port', serviceId);
+  assertPortArg(serviceId, args[4] ?? '');
+  assertExpectedArg(args[5] === '--static-dir', serviceId);
+  assertExpectedArg(args[6] === 'packages/franken-web/dist', serviceId);
+  assertExpectedArg(args[7] === '--api-target', serviceId);
+  assertExpectedArg(args[9] === '--build-command', serviceId);
+  assertExpectedArg(args[11] === '--build-args', serviceId);
+  assertExpectedArg(args[12] === '--workspace', serviceId);
+  assertExpectedArg(args[13] === '@franken/web', serviceId);
+  assertExpectedArg(args[14] === 'run', serviceId);
+  assertExpectedArg(args[15] === 'build', serviceId);
+}
+
+function validateNetworkServiceArgs(service: ResolvedNetworkService): void {
+  const processSpec = service.runtimeConfig.process;
+  if (!processSpec) {
+    return;
+  }
+  if (service.id === 'beasts-daemon' || service.id === 'chat-server') {
+    validateNpmServiceArgs(service.id, processSpec.args);
+    return;
+  }
+  if (service.id === 'dashboard-web') {
+    validateDashboardArgs(processSpec.args);
+  }
+}
+
+function validateNetworkServiceEnv(service: ResolvedNetworkService): void {
+  const processSpec = service.runtimeConfig.process;
+  if (!processSpec) {
+    return;
+  }
+  const allowedKeys = ALLOWED_NETWORK_SERVICE_ENV_KEYS[service.id] ?? [];
+  for (const [key, value] of Object.entries(processSpec.env ?? {})) {
+    if (key.includes('=') || !allowedKeys.includes(key)) {
+      throw new Error(`Unsafe network service environment key ${key} for ${service.id}`);
+    }
+    assertSafeProcessValue(service.id, `environment key ${key}`, key);
+    assertSafeProcessValue(service.id, `environment value ${key}`, value);
+  }
+}
+
+function resolveNpmCliPath(): string {
+  const npmCliPath = join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!existsSync(npmCliPath)) {
+    throw new Error(`Unable to locate trusted npm CLI next to ${process.execPath}`);
+  }
+  return npmCliPath;
+}
+
+function buildNetworkProcessEnv(processSpecEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.NODE_OPTIONS;
+  delete env.npm_config_node_options;
+  return {
+    ...env,
+    ...processSpecEnv,
+    PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+  };
+}
+
+function buildValidatedProcessSpec(service: ResolvedNetworkService): ValidatedProcessSpec {
+  validateNetworkProcessSpec(service);
+  const processSpec = service.runtimeConfig.process;
+  if (!processSpec) {
+    throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
+  }
+  const env = buildNetworkProcessEnv(processSpec.env);
+  if (processSpec.command === 'npm' || processSpec.command === 'npm.cmd') {
+    return {
+      command: process.execPath,
+      args: [resolveNpmCliPath(), ...processSpec.args],
+      cwd: processSpec.cwd,
+      env,
+    };
+  }
+  if (processSpec.command === 'node' || processSpec.command === 'node.exe') {
+    return {
+      command: process.execPath,
+      args: processSpec.args,
+      cwd: processSpec.cwd,
+      env,
+    };
+  }
+  throw new Error(`Unsafe network service command for ${service.id}: ${processSpec.command}`);
 }
 
 function validateNetworkProcessSpec(service: ResolvedNetworkService): void {
@@ -49,13 +196,8 @@ function validateNetworkProcessSpec(service: ResolvedNetworkService): void {
     assertSafeProcessValue(service.id, 'argument', arg);
   }
   assertSafeProcessValue(service.id, 'working directory', processSpec.cwd);
-  for (const [key, value] of Object.entries(processSpec.env ?? {})) {
-    if (key.includes('=')) {
-      throw new Error(`Unsafe network service environment key ${key} for ${service.id}`);
-    }
-    assertSafeProcessValue(service.id, `environment key ${key}`, key);
-    assertSafeProcessValue(service.id, `environment value ${key}`, value);
-  }
+  validateNetworkServiceArgs(service);
+  validateNetworkServiceEnv(service);
   validateDashboardBuildCommand(service);
 }
 
@@ -67,16 +209,13 @@ export async function startNetworkService(
   if (!processSpec) {
     throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
   }
-  validateNetworkProcessSpec(service);
+  const validatedProcessSpec = buildValidatedProcessSpec(service);
 
   if (options.detached) {
     const handle = await open(options.logFile ?? '/dev/null', 'a');
-    const child = spawn(processSpec.command, processSpec.args, {
-      cwd: processSpec.cwd,
-      env: {
-        ...process.env,
-        ...processSpec.env,
-      },
+    const child = spawn(validatedProcessSpec.command, validatedProcessSpec.args, {
+      cwd: validatedProcessSpec.cwd,
+      env: validatedProcessSpec.env,
       detached: true,
       stdio: ['ignore', handle.fd, handle.fd],
     });
@@ -91,12 +230,9 @@ export async function startNetworkService(
     return { pid: child.pid };
   }
 
-  const child = spawn(processSpec.command, processSpec.args, {
-    cwd: processSpec.cwd,
-    env: {
-      ...process.env,
-      ...processSpec.env,
-    },
+  const child = spawn(validatedProcessSpec.command, validatedProcessSpec.args, {
+    cwd: validatedProcessSpec.cwd,
+    env: validatedProcessSpec.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
