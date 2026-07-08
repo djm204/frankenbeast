@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.13](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.12...franken-critique-v0.6.13) (2026-07-08)
+
+
+### Bug Fixes
+
+* **critique:** harden logic-loop syntax masking ([#925](https://github.com/djm204/frankenbeast/issues/925)) ([bf2f0dc](https://github.com/djm204/frankenbeast/commit/bf2f0dc28c5115539e627f3bb15a751c84436d29))
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
 ## [0.6.12](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.11...franken-critique-v0.6.12) (2026-07-07)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.1...@franken/brain-v0.7.2) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.0...@franken/brain-v0.7.1) (2026-07-07)
 
 

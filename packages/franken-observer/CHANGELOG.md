@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.13](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.12...franken-observer-v0.7.13) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+
+### Tests
+
+* **observer:** cover replay blob symlink reads ([#897](https://github.com/djm204/frankenbeast/issues/897)) ([851417e](https://github.com/djm204/frankenbeast/commit/851417e53af4a639cb52963f3d06d869f6937034))
+
 ## [0.7.12](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.11...franken-observer-v0.7.12) (2026-07-07)
 
 

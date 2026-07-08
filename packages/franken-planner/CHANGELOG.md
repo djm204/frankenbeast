@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.11](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.10...@franken/planner-v0.4.11) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
 ## [0.4.10](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.9...@franken/planner-v0.4.10) (2026-07-07)
 
 
