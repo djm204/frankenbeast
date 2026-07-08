@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatShell } from './chat-shell';
 
 vi.mock('../hooks/use-chat-session', () => ({
@@ -101,6 +101,10 @@ vi.mock('./cost-badge', () => ({
 }));
 
 describe('ChatShell route heading', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     window.location.hash = '#/network';
     window.matchMedia = vi.fn().mockReturnValue({
@@ -118,5 +122,22 @@ describe('ChatShell route heading', () => {
     expect(screen.getByText('Project: default')).toBeTruthy();
     expect(screen.getByText('Service controls')).toBeTruthy();
     expect(screen.queryByText('Chat is the only live section in this first Frankenbeast dashboard cut.')).toBeNull();
+  });
+
+  it('keeps placeholder modules out of the primary dashboard navigation', () => {
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+
+    const navigation = within(screen.getByRole('navigation', { name: 'Dashboard navigation' }));
+    expect(navigation.getByRole('link', { name: /Overview/ })).toBeTruthy();
+    expect(navigation.getByRole('link', { name: /Chat/ })).toBeTruthy();
+    expect(navigation.getByRole('link', { name: /Beasts/ })).toBeTruthy();
+    expect(navigation.getByRole('link', { name: /Network/ })).toBeTruthy();
+    expect(navigation.getByRole('link', { name: /Analytics/ })).toBeTruthy();
+
+    expect(navigation.queryByRole('link', { name: /Sessions/ })).toBeNull();
+    expect(navigation.queryByRole('link', { name: /Costs/ })).toBeNull();
+    expect(navigation.queryByRole('link', { name: /Safety/ })).toBeNull();
+    expect(navigation.queryByRole('link', { name: /Settings/ })).toBeNull();
+    expect(navigation.queryByText('Soon')).toBeNull();
   });
 });

@@ -47,6 +47,8 @@ const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean
   { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
 ];
 
+const PRIMARY_NAV_ROUTES = ROUTES.filter((route) => route.live);
+
 function formatSessionCount(count: number): string {
   return `${count} ${count === 1 ? 'message' : 'messages'}`;
 }
@@ -743,7 +745,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         </div>
 
         <nav className="sidebar__nav" aria-label="Dashboard navigation">
-          {ROUTES.map((item) => (
+          {PRIMARY_NAV_ROUTES.map((item) => (
             <a
               aria-current={route === item.id ? 'page' : undefined}
               key={item.id}
@@ -754,7 +756,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 <strong>{item.label}</strong>
                 <small>{item.summary}</small>
               </span>
-              {!item.live && <span className="sidebar__status">Soon</span>}
             </a>
           ))}
         </nav>
