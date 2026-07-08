@@ -58,6 +58,8 @@ fbeast mcp init --client=codex           # target Codex CLI
 
 This writes MCP entries into your client config (`~/.claude/settings.json`, `~/.gemini/settings.json`, etc.) and creates `.fbeast/beast.db`.
 
+If a daemon or wrapper starts the CLI from outside the target project, see the README's [Beast project-root override](../../README.md#beast-project-root-override) for the supported `FBEAST_ROOT` fallback. Prefer an explicit project-root option such as `--base-dir` when the command exposes one; otherwise `FBEAST_ROOT` is resolved before `process.cwd()` and controls Beast service state, process/container execution roots, run-config snapshots, and built-in Beast child working directories.
+
 ---
 
 ## 3. Activate beast mode (`fbeast mcp beast`)

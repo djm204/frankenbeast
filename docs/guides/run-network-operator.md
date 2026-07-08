@@ -6,6 +6,8 @@ This guide starts Frankenbeast through the new `frankenbeast network` operator i
 
 `frankenbeast network up` selects services from canonical config and starts the enabled request-serving surfaces.
 
+When running `network up` from a service manager or wrapper whose current directory is not the target project, set the project root explicitly where available or use the supported `FBEAST_ROOT` fallback documented in the README's [Beast project-root override](../../README.md#beast-project-root-override). That root is used before `process.cwd()` for Beast services, run-config snapshots, process/container execution roots, and built-in Beast child working directories.
+
 Current default local surface:
 
 - `beasts-daemon` (standalone Beast control plane on `:4050`)
