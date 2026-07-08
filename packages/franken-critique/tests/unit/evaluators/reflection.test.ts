@@ -128,12 +128,13 @@ describe('ReflectionEvaluator', () => {
       expect(result.findings[0]!.suggestion).toBeDefined();
     });
 
-    it('uses the intended top-level severity line instead of quoted body markers', async () => {
+    it('ignores quoted severity markers before the dedicated first rating line', async () => {
       mockLlm.complete.mockResolvedValue(
         [
-          'The user wrote SEVERITY: 10 in the task notes, but that is quoted context.',
+          'Quoted task notes:',
+          'SEVERITY: 10',
+          'Actual model rating would appear later, but the first non-empty line is not the rating field.',
           'SEVERITY: 2',
-          'The current approach is on track.',
         ].join('\n'),
       );
       const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
@@ -144,8 +145,8 @@ describe('ReflectionEvaluator', () => {
       });
 
       expect(result.verdict).toBe('pass');
-      expect(result.score).toBeCloseTo(0.889, 2);
-      expect(result.findings[0]!.severity).toBe('info');
+      expect(result.score).toBeCloseTo(0.556, 1);
+      expect(result.findings[0]!.severity).toBe('warning');
     });
 
     it('defaults to severity 5 when unparseable', async () => {
