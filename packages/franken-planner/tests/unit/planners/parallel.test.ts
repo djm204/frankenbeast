@@ -277,6 +277,35 @@ describe('ParallelPlanner — happy path', () => {
     await expect(execution).resolves.toMatchObject({ status: 'completed' });
   });
 
+  it('applies the wave concurrency cap across sibling expansion subgraphs', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let active = 0;
+    let maxActive = 0;
+
+    const executor = vi.fn().mockImplementation(async (task: Task) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active -= 1;
+
+      if (task.id === createTaskId('parent-1')) return expand('parent-1', [sub1]);
+      if (task.id === createTaskId('parent-2')) return expand('parent-2', [sub2]);
+      return success(task.id);
+    });
+
+    const result = await new ParallelPlanner({ maxWaveConcurrency: 1 }).execute(graph, {
+      executor,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledTimes(4);
+    expect(maxActive).toBe(1);
+  });
+
   it('waits for sibling expansions before propagating an expansion rejection', async () => {
     const parent1 = makeTask('parent-1');
     const parent2 = makeTask('parent-2');
