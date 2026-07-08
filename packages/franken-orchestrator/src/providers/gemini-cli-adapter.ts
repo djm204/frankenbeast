@@ -281,10 +281,17 @@ export class GeminiCliAdapter implements ILlmProvider {
     return this.uniqueStrings([
       managedContextFileName,
       ...this.stringArray(context['fileName']),
+      ...this.systemDefaultsContextFileNames(),
       ...this.userContextFileNames(),
       ...this.workspaceContextFileNames(),
       'GEMINI.md',
     ]);
+  }
+
+  private systemDefaultsContextFileNames(): string[] {
+    const defaultsSettings = this.readSettingsFile(this.effectiveSystemDefaultsPath(), 'Gemini system defaults');
+    const defaultsContext = this.asObject(defaultsSettings['context']) ?? {};
+    return this.stringArray(defaultsContext['fileName']);
   }
 
   private userContextFileNames(): string[] {
