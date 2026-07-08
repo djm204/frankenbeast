@@ -340,8 +340,9 @@ const TOOLS: ToolFull[] = [
       const promptTokens = Number(args['promptTokens']);
       const completionTokens = Number(args['completionTokens']);
       const costUsdArg = args['costUsd'] != null ? Number(args['costUsd']) : undefined;
-      await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
-      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model}` }] };
+      const result = await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
+      const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
+      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
     },
   },
   {
@@ -360,7 +361,7 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded.' }] };
       }
-      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
+      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },
@@ -439,7 +440,7 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded yet.' }] };
       }
-      const lines = [`## Budget Status`, '', ...summary.byModel.map((row) => `- ${row.model}: $${row.costUsd.toFixed(4)}`), '', `**Total spend:** $${summary.totalSpendUsd.toFixed(4)}`];
+      const lines = [`## Budget Status`, '', ...summary.byModel.map((row) => `- ${row.model}: $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total spend:** $${summary.totalSpendUsd.toFixed(4)}`];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },

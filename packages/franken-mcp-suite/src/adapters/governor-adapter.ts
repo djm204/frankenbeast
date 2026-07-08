@@ -1,5 +1,6 @@
 import { SkillTrigger, TriggerRegistry } from '@franken/governor';
 import type { TriggerResult, TriggerSeverity } from '@franken/governor';
+import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
@@ -87,7 +88,7 @@ export interface GovernorCheckResult {
 
 export interface GovernorBudgetStatus {
   totalSpendUsd: number;
-  byModel: Array<{ model: string; costUsd: number }>;
+  byModel: Array<{ model: string; costUsd: number; unknownModel?: boolean }>;
 }
 
 export interface GovernorAdapter {
@@ -166,6 +167,11 @@ function assessAction(action: string, context: string): GovernorCheckResult {
 
 export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
+  const costCalculator = new CostCalculator(DEFAULT_PRICING, {
+    onUnknownModel: (model) => {
+      process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
+    },
+  });
 
   return {
     async check(input) {
@@ -181,14 +187,31 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
     async budgetStatus() {
       const rows = store.db.prepare(`
-        SELECT model, SUM(cost_usd) as total_cost
+        SELECT model, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as total_cost
         FROM cost_ledger
         GROUP BY model
-      `).all() as Array<{ model: string; total_cost: number }>;
+      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; total_cost: number }>;
+
+      const byModel = rows.map((row) => {
+        const hasPricing = DEFAULT_PRICING[row.model] !== undefined;
+        const costUsd = row.total_cost > 0
+          ? row.total_cost
+          : costCalculator.calculate({
+              model: row.model,
+              promptTokens: row.prompt_tokens,
+              completionTokens: row.completion_tokens,
+            });
+
+        return {
+          model: row.model,
+          costUsd,
+          ...(hasPricing || row.total_cost > 0 ? {} : { unknownModel: true }),
+        };
+      });
 
       return {
-        totalSpendUsd: rows.reduce((sum, row) => sum + row.total_cost, 0),
-        byModel: rows.map((row) => ({ model: row.model, costUsd: row.total_cost })),
+        totalSpendUsd: byModel.reduce((sum, row) => sum + row.costUsd, 0),
+        byModel,
       };
     },
   };

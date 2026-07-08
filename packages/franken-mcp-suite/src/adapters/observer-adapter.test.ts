@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -418,5 +418,33 @@ describe('ObserverAdapter', () => {
 
     expect(verification.ok).toBe(false);
     expect(verification.firstInvalid?.index).toBe(0);
+  });
+
+  it('warns and marks unknown auto-priced model costs as unpriced', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const writeSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const logged = await observer.logCost({
+      sessionId: 'sess-unknown',
+      model: 'new-model-not-in-pricing',
+      promptTokens: 1000,
+      completionTokens: 500,
+    });
+    const summary = await observer.cost({ sessionId: 'sess-unknown' });
+
+    expect(logged).toEqual({ costUsd: 0, unknownModel: true });
+    expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown model "new-model-not-in-pricing"'));
+    expect(summary.byModel).toEqual([
+      {
+        model: 'new-model-not-in-pricing',
+        promptTokens: 1000,
+        completionTokens: 500,
+        costUsd: 0,
+        unknownModel: true,
+      },
+    ]);
+
+    writeSpy.mockRestore();
   });
 });
