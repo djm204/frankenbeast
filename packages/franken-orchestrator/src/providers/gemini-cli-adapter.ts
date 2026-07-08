@@ -5,7 +5,9 @@ import {
   writeFileSync,
   existsSync,
   chmodSync,
+  lstatSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   renameSync,
   statSync,
@@ -56,14 +58,15 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    const workspaceDir = resolve(this.workingDir);
     const promptWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
 
     this.removeManagedGeminiMd();
     this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
-    const args = [...this.buildArgs(request), '--include-directories', promptWorkingDir];
+    const args = [...this.buildArgs(request), '--include-directories', workspaceDir];
     try {
       const proc = spawn(this.binaryPath, args, {
-        cwd: this.workingDir,
+        cwd: promptWorkingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -204,19 +207,30 @@ export class GeminiCliAdapter implements ILlmProvider {
     const next = (existing.slice(0, startIdx) + existing.slice(endIdx + MANAGED_END.length)).trim();
     if (next) {
       this.writeFileAtomically(geminiMdPath, `${next}\n`);
+    } else if (this.isSymlink(geminiMdPath)) {
+      this.writeFileAtomically(geminiMdPath, '');
     } else {
       unlinkSync(geminiMdPath);
     }
   }
 
   private writeFileAtomically(path: string, content: string): void {
-    const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-    const existingMode = existsSync(path) ? statSync(path).mode : undefined;
+    const writePath = existsSync(path) && this.isSymlink(path) ? realpathSync(path) : path;
+    const tmpPath = `${writePath}.${process.pid}.${Date.now()}.tmp`;
+    const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
     writeFileSync(tmpPath, content);
     if (existingMode !== undefined) {
       chmodSync(tmpPath, existingMode);
     }
-    renameSync(tmpPath, path);
+    renameSync(tmpPath, writePath);
+  }
+
+  private isSymlink(path: string): boolean {
+    try {
+      return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
+    }
   }
 
   private async *parseStream(

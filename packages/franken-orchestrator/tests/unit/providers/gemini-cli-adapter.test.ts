@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync, lstatSync, symlinkSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -91,7 +91,7 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
-    it('runs from the configured working directory with an isolated context directory', async () => {
+    it('runs from an isolated prompt directory with the configured workspace included', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
       await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
@@ -99,10 +99,11 @@ describe('GeminiCliAdapter', () => {
       const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
       const spawnArgs = spawnCall[1] as string[];
       const includeIndex = spawnArgs.indexOf('--include-directories');
-      const promptDir = spawnArgs[includeIndex + 1]!;
+      const includedWorkspace = spawnArgs[includeIndex + 1]!;
       const spawnOptions = spawnCall[2] as { cwd: string };
-      expect(spawnOptions.cwd).toBe(tempDir);
+      const promptDir = spawnOptions.cwd;
       expect(promptDir).not.toContain(tempDir);
+      expect(includedWorkspace).toBe(tempDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
       expect(existsSync(promptDir)).toBe(false);
@@ -116,6 +117,19 @@ describe('GeminiCliAdapter', () => {
       await collectEvents(adapter.execute({ systemPrompt: 'fresh sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
       expect(readFileSync(geminiPath, 'utf-8')).toBe('user notes\n');
+    });
+
+    it('removes stale managed content through a symlinked GEMINI.md without replacing the link', async () => {
+      const targetPath = join(tempDir, 'shared-GEMINI.md');
+      const geminiPath = join(tempDir, 'GEMINI.md');
+      writeFileSync(targetPath, `user notes\n\n<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->\nstale\n<!-- END FRANKENBEAST SECTION -->\n`);
+      symlinkSync(targetPath, geminiPath);
+      mockSpawn([JSON.stringify({ type: 'message_stop' })]);
+
+      await collectEvents(adapter.execute({ systemPrompt: 'fresh sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
+      expect(readFileSync(targetPath, 'utf-8')).toBe('user notes\n');
     });
 
     it('emits error on non-zero exit code', async () => {
@@ -159,6 +173,19 @@ describe('GeminiCliAdapter', () => {
       adapter.writeGeminiMd('New');
 
       expect(statSync(geminiPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('updates symlinked GEMINI.md targets without replacing the symlink', () => {
+      const targetPath = join(tempDir, 'shared-GEMINI.md');
+      const geminiPath = join(tempDir, 'GEMINI.md');
+      writeFileSync(targetPath, 'User notes');
+      symlinkSync(targetPath, geminiPath);
+
+      adapter.writeGeminiMd('New');
+
+      expect(lstatSync(geminiPath).isSymbolicLink()).toBe(true);
+      expect(readFileSync(targetPath, 'utf-8')).toContain('New');
+      expect(readFileSync(targetPath, 'utf-8')).toContain('User notes');
     });
 
     it('prepends managed content to user GEMINI.md content', () => {
