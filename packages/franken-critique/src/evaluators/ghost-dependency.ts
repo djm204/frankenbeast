@@ -110,6 +110,15 @@ function extractDependencySpecifiers(content: string): string[] {
       continue;
     }
 
+    if (startsWithKeyword(content, i, 'export')) {
+      const reexported = readStaticImportSpecifier(content, i + 'export'.length);
+      if (reexported) {
+        specifiers.push(reexported.value);
+        i = reexported.endIndex;
+      }
+      continue;
+    }
+
     if (startsWithKeyword(content, i, 'require')) {
       const required = readRequireSpecifier(content, i + 'require'.length);
       if (required) {
