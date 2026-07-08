@@ -362,6 +362,24 @@ describe('fbeast init', () => {
     ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
   });
 
+  it('uses cwd-relative database paths for global Claude settings across project roots', () => {
+    const globalConfigDir = tmpDir();
+    const rootA = tmpDir();
+    const rootB = tmpDir();
+    dirs.push(globalConfigDir, rootA, rootB);
+
+    runInit({ root: rootA, claudeDir: globalConfigDir, hooks: false, servers: ['memory'] });
+    runInit({ root: rootB, claudeDir: globalConfigDir, hooks: false, servers: ['memory'] });
+
+    const settings = JSON.parse(readFileSync(join(globalConfigDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers['fbeast-memory']).toEqual({
+      command: 'fbeast-memory',
+      args: ['--db', join('.fbeast', 'beast.db')],
+    });
+    expect(JSON.stringify(settings.mcpServers)).not.toContain(rootA);
+    expect(JSON.stringify(settings.mcpServers)).not.toContain(rootB);
+  });
+
   it('proxy mode writes single fbeast-proxy entry (not 7) for claude client', () => {
     const root = tmpDir();
     dirs.push(root);
@@ -371,7 +389,7 @@ describe('fbeast init', () => {
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
     const keys = Object.keys(settings.mcpServers);
     expect(keys).toEqual(['fbeast-proxy']);
-    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join(root, '.fbeast', 'beast.db'), '--root', root] });
+    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join('.fbeast', 'beast.db')] });
     expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
   });
 
