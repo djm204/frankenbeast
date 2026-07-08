@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import Database from 'better-sqlite3';
 
 function tmpDbPath(): string {
   const dir = join(tmpdir(), `fbeast-test-${randomUUID()}`);
@@ -62,6 +63,31 @@ describe('SqliteStore', () => {
     const timeout = store.db.pragma('busy_timeout', { simple: true });
     expect(timeout).toBe(5000);
 
+    store.close();
+  });
+
+  it('migrates existing cost ledgers with explicit source for legacy rows', () => {
+    const dbPath = tracked(tmpDbPath());
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE cost_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
+      VALUES ('legacy', 'gpt-4o', 1000, 1000, 0);
+    `);
+    db.close();
+
+    const store = createSqliteStore(dbPath);
+    const row = store.db.prepare('SELECT cost_source FROM cost_ledger WHERE session_id = ?').get('legacy') as { cost_source: string };
+
+    expect(row.cost_source).toBe('explicit');
     store.close();
   });
 
