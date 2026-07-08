@@ -68,6 +68,24 @@ If the managed chat service is healthy, `frankenbeast chat` now attaches to that
 
 If the managed chat service is not healthy, `frankenbeast chat` falls back to standalone mode.
 
+## Managed Child-Process Marker
+
+`frankenbeast network` owns the internal `FRANKENBEAST_NETWORK_MANAGED=1` marker. The network supervisor sets it only for managed child services such as `chat-server`; operators normally should not export it before running standalone commands.
+
+Managed children use this marker for user-visible runtime behavior:
+
+- CLI children suppress the normal Frankenbeast startup banner so supervised logs stay focused on service output.
+- `chat-server` treats managed mode as exposed even when it binds to loopback (`127.0.0.1` or `localhost`) and fails closed unless an operator token is configured.
+
+If a standalone local `chat-server` run unexpectedly fails with an operator-token error on loopback, check for an inherited `FRANKENBEAST_NETWORK_MANAGED=1` and unset it before debugging standalone mode:
+
+```bash
+unset FRANKENBEAST_NETWORK_MANAGED
+npm --workspace @franken/orchestrator run chat-server
+```
+
+When intentionally running `chat-server` with managed semantics, keep `FRANKENBEAST_NETWORK_MANAGED=1` and provide the configured operator token, for example through `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or the repo's configured secret-store token reference.
+
 ## Config Updates
 
 Inspect current operator-facing config:

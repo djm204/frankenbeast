@@ -68,7 +68,7 @@ npm --workspace @franken/orchestrator run chat-server -- --allow-origin http://l
 
 If the daemon or chat server is launched by a wrapper from outside the intended checkout, pass the explicit CLI root with `--base-dir /absolute/path/to/project`. The README's [Beast project-root override](../../README.md#beast-project-root-override) documents the narrower `FBEAST_ROOT` fallback used by Beast service construction and built-in run configs when no explicit root is supplied; keep it aligned with `--base-dir` if both are set.
 
-If you bind to a non-loopback host or run in managed network mode, the server refuses to start without an operator token.
+If you bind to a non-loopback host, the server refuses to start without an operator token. The same fail-closed rule applies when `chat-server` is launched by `frankenbeast network`: the supervisor sets the internal `FRANKENBEAST_NETWORK_MANAGED=1` child-process marker, and managed `chat-server` requires an operator token even on loopback. Do not export this marker for normal standalone debugging; unset it for local standalone `chat-server` runs, or provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` / the configured secret-store token when intentionally exercising managed semantics.
 
 ## 2. Start the dashboard
 
