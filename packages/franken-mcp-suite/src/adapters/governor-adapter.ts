@@ -187,15 +187,15 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
     async budgetStatus() {
       const rows = store.db.prepare(`
-        SELECT model, prompt_tokens, completion_tokens, cost_usd
+        SELECT model, prompt_tokens, completion_tokens, cost_usd, cost_source
         FROM cost_ledger
-      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; cost_usd: number }>;
+      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; cost_usd: number; cost_source: string }>;
 
       const grouped = new Map<string, { model: string; costUsd: number; unknownModel?: boolean }>();
 
       for (const row of rows) {
         const hasPricing = DEFAULT_PRICING[row.model] !== undefined;
-        const costUsd = row.cost_usd > 0
+        const costUsd = row.cost_source === 'explicit' || row.cost_usd > 0
           ? row.cost_usd
           : costCalculator.calculate({
               model: row.model,
@@ -205,7 +205,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
         const current = grouped.get(row.model) ?? { model: row.model, costUsd: 0 };
 
         current.costUsd += costUsd;
-        if (row.cost_usd <= 0 && !hasPricing) {
+        if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasPricing) {
           current.unknownModel = true;
         }
 

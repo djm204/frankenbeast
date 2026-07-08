@@ -46,6 +46,9 @@ describe('SqliteStore', () => {
     expect(tables).toContain('firewall_log');
     expect(tables).not.toContain('skill_state');
 
+    const costColumns = store.db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
+    expect(costColumns.map((column) => column.name)).toContain('cost_source');
+
     const walMode = store.db.pragma('journal_mode', { simple: true });
     expect(walMode).toBe('wal');
 

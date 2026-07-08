@@ -134,6 +134,23 @@ describe('GovernorAdapter', () => {
     });
   });
 
+  it('preserves explicit zero-cost rows in budget status', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, cost_source)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('sess-free-known', 'gpt-4o', 1_000_000, 1_000_000, 0, 'explicit');
+    db.close();
+
+    await expect(governor.budgetStatus()).resolves.toEqual({
+      totalSpendUsd: 0,
+      byModel: [{ model: 'gpt-4o', costUsd: 0 }],
+    });
+  });
+
   it('marks zero-cost unknown model rows in budget status', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

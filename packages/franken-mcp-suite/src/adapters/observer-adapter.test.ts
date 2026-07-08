@@ -447,4 +447,28 @@ describe('ObserverAdapter', () => {
 
     writeSpy.mockRestore();
   });
+
+  it('preserves explicitly logged zero-cost rows in cost summaries', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+
+    const logged = await observer.logCost({
+      sessionId: 'sess-explicit-zero',
+      model: 'gpt-4o',
+      promptTokens: 1_000_000,
+      completionTokens: 1_000_000,
+      costUsd: 0,
+    });
+    const summary = await observer.cost({ sessionId: 'sess-explicit-zero' });
+
+    expect(logged).toEqual({ costUsd: 0, unknownModel: false });
+    expect(summary.byModel).toEqual([
+      {
+        model: 'gpt-4o',
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        costUsd: 0,
+      },
+    ]);
+  });
 });

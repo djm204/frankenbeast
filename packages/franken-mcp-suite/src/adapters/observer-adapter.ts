@@ -128,16 +128,16 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         completionTokens: input.completionTokens,
       });
       store.db.prepare(`
-        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd);
+        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, cost_source)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd, input.costUsd === undefined ? 'computed' : 'explicit');
 
       return { costUsd, unknownModel };
     },
 
     async cost(input) {
       let sql = `
-        SELECT model, prompt_tokens, completion_tokens, cost_usd
+        SELECT model, prompt_tokens, completion_tokens, cost_usd, cost_source
         FROM cost_ledger
       `;
       const params: unknown[] = [];
@@ -152,6 +152,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         prompt_tokens: number;
         completion_tokens: number;
         cost_usd: number;
+        cost_source: string;
       }>;
 
       const grouped = new Map<string, ObserverCostSummary['byModel'][number]>();
@@ -166,10 +167,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
         current.promptTokens += row.prompt_tokens;
         current.completionTokens += row.completion_tokens;
-        if (row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
+        if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
           current.unknownModel = true;
         }
-        current.costUsd += row.cost_usd > 0
+        current.costUsd += row.cost_source === 'explicit' || row.cost_usd > 0
           ? row.cost_usd
           : costCalculator.calculate({
               model: row.model,
