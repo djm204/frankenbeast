@@ -38,12 +38,17 @@ describe('ScalabilityEvaluator', () => {
     expect(result.findings.some((f) => f.message.includes('hardcoded'))).toBe(true);
   });
 
-  it('flags hardcoded port numbers in assignments', async () => {
+  it.each([
+    ['bare declaration', 'const port = 8080;'],
+    ['exported declaration', 'export const DEFAULT_PORT = 8080;'],
+    ['object literal property', 'const cfg = { port: 8080 };'],
+    ['call-site options object', 'createServer({ host: "0.0.0.0", port: 8080 });'],
+    ['property assignment', 'config.port = 8080;'],
+  ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
-    const content = `const port = 8080;`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes('hardcoded'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number: 8080'))).toBe(true);
   });
 
   it('passes empty content', async () => {

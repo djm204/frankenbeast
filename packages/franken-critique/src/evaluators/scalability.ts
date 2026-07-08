@@ -2,7 +2,11 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const HARDCODED_PORT_PATTERN = /(?:const|let|var)\s+\w*[Pp]ort\w*\s*=\s*(\d{2,5})\s*;/g;
+const HARDCODED_PORT_PATTERNS = [
+  /(?:export\s+)?(?:const|let|var)\s+\w*port\w*\s*=\s*(\d{2,5})\b/gi,
+  /(?:^|[,{(])\s*["']?\w*port\w*["']?\s*:\s*(\d{2,5})\b/gi,
+  /\.\s*\w*port\w*\s*=\s*(\d{2,5})\b/gi,
+];
 
 export class ScalabilityEvaluator implements Evaluator {
   readonly name = 'scalability';
@@ -50,12 +54,14 @@ export class ScalabilityEvaluator implements Evaluator {
   }
 
   private checkHardcodedPorts(content: string, findings: EvaluationFinding[]): void {
-    for (const match of content.matchAll(HARDCODED_PORT_PATTERN)) {
-      findings.push({
-        message: `Found hardcoded port number: ${match[1]}. Use environment variables or config.`,
-        severity: 'warning',
-        suggestion: 'Use process.env.PORT or a config object instead',
-      });
+    for (const pattern of HARDCODED_PORT_PATTERNS) {
+      for (const match of content.matchAll(pattern)) {
+        findings.push({
+          message: `Found hardcoded port number: ${match[1]}. Use environment variables or config.`,
+          severity: 'warning',
+          suggestion: 'Use process.env.PORT or a config object instead',
+        });
+      }
     }
   }
 }
