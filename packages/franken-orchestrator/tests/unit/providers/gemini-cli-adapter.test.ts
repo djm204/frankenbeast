@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -84,6 +84,17 @@ describe('GeminiCliAdapter', () => {
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'Gemini says hi' });
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
+    });
+
+    it('keeps generated GEMINI.md out of the configured working directory', async () => {
+      mockSpawn([JSON.stringify({ type: 'message_stop' })]);
+
+      await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { cwd: string };
+      expect(spawnOptions.cwd).not.toBe(tempDir);
+      expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
+      expect(existsSync(spawnOptions.cwd)).toBe(false);
     });
 
     it('emits error on non-zero exit code', async () => {

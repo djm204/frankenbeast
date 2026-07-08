@@ -1,6 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  renameSync,
+} from 'node:fs';
 import type {
   ILlmProvider,
   LlmRequest,
@@ -11,7 +18,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
@@ -46,23 +53,29 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
-    this.writeGeminiMd(request.systemPrompt);
+    const promptWorkingDir = mkdtempSync(join(tmpdir(), 'franken-gemini-'));
 
-    const args = this.buildArgs(request);
-    const proc = spawn(this.binaryPath, args, {
-      cwd: this.workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    try {
+      this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
 
-    const userContent = request.messages
-      .map((m) =>
-        typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      )
-      .join('\n');
-    proc.stdin!.write(userContent);
-    proc.stdin!.end();
+      const args = this.buildArgs(request);
+      const proc = spawn(this.binaryPath, args, {
+        cwd: promptWorkingDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-    yield* this.parseStream(proc);
+      const userContent = request.messages
+        .map((m) =>
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        )
+        .join('\n');
+      proc.stdin!.write(userContent);
+      proc.stdin!.end();
+
+      yield* this.parseStream(proc);
+    } finally {
+      rmSync(promptWorkingDir, { recursive: true, force: true });
+    }
   }
 
   formatHandoff(snapshot: BrainSnapshot): string {
@@ -136,6 +149,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   buildArgs(_request: LlmRequest): string[] {
     const args = ['-p', '--output-format', 'stream-json'];
+    args.push('--include-directories', this.workingDir);
     if (this.options.model) {
       args.push('-m', this.options.model);
     }
@@ -145,8 +159,12 @@ export class GeminiCliAdapter implements ILlmProvider {
     return args;
   }
 
-  writeGeminiMd(systemPrompt: string, handoffContext?: string): void {
-    const geminiMdPath = `${this.workingDir}/GEMINI.md`;
+  writeGeminiMd(
+    systemPrompt: string,
+    handoffContext?: string,
+    targetDir = this.workingDir,
+  ): void {
+    const geminiMdPath = join(targetDir, 'GEMINI.md');
     const managedContent = [
       MANAGED_START,
       systemPrompt,
@@ -166,10 +184,16 @@ export class GeminiCliAdapter implements ILlmProvider {
       } else {
         existing = managedContent + '\n\n' + existing;
       }
-      writeFileSync(geminiMdPath, existing);
+      this.writeFileAtomically(geminiMdPath, existing);
     } else {
-      writeFileSync(geminiMdPath, managedContent);
+      this.writeFileAtomically(geminiMdPath, managedContent);
     }
+  }
+
+  private writeFileAtomically(path: string, content: string): void {
+    const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, content);
+    renameSync(tmpPath, path);
   }
 
   private async *parseStream(

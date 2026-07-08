@@ -69,6 +69,8 @@ describe('createLlmProvider', () => {
       '-p',
       '--output-format',
       'stream-json',
+      '--include-directories',
+      process.cwd(),
       '-m',
       'gemini-2.5-pro',
       '--debug',
