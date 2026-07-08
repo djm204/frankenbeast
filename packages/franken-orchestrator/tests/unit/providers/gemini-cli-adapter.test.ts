@@ -91,6 +91,19 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
+    it('parses Gemini stream-json message and result events', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'init' }),
+        JSON.stringify({ type: 'message', content: { parts: [{ text: 'Gemini ' }, { text: 'native' }] } }),
+        JSON.stringify({ type: 'result', usage_metadata: { promptTokenCount: 12, candidatesTokenCount: 5 } }),
+      ]);
+
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'Gemini native' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } });
+    });
+
     it('runs from an isolated context cwd while including the configured workspace', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 

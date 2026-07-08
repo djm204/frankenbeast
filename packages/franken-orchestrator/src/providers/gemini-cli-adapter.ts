@@ -261,7 +261,38 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       const type = parsed['type'] as string;
 
-      if (type === 'content_block_delta') {
+      if (type === 'message') {
+        for (const text of this.extractGeminiText(parsed)) {
+          yield { type: 'text', content: text };
+        }
+      } else if (type === 'tool_use') {
+        yield {
+          type: 'tool_use',
+          id: (parsed['id'] as string) ?? crypto.randomUUID(),
+          name: (parsed['name'] as string) ?? '',
+          input: parsed['input'] ?? parsed['args'] ?? {},
+        };
+      } else if (type === 'tool_result') {
+        yield {
+          type: 'tool_result',
+          toolUseId: (parsed['toolUseId'] as string) ?? (parsed['tool_use_id'] as string) ?? (parsed['id'] as string) ?? '',
+          content: this.stringifyGeminiContent(parsed['content'] ?? parsed['result'] ?? ''),
+          isError: Boolean(parsed['isError'] ?? parsed['is_error']),
+        };
+      } else if (type === 'result') {
+        const usage = this.extractGeminiUsage(parsed);
+        totalInputTokens = usage.inputTokens ?? totalInputTokens;
+        totalOutputTokens = usage.outputTokens ?? totalOutputTokens;
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: usage.totalTokens ?? totalInputTokens + totalOutputTokens,
+          },
+        };
+        return;
+      } else if (type === 'content_block_delta') {
         const delta = parsed['delta'] as Record<string, unknown>;
         if (delta?.['type'] === 'text_delta') {
           yield { type: 'text', content: delta['text'] as string };
@@ -298,7 +329,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         };
         return;
       } else if (type === 'error') {
-        const message = (parsed['message'] as string) ?? 'Unknown error';
+        const message = this.stringifyGeminiContent(parsed['message'] ?? parsed['error'] ?? 'Unknown error');
         yield {
           type: 'error',
           error: message,
@@ -308,7 +339,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       }
     }
 
-    // Stream ended without message_stop/error — check exit code
+    // Stream ended without message_stop/result/error — check exit code
     const exitCode = await new Promise<number | null>((resolve) => {
       proc.on('close', resolve);
     });
@@ -328,5 +359,44 @@ export class GeminiCliAdapter implements ILlmProvider {
         },
       };
     }
+  }
+
+  private extractGeminiText(event: Record<string, unknown>): string[] {
+    const message = this.asObject(event['message']) ?? event;
+    return this.extractTextParts(message['content'] ?? message['text']);
+  }
+
+  private extractTextParts(value: unknown): string[] {
+    if (typeof value === 'string') return value ? [value] : [];
+    if (Array.isArray(value)) return value.flatMap((part) => this.extractTextParts(part));
+    const objectValue = this.asObject(value);
+    if (!objectValue) return [];
+    if (objectValue['type'] === 'text' && typeof objectValue['text'] === 'string') {
+      return [objectValue['text']];
+    }
+    return this.extractTextParts(objectValue['content'] ?? objectValue['parts'] ?? objectValue['text']);
+  }
+
+  private extractGeminiUsage(event: Record<string, unknown>): Partial<{ inputTokens: number; outputTokens: number; totalTokens: number }> {
+    const usage = this.asObject(event['usage']) ?? this.asObject(event['usageMetadata']) ?? this.asObject(event['usage_metadata']) ?? event;
+    return {
+      inputTokens: this.numberValue(usage['inputTokens'], usage['input_tokens'], usage['promptTokenCount'], usage['prompt_token_count']),
+      outputTokens: this.numberValue(usage['outputTokens'], usage['output_tokens'], usage['candidatesTokenCount'], usage['candidates_token_count']),
+      totalTokens: this.numberValue(usage['totalTokens'], usage['total_tokens'], usage['totalTokenCount'], usage['total_token_count']),
+    };
+  }
+
+  private numberValue(...values: unknown[]): number | undefined {
+    return values.find((value): value is number => typeof value === 'number');
+  }
+
+  private stringifyGeminiContent(value: unknown): string {
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  private asObject(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
   }
 }
