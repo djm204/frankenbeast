@@ -140,4 +140,13 @@ describe('ChatShell route heading', () => {
     expect(navigation.queryByRole('link', { name: /Settings/ })).toBeNull();
     expect(navigation.queryByText('Soon')).toBeNull();
   });
+
+  it('redirects direct placeholder hashes back to the live chat route', () => {
+    window.location.hash = '#/sessions';
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Chat' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Sessions' })).toBeNull();
+  });
 });

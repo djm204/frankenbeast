@@ -110,7 +110,7 @@ function formatSessionOptionLabel(session: ChatSessionSummary): string {
 
 function routeFromHash(hash: string): RouteId {
   const candidate = hash.replace(/^#\/?/, '') as RouteId;
-  return ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
+  return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
 }
 
 function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
