@@ -47,6 +47,8 @@ describe('ScalabilityEvaluator', () => {
     ['call-site options object', 'createServer({ host: "0.0.0.0", port: 8080 });'],
     ['property assignment', 'config.port = 8080;'],
     ['prefixed port-number declaration', 'const serverPortNumber = 8080;'],
+    ['prefixed port-default declaration', 'const apiPortDefault = 8080;'],
+    ['bracket notation assignment', 'config["serverPort"] = 8080;'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
@@ -70,7 +72,9 @@ type NestedConfig = { server: { port: 8080 } };
 interface ListenerConfig {
   port: 3000;
 }
-const cfg: { port: 8080 } = createCfg();`;
+const cfg: { port: 8080 } = createCfg();
+function bind(opts: { port: 8080 }) {}
+const castCfg = {} as { port: 8080 };`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
