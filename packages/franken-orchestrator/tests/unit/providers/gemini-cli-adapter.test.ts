@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, statSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -102,7 +102,7 @@ describe('GeminiCliAdapter', () => {
       const promptDir = spawnArgs[includeIndex + 1]!;
       const spawnOptions = spawnCall[2] as { cwd: string };
       expect(spawnOptions.cwd).toBe(tempDir);
-      expect(promptDir).toContain(tempDir);
+      expect(promptDir).not.toContain(tempDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
       expect(existsSync(promptDir)).toBe(false);
@@ -144,6 +144,24 @@ describe('GeminiCliAdapter', () => {
     });
 
     it('preserves user content outside managed section', () => {
+      writeFileSync(join(tempDir, 'GEMINI.md'), `User notes\n\n<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->\nOld\n<!-- END FRANKENBEAST SECTION -->\n`);
+      adapter.writeGeminiMd('New');
+      const content = readFileSync(join(tempDir, 'GEMINI.md'), 'utf-8');
+      expect(content).toContain('User notes');
+      expect(content).toContain('New');
+    });
+
+    it('preserves GEMINI.md file mode when updating atomically', () => {
+      const geminiPath = join(tempDir, 'GEMINI.md');
+      writeFileSync(geminiPath, 'User notes');
+      chmodSync(geminiPath, 0o600);
+
+      adapter.writeGeminiMd('New');
+
+      expect(statSync(geminiPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('prepends managed content to user GEMINI.md content', () => {
       writeFileSync(
         join(tempDir, 'GEMINI.md'),
         '# My Project\nUser content here\n',

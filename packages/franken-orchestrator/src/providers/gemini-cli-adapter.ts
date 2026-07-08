@@ -4,9 +4,11 @@ import {
   readFileSync,
   writeFileSync,
   existsSync,
+  chmodSync,
   mkdtempSync,
   rmSync,
   renameSync,
+  statSync,
   unlinkSync,
 } from 'node:fs';
 import type {
@@ -19,8 +21,8 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
@@ -54,7 +56,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
-    const promptWorkingDir = mkdtempSync(join(this.workingDir, '.franken-gemini-context-'));
+    const promptWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
 
     this.removeManagedGeminiMd();
     this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
@@ -209,7 +211,11 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private writeFileAtomically(path: string, content: string): void {
     const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    const existingMode = existsSync(path) ? statSync(path).mode : undefined;
     writeFileSync(tmpPath, content);
+    if (existingMode !== undefined) {
+      chmodSync(tmpPath, existingMode);
+    }
     renameSync(tmpPath, path);
   }
 
