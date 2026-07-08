@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -891,6 +891,28 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPersisted).not.toContain(sensitiveTokenValue);
       expect(serializedPersisted).not.toContain(sensitiveWebhookUrl);
       expect(serializedPersisted).not.toContain(sensitivePrivateCredential);
+    });
+
+    it('refuses symlinked run-config directories before applying secure modes', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const targetDir = join(workDir, 'outside-run-configs');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(join(projectRoot, '.fbeast', '.build'), { recursive: true });
+      mkdirSync(targetDir, { recursive: true });
+      symlinkSync(targetDir, runConfigDir, 'dir');
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, createDefinitionWithCwd(projectRoot))).rejects.toThrow(
+        'Refusing to use symlinked run config directory',
+      );
+      expect(supervisor.spawn).not.toHaveBeenCalled();
+    });
+
     });
 
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {

@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -229,11 +229,59 @@ function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | u
     return;
   }
   const currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined;
-  const currentGid = typeof process.getgid === 'function' ? process.getgid() : undefined;
-  if (currentUid === owner.uid && currentGid === owner.gid) {
+  if (currentUid === owner.uid) {
     return;
   }
   chownSync(path, owner.uid, owner.gid);
+}
+
+function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
+  const root = resolve(rootDir);
+  const target = resolve(configDir);
+  try {
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink()) {
+      throw new Error(`Refusing to use symlinked run config root: ${root}`);
+    }
+    if (!rootStat.isDirectory()) {
+      throw new Error(`Run config root is not a directory: ${root}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+    mkdirSync(root, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
+    applyRunConfigOwnership(root, owner);
+    chmodSync(root, RUN_CONFIG_DIR_MODE);
+  }
+
+  const relativeTarget = relative(root, target);
+  const dirs = relativeTarget !== '' && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)
+    ? relativeTarget.split(/[\\/]+/).reduce<string[]>((acc, part) => {
+      const parent = acc.at(-1) ?? root;
+      acc.push(join(parent, part));
+      return acc;
+    }, [])
+    : [target];
+
+  for (const dir of dirs) {
+    try {
+      const stat = lstatSync(dir);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Refusing to use symlinked run config directory: ${dir}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(`Run config path is not a directory: ${dir}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      mkdirSync(dir, { mode: RUN_CONFIG_DIR_MODE });
+    }
+    applyRunConfigOwnership(dir, owner);
+    chmodSync(dir, RUN_CONFIG_DIR_MODE);
+  }
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -281,14 +329,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : processSpec;
 
     // Write configSnapshot to a JSON file for the spawned process to load
-    const configDir = resolve(
-      this.options.runConfigDir ??
-      join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
-    );
+    const runConfigRoot = resolve(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
     const runConfigOwner = this.options.runConfigOwner;
-    mkdirSync(configDir, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
-    applyRunConfigOwnership(configDir, runConfigOwner);
-    chmodSync(configDir, RUN_CONFIG_DIR_MODE);
+    ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
     if (existsSync(configFilePath)) {
       unlinkSync(configFilePath);

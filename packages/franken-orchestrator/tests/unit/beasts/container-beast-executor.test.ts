@@ -89,10 +89,12 @@ describe('ContainerBeastExecutor', () => {
     const [expectedUid, expectedGid] = containerUser.split(':').map((part) => Number.parseInt(part, 10));
     const configDir = join(workDir, '.fbeast', '.build', 'run-configs');
     const configPath = join(configDir, `${run.id}.json`);
-    expect(statSync(configDir).mode & 0o777).toBe(0o700);
+    for (const dir of [join(workDir, '.fbeast'), join(workDir, '.fbeast', '.build'), configDir]) {
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(dir).uid).toBe(expectedUid);
+      expect(statSync(dir).gid).toBe(expectedGid);
+    }
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
-    expect(statSync(configDir).uid).toBe(expectedUid);
-    expect(statSync(configDir).gid).toBe(expectedGid);
     expect(statSync(configPath).uid).toBe(expectedUid);
     expect(statSync(configPath).gid).toBe(expectedGid);
   });
