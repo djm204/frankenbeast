@@ -61,15 +61,13 @@ export class GeminiCliAdapter implements ILlmProvider {
     const workspaceDir = resolve(this.workingDir);
     const promptWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
 
-    this.removeManagedGeminiMd();
-    this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
-    const settingsPath = join(promptWorkingDir, 'settings.json');
-    writeFileSync(
-      settingsPath,
-      JSON.stringify({ context: { loadMemoryFromIncludeDirectories: true } }),
-    );
-    const args = [...this.buildArgs(request), '--include-directories', promptWorkingDir];
     try {
+      this.removeManagedGeminiMd();
+      const contextFileName = `FRANKENBEAST_CONTEXT_${process.pid}_${Date.now()}.md`;
+      const projectGeminiMd = this.readGeminiMd();
+      this.writeGeminiMd(request.systemPrompt, projectGeminiMd, promptWorkingDir, contextFileName);
+      const settingsPath = this.writeTemporarySettings(promptWorkingDir, contextFileName);
+      const args = [...this.buildArgs(request), '--include-directories', promptWorkingDir];
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
         env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
@@ -174,8 +172,9 @@ export class GeminiCliAdapter implements ILlmProvider {
     systemPrompt: string,
     handoffContext?: string,
     targetDir = this.workingDir,
+    fileName = 'GEMINI.md',
   ): void {
-    const geminiMdPath = join(targetDir, 'GEMINI.md');
+    const geminiMdPath = join(targetDir, fileName);
     const managedContent = [
       MANAGED_START,
       systemPrompt,
@@ -218,6 +217,46 @@ export class GeminiCliAdapter implements ILlmProvider {
     } else {
       unlinkSync(geminiMdPath);
     }
+  }
+
+  private readGeminiMd(targetDir = this.workingDir): string | undefined {
+    const geminiMdPath = join(targetDir, 'GEMINI.md');
+    if (!existsSync(geminiMdPath)) return undefined;
+    const content = readFileSync(geminiMdPath, 'utf-8').trim();
+    return content || undefined;
+  }
+
+  private writeTemporarySettings(targetDir: string, contextFileName: string): string {
+    const settingsPath = join(targetDir, 'settings.json');
+    const existingSettings = this.readExistingSystemSettings();
+    const existingContext = this.asRecord(existingSettings['context']);
+    const nextSettings = {
+      ...existingSettings,
+      context: {
+        ...existingContext,
+        fileName: contextFileName,
+        loadMemoryFromIncludeDirectories: true,
+      },
+    };
+    writeFileSync(settingsPath, JSON.stringify(nextSettings));
+    return settingsPath;
+  }
+
+  private readExistingSystemSettings(): Record<string, unknown> {
+    const existingPath = process.env['GEMINI_CLI_SYSTEM_SETTINGS_PATH'];
+    if (!existingPath || !existsSync(existingPath)) return {};
+    try {
+      const parsed = JSON.parse(readFileSync(existingPath, 'utf-8')) as unknown;
+      return this.asRecord(parsed);
+    } catch {
+      return {};
+    }
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private writeFileAtomically(path: string, content: string): void {
