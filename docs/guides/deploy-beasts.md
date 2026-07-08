@@ -66,7 +66,7 @@ npm --workspace @franken/orchestrator run chat-server -- --provider codex
 npm --workspace @franken/orchestrator run chat-server -- --allow-origin http://localhost:5173
 ```
 
-If you bind to a non-loopback host or run in managed network mode, the server refuses to start without an operator token.
+If you bind to a non-loopback host, the server refuses to start without an operator token. The same fail-closed rule applies when `chat-server` is launched by `frankenbeast network`: the supervisor sets the internal `FRANKENBEAST_NETWORK_MANAGED=1` child-process marker, and managed `chat-server` requires an operator token even on loopback. Do not export this marker for normal standalone debugging; unset it for local standalone `chat-server` runs, or provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` / the configured secret-store token when intentionally exercising managed semantics.
 
 ## 2. Start the dashboard
 
