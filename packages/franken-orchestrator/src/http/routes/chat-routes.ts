@@ -43,8 +43,6 @@ export interface ChatRoutesDeps {
   chatRateLimit: BeastRateLimitOptions;
 }
 
-type ChatMutationKind = 'message' | 'approval';
-
 function getSessionOrThrow(store: ISessionStore, id: string) {
   const session = store.get(id);
   if (!session) {
@@ -65,10 +63,11 @@ function firstForwardedAddress(header: string | undefined): string | undefined {
 }
 
 function requestAddress(c: Context): string {
-  return firstForwardedAddress(c.req.header('x-forwarded-for'))
-    ?? c.req.header('x-real-ip')?.trim()
-    ?? c.req.header('cf-connecting-ip')?.trim()
-    ?? 'unknown';
+  return c.req.header('x-frankenbeast-remote-address')?.trim()
+    || firstForwardedAddress(c.req.header('x-forwarded-for'))
+    || c.req.header('x-real-ip')?.trim()
+    || c.req.header('cf-connecting-ip')?.trim()
+    || 'unknown';
 }
 
 function hashPrincipal(value: string): string {
@@ -94,13 +93,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
   async function withChatMutationAdmission<T>(
     c: Context,
-    kind: ChatMutationKind,
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
     const principalKey = chatPrincipalKey(c, operatorToken);
     const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(`${kind}:principal:${principalKey}`);
+    const result = limiter.take(`chat:principal:${principalKey}`);
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
@@ -162,7 +160,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    return withChatMutationAdmission(c, 'message', session.id, async () => {
+    return withChatMutationAdmission(c, session.id, async () => {
       const result = await runtime.run(content, {
         sessionId: session.id,
         pendingApproval: Boolean(session.pendingApproval),
@@ -232,7 +230,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    return withChatMutationAdmission(c, 'approval', session.id, async () => {
+    return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval && session.state !== 'pending_approval') {
         return c.json({ data: { id: session.id, approved, state: session.state } });
       }

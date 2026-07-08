@@ -511,6 +511,7 @@ describe('Chat HTTP Routes', () => {
       headers: {
         'Content-Type': 'application/json',
         authorization: 'Basic attacker-controlled-a',
+        'x-frankenbeast-remote-address': '10.0.0.7',
         'x-forwarded-for': '203.0.113.7',
       },
       body: JSON.stringify({ content: 'hello' }),
@@ -523,7 +524,8 @@ describe('Chat HTTP Routes', () => {
         'Content-Type': 'application/json',
         authorization: 'Basic attacker-controlled-b',
         'x-frankenbeast-operator-token': 'attacker-controlled-c',
-        'x-forwarded-for': '203.0.113.7',
+        'x-frankenbeast-remote-address': '10.0.0.7',
+        'x-forwarded-for': '198.51.100.9',
       },
       body: JSON.stringify({ content: 'second' }),
     });
@@ -569,6 +571,69 @@ describe('Chat HTTP Routes', () => {
     expect(limited.status).toBe(429);
     expect((await limited.json()).error.code).toBe('RATE_LIMITED');
     expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one quota across message and approval mutations for the same principal', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-shared-mutation-quota',
+      projectId: 'proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'done' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const message = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '10.0.0.9' },
+      body: JSON.stringify({ content: 'first' }),
+    });
+    expect(message.status).toBe(200);
+
+    session.state = 'pending_approval';
+    session.pendingApproval = { description: 'Deploy?', requestedAt: now };
+    const approval = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '10.0.0.9' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(approval.status).toBe(429);
+    expect((await approval.json()).error.code).toBe('RATE_LIMITED');
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(session.state).toBe('pending_approval');
+    expect(session.pendingApproval).toEqual({ description: 'Deploy?', requestedAt: now });
   });
 
   it('rejects concurrent chat mutations for the same session across valid auth forms', async () => {
