@@ -313,7 +313,7 @@ describe('ws chat server', () => {
     };
     store.save(session);
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const execute = vi.fn().mockResolvedValue({
       status: 'success' as const,
       summary: 'Done',
@@ -380,7 +380,7 @@ describe('ws chat server', () => {
     };
     store.save(session);
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     let finishExecution!: () => void;
     const executionStarted = new Promise<void>((resolve) => {
       finishExecution = resolve;
@@ -452,7 +452,7 @@ describe('ws chat server', () => {
     };
     store.save(session);
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const execute = vi.fn(async () => {
       throw new Error('executor offline');
     });
@@ -508,7 +508,7 @@ describe('ws chat server', () => {
     };
     store.save(session);
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const execute = vi.fn().mockResolvedValue({
       status: 'success' as const,
       summary: 'Done',
@@ -571,7 +571,7 @@ describe('ws chat server', () => {
     };
     store.save(session);
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const execute = vi.fn();
     const runtime = new ChatRuntime({
       engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
