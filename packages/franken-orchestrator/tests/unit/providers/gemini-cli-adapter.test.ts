@@ -101,6 +101,37 @@ describe('GeminiCliAdapter', () => {
       ]);
     });
 
+    it('parses Gemini result stats token totals', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: { response: { text: 'Gemini stats answer' } },
+          stats: { promptTokenCount: 11, candidatesTokenCount: 5 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 11, outputTokens: 5, totalTokens: 16 } });
+    });
+
+    it('emits only assistant Gemini message chunks', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message', message: { role: 'user', content: [{ text: 'echoed prompt' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'assistant answer' }] } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 1, candidatesTokenCount: 2 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'assistant answer' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 } });
+    });
+
+    it('treats Gemini status error result frames as failures', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', status: 'error', error: { message: 'RESOURCE_EXHAUSTED quota' } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED quota', retryable: true });
+    });
+
     it('errors instead of returning empty success when the stream has no parseable text', async () => {
       mockSpawn([], 0);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));

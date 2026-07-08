@@ -197,12 +197,15 @@ export class GeminiCliAdapter implements ILlmProvider {
         const parts: string[] = [];
         tryExtractTextFromNode(parsed['result'] ?? parsed, parts);
         const text = parts.join('').trim();
-        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error';
+        const error = parsed['error'] as Record<string, unknown> | string | undefined;
+        const errorText = typeof error === 'string' ? error : ((error?.['message'] as string | undefined) ?? '');
+        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error' || parsed['status'] === 'error';
         if (isErrorResult) {
+          const message = text || errorText || 'gemini returned an error result frame';
           yield {
             type: 'error',
-            error: text || 'gemini returned an error result frame',
-            retryable: text.includes('rate') || text.includes('RESOURCE_EXHAUSTED'),
+            error: message,
+            retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
           };
           return;
         }
@@ -210,10 +213,22 @@ export class GeminiCliAdapter implements ILlmProvider {
           yield { type: 'text', content: text };
           emittedText = true;
         }
-        const usage = parsed['usage'] as Record<string, number> | undefined;
+        const usage = (parsed['usage'] ?? parsed['stats']) as Record<string, number> | undefined;
         if (usage) {
-          totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
-          totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+          totalInputTokens =
+            usage['input_tokens'] ??
+            usage['inputTokens'] ??
+            usage['prompt_tokens'] ??
+            usage['promptTokenCount'] ??
+            usage['totalInputTokens'] ??
+            totalInputTokens;
+          totalOutputTokens =
+            usage['output_tokens'] ??
+            usage['outputTokens'] ??
+            usage['completion_tokens'] ??
+            usage['candidatesTokenCount'] ??
+            usage['totalOutputTokens'] ??
+            totalOutputTokens;
         }
         if (!emittedText) {
           yield {
@@ -259,6 +274,18 @@ export class GeminiCliAdapter implements ILlmProvider {
         const usage = message?.['usage'] as Record<string, number> | undefined;
         if (usage) {
           totalInputTokens = usage['input_tokens'] ?? 0;
+        }
+      } else if (type === 'message') {
+        const message = parsed['message'] as Record<string, unknown> | undefined;
+        const role = (message?.['role'] ?? parsed['role']) as string | undefined;
+        if (role === 'assistant') {
+          const parts: string[] = [];
+          tryExtractTextFromNode(message?.['content'] ?? parsed['content'] ?? parsed['parts'] ?? parsed, parts);
+          const text = parts.join('').trim();
+          if (text.length > 0) {
+            yield { type: 'text', content: text };
+            emittedText = true;
+          }
         }
       } else if (type === 'message_stop') {
         sawTerminalFrame = true;

@@ -154,12 +154,17 @@ export class ClaudeCliAdapter implements ILlmProvider {
 
       if (type === 'result') {
         const resultText = typeof parsed['result'] === 'string' ? parsed['result'] : '';
+        const errorText =
+          typeof parsed['error'] === 'string'
+            ? parsed['error']
+            : ((parsed['error'] as Record<string, unknown> | undefined)?.['message'] as string | undefined) ?? '';
         const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error';
         if (isErrorResult) {
+          const message = resultText.trim() || errorText.trim() || 'claude returned an error result frame';
           yield {
             type: 'error',
-            error: resultText.trim() || 'claude returned an error result frame',
-            retryable: resultText.includes('rate') || resultText.includes('overloaded'),
+            error: message,
+            retryable: message.includes('rate') || message.includes('overloaded'),
           };
           return;
         }
@@ -238,6 +243,16 @@ export class ClaudeCliAdapter implements ILlmProvider {
         if (usage) {
           totalInputTokens = usage['input_tokens'] ?? 0;
         }
+      } else if (type === 'assistant') {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed['message'] ?? parsed['content'] ?? parsed, parts);
+        const text = parts.join('').trim();
+        if (text.length > 0) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
+      } else if (type === 'user') {
+        continue;
       } else if (type === 'message_stop') {
         yield {
           type: 'done',
@@ -256,7 +271,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           message.includes('rate') || message.includes('overloaded');
         yield { type: 'error', error: message, retryable };
         return;
-      } else if (!emittedText) {
+      } else if (!emittedText && type !== 'message') {
         const parts: string[] = [];
         tryExtractTextFromNode(parsed, parts);
         const text = parts.join('').trim();

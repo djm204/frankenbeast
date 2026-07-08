@@ -156,6 +156,23 @@ describe('ClaudeCliAdapter', () => {
       ]);
     });
 
+    it('ignores Claude user tool-result frames before the final result', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'secret tool stdout' }] } }),
+        JSON.stringify({ type: 'result', result: 'Final assistant answer' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'Final assistant answer' });
+    });
+
+    it('preserves Claude result-frame error messages', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', is_error: true, result: '', error: 'permission denied' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'permission denied', retryable: false });
+    });
+
     it('errors when a successful process produces no parseable text or result frame', async () => {
       mockSpawn([], 0);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
