@@ -632,17 +632,21 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }, [route, beastClient]);
 
   useEffect(() => {
-    if (!window.location.hash) {
-      window.location.hash = '/chat';
-    }
+    function syncRouteFromHash() {
+      const nextRoute = routeFromHash(window.location.hash);
+      const nextHash = `#/${nextRoute}`;
 
-    function handleHashChange() {
-      setRoute(routeFromHash(window.location.hash));
+      if (window.location.hash !== nextHash) {
+        window.history.replaceState(null, '', nextHash);
+      }
+
+      setRoute(nextRoute);
       setIsSidebarOpen(false);
     }
 
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    syncRouteFromHash();
+    window.addEventListener('hashchange', syncRouteFromHash);
+    return () => window.removeEventListener('hashchange', syncRouteFromHash);
   }, []);
 
   useEffect(() => {

@@ -148,5 +148,6 @@ describe('ChatShell route heading', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Chat' })).toBeTruthy();
     expect(screen.queryByRole('heading', { level: 2, name: 'Sessions' })).toBeNull();
+    expect(window.location.hash).toBe('#/chat');
   });
 });
