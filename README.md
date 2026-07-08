@@ -530,16 +530,16 @@ cd packages/franken-orchestrator && npm run test:e2e
 # Configure local services. Generate a unique Grafana password before starting
 # the full compose stack; Grafana refuses the old admin/admin default pair.
 cp .env.example .env
-$EDITOR .env  # uncomment GRAFANA_USER=admin and set a unique GRAFANA_PASSWORD
+$EDITOR .env  # set CHROMA_URL if not using http://localhost:8000; set Grafana credentials
 
 # Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
 # image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
-# Seed ChromaDB with initial collections
+# Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npx tsx scripts/seed.ts
 
-# Verify everything is running
+# Verify everything is running. This probes the same CHROMA_URL endpoint.
 npx tsx scripts/verify-setup.ts
 ```
 
@@ -620,8 +620,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
-| `CHROMA_HOST` | MOD-03 | If using semantic memory | ChromaDB server host (default: `localhost`) |
-| `CHROMA_PORT` | MOD-03 | If using semantic memory | ChromaDB server port (default: `8000`) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 
 See [.env.example](.env.example) for the full list.
