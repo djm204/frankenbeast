@@ -474,6 +474,10 @@ frankenbeast issues --label bug --repo owner/repo
 --allow-origin <url>    CORS origin for dashboard
 ```
 
+### Operator environment variables
+
+Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
+
 ### Project Layout
 
 Running `frankenbeast` in any project creates:
