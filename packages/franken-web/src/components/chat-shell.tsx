@@ -47,6 +47,8 @@ const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean
   { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
 ];
 
+const PRIMARY_NAV_ROUTES = ROUTES.filter((route) => route.live);
+
 function formatSessionCount(count: number): string {
   return `${count} ${count === 1 ? 'message' : 'messages'}`;
 }
@@ -108,7 +110,7 @@ function formatSessionOptionLabel(session: ChatSessionSummary): string {
 
 function routeFromHash(hash: string): RouteId {
   const candidate = hash.replace(/^#\/?/, '') as RouteId;
-  return ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
+  return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
 }
 
 function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
@@ -630,17 +632,21 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }, [route, beastClient]);
 
   useEffect(() => {
-    if (!window.location.hash) {
-      window.location.hash = '/chat';
-    }
+    function syncRouteFromHash() {
+      const nextRoute = routeFromHash(window.location.hash);
+      const nextHash = `#/${nextRoute}`;
 
-    function handleHashChange() {
-      setRoute(routeFromHash(window.location.hash));
+      if (window.location.hash !== nextHash) {
+        window.history.replaceState(null, '', nextHash);
+      }
+
+      setRoute(nextRoute);
       setIsSidebarOpen(false);
     }
 
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    syncRouteFromHash();
+    window.addEventListener('hashchange', syncRouteFromHash);
+    return () => window.removeEventListener('hashchange', syncRouteFromHash);
   }, []);
 
   useEffect(() => {
@@ -743,7 +749,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         </div>
 
         <nav className="sidebar__nav" aria-label="Dashboard navigation">
-          {ROUTES.map((item) => (
+          {PRIMARY_NAV_ROUTES.map((item) => (
             <a
               aria-current={route === item.id ? 'page' : undefined}
               key={item.id}
@@ -754,7 +760,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 <strong>{item.label}</strong>
                 <small>{item.summary}</small>
               </span>
-              {!item.live && <span className="sidebar__status">Soon</span>}
             </a>
           ))}
         </nav>
