@@ -204,7 +204,7 @@ describe('fbeast main CLI', () => {
     const mockSpawnSync = vi.fn().mockReturnValue({ status: 0, signal: null, error: undefined });
     vi.doMock('node:child_process', () => ({ spawnSync: mockSpawnSync }));
 
-    process.argv = ['node', 'fbeast', 'network', 'up', 'name&whoami', '100%literal%'];
+    process.argv = ['node', 'fbeast', 'network', 'up', 'name&whoami', '100%literal%', 'C:\\tmp\\', 'with space'];
 
     const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('process.exit'); }) as never);
 
@@ -216,8 +216,8 @@ describe('fbeast main CLI', () => {
 
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'C:\\Windows\\System32\\cmd.exe',
-      ['/d', '/s', '/c', `"${shimPath}" "network" "up" "name^&whoami" "100^%literal^%"`],
-      expect.objectContaining({ stdio: 'inherit', shell: false }),
+      ['/d', '/c', `"${shimPath}" "network" "up" "name^&whoami" "100^%literal^%" "C:\\tmp\\\\" "with space"`],
+      expect.objectContaining({ stdio: 'inherit', shell: false, windowsVerbatimArguments: true }),
     );
     mockExit.mockRestore();
     platformSpy.mockRestore();

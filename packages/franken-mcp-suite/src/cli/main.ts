@@ -19,6 +19,7 @@ const MCP_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 type ResolvedCommand = {
   command: string;
   args: string[];
+  windowsVerbatimArguments?: boolean;
 };
 
 function getEnvPath(env: NodeJS.ProcessEnv): string {
@@ -63,8 +64,27 @@ function resolveExecutable(command: string): string {
 }
 
 function quoteCmdArg(arg: string): string {
-  if (arg === '') return '""';
-  return `"${arg.replace(/["^&|<>()%!]/g, (char) => `^${char}`)}"`;
+  let quoted = '"';
+  let backslashes = 0;
+
+  for (const char of arg) {
+    if (char === '\\') {
+      backslashes += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      quoted += `${'\\'.repeat(backslashes * 2 + 1)}"`;
+      backslashes = 0;
+      continue;
+    }
+
+    quoted += `${'\\'.repeat(backslashes)}${char}`;
+    backslashes = 0;
+  }
+
+  quoted += `${'\\'.repeat(backslashes * 2)}"`;
+  return quoted.replace(/[\^&|<>()%!]/g, (char) => `^${char}`);
 }
 
 function isWindowsShellShim(command: string): boolean {
@@ -80,7 +100,7 @@ function resolveCommand(command: string, args: string[]): ResolvedCommand {
 
   const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
   const commandLine = [executable, ...args].map(quoteCmdArg).join(' ');
-  return { command: comspec, args: ['/d', '/s', '/c', commandLine] };
+  return { command: comspec, args: ['/d', '/c', commandLine], windowsVerbatimArguments: true };
 }
 
 function resolveClient(): McpClient {
@@ -97,10 +117,11 @@ function reportMcpInitError(error: unknown): never {
 
 function passthrough(): never {
   const passthroughArgs = process.argv.slice(2);
-  const { command, args } = resolveCommand('frankenbeast', passthroughArgs);
+  const { command, args, windowsVerbatimArguments } = resolveCommand('frankenbeast', passthroughArgs);
   const result = spawnSync(command, args, {
     stdio: 'inherit',
     shell: false,
+    windowsVerbatimArguments,
   });
   if (result.error) {
     const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
