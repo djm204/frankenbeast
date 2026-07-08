@@ -137,7 +137,7 @@ describe('GeminiCliAdapter', () => {
           server: 'https://example.com/gemini',
           context: {
             fileName: contextFileName,
-            includeDirectories: ['/default/docs', '/user/docs', '/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
+            includeDirectories: ['/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         });
@@ -156,6 +156,67 @@ describe('GeminiCliAdapter', () => {
           delete process.env.GEMINI_CLI_HOME;
         } else {
           process.env.GEMINI_CLI_HOME = originalGeminiCliHome;
+        }
+      }
+    });
+
+    it('inherits trusted project include directories when system settings do not override them', () => {
+      const originalSettingsPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+      const originalSystemDefaultsPath = process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+      const originalGeminiCliHome = process.env.GEMINI_CLI_HOME;
+      const originalTrustWorkspace = process.env.GEMINI_CLI_TRUST_WORKSPACE;
+      const existingSettings = join(tempDir, 'existing-settings.json');
+      const systemDefaults = join(tempDir, 'system-defaults.json');
+      const geminiCliHome = join(tempDir, 'gemini-home-trusted');
+      mkdirSync(join(tempDir, '.gemini'));
+      mkdirSync(join(geminiCliHome, '.gemini'), { recursive: true });
+      writeFileSync(systemDefaults, `{ "context": { "includeDirectories": ["/default/docs"] } }`);
+      writeFileSync(
+        join(geminiCliHome, '.gemini', 'settings.json'),
+        `{ "context": { "includeDirectories": ["/user/docs"] } }`,
+      );
+      writeFileSync(
+        join(tempDir, '.gemini', 'settings.json'),
+        `{ "context": { "includeDirectories": ["/project/docs"] } }`,
+      );
+      writeFileSync(existingSettings, `{ "sandbox": true, "context": { "fileName": "PROJECT.md" } }`);
+      adapter = new GeminiCliAdapter({ workingDir: tempDir });
+      process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
+      process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = systemDefaults;
+      process.env.GEMINI_CLI_HOME = geminiCliHome;
+      process.env.GEMINI_CLI_TRUST_WORKSPACE = 'true';
+
+      try {
+        const includeDir = join(tempDir, 'managed-context');
+        const { settingsPath, contextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; contextFileName: string } }).writeContextSettings(tempDir, includeDir);
+        expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toMatchObject({
+          sandbox: true,
+          context: {
+            fileName: contextFileName,
+            includeDirectories: ['/default/docs', '/user/docs', '/project/docs', includeDir],
+            loadMemoryFromIncludeDirectories: true,
+          },
+        });
+      } finally {
+        if (originalSettingsPath === undefined) {
+          delete process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+        } else {
+          process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = originalSettingsPath;
+        }
+        if (originalSystemDefaultsPath === undefined) {
+          delete process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+        } else {
+          process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = originalSystemDefaultsPath;
+        }
+        if (originalGeminiCliHome === undefined) {
+          delete process.env.GEMINI_CLI_HOME;
+        } else {
+          process.env.GEMINI_CLI_HOME = originalGeminiCliHome;
+        }
+        if (originalTrustWorkspace === undefined) {
+          delete process.env.GEMINI_CLI_TRUST_WORKSPACE;
+        } else {
+          process.env.GEMINI_CLI_TRUST_WORKSPACE = originalTrustWorkspace;
         }
       }
     });

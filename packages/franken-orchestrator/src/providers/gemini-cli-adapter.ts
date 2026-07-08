@@ -25,7 +25,7 @@ import type {
   SkillCatalogEntry,
 } from '@franken/types';
 import { homedir, platform, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
@@ -225,15 +225,17 @@ export class GeminiCliAdapter implements ILlmProvider {
   private writeContextSettings(
     targetDir: string,
     includeDir: string,
+    workspaceDir = resolve(this.workingDir),
   ): { settingsPath: string; contextFileName: string } {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
 
     const existingContext = this.asObject(existing['context']) ?? {};
+    const existingIncludeDirectories = this.stringArray(existingContext['includeDirectories']);
     const contextFileName = this.managedContextFileName();
     const includeDirectories = this.uniqueStrings([
-      ...this.inheritedIncludeDirectories(),
-      ...this.stringArray(existingContext['includeDirectories']),
+      ...(existingIncludeDirectories.length === 0 ? this.inheritedIncludeDirectories(workspaceDir) : []),
+      ...existingIncludeDirectories,
       ...this.extraIncludeDirectories(),
       includeDir,
     ]);
@@ -309,10 +311,11 @@ export class GeminiCliAdapter implements ILlmProvider {
     return '/etc/gemini-cli/system-defaults.json';
   }
 
-  private inheritedIncludeDirectories(): string[] {
+  private inheritedIncludeDirectories(workspaceDir: string): string[] {
     const settingsFiles = [
       process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
       this.userSettingsPath(),
+      ...(this.isWorkspaceTrusted(workspaceDir) ? [join(workspaceDir, '.gemini', 'settings.json')] : []),
     ];
 
     return settingsFiles.flatMap((settingsPath) => {
@@ -324,6 +327,63 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private userSettingsPath(): string {
     return join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'settings.json');
+  }
+
+  private trustedFoldersPath(): string {
+    return process.env.GEMINI_CLI_TRUSTED_FOLDERS_PATH ?? join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'trustedFolders.json');
+  }
+
+  private isWorkspaceTrusted(workspaceDir: string): boolean {
+    if (process.env.GEMINI_CLI_TRUST_WORKSPACE === 'true') return true;
+    if (!this.isFolderTrustEnabled()) return true;
+
+    const trustConfig = this.readSettingsFile(this.trustedFoldersPath(), 'Gemini trusted folders');
+    const workspacePath = this.realOrResolvedPath(workspaceDir);
+    let longestMatchLength = -1;
+    let longestMatchTrust: string | undefined;
+
+    for (const [rawPath, trustLevel] of Object.entries(trustConfig)) {
+      if (trustLevel !== 'TRUST_FOLDER' && trustLevel !== 'TRUST_PARENT' && trustLevel !== 'DO_NOT_TRUST') continue;
+      const effectivePath = trustLevel === 'TRUST_PARENT' ? dirname(rawPath) : rawPath;
+      const trustedPath = this.realOrResolvedPath(effectivePath);
+      if (this.isSameOrSubpath(trustedPath, workspacePath) && rawPath.length > longestMatchLength) {
+        longestMatchLength = rawPath.length;
+        longestMatchTrust = trustLevel;
+      }
+    }
+
+    return longestMatchTrust === 'TRUST_FOLDER' || longestMatchTrust === 'TRUST_PARENT';
+  }
+
+  private isFolderTrustEnabled(): boolean {
+    const settingsFiles = [
+      process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH ?? this.defaultSystemDefaultsPath(),
+      this.userSettingsPath(),
+      process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath(),
+    ];
+    let enabled: boolean | undefined;
+    for (const settingsPath of settingsFiles) {
+      const settings = this.readSettingsFile(settingsPath, 'Gemini settings');
+      const security = this.asObject(settings['security']);
+      const folderTrust = this.asObject(security?.['folderTrust']);
+      if (typeof folderTrust?.['enabled'] === 'boolean') {
+        enabled = folderTrust['enabled'];
+      }
+    }
+    return enabled ?? true;
+  }
+
+  private realOrResolvedPath(path: string): string {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  }
+
+  private isSameOrSubpath(parent: string, child: string): boolean {
+    const result = relative(parent, child);
+    return result === '' || (result.length > 0 && !result.startsWith('..') && !isAbsolute(result));
   }
 
   private readSettingsFile(path: string, description: string): Record<string, unknown> {
