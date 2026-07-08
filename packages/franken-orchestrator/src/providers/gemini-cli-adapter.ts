@@ -180,6 +180,7 @@ export class GeminiCliAdapter implements ILlmProvider {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let emittedText = false;
+    let emittedToolUse = false;
     let sawTerminalFrame = false;
 
     for await (const line of rl) {
@@ -263,7 +264,16 @@ export class GeminiCliAdapter implements ILlmProvider {
             name: block['name'] as string,
             input: block['input'] ?? {},
           };
+          emittedToolUse = true;
         }
+      } else if (type === 'tool_use') {
+        yield {
+          type: 'tool_use',
+          id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
+          name: (parsed['tool_name'] as string) ?? (parsed['name'] as string),
+          input: parsed['parameters'] ?? parsed['input'] ?? {},
+        };
+        emittedToolUse = true;
       } else if (type === 'message_delta') {
         const usage = parsed['usage'] as Record<string, number> | undefined;
         if (usage) {
@@ -289,7 +299,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         }
       } else if (type === 'message_stop') {
         sawTerminalFrame = true;
-        if (!emittedText) {
+        if (!emittedText && !emittedToolUse) {
           yield {
             type: 'error',
             error: 'gemini stream completed without parseable text',
@@ -337,7 +347,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         error: `gemini process exited with code ${exitCode}`,
         retryable: false,
       };
-    } else if (sawTerminalFrame && emittedText) {
+    } else if (sawTerminalFrame && (emittedText || emittedToolUse)) {
       yield {
         type: 'done',
         usage: {

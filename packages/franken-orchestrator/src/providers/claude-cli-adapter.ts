@@ -300,14 +300,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
           message.includes('rate') || message.includes('overloaded');
         yield { type: 'error', error: message, retryable };
         return;
-      } else if (!emittedText && type !== 'message') {
-        const parts: string[] = [];
-        tryExtractTextFromNode(parsed, parts);
-        const text = parts.join('').trim();
-        if (text.length > 0) {
-          yield { type: 'text', content: text };
-          emittedText = true;
-        }
       }
     }
 

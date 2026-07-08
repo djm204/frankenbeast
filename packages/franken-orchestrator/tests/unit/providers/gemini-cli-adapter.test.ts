@@ -152,6 +152,29 @@ describe('GeminiCliAdapter', () => {
       expect(events[0]).toEqual({ type: 'error', error: 'gemini stream completed without parseable text', retryable: true });
     });
 
+    it('allows tool-only Gemini turns to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_start', content_block: { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'README.md' } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'README.md' } },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
+    it('emits top-level Gemini tool_use events', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_use', tool_id: 'tool-2', tool_name: 'search', parameters: { query: 'docs' } }),
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'done' } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-2', name: 'search', input: { query: 'docs' } });
+      expect(events[1]).toEqual({ type: 'text', content: 'done' });
+    });
+
     it('ignores Gemini tool result output before final result text', async () => {
       mockSpawn([
         JSON.stringify({ type: 'tool_result', output: 'raw tool stdout' }),

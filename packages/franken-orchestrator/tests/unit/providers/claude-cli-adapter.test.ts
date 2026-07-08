@@ -220,6 +220,18 @@ describe('ClaudeCliAdapter', () => {
       expect(events[0]).toEqual({ type: 'text', content: 'Final assistant answer' });
     });
 
+    it('ignores Claude system frames before the final result', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'system', subtype: 'hook_progress', output: 'internal hook status' }),
+        JSON.stringify({ type: 'result', result: 'Final assistant answer' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Final assistant answer' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
     it('preserves Claude result-frame error messages', async () => {
       mockSpawn([
         JSON.stringify({ type: 'result', is_error: true, result: '', error: 'permission denied' }),
