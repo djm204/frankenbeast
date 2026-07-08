@@ -71,10 +71,24 @@ describe('GeminiCliAdapter', () => {
       ]);
     });
 
-    it('includes -m for model', () => {
-      const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
-      expect(args).toContain('-m');
-      expect(args).toContain('gemini-2.5-flash');
+    it('drops include-directory extra args so only the managed prompt dir is scanned for memory', () => {
+      adapter = new GeminiCliAdapter({
+        binaryPath: 'gemini',
+        model: 'gemini-2.5-flash',
+        workingDir: tempDir,
+        extraArgs: ['--foo', 'bar', '--include-directories', '/tmp/untrusted', '--include-directories=/tmp/also-untrusted'],
+      });
+
+      expect(adapter.buildArgs({ systemPrompt: '', messages: [] })).toEqual([
+        '-p',
+        '',
+        '--output-format',
+        'stream-json',
+        '-m',
+        'gemini-2.5-flash',
+        '--foo',
+        'bar',
+      ]);
     });
   });
 
@@ -89,11 +103,12 @@ describe('GeminiCliAdapter', () => {
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
 
       try {
-        const settingsPath = (adapter as unknown as { writeContextSettings(dir: string): string }).writeContextSettings(tempDir);
+        const includeDir = join(tempDir, 'managed-context');
+        const settingsPath = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): string }).writeContextSettings(tempDir, includeDir);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
           server: 'https://example.com/gemini',
-          context: { fileName: 'GEMINI.md', loadMemoryFromIncludeDirectories: true },
+          context: { fileName: 'GEMINI.md', includeDirectories: [includeDir], loadMemoryFromIncludeDirectories: true },
         });
       } finally {
         if (originalSettingsPath === undefined) {
@@ -143,7 +158,7 @@ describe('GeminiCliAdapter', () => {
       expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED', retryable: true });
     });
 
-    it('runs from an isolated context cwd while including the configured workspace', async () => {
+    it('runs from the configured workspace while scoping temp Gemini context through settings', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
       await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
@@ -152,16 +167,12 @@ describe('GeminiCliAdapter', () => {
       const spawnArgs = spawnCall[1] as string[];
       const spawnOptions = spawnCall[2] as { cwd: string; env: Record<string, string> };
       expect(spawnOptions.cwd).toBe(tempDir);
-      expect(spawnArgs).toContain('--include-directories');
-      const includeDir = spawnArgs[spawnArgs.indexOf('--include-directories') + 1];
-      expect(includeDir).toContain('franken-gemini-context-');
-      expect(includeDir).not.toContain(tempDir);
+      expect(spawnArgs).not.toContain('--include-directories');
       const settingsPath = spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
       expect(settingsPath).toContain('franken-gemini-settings-');
-      expect(settingsPath).not.toContain(includeDir);
+      expect(settingsPath).not.toContain(tempDir);
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
-      expect(existsSync(includeDir)).toBe(false);
       expect(existsSync(settingsPath)).toBe(false);
     });
 

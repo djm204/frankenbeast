@@ -67,8 +67,8 @@ export class GeminiCliAdapter implements ILlmProvider {
     try {
       this.removeManagedGeminiMd();
       this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
-      const settingsPath = this.writeContextSettings(settingsWorkingDir);
-      const args = this.buildArgs(request, contextWorkingDir);
+      const settingsPath = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+      const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
         env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
@@ -159,18 +159,29 @@ export class GeminiCliAdapter implements ILlmProvider {
     return this.options.workingDir ?? process.cwd();
   }
 
-  buildArgs(_request: LlmRequest, includeDirectory?: string): string[] {
+  buildArgs(_request: LlmRequest): string[] {
     const args = ['-p', '', '--output-format', 'stream-json'];
-    if (includeDirectory) {
-      args.push('--include-directories', includeDirectory);
-    }
     if (this.options.model) {
       args.push('-m', this.options.model);
     }
     if (this.options.extraArgs?.length) {
-      args.push(...this.options.extraArgs);
+      args.push(...this.safeExtraArgs());
     }
     return args;
+  }
+
+  private safeExtraArgs(): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < this.options.extraArgs!.length; index += 1) {
+      const arg = this.options.extraArgs![index]!;
+      if (arg === '--include-directories') {
+        index += 1;
+        continue;
+      }
+      if (arg.startsWith('--include-directories=')) continue;
+      result.push(arg);
+    }
+    return result;
   }
 
   writeGeminiMd(
@@ -205,7 +216,7 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
   }
 
-  private writeContextSettings(targetDir: string): string {
+  private writeContextSettings(targetDir: string, includeDir: string): string {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     let existing: Record<string, unknown> = {};
     if (existsSync(existingPath)) {
@@ -225,6 +236,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           ...existing,
           context: {
             ...existingContext,
+            includeDirectories: [includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         },
