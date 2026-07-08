@@ -17,6 +17,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { extractOperatorToken } from '../operator-auth.js';
 import { chatClientKey } from '../chat-rate-limit.js';
 import { extractOperatorTokenCookie } from '../operator-auth.js';
 
@@ -76,7 +77,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const result = chatRateLimiter.take(chatClientKey({
       sessionId,
       action,
-      authorization: headers.authorization,
+      authorization: extractOperatorToken(headers.authorization),
       operatorToken: headers.operatorToken,
       cookie: extractOperatorTokenCookie(headers.cookie),
       remoteAddress: headers.remoteAddress,
@@ -133,7 +134,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
     enforceChatRateLimit(session.id, 'message', {
-      authorization: c.req.header('authorization'),
+      authorization: extractOperatorToken(c.req.header('authorization')),
       operatorToken: c.req.header('x-frankenbeast-operator-token'),
       cookie: c.req.header('cookie'),
       remoteAddress: c.req.header('x-frankenbeast-remote-address'),
@@ -212,7 +213,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     }
 
     enforceChatRateLimit(session.id, 'approval', {
-      authorization: c.req.header('authorization'),
+      authorization: extractOperatorToken(c.req.header('authorization')),
       operatorToken: c.req.header('x-frankenbeast-operator-token'),
       cookie: c.req.header('cookie'),
       remoteAddress: c.req.header('x-frankenbeast-remote-address'),

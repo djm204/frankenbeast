@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { extractOperatorToken } from './operator-auth.js';
 import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
 
 export type ChatRateLimitOptions = BeastRateLimitOptions;
@@ -22,7 +23,7 @@ export function chatClientKey(parts: {
   readonly principal?: string | undefined;
 }): string {
   const principal = parts.principal?.trim()
-    || credentialPrincipal('bearer', parts.authorization)
+    || credentialPrincipal('bearer', parts.authorization ? extractOperatorToken(parts.authorization) : undefined)
     || credentialPrincipal('operator', parts.operatorToken)
     || credentialPrincipal('cookie', parts.cookie)
     || addressPrincipal(parts.remoteAddress)
