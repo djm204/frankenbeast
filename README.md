@@ -474,6 +474,22 @@ frankenbeast issues --label bug --repo owner/repo
 --allow-origin <url>    CORS origin for dashboard
 ```
 
+### Runtime config and environment overrides
+
+`frankenbeast run` loads orchestrator config from defaults, an optional JSON config file (`--config <path>` or the project-local `.fbeast/config.json`), `FRANKEN_*` environment variables, and CLI flags. When the same field is set in more than one place, precedence is: CLI flags > `FRANKEN_*` env vars > config file > built-in defaults.
+
+| Environment variable | Config field | Type and accepted values | Default / validation |
+|----------------------|--------------|--------------------------|----------------------|
+| `FRANKEN_MAX_TOTAL_TOKENS` | `maxTotalTokens` | integer token budget | default `100000`; must be at least `10000` |
+| `FRANKEN_MAX_DURATION_MS` | `maxDurationMs` | integer milliseconds | default `300000`; must be at least `1000` |
+| `FRANKEN_MAX_CRITIQUE_ITERATIONS` | `maxCritiqueIterations` | integer critique passes | default `3`; valid range `1` through `10` |
+| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; only `true` enables it | default `false`; `--verbose` also enables tracing and wins over env/config |
+| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
+
+Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+
 ### Project Layout
 
 Running `frankenbeast` in any project creates:
