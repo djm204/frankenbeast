@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.2.4](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.3...franken-mcp-suite-v0.2.4) (2026-07-08)
+
+
+### Bug Fixes
+
+* **mcp:** configure BrainAdapter sqlite pragmas ([09ee4bd](https://github.com/djm204/frankenbeast/commit/09ee4bd373cd99f8d25a418045710461e0a9ef1a))
+
+
+### Refactoring
+
+* **mcp:** source standalone tools from registry ([796f4bb](https://github.com/djm204/frankenbeast/commit/796f4bbd05fed92881606c38c8d1d58c385c5691))
+
+
+### Documentation
+
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+* **mcp:** document central audit session ids ([7209458](https://github.com/djm204/frankenbeast/commit/7209458bb35d4ad0641b24e8f44fa5e8e13b0c72))
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+    * @franken/brain bumped from 0.7.2 to 0.7.3
+    * @franken/critique bumped from 0.6.13 to 0.6.14
+    * @franken/governor bumped from 0.5.11 to 0.5.12
+    * @franken/observer bumped from 0.7.13 to 0.7.14
+    * @franken/orchestrator bumped from 0.41.1 to 0.42.0
+    * @franken/planner bumped from 0.4.11 to 0.4.12
+
 ## [0.2.3](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.2...franken-mcp-suite-v0.2.3) (2026-07-08)
 
 
