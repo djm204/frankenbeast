@@ -55,7 +55,28 @@ describe('ScalabilityEvaluator', () => {
 
   it('does not treat non-port config keys containing port as port literals', async () => {
     const evaluator = new ScalabilityEvaluator();
-    const content = `const cfg = { transport: 443, viewport: 1024, support: 1000, portalId: 1234, portfolio: 1000 };`;
+    const content = `const cfg = { transport: 443, viewport: 1024, viewPortWidth: 1024, support: 1000, portalId: 1234, portfolio: 1000 };
+layout.viewPortWidth = 1024;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('does not treat type-only object literals as hardcoded runtime ports', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `type ServerConfig = { port: 8080 };
+interface ListenerConfig {
+  port: 3000;
+}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('does not let typed port declarations consume an initializer from a later line', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `let port: number
+const retryDelay = 5000;`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);

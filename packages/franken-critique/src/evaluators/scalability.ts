@@ -2,20 +2,21 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|\w+Port\w*|\w*_PORT\w*|\w*_port\w*)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|\w+Port|\w*_PORT\w*|\w*_port\w*)`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
   {
     pattern: new RegExp(
-      String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;]+)?\s*=\s*(\d{2,5})\b`,
+      String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;\n]+)?\s*=\s*(\d{2,5})\b`,
       'g',
     ),
     suggestion: DECLARATION_PORT_SUGGESTION,
   },
   {
-    pattern: new RegExp(String.raw`(?:^|[,{}])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
+    pattern: new RegExp(String.raw`(?:^|[,{])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
     suggestion: CONFIG_PORT_SUGGESTION,
+    skipTypeOnly: true,
   },
   {
     pattern: new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
@@ -69,8 +70,12 @@ export class ScalabilityEvaluator implements Evaluator {
   }
 
   private checkHardcodedPorts(content: string, findings: EvaluationFinding[]): void {
-    for (const { pattern, suggestion } of HARDCODED_PORT_PATTERNS) {
+    for (const { pattern, suggestion, skipTypeOnly } of HARDCODED_PORT_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
+        if (skipTypeOnly && this.isTypeOnlyPortShape(content, match.index)) {
+          continue;
+        }
+
         findings.push({
           message: `Found hardcoded port number: ${match[1]}. Use environment variables or config.`,
           severity: 'warning',
@@ -78,5 +83,10 @@ export class ScalabilityEvaluator implements Evaluator {
         });
       }
     }
+  }
+
+  private isTypeOnlyPortShape(content: string, matchIndex: number): boolean {
+    const prefix = content.slice(Math.max(0, matchIndex - 200), matchIndex + 1);
+    return /\b(?:type\s+\w+\s*=\s*|interface\s+\w+\s*)\{[^{}]*$/s.test(prefix);
   }
 }
