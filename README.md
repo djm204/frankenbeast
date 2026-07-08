@@ -778,7 +778,7 @@ frankenbeast/
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
 │   ├── adr/                     # Architecture Decision Records
-│   ├── guides/                  # Quickstart, add-provider, wrap-agent, run-dashboard-chat
+│   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
