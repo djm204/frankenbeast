@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -82,6 +83,20 @@ describe('ContainerBeastExecutor', () => {
     expect(spawned[0].command).toBe('docker');
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--name', `fbeast-${run.id}-attempt-1`]));
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--network', 'none']));
+
+    const userFlag = spawned[0].args.indexOf('--user');
+    const containerUser = spawned[0].args[userFlag + 1]!;
+    const [expectedUid, expectedGid] = containerUser.split(':').map((part) => Number.parseInt(part, 10));
+    const configDir = join(workDir, '.fbeast', '.build', 'run-configs');
+    const configPath = join(configDir, `${run.id}.json`);
+    for (const dir of [join(workDir, '.fbeast'), join(workDir, '.fbeast', '.build'), configDir]) {
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(dir).uid).toBe(expectedUid);
+      expect(statSync(dir).gid).toBe(expectedGid);
+    }
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(statSync(configPath).uid).toBe(expectedUid);
+    expect(statSync(configPath).gid).toBe(expectedGid);
   });
 
   it('uses a distinct Docker container name for each retry attempt', async () => {
