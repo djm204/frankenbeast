@@ -32,6 +32,7 @@ import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
+const MANAGED_CONTEXT_FILENAME_PREFIX = 'FRANKENBEAST_GEMINI';
 
 export interface GeminiCliOptions {
   binaryPath?: string;
@@ -228,7 +229,7 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
 
     const existingContext = this.asObject(existing['context']) ?? {};
-    const contextFileName = this.firstContextFileName(existingContext['fileName']) ?? 'GEMINI.md';
+    const contextFileName = this.managedContextFileName();
     const includeDirectories = this.uniqueStrings([
       ...this.stringArray(existingContext['includeDirectories']),
       ...this.extraIncludeDirectories(),
@@ -242,6 +243,12 @@ export class GeminiCliAdapter implements ILlmProvider {
           ...existing,
           context: {
             ...existingContext,
+            // Force Gemini memory scanning to look for a per-run managed file
+            // name. That preserves user/project includeDirectories as workspace
+            // context while avoiding accidental GEMINI.md instruction injection
+            // from those directories when loadMemoryFromIncludeDirectories is
+            // enabled for the temp prompt include.
+            fileName: contextFileName,
             includeDirectories,
             loadMemoryFromIncludeDirectories: true,
           },
@@ -254,12 +261,6 @@ export class GeminiCliAdapter implements ILlmProvider {
     return { settingsPath, contextFileName };
   }
 
-  private firstContextFileName(value: unknown): string | undefined {
-    if (typeof value === 'string' && value) return value;
-    if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0);
-    return undefined;
-  }
-
   private extraIncludeDirectories(): string[] {
     const args = this.options.extraArgs ?? [];
     const dirs: string[] = [];
@@ -267,13 +268,21 @@ export class GeminiCliAdapter implements ILlmProvider {
       const arg = args[index]!;
       if (arg === '--include-directories') {
         const next = args[index + 1];
-        if (next) dirs.push(next);
+        if (next) dirs.push(...this.splitIncludeDirectories(next));
         index += 1;
       } else if (arg.startsWith('--include-directories=')) {
-        dirs.push(arg.slice('--include-directories='.length));
+        dirs.push(...this.splitIncludeDirectories(arg.slice('--include-directories='.length)));
       }
     }
     return dirs;
+  }
+
+  private managedContextFileName(): string {
+    return `${MANAGED_CONTEXT_FILENAME_PREFIX}_${crypto.randomUUID()}.md`;
+  }
+
+  private splitIncludeDirectories(value: string): string[] {
+    return value.split(',').map((item) => item.trim()).filter(Boolean);
   }
 
   private stringArray(value: unknown): string[] {

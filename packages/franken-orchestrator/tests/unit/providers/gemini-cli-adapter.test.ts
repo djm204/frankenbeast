@@ -104,20 +104,20 @@ describe('GeminiCliAdapter', () => {
         binaryPath: 'gemini',
         model: 'gemini-2.5-flash',
         workingDir: tempDir,
-        extraArgs: ['--include-directories', '/sibling/repo', '--include-directories=/more/docs'],
+        extraArgs: ['--include-directories', '/sibling/repo,/sibling/docs', '--include-directories=/more/docs,/even-more/docs'],
       });
       process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = existingSettings;
 
       try {
         const includeDir = join(tempDir, 'managed-context');
         const { settingsPath, contextFileName } = (adapter as unknown as { writeContextSettings(dir: string, includeDir: string): { settingsPath: string; contextFileName: string } }).writeContextSettings(tempDir, includeDir);
-        expect(contextFileName).toBe('PROJECT.md');
+        expect(contextFileName).toMatch(/^FRANKENBEAST_GEMINI_[0-9a-f-]+\.md$/);
         expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
           sandbox: true,
           server: 'https://example.com/gemini',
           context: {
-            fileName: 'PROJECT.md',
-            includeDirectories: ['/shared/docs', '/sibling/repo', '/more/docs', includeDir],
+            fileName: contextFileName,
+            includeDirectories: ['/shared/docs', '/sibling/repo', '/sibling/docs', '/more/docs', '/even-more/docs', includeDir],
             loadMemoryFromIncludeDirectories: true,
           },
         });
