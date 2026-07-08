@@ -138,7 +138,10 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       app.use('*', credentialedCorsForAllowedOrigins(allowedOrigins));
     }
   }
-  for (const base of ['/v1/chat', '/v1/network', '/api/skills']) {
+  // Apply the JSON body cap to every first-party control route group that can
+  // parse request bodies. Provider webhooks keep their own signature-specific
+  // handling under /webhooks/* and are intentionally not included here.
+  for (const base of ['/v1/chat', '/v1/network', '/v1/comms', '/v1/beasts', '/api/security', '/api/skills']) {
     app.use(base, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
     app.use(`${base}/*`, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   }

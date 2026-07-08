@@ -241,6 +241,44 @@ describe('control-plane operator auth', () => {
       expect(skillManager.install).not.toHaveBeenCalled();
       expect(skillManager.installCustom).not.toHaveBeenCalled();
     });
+
+    it.each(['/v1/comms/inbound', '/v1/comms/action'])(
+      'rejects oversized comms payloads for %s before gateway processing',
+      async (path) => {
+        const runtime = mockCommsRuntime();
+        const app = buildApp({ commsRuntime: runtime });
+
+        const res = await app.request(path, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: oversizedJsonBody,
+        });
+
+        expect(res.status).toBe(413);
+        expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+        expect(runtime.processInbound).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects oversized security config payloads before applying updates', async () => {
+      const setSecurityConfig = vi.fn();
+      const app = buildApp({
+        securityConfig: {
+          getSecurityConfig: () => resolveSecurityConfig('standard'),
+          setSecurityConfig,
+        },
+      });
+
+      const res = await app.request('/api/security', {
+        method: 'PATCH',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setSecurityConfig).not.toHaveBeenCalled();
+    });
   });
 
   describe('public comms surfaces stay reachable', () => {
