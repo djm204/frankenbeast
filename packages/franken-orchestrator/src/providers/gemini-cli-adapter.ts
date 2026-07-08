@@ -15,6 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -178,6 +179,8 @@ export class GeminiCliAdapter implements ILlmProvider {
     const rl = createInterface({ input: proc.stdout! });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let emittedText = false;
+    let sawTerminalFrame = false;
 
     for await (const line of rl) {
       if (!line.trim()) continue;
@@ -190,10 +193,51 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       const type = parsed['type'] as string;
 
-      if (type === 'content_block_delta') {
+      if (type === 'result') {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed['result'] ?? parsed, parts);
+        const text = parts.join('').trim();
+        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error';
+        if (isErrorResult) {
+          yield {
+            type: 'error',
+            error: text || 'gemini returned an error result frame',
+            retryable: text.includes('rate') || text.includes('RESOURCE_EXHAUSTED'),
+          };
+          return;
+        }
+        if (text.length > 0 && !emittedText) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
+        const usage = parsed['usage'] as Record<string, number> | undefined;
+        if (usage) {
+          totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
+          totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+        }
+        if (!emittedText) {
+          yield {
+            type: 'error',
+            error: 'gemini result frame contained no text output',
+            retryable: false,
+          };
+          return;
+        }
+        sawTerminalFrame = true;
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
+        };
+        return;
+      } else if (type === 'content_block_delta') {
         const delta = parsed['delta'] as Record<string, unknown>;
         if (delta?.['type'] === 'text_delta') {
           yield { type: 'text', content: delta['text'] as string };
+          emittedText = true;
         }
       } else if (type === 'content_block_start') {
         const block = parsed['content_block'] as Record<string, unknown>;
@@ -217,6 +261,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           totalInputTokens = usage['input_tokens'] ?? 0;
         }
       } else if (type === 'message_stop') {
+        sawTerminalFrame = true;
         yield {
           type: 'done',
           usage: {
@@ -234,6 +279,14 @@ export class GeminiCliAdapter implements ILlmProvider {
           retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
         };
         return;
+      } else if (!emittedText) {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed, parts);
+        const text = parts.join('').trim();
+        if (text.length > 0) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
       }
     }
 
@@ -247,7 +300,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         error: `gemini process exited with code ${exitCode}`,
         retryable: false,
       };
-    } else {
+    } else if (sawTerminalFrame && emittedText) {
       yield {
         type: 'done',
         usage: {
@@ -255,6 +308,12 @@ export class GeminiCliAdapter implements ILlmProvider {
           outputTokens: totalOutputTokens,
           totalTokens: totalInputTokens + totalOutputTokens,
         },
+      };
+    } else {
+      yield {
+        type: 'error',
+        error: 'gemini process exited without producing a result frame or text output',
+        retryable: false,
       };
     }
   }

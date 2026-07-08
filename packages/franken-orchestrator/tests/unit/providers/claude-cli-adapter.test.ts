@@ -70,11 +70,12 @@ describe('ClaudeCliAdapter', () => {
   });
 
   describe('buildArgs()', () => {
-    it('includes -p and --output-format stream-json', () => {
+    it('includes -p, --output-format stream-json, and --verbose', () => {
       const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
       expect(args).toContain('-p');
       expect(args).toContain('--output-format');
       expect(args).toContain('stream-json');
+      expect(args).toContain('--verbose');
     });
 
     it('adds --append-system-prompt when provided', () => {
@@ -138,6 +139,31 @@ describe('ClaudeCliAdapter', () => {
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'Hello world' });
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 } });
+    });
+
+    it('parses Claude CLI result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: 'Final Claude CLI answer',
+          usage: { input_tokens: 12, output_tokens: 7 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Final Claude CLI answer' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 7, totalTokens: 19 } },
+      ]);
+    });
+
+    it('errors when a successful process produces no parseable text or result frame', async () => {
+      mockSpawn([], 0);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'claude process exited without producing a result frame or text output',
+        retryable: false,
+      });
     });
 
     it('parses tool_use events with accumulated input', async () => {

@@ -86,11 +86,38 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
+    it('parses Gemini CLI result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: { response: { text: 'Gemini wrapper answer' } },
+          usage: { input_tokens: 9, output_tokens: 4 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Gemini wrapper answer' },
+        { type: 'done', usage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 } },
+      ]);
+    });
+
+    it('errors instead of returning empty success when the stream has no parseable text', async () => {
+      mockSpawn([], 0);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'gemini process exited without producing a result frame or text output',
+        retryable: false,
+      });
+    });
+
     it('emits error on non-zero exit code', async () => {
       mockSpawn([], 2);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
-      expect(events[0]!.type).toBe('error');
-      expect((events[0] as any).error).toContain('gemini process exited with code 2');
+      expect(events[0]).toMatchObject({
+        type: 'error',
+        error: expect.stringContaining('gemini process exited with code 2'),
+      });
     });
   });
 

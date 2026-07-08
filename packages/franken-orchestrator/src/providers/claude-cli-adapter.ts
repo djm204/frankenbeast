@@ -12,6 +12,7 @@ import type {
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 
 export interface ClaudeCliOptions {
   binaryPath?: string;
@@ -97,7 +98,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
-    const args = ['-p', '--output-format', 'stream-json'];
+    const args = ['-p', '--output-format', 'stream-json', '--verbose'];
     if (request.systemPrompt) {
       args.push('--append-system-prompt', request.systemPrompt);
     }
@@ -138,6 +139,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
       null;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let emittedText = false;
 
     for await (const line of rl) {
       if (!line.trim()) continue;
@@ -150,7 +152,44 @@ export class ClaudeCliAdapter implements ILlmProvider {
 
       const type = parsed['type'] as string;
 
-      if (type === 'content_block_start') {
+      if (type === 'result') {
+        const resultText = typeof parsed['result'] === 'string' ? parsed['result'] : '';
+        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error';
+        if (isErrorResult) {
+          yield {
+            type: 'error',
+            error: resultText.trim() || 'claude returned an error result frame',
+            retryable: resultText.includes('rate') || resultText.includes('overloaded'),
+          };
+          return;
+        }
+        if (resultText.trim().length > 0 && !emittedText) {
+          yield { type: 'text', content: resultText };
+          emittedText = true;
+        }
+        const usage = parsed['usage'] as Record<string, number> | undefined;
+        if (usage) {
+          totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
+          totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+        }
+        if (!emittedText) {
+          yield {
+            type: 'error',
+            error: 'claude result frame contained no text output',
+            retryable: false,
+          };
+          return;
+        }
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
+        };
+        return;
+      } else if (type === 'content_block_start') {
         const block = parsed['content_block'] as Record<string, unknown>;
         if (block?.['type'] === 'tool_use') {
           currentToolUse = {
@@ -163,6 +202,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
         const delta = parsed['delta'] as Record<string, unknown>;
         if (delta?.['type'] === 'text_delta') {
           yield { type: 'text', content: delta['text'] as string };
+          emittedText = true;
         } else if (
           delta?.['type'] === 'input_json_delta' &&
           currentToolUse
@@ -216,6 +256,14 @@ export class ClaudeCliAdapter implements ILlmProvider {
           message.includes('rate') || message.includes('overloaded');
         yield { type: 'error', error: message, retryable };
         return;
+      } else if (!emittedText) {
+        const parts: string[] = [];
+        tryExtractTextFromNode(parsed, parts);
+        const text = parts.join('').trim();
+        if (text.length > 0) {
+          yield { type: 'text', content: text };
+          emittedText = true;
+        }
       }
     }
 
@@ -227,6 +275,12 @@ export class ClaudeCliAdapter implements ILlmProvider {
       yield {
         type: 'error',
         error: `claude process exited with code ${exitCode}`,
+        retryable: false,
+      };
+    } else if (!emittedText) {
+      yield {
+        type: 'error',
+        error: 'claude process exited without producing a result frame or text output',
         retryable: false,
       };
     }
