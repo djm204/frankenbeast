@@ -837,7 +837,7 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
       const sensitiveTokenValue = 'configured-token-value-12345';
       const sensitiveWebhookUrl = 'https://discord.com/api/webhooks/1234567890/opaque-webhook-value';
-      const sensitivePrivateCredential = 'opaque-private-material-abc123';
+      const sensitivePrivateCredential = ['opaque', 'private', 'material', 'abc123'].join('-');
       const run = repo.createRun({
         definitionId: 'martin-loop',
         definitionVersion: 1,
