@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.4](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.3...live-bench-v0.2.4) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.13 to 0.7.14
+
 ## [0.2.3](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.2...live-bench-v0.2.3) (2026-07-08)
 
 
