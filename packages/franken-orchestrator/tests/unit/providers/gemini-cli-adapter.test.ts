@@ -86,11 +86,143 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
+    it('parses Gemini CLI result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: { response: { text: 'Gemini wrapper answer' } },
+          usage: { input_tokens: 8, output_tokens: 3 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Gemini wrapper answer' },
+        { type: 'done', usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 } },
+      ]);
+    });
+
+    it('preserves whitespace in Gemini result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', result: { response: { text: '  code block\n' } } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: '  code block\n' });
+    });
+
+    it('reads Gemini stats token totals from result frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: { response: { text: 'Gemini stats answer' } },
+          stats: { promptTokenCount: 11, candidatesTokenCount: 5 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 11, outputTokens: 5, totalTokens: 16 } });
+    });
+
+    it('emits only assistant Gemini message chunks', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message', message: { role: 'user', content: [{ text: 'echoed prompt' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'assistant answer' }] } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 1, candidatesTokenCount: 2 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'assistant answer' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 } });
+    });
+
+    it('preserves whitespace in Gemini assistant message chunks', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'hello ' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'world\n\n' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: '  \n' }] } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 1, candidatesTokenCount: 2 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'hello ' });
+      expect(events[1]).toEqual({ type: 'text', content: 'world\n\n' });
+      expect(events[2]).toEqual({ type: 'text', content: '  \n' });
+    });
+
+    it('fails closed when Gemini message_stop arrives without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'gemini stream completed without parseable text', retryable: true });
+    });
+
+    it('allows tool-only Gemini turns to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_start', content_block: { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'README.md' } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'README.md' } },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
+    it('emits top-level Gemini tool_use events', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_use', tool_id: 'tool-2', tool_name: 'search', parameters: { query: 'docs' } }),
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'done' } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-2', name: 'search', input: { query: 'docs' } });
+      expect(events[1]).toEqual({ type: 'text', content: 'done' });
+    });
+
+    it('allows top-level Gemini tool-only result frames to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_use', tool_id: 'tool-3', tool_name: 'search', parameters: { query: 'docs' } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 4, candidatesTokenCount: 0 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-3', name: 'search', input: { query: 'docs' } },
+        { type: 'done', usage: { inputTokens: 4, outputTokens: 0, totalTokens: 4 } },
+      ]);
+    });
+
+    it('ignores Gemini tool result output before final result text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_result', output: 'raw tool stdout' }),
+        JSON.stringify({ type: 'result', result: { response: { text: 'final text' } } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'final text' });
+    });
+
+    it('treats Gemini status error result frames as failures', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', status: 'error', error: { message: 'RESOURCE_EXHAUSTED quota' } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED quota', retryable: true });
+    });
+
+    it('errors instead of returning empty success when the stream has no parseable text', async () => {
+      mockSpawn([], 0);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'gemini process exited without producing a result frame or text output',
+        retryable: false,
+      });
+    });
+
     it('emits error on non-zero exit code', async () => {
       mockSpawn([], 2);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
-      expect(events[0]!.type).toBe('error');
-      expect((events[0] as any).error).toContain('gemini process exited with code 2');
+      expect(events[0]).toMatchObject({
+        type: 'error',
+        error: expect.stringContaining('gemini process exited with code 2'),
+      });
     });
   });
 
