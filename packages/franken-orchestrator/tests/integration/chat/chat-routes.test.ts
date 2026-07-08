@@ -485,7 +485,93 @@ describe('Chat HTTP Routes', () => {
     expect(llmComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects concurrent chat mutations for the same token and session', async () => {
+  it('uses the client address for unauthenticated rate limits even when auth headers vary', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const firstCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: firstSession } = await firstCreate.json();
+    const secondCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: secondSession } = await secondCreate.json();
+
+    const allowed = await app.request(`/v1/chat/sessions/${firstSession.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic attacker-controlled-a',
+        'x-forwarded-for': '203.0.113.7',
+      },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const limited = await app.request(`/v1/chat/sessions/${secondSession.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic attacker-controlled-b',
+        'x-frankenbeast-operator-token': 'attacker-controlled-c',
+        'x-forwarded-for': '203.0.113.7',
+      },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keys authenticated rate limits to the configured operator credential, not ignored auth headers', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      operatorToken: 'operator-a',
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const allowed = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const limited = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic ignored-attacker-value',
+        'x-frankenbeast-operator-token': 'operator-a',
+      },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects concurrent chat mutations for the same session across valid auth forms', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {
       id: 'chat-concurrent-message',
@@ -519,12 +605,13 @@ describe('Chat HTTP Routes', () => {
       runtime: runtime as never,
       turnRunner: {} as never,
       sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      operatorToken: 'operator-a',
       chatRateLimit: { windowMs: 60_000, max: 20 },
     });
 
     const first = app.request(`/v1/chat/sessions/${session.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
       body: JSON.stringify({ content: 'first' }),
     });
     await vi.waitFor(() => expect(runtime.run).toHaveBeenCalledTimes(1));

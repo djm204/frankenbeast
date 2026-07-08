@@ -71,15 +71,19 @@ function requestAddress(c: Context): string {
     ?? 'unknown';
 }
 
-function principalHash(c: Context): string {
-  const credential = c.req.header('authorization')?.trim()
-    ?? c.req.header('x-frankenbeast-operator-token')?.trim()
-    ?? `ip:${requestAddress(c)}`;
-  return createHash('sha256').update(credential).digest('hex').slice(0, 24);
+function hashPrincipal(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
 }
 
-function chatAdmissionKey(c: Context, sessionId: string): string {
-  return `session:${sessionId}:principal:${principalHash(c)}`;
+function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
+  if (operatorToken) {
+    return `operator:${hashPrincipal(operatorToken)}`;
+  }
+  return `ip:${hashPrincipal(requestAddress(c))}`;
+}
+
+function chatMutationKey(sessionId: string): string {
+  return `session:${sessionId}`;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
@@ -94,19 +98,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const key = chatAdmissionKey(c, sessionId);
-    const result = limiter.take(`${kind}:${key}`);
+    const principalKey = chatPrincipalKey(c, operatorToken);
+    const mutationKey = chatMutationKey(sessionId);
+    const result = limiter.take(`${kind}:principal:${principalKey}`);
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
-    if (inFlightMutations.has(key)) {
+    if (inFlightMutations.has(mutationKey)) {
       throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
     }
-    inFlightMutations.add(key);
+    inFlightMutations.add(mutationKey);
     try {
       return await run();
     } finally {
-      inFlightMutations.delete(key);
+      inFlightMutations.delete(mutationKey);
     }
   }
 
