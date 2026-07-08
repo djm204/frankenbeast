@@ -64,10 +64,11 @@ export class GeminiCliAdapter implements ILlmProvider {
     try {
       this.removeManagedGeminiMd();
       this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir);
+      const settingsPath = this.writeContextSettings(contextWorkingDir);
       const args = this.buildArgs(request, contextWorkingDir);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
-        env: { ...process.env },
+        env: { ...process.env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -200,6 +201,16 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
   }
 
+  private writeContextSettings(targetDir: string): string {
+    const settingsPath = join(targetDir, 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ context: { loadMemoryFromIncludeDirectories: true } }, null, 2),
+      { mode: 0o600 },
+    );
+    return settingsPath;
+  }
+
   private removeManagedGeminiMd(targetDir = this.workingDir): void {
     const geminiMdPath = join(targetDir, 'GEMINI.md');
     if (!existsSync(geminiMdPath)) return;
@@ -277,8 +288,8 @@ export class GeminiCliAdapter implements ILlmProvider {
         yield {
           type: 'tool_result',
           toolUseId: (parsed['tool_id'] as string) ?? (parsed['toolUseId'] as string) ?? (parsed['tool_use_id'] as string) ?? (parsed['id'] as string) ?? '',
-          content: this.stringifyGeminiContent(parsed['content'] ?? parsed['result'] ?? ''),
-          isError: Boolean(parsed['isError'] ?? parsed['is_error']),
+          content: this.stringifyGeminiContent(parsed['content'] ?? parsed['result'] ?? parsed['output'] ?? ''),
+          isError: Boolean(parsed['isError'] ?? parsed['is_error'] ?? parsed['status'] === 'error'),
         };
       } else if (type === 'result') {
         if (parsed['status'] === 'error' || parsed['error']) {

@@ -97,7 +97,7 @@ describe('GeminiCliAdapter', () => {
         JSON.stringify({ type: 'message', role: 'user', content: { parts: [{ text: 'Hi' }] } }),
         JSON.stringify({ type: 'message', role: 'assistant', content: { parts: [{ text: 'Gemini ' }, { text: 'native' }] } }),
         JSON.stringify({ type: 'tool_use', tool_id: 'tool-1', tool_name: 'read_file', parameters: { path: 'README.md' } }),
-        JSON.stringify({ type: 'tool_result', tool_id: 'tool-1', result: 'ok' }),
+        JSON.stringify({ type: 'tool_result', tool_id: 'tool-1', output: 'ok', status: 'success' }),
         JSON.stringify({ type: 'result', stats: { input_tokens: 12, output_tokens: 5, total_tokens: 17 } }),
       ]);
 
@@ -131,7 +131,7 @@ describe('GeminiCliAdapter', () => {
       const includeDir = spawnArgs[spawnArgs.indexOf('--include-directories') + 1];
       expect(includeDir).toContain('franken-gemini-context-');
       expect(includeDir).not.toContain(tempDir);
-      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
+      expect(spawnOptions.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBe(includeDir + '/settings.json');
       expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
       expect(existsSync(includeDir)).toBe(false);
