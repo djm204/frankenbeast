@@ -242,6 +242,25 @@ describe('control-plane operator auth', () => {
       expect(skillManager.installCustom).not.toHaveBeenCalled();
     });
 
+    it('allows larger skill context Markdown payloads through the context endpoint', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        writeContext: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const content = 'x'.repeat(20 * 1024);
+      const res = await app.request('/api/skills/example/context', {
+        method: 'PUT',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(skillManager.writeContext).toHaveBeenCalledWith('example', content);
+    });
+
     it.each(['/v1/comms/inbound', '/v1/comms/action'])(
       'rejects oversized comms payloads for %s before gateway processing',
       async (path) => {

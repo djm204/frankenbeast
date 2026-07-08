@@ -6,7 +6,13 @@ import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
-import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
+import {
+  BEAST_CONTROL_MAX_BODY_SIZE,
+  HttpError,
+  parseJsonBody,
+  requestSizeLimit,
+  validateBody,
+} from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
 const ModuleConfigSchema = z.object({
@@ -58,6 +64,8 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.use('/v1/beasts/agents', auth);
   app.use('/v1/beasts/agents/*', auth);
+  app.use('/v1/beasts/agents', requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE));
+  app.use('/v1/beasts/agents/*', requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE));
   if (deps.rateLimit) {
     const limiter = new InMemoryRateLimiter(deps.rateLimit);
     const rateLimit = requireBeastRateLimit(
