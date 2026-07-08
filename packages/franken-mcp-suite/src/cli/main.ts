@@ -6,6 +6,7 @@ function printLine(...args: unknown[]): void {
 
 import { existsSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
+import { win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
@@ -14,6 +15,76 @@ const command = process.argv[2];
 const FRANKENBEAST_INSTALL_HELP = "install @franken/orchestrator with 'npm install -g @franken/orchestrator'";
 const TOP_LEVEL_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 const MCP_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
+
+type ResolvedCommand = {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+};
+
+function getEnvPath(env: NodeJS.ProcessEnv): string {
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path');
+  return pathKey ? env[pathKey] ?? '' : '';
+}
+
+function windowsCommandCandidates(command: string): string[] {
+  const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((ext) => ext.trim())
+    .filter(Boolean);
+  const hasWindowsPathSeparator = command.includes('/') || command.includes('\\');
+  const commandHasExt = win32.extname(command) !== '';
+
+  if (hasWindowsPathSeparator || win32.isAbsolute(command)) {
+    const directory = win32.dirname(command);
+    const file = win32.basename(command);
+    return commandHasExt ? [command] : pathext.map((ext) => win32.join(directory, `${file}${ext}`));
+  }
+
+  const pathEntries = getEnvPath(process.env).split(win32.delimiter).filter(Boolean);
+  const names = commandHasExt ? [command] : pathext.map((ext) => `${command}${ext}`);
+  return pathEntries.flatMap((entry) => names.map((name) => joinWindowsPathEntry(entry, name)));
+}
+
+function joinWindowsPathEntry(entry: string, name: string): string {
+  // Tests can mock process.platform to win32 while running on POSIX paths.
+  // Preserve those host paths so existsSync can exercise the Windows branch.
+  if (entry.includes('/')) return `${entry.replace(/[\\/]+$/, '')}/${name}`;
+  return win32.join(entry, name);
+}
+
+function resolveExecutable(command: string): string {
+  if (process.platform !== 'win32') return command;
+
+  for (const candidate of windowsCommandCandidates(command)) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return command;
+}
+
+function quoteCmdArg(arg: string): string {
+  // This string is parsed first by cmd.exe and then forwarded by the npm .cmd shim
+  // via %*. Keep metacharacters literal by grouping every argv entry in quotes,
+  // not by caret-escaping characters that would then leak into the child argv.
+  return `"${arg.replace(/"/g, '""').replace(/%/g, '^%')}"`;
+}
+
+function isWindowsShellShim(command: string): boolean {
+  const extension = win32.extname(command).toLowerCase();
+  return extension === '.cmd' || extension === '.bat';
+}
+
+function resolveCommand(command: string, args: string[]): ResolvedCommand {
+  const executable = resolveExecutable(command);
+  if (process.platform !== 'win32' || !isWindowsShellShim(executable)) {
+    return { command: executable, args };
+  }
+
+  const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+  const commandLine = [executable, ...args].map(quoteCmdArg).join(' ');
+  return { command: comspec, args: ['/d', '/s', '/c', `"${commandLine}"`], windowsVerbatimArguments: true };
+}
 
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
@@ -28,9 +99,12 @@ function reportMcpInitError(error: unknown): never {
 }
 
 function passthrough(): never {
-  const result = spawnSync('frankenbeast', process.argv.slice(2), {
+  const passthroughArgs = process.argv.slice(2);
+  const { command, args, windowsVerbatimArguments } = resolveCommand('frankenbeast', passthroughArgs);
+  const result = spawnSync(command, args, {
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    shell: false,
+    windowsVerbatimArguments,
   });
   if (result.error) {
     const isNotFound = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
@@ -141,12 +215,12 @@ switch (subcommand) {
         });
       },
       exec: async (cmd, args) => {
-        const isWindows = process.platform === 'win32';
+        const resolved = resolveCommand(cmd, args);
         const result = spawn(
-          cmd,
-          args,
-          isWindows
-            ? { stdio: 'pipe', shell: true, encoding: 'utf8' }
+          resolved.command,
+          resolved.args,
+          process.platform === 'win32'
+            ? { stdio: 'pipe', shell: false, encoding: 'utf8', windowsVerbatimArguments: resolved.windowsVerbatimArguments }
             : { stdio: 'inherit', shell: false },
         );
         if (result.error) {
@@ -160,15 +234,6 @@ switch (subcommand) {
         if (result.status !== 0) {
           const stdout = result.stdout ? String(result.stdout) : '';
           const stderr = result.stderr ? String(result.stderr) : '';
-          const shellOutput = `${stdout}\n${stderr}`.toLowerCase();
-          const isWindowsCommandNotFound =
-            isWindows &&
-            (shellOutput.includes('is not recognized') ||
-              shellOutput.includes('not recognized as an internal or external command') ||
-              shellOutput.includes('command not found'));
-          if (isWindowsCommandNotFound) {
-            throw new Error(`${cmd}: binary not found — ${FRANKENBEAST_INSTALL_HELP}`);
-          }
           if (stdout) process.stdout.write(stdout);
           if (stderr) process.stderr.write(stderr);
           throw new Error(
