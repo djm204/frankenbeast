@@ -196,7 +196,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       if (type === 'result') {
         const parts: string[] = [];
         tryExtractTextFromNode(parsed['result'] ?? parsed, parts);
-        const text = parts.join('').trim();
+        const text = parts.join('');
         const error = parsed['error'] as Record<string, unknown> | string | undefined;
         const errorText = typeof error === 'string' ? error : ((error?.['message'] as string | undefined) ?? '');
         const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error' || parsed['status'] === 'error';
@@ -209,7 +209,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           };
           return;
         }
-        if (text.length > 0 && !emittedText) {
+        if (text.trim().length > 0 && !emittedText) {
           yield { type: 'text', content: text };
           emittedText = true;
         }

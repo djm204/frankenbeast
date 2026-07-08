@@ -170,7 +170,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           };
           return;
         }
-        if (resultText.trim().length > 0) {
+        if (resultText.trim().length > 0 && !emittedText) {
           yield { type: 'text', content: resultText };
           emittedText = true;
         }
@@ -252,8 +252,24 @@ export class ClaudeCliAdapter implements ILlmProvider {
           totalInputTokens = usage['input_tokens'] ?? 0;
         }
       } else if (type === 'assistant') {
+        const message = parsed['message'] as Record<string, unknown> | undefined;
+        const content = (message?.['content'] ?? parsed['content']) as unknown;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (!block || typeof block !== 'object') continue;
+            const record = block as Record<string, unknown>;
+            if (record['type'] === 'tool_use') {
+              yield {
+                type: 'tool_use',
+                id: (record['id'] as string) ?? crypto.randomUUID(),
+                name: record['name'] as string,
+                input: record['input'] ?? {},
+              };
+            }
+          }
+        }
         const parts: string[] = [];
-        tryExtractTextFromNode(parsed['message'] ?? parsed['content'] ?? parsed, parts);
+        tryExtractTextFromNode(content ?? message ?? parsed, parts);
         const text = parts.join('').trim();
         if (text.length > 0) {
           yield { type: 'text', content: text };

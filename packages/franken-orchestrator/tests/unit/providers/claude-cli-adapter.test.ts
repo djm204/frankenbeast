@@ -172,15 +172,27 @@ describe('ClaudeCliAdapter', () => {
       expect(events[0]).toEqual({ type: 'error', error: 'turn limit reached', retryable: false });
     });
 
-    it('emits Claude result text even after assistant deltas', async () => {
+    it('does not duplicate Claude result text after assistant deltas', async () => {
       mockSpawn([
-        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'intermediate narration' } }),
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'final answer' } }),
         JSON.stringify({ type: 'result', result: 'final answer', total_input_tokens: 4, total_output_tokens: 2 }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
-      expect(events[0]).toEqual({ type: 'text', content: 'intermediate narration' });
-      expect(events[1]).toEqual({ type: 'text', content: 'final answer' });
-      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } });
+      expect(events[0]).toEqual({ type: 'text', content: 'final answer' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } });
+    });
+
+    it('emits Claude tool-use blocks from assistant frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } }] },
+        }),
+        JSON.stringify({ type: 'result', result: 'done' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } });
+      expect(events[1]).toEqual({ type: 'text', content: 'done' });
     });
 
     it('ignores Claude user tool-result frames before the final result', async () => {

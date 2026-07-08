@@ -91,17 +91,25 @@ describe('GeminiCliAdapter', () => {
         JSON.stringify({
           type: 'result',
           result: { response: { text: 'Gemini wrapper answer' } },
-          usage: { input_tokens: 9, output_tokens: 4 },
+          usage: { input_tokens: 8, output_tokens: 3 },
         }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events).toEqual([
         { type: 'text', content: 'Gemini wrapper answer' },
-        { type: 'done', usage: { inputTokens: 9, outputTokens: 4, totalTokens: 13 } },
+        { type: 'done', usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 } },
       ]);
     });
 
-    it('parses Gemini result stats token totals', async () => {
+    it('preserves whitespace in Gemini result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', result: { response: { text: '  code block\n' } } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: '  code block\n' });
+    });
+
+    it('reads Gemini stats token totals from result frames', async () => {
       mockSpawn([
         JSON.stringify({
           type: 'result',
