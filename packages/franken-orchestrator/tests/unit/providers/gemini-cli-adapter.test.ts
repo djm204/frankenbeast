@@ -91,17 +91,31 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
-    it('runs from the configured working directory and passes instructions through GEMINI_SYSTEM_MD', async () => {
+    it('runs from the configured working directory with an isolated context directory', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
       await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
       const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
-      const spawnOptions = spawnCall[2] as { cwd: string; env: NodeJS.ProcessEnv };
+      const spawnArgs = spawnCall[1] as string[];
+      const includeIndex = spawnArgs.indexOf('--include-directories');
+      const promptDir = spawnArgs[includeIndex + 1]!;
+      const spawnOptions = spawnCall[2] as { cwd: string };
       expect(spawnOptions.cwd).toBe(tempDir);
-      expect(spawnOptions.env.GEMINI_SYSTEM_MD).toMatch(/system\.md$/);
-      expect(spawnCall[1]).not.toContain('private sys');
+      expect(promptDir).toContain(tempDir);
+      expect(spawnArgs).not.toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
+      expect(existsSync(promptDir)).toBe(false);
+    });
+
+    it('removes a stale managed GEMINI.md block before launching', async () => {
+      const geminiPath = join(tempDir, 'GEMINI.md');
+      writeFileSync(geminiPath, `user notes\n\n<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->\nstale\n<!-- END FRANKENBEAST SECTION -->\n`);
+      mockSpawn([JSON.stringify({ type: 'message_stop' })]);
+
+      await collectEvents(adapter.execute({ systemPrompt: 'fresh sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      expect(readFileSync(geminiPath, 'utf-8')).toBe('user notes\n');
     });
 
     it('emits error on non-zero exit code', async () => {

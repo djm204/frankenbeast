@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   rmSync,
   renameSync,
+  unlinkSync,
 } from 'node:fs';
 import type {
   ILlmProvider,
@@ -18,7 +19,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
@@ -53,15 +54,14 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
-    const systemPromptDir = mkdtempSync(join(tmpdir(), 'franken-gemini-system-'));
-    const systemPromptPath = join(systemPromptDir, 'system.md');
+    const promptWorkingDir = mkdtempSync(join(this.workingDir, '.franken-gemini-context-'));
 
-    writeFileSync(systemPromptPath, request.systemPrompt, 'utf-8');
-    const args = this.buildArgs(request);
+    this.removeManagedGeminiMd();
+    this.writeGeminiMd(request.systemPrompt, undefined, promptWorkingDir);
+    const args = [...this.buildArgs(request), '--include-directories', promptWorkingDir];
     try {
       const proc = spawn(this.binaryPath, args, {
         cwd: this.workingDir,
-        env: { ...process.env, GEMINI_SYSTEM_MD: systemPromptPath },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -75,7 +75,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       yield* this.parseStream(proc);
     } finally {
-      rmSync(systemPromptDir, { recursive: true, force: true });
+      rmSync(promptWorkingDir, { recursive: true, force: true });
     }
   }
 
@@ -187,6 +187,23 @@ export class GeminiCliAdapter implements ILlmProvider {
       this.writeFileAtomically(geminiMdPath, existing);
     } else {
       this.writeFileAtomically(geminiMdPath, managedContent);
+    }
+  }
+
+  private removeManagedGeminiMd(targetDir = this.workingDir): void {
+    const geminiMdPath = join(targetDir, 'GEMINI.md');
+    if (!existsSync(geminiMdPath)) return;
+
+    const existing = readFileSync(geminiMdPath, 'utf-8');
+    const startIdx = existing.indexOf(MANAGED_START);
+    const endIdx = existing.indexOf(MANAGED_END);
+    if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return;
+
+    const next = (existing.slice(0, startIdx) + existing.slice(endIdx + MANAGED_END.length)).trim();
+    if (next) {
+      this.writeFileAtomically(geminiMdPath, `${next}\n`);
+    } else {
+      unlinkSync(geminiMdPath);
     }
   }
 
