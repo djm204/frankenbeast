@@ -40,6 +40,23 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('ignores dense braces inside strings and comments for nesting depth', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function sample(value: boolean) {',
+      '  const objectLike = "{{{{{{";',
+      '  const templateText = `{{{{{{`;',
+      '  // }}}}}}',
+      '  /* {{{{{{ */',
+      '  return value ? objectLike : templateText;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('preserves active code inside template literal interpolations', async () => {
     const evaluator = new ComplexityEvaluator();
     const content =
