@@ -100,8 +100,9 @@ describe('GeminiCliAdapter', () => {
 
       const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
-      expect(events[0]).toEqual({ type: 'text', content: 'Gemini native' });
-      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } });
+      expect(events[0]).toEqual({ type: 'text', content: 'Gemini ' });
+      expect(events[1]).toEqual({ type: 'text', content: 'native' });
+      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } });
     });
 
     it('runs from an isolated context cwd while including the configured workspace', async () => {

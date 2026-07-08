@@ -379,10 +379,13 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private extractGeminiUsage(event: Record<string, unknown>): Partial<{ inputTokens: number; outputTokens: number; totalTokens: number }> {
     const usage = this.asObject(event['usage']) ?? this.asObject(event['usageMetadata']) ?? this.asObject(event['usage_metadata']) ?? event;
+    const inputTokens = this.numberValue(usage['inputTokens'], usage['input_tokens'], usage['promptTokenCount'], usage['prompt_token_count']);
+    const outputTokens = this.numberValue(usage['outputTokens'], usage['output_tokens'], usage['candidatesTokenCount'], usage['candidates_token_count']);
+    const totalTokens = this.numberValue(usage['totalTokens'], usage['total_tokens'], usage['totalTokenCount'], usage['total_token_count']);
     return {
-      inputTokens: this.numberValue(usage['inputTokens'], usage['input_tokens'], usage['promptTokenCount'], usage['prompt_token_count']),
-      outputTokens: this.numberValue(usage['outputTokens'], usage['output_tokens'], usage['candidatesTokenCount'], usage['candidates_token_count']),
-      totalTokens: this.numberValue(usage['totalTokens'], usage['total_tokens'], usage['totalTokenCount'], usage['total_token_count']),
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(totalTokens === undefined ? {} : { totalTokens }),
     };
   }
 
