@@ -12,11 +12,11 @@ The beast harness is split across two CLIs. This guide covers both.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
-- An API key for at least one provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a local Ollama instance
+- An API key for at least one API provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`
 
 ```bash
 cp .env.example .env
-# Set ANTHROPIC_API_KEY (or OPENAI_API_KEY / OLLAMA_BASE_URL)
+# Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY / GEMINI_API_KEY
 ```
 
 ---
