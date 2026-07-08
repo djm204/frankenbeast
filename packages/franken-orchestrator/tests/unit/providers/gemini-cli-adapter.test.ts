@@ -59,11 +59,16 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('buildArgs()', () => {
-    it('includes -p --output-format stream-json', () => {
-      const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
-      expect(args).toContain('-p');
-      expect(args).toContain('--output-format');
-      expect(args).toContain('stream-json');
+    it('includes -p system prompt and --output-format stream-json', () => {
+      const args = adapter.buildArgs({ systemPrompt: 'system prompt', messages: [] });
+      expect(args).toEqual([
+        '-p',
+        'system prompt',
+        '--output-format',
+        'stream-json',
+        '-m',
+        'gemini-2.5-flash',
+      ]);
     });
 
     it('includes -m for model', () => {
@@ -86,15 +91,16 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 30, outputTokens: 8, totalTokens: 38 } });
     });
 
-    it('keeps generated GEMINI.md out of the configured working directory', async () => {
+    it('runs from the configured working directory without writing GEMINI.md', async () => {
       mockSpawn([JSON.stringify({ type: 'message_stop' })]);
 
       await collectEvents(adapter.execute({ systemPrompt: 'private sys', messages: [{ role: 'user', content: 'Hi' }] }));
 
-      const spawnOptions = (spawn as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { cwd: string };
-      expect(spawnOptions.cwd).not.toBe(tempDir);
+      const spawnCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+      const spawnOptions = spawnCall[2] as { cwd: string };
+      expect(spawnOptions.cwd).toBe(tempDir);
+      expect(spawnCall[1]).toContain('private sys');
       expect(existsSync(join(tempDir, 'GEMINI.md'))).toBe(false);
-      expect(existsSync(spawnOptions.cwd)).toBe(false);
     });
 
     it('emits error on non-zero exit code', async () => {
