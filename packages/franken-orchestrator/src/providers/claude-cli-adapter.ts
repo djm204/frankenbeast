@@ -158,7 +158,8 @@ export class ClaudeCliAdapter implements ILlmProvider {
           typeof parsed['error'] === 'string'
             ? parsed['error']
             : ((parsed['error'] as Record<string, unknown> | undefined)?.['message'] as string | undefined) ?? '';
-        const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error';
+        const subtype = parsed['subtype'] as string | undefined;
+        const isErrorResult = parsed['is_error'] === true || subtype === 'error' || subtype?.startsWith('error_') === true;
         if (isErrorResult) {
           const message = resultText.trim() || errorText.trim() || 'claude returned an error result frame';
           yield {
@@ -176,6 +177,9 @@ export class ClaudeCliAdapter implements ILlmProvider {
         if (usage) {
           totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
           totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+        } else {
+          totalInputTokens = (parsed['total_input_tokens'] as number | undefined) ?? totalInputTokens;
+          totalOutputTokens = (parsed['total_output_tokens'] as number | undefined) ?? totalOutputTokens;
         }
         if (!emittedText) {
           yield {

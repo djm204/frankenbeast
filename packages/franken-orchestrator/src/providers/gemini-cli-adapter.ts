@@ -281,8 +281,8 @@ export class GeminiCliAdapter implements ILlmProvider {
         if (role === 'assistant') {
           const parts: string[] = [];
           tryExtractTextFromNode(message?.['content'] ?? parsed['content'] ?? parsed['parts'] ?? parsed, parts);
-          const text = parts.join('').trim();
-          if (text.length > 0) {
+          const text = parts.join('');
+          if (text.trim().length > 0) {
             yield { type: 'text', content: text };
             emittedText = true;
           }
@@ -306,6 +306,8 @@ export class GeminiCliAdapter implements ILlmProvider {
           retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
         };
         return;
+      } else if (type === 'tool_result') {
+        continue;
       } else if (!emittedText) {
         const parts: string[] = [];
         tryExtractTextFromNode(parsed, parts);

@@ -156,6 +156,22 @@ describe('ClaudeCliAdapter', () => {
       ]);
     });
 
+    it('reads top-level Claude result token totals', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', result: 'Final answer', total_input_tokens: 21, total_output_tokens: 8 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 } });
+    });
+
+    it('treats Claude error result subtypes as failures', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: '', error: 'turn limit reached' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'turn limit reached', retryable: false });
+    });
+
     it('ignores Claude user tool-result frames before the final result', async () => {
       mockSpawn([
         JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'secret tool stdout' }] } }),

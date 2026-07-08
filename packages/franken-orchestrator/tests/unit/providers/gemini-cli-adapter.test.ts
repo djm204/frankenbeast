@@ -124,6 +124,26 @@ describe('GeminiCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 } });
     });
 
+    it('preserves whitespace in Gemini assistant message chunks', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'hello ' }] } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ text: 'world\n\n' }] } }),
+        JSON.stringify({ type: 'result', stats: { promptTokenCount: 1, candidatesTokenCount: 2 } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'hello ' });
+      expect(events[1]).toEqual({ type: 'text', content: 'world\n\n' });
+    });
+
+    it('ignores Gemini tool result output before final result text', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'tool_result', output: 'raw tool stdout' }),
+        JSON.stringify({ type: 'result', result: { response: { text: 'final text' } } }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'final text' });
+    });
+
     it('treats Gemini status error result frames as failures', async () => {
       mockSpawn([
         JSON.stringify({ type: 'result', status: 'error', error: { message: 'RESOURCE_EXHAUSTED quota' } }),
