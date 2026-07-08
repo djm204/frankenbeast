@@ -72,6 +72,7 @@ export interface ChatAppOptions {
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
+const BEAST_CONTROL_MAX_BODY_SIZE = 1024 * 1024;
 const CORS_ALLOW_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'x-frankenbeast-operator-token'];
 
@@ -138,13 +139,17 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       app.use('*', credentialedCorsForAllowedOrigins(allowedOrigins));
     }
   }
-  // Apply the JSON body cap to every first-party control route group that can
-  // parse request bodies. Provider webhooks keep their own signature-specific
-  // handling under /webhooks/* and are intentionally not included here.
-  for (const base of ['/v1/chat', '/v1/network', '/v1/comms', '/v1/beasts', '/api/security', '/api/skills']) {
+  // Apply the JSON body cap to first-party control route groups that can parse
+  // request bodies. Provider webhooks keep their own signature-specific handling
+  // under /webhooks/* and are intentionally not included here. Beast launch
+  // routes carry wizard prompt/frontload content, so they get a larger bounded
+  // cap that preserves supported UI flows without leaving the route unbounded.
+  for (const base of ['/v1/chat', '/v1/network', '/v1/comms', '/api/security', '/api/skills']) {
     app.use(base, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
     app.use(`${base}/*`, requestSizeLimit(DEFAULT_MAX_BODY_SIZE));
   }
+  app.use('/v1/beasts', requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE));
+  app.use('/v1/beasts/*', requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE));
   // Chat /v1/chat/* is gated by an operator token whenever one is configured.
   // The same operator token authorizes the beast control plane and chat in
   // this codebase (matching the existing `VITE_BEAST_OPERATOR_TOKEN` pattern
