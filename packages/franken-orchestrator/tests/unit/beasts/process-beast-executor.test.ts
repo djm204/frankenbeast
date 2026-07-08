@@ -814,6 +814,72 @@ describe('ProcessBeastExecutor', () => {
       expect(existsSync(configPath)).toBe(false);
     });
 
+    it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
+      const sensitiveTokenValue = 'configured-token-value-12345';
+      const sensitiveWebhookUrl = 'https://discord.com/api/webhooks/1234567890/opaque-webhook-value';
+      const sensitivePrivateCredential = 'opaque-private-material-abc123';
+      const run = repo.createRun({
+        definitionId: 'martin-loop',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'keep this user-visible objective',
+          chunkDirectory: '/tmp/chunks',
+          maxTotalTokens: 50000,
+          nested: {
+            apiKey: sensitiveTokenValue,
+            authorization: `Bearer ${sensitiveTokenValue}`,
+            webhook: sensitiveWebhookUrl,
+            visible: 'safe-value',
+          },
+          tokenRefs: ['op://vault/item/token', { privateKey: sensitivePrivateCredential }],
+          notes: `call ${sensitiveWebhookUrl} with ${sensitiveTokenValue}`,
+          promptConfig: {
+            text: `Read https://docs.example.test/webhook/setup and use ${sensitiveTokenValue}`,
+          },
+        },
+        dispatchedBy: 'cli',
+        dispatchedByUser: 'pfk',
+        createdAt: '2026-03-10T00:00:00.000Z',
+      });
+
+      await executor.start(run, martinLoopDefinition);
+
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      const serializedPersisted = JSON.stringify(persisted);
+      expect(persisted).toMatchObject({
+        provider: 'claude',
+        objective: 'keep this user-visible objective',
+        chunkDirectory: '/tmp/chunks',
+        // Numeric token-budget field must survive redaction as a number even
+        // though its key matches the generic `token` secret pattern (PR #1064).
+        maxTotalTokens: 50000,
+        nested: {
+          apiKey: '[REDACTED]',
+          authorization: '[REDACTED]',
+          webhook: '[REDACTED]',
+          visible: 'safe-value',
+        },
+        tokenRefs: '[REDACTED]',
+        notes: 'call [REDACTED] with [REDACTED]',
+        promptConfig: {
+          text: 'Read https://docs.example.test/webhook/setup and use [REDACTED]',
+        },
+      });
+      expect(typeof persisted.maxTotalTokens).toBe('number');
+      expect(serializedPersisted).not.toContain(sensitiveTokenValue);
+      expect(serializedPersisted).not.toContain(sensitiveWebhookUrl);
+      expect(serializedPersisted).not.toContain(sensitivePrivateCredential);
+    });
+
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
