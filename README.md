@@ -476,7 +476,7 @@ frankenbeast issues --label bug --repo owner/repo
 
 ### Operator environment variables
 
-Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain text fallback instead of the graphic/ANSI banner. This is useful for CI logs, terminals with limited ANSI or Unicode support, and log processors that should receive simple text. Leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
+Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
 
 ### Project Layout
 
