@@ -1,6 +1,10 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { OsKeychainStore } from '../../../../src/network/secret-backends/os-keychain-store.js';
 import type { CliResult } from '../../../../src/network/secret-backends/cli-runner.js';
+import { testCredential } from '../../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 // Same mock runner pattern as OnePasswordStore/BitwardenStore tests
 function createMockRunner() {
@@ -41,15 +45,15 @@ describe('OsKeychainStore', () => {
 
     it('stores via secret-tool store', async () => {
       mock.responses.set('store', { stdout: '', stderr: '', exitCode: 0 });
-      await store.store('comms.slack.botTokenRef', 'xoxb-test');
+      await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const storeCall = mock.calls.find(c => c.args.includes('store'));
       expect(storeCall).toBeDefined();
     });
 
     it('resolves via secret-tool lookup', async () => {
-      mock.responses.set('lookup', { stdout: 'xoxb-resolved\n', stderr: '', exitCode: 0 });
+      mock.responses.set('lookup', { stdout: `${RESOLVED_SLACK_BOT_TOKEN}\n`, stderr: '', exitCode: 0 });
       const value = await store.resolve('comms.slack.botTokenRef');
-      expect(value).toBe('xoxb-resolved');
+      expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
     });
 
     it('returns undefined when key not found', async () => {
