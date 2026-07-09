@@ -625,9 +625,10 @@ Common forms:
 frankenbeast init                  # interactive setup wizard
 frankenbeast init --verify         # validate .fbeast/config.json and .fbeast/init-state.json
 frankenbeast init --repair         # re-run missing or failed init steps only
-frankenbeast init --backend os-keychain   # choose a secret backend for this run
 frankenbeast init --non-interactive       # safe only after config and init state are complete
 ```
+
+Choose the secret backend before the first init run by writing `network.secureBackend` in `.fbeast/config.json`, for example `{ "network": { "secureBackend": "os-keychain" } }`. Keeping the config choice ahead of init ensures the generated operator token is written to the same backend that later runtime and dashboard processes will read.
 
 During the interactive wizard, expect prompts for the Chat, Dashboard, and Comms modules; the default provider; the `secure`/`insecure` network mode; optional Slack, Discord, Telegram, or WhatsApp credentials when Comms is enabled; and an operator token prompt that can be left blank to auto-generate a token. Sensitive values are stored in the selected secret backend and referenced from `.fbeast/config.json`; the raw operator token is printed once when auto-generated so you can copy it into a local server-side `.env` if you are not resolving it through the configured backend.
 
@@ -638,7 +639,7 @@ export FRANKENBEAST_PASSPHRASE=<passphrase>
 frankenbeast run --config .fbeast/config.json
 ```
 
-Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies existing state and fails closed if setup is incomplete; it does not create a fresh vault or answer wizard prompts. Likewise, `frankenbeast init --verify` validates init config and state files but does not decrypt the secret vault, so keep a runtime smoke check in CI when you need to prove secret resolution works.
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies config and init-state completeness and fails closed if setup is incomplete, but it does not create a fresh vault, answer wizard prompts, or decrypt the secret vault. Likewise, `frankenbeast init --verify` validates init config and state files but does not resolve secret refs, so keep a runtime smoke check in CI when you need to prove operator-token resolution works.
 
 ### Non-interactive / CI usage
 

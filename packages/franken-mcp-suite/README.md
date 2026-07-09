@@ -76,7 +76,7 @@ npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/you
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
-For Beast controls, run the orchestrator/backend setup flow with `frankenbeast init` (distinct from `fbeast mcp init`) and set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.env` to the generated operator token when you are not resolving it through the configured secret backend; the Vite dev proxy reads it server-side without exposing it to the browser. The root README's Secret Management section documents `frankenbeast init`, `--verify`, `--repair`, `--non-interactive`, and secret-backend prerequisites.
+For Beast controls, run the orchestrator/backend setup flow with `frankenbeast init` (distinct from `fbeast mcp init`) and keep the Vite proxy's auth source aligned with the backend project. For same-repo runs, either set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.env` or let the proxy resolve the token from the configured secret backend. For the external `/path/to/your-project` workflow above, also export `FRANKENBEAST_CONFIG_FILE=/path/to/your-project/.fbeast/config.json` (or `FRANKENBEAST_CONFIG_PATH`) before starting the web UI, or keep using the server-side env token. The Vite dev proxy reads these values server-side without exposing them to the browser. The root README's Secret Management section documents `frankenbeast init`, `--verify`, `--repair`, `--non-interactive`, and secret-backend prerequisites.
 
 ## MCP servers
 

@@ -96,6 +96,7 @@ describe('local setup scripts', () => {
     const readme = read('README.md');
     const quickstart = read('docs/guides/quickstart.md');
     const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const mcpSuiteReadme = read('packages/franken-mcp-suite/README.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -165,11 +166,16 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --verify');
     expect(readme).toContain('frankenbeast init --repair');
     expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('Choose the secret backend before the first init run');
+    expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
     expect(readme).toContain('Chat, Dashboard, and Comms modules');
     expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
     expect(readme).toContain('frankenbeast run --config .fbeast/config.json');
     expect(readme).toContain('fails closed if setup is incomplete');
-    expect(readme).toContain('does not decrypt the secret vault');
+    expect(readme).toContain('does not create a fresh vault, answer wizard prompts, or decrypt the secret vault');
+    expect(readme).toContain('does not resolve secret refs');
+    expect(mcpSuiteReadme).toContain('FRANKENBEAST_CONFIG_FILE=/path/to/your-project/.fbeast/config.json');
+    expect(mcpSuiteReadme).toContain('or `FRANKENBEAST_CONFIG_PATH`');
     for (const frankenOverride of [
       'FRANKEN_MAX_TOTAL_TOKENS',
       'FRANKEN_MAX_DURATION_MS',
