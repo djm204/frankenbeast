@@ -6,7 +6,11 @@ import { FbeastConfig } from '../shared/config.js';
 function printLine(...args: unknown[]): void {
   console.info(...args);
 }
-const FRANKENBEAST_INSTALL_HELP = ['from the repo root, run: npm run local:link', 'then verify with: npm run local:verify-cli'];
+const FRANKENBEAST_INSTALL_HELP = [
+  'for a local checkout, from the repo root run: npm run local:link',
+  'then verify with: npm run local:verify-cli',
+  'for a global install, run: npm install -g @franken/orchestrator',
+];
 const SUPPORTED_BEAST_PROVIDERS = new Set(['anthropic-api', 'codex-cli', 'claude-cli']);
 
 function parseProvider(argv: string[]): string {

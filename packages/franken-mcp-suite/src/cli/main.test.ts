@@ -254,7 +254,7 @@ describe('fbeast main CLI', () => {
     const message = mockError.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(message).toContain('npm run local:link');
     expect(message).toContain('npm run local:verify-cli');
-    expect(message).not.toContain('npm install -g @franken/orchestrator');
+    expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).not.toContain('@fbeast/orchestrator');
     expect(mockExit).toHaveBeenCalledWith(1);
     mockError.mockRestore();
@@ -295,7 +295,7 @@ describe('fbeast main CLI', () => {
     );
     expect(message).toContain('npm run local:link');
     expect(message).toContain('npm run local:verify-cli');
-    expect(message).not.toContain('npm install -g @franken/orchestrator');
+    expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');
     mockLog.mockRestore();
     cwdSpy.mockRestore();
