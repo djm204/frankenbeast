@@ -116,7 +116,7 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
 
 function getCliShadowedFields(args: CliArgs): Set<keyof OrchestratorConfig> {
   const fields = new Set<keyof OrchestratorConfig>();
-  if (args.verbose) fields.add('enableTracing');
+  if (args.verbose && args.subcommand !== 'network') fields.add('enableTracing');
   if (args.initBackend) fields.add('network');
   return fields;
 }

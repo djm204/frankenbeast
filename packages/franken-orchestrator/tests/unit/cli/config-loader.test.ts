@@ -157,6 +157,14 @@ describe('Config loader', () => {
     expect(config.enableTracing).toBe(true);
   });
 
+  it('rejects invalid tracing env for verbose network commands inherited by children', async () => {
+    process.env['FRANKEN_ENABLE_TRACING'] = 'disabled';
+
+    await expect(
+      loadConfig(makeArgs({ subcommand: 'network', networkAction: 'up', verbose: true })),
+    ).rejects.toThrow('Invalid boolean value for FRANKEN_ENABLE_TRACING');
+  });
+
   it('reads numeric env vars', async () => {
     process.env['FRANKEN_MIN_CRITIQUE_SCORE'] = '0.9';
     const config = await loadConfig(makeArgs());
