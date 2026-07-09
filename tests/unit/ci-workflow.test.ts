@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
+const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
@@ -66,6 +67,17 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).toMatch(/turbo run build lint[\s\S]*turbo run test/);
       expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('turbo run test'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
+    });
+
+    it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
+      expect(existsSync(WORKFLOW_LINT_PATH)).toBe(true);
+      const workflowLint = readFileSync(WORKFLOW_LINT_PATH, 'utf-8');
+      expect(workflowLint).toContain('Lint GitHub Actions workflows');
+      expect(workflowLint).toContain('raven-actions/actionlint@v2.1.2');
+      expect(workflowLint).toContain('version: 1.7.12');
+      expect(workflowLint).toContain("'.github/workflows/**'");
+      expect(content).not.toContain('actions/bin/check-yaml');
+      expect(content).not.toContain('raven-actions/actionlint');
     });
 
     it('uses actions/setup-node with npm cache', () => {
