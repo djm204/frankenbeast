@@ -439,14 +439,19 @@ const verifier = new SignatureVerifier(secret);
 
 // Sign the deterministic approval-response payload. Do not use JSON.stringify:
 // object key order can differ across runtimes and break verification.
-const payload = formatApprovalResponseSignaturePayload({ requestId: 'abc', decision: 'APPROVE' });
+const payload = formatApprovalResponseSignaturePayload({
+  requestId: 'abc',
+  decision: 'APPROVE',
+  respondedBy: 'alice@example.com',
+  feedback: 'Looks safe to deploy',
+});
 const signature = verifier.sign(payload);
 
 // Verify (timing-safe comparison)
 const isValid = verifier.verify(payload, signature);
 ```
 
-The canonical signed approval-response payload is `requestId:<url-encoded-id>|decision:<url-encoded-decision>` (for example `requestId:abc|decision:APPROVE`). Custom approval UIs and non-TypeScript clients must sign those exact bytes rather than serialized JSON.
+The canonical signed approval-response payload is `requestId:<url-encoded-id>|decision:<url-encoded-decision>|respondedBy:<url-encoded-responder>|feedback:<feedback-state>` (for example `requestId:abc|decision:APPROVE|respondedBy:alice%40example.com|feedback:s:Looks%20safe%20to%20deploy`). `feedback:<feedback-state>` is `feedback:u` when feedback is omitted and `feedback:s:<url-encoded-feedback>` when feedback is present. Custom approval UIs and non-TypeScript clients must sign those exact bytes rather than serialized JSON.
 
 To enable in the gateway:
 
