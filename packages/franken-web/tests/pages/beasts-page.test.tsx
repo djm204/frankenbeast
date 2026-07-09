@@ -56,6 +56,25 @@ describe('BeastsPage', () => {
     expect(screen.getByText('Identity')).toBeTruthy();
   });
 
+  it('drives wizard workflow choices from backend catalog prop', () => {
+    render(<BeastsPage {...baseProps} catalog={[{
+      id: 'custom-beast',
+      label: 'Custom Backend Beast',
+      description: 'Served from backend catalog',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'objective', prompt: 'What should the custom beast do?', kind: 'string', required: true },
+      ],
+    }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
+    fireEvent.change(screen.getByLabelText(/agent name/i), { target: { value: 'Catalog Agent' } });
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+
+    expect(screen.getByText('Custom Backend Beast')).toBeTruthy();
+    expect(screen.queryByText('Design Interview')).toBeNull();
+  });
+
   it('shows error banner when error prop is set', () => {
     render(<BeastsPage {...baseProps} error="Something went wrong" />);
     expect(screen.getByText('Something went wrong')).toBeTruthy();

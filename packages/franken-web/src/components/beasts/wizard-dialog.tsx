@@ -17,7 +17,7 @@ import {
   validateWizardStep,
   type WizardValidationErrors,
 } from './wizard-validation';
-import type { BeastContainerRuntimeStatus } from '../../lib/beast-api';
+import type { BeastCatalogEntry, BeastContainerRuntimeStatus } from '../../lib/beast-api';
 
 const STEP_LABELS = [...WIZARD_SECTION_LABELS];
 
@@ -25,12 +25,13 @@ interface WizardDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => void;
+  catalog?: readonly BeastCatalogEntry[];
   containerRuntime?: BeastContainerRuntimeStatus;
   launching?: boolean;
   launchError?: string | null;
 }
 
-export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, launching, launchError }: WizardDialogProps) {
+export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRuntime, launching, launchError }: WizardDialogProps) {
   const {
     wizardStep,
     highestCompleted,
@@ -46,12 +47,12 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
 
   const isLastStep = wizardStep === STEP_LABELS.length - 1;
   const isFirstStep = wizardStep === 0;
-  const currentValidationErrors = validateWizardStep(wizardStep, stepValues);
+  const currentValidationErrors = validateWizardStep(wizardStep, stepValues, catalog);
   const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
-  const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues);
+  const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues, catalog);
   const formIsValid = Object.keys(formValidationErrors).length === 0;
   const promptFilesLoading = Boolean(stepValues[5]?.filesLoading);
-  const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues);
+  const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues, catalog);
 
   function syncValidationErrors(step: number, errors: WizardValidationErrors) {
     if (Object.keys(errors).length > 0) {
@@ -70,10 +71,10 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
       return;
     }
 
-    const firstInvalidStep = getFirstInvalidWizardStep(stepValues);
+    const firstInvalidStep = getFirstInvalidWizardStep(stepValues, catalog);
     if (firstInvalidStep !== null) {
       for (let i = 0; i < STEP_LABELS.length - 1; i += 1) {
-        syncValidationErrors(i, validateWizardStep(i, stepValues));
+        syncValidationErrors(i, validateWizardStep(i, stepValues, catalog));
       }
       if (wizardMode === 'wizard') {
         setWizardStep(firstInvalidStep);
@@ -82,7 +83,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
     }
 
     clearValidationErrors(wizardStep);
-    onLaunch(buildWizardLaunchConfig(stepValues));
+    onLaunch(buildWizardLaunchConfig(stepValues, catalog));
   }
 
   function handleNext() {
@@ -101,13 +102,13 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   function renderStep() {
     switch (wizardStep) {
       case 0: return <StepIdentity />;
-      case 1: return <StepWorkflow containerRuntime={containerRuntime} />;
+      case 1: return <StepWorkflow catalog={catalog} containerRuntime={containerRuntime} />;
       case 2: return <StepLlmTargets />;
       case 3: return <StepModules />;
       case 4: return <StepSkills />;
       case 5: return <StepPrompts />;
       case 6: return <StepGit />;
-      case 7: return <StepReview />;
+      case 7: return <StepReview catalog={catalog} />;
       default: return null;
     }
   }
@@ -168,13 +169,13 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
             {wizardMode === 'wizard' ? renderStep() : (
               <div className="space-y-8 p-8">
                 <FormSection title="Identity"><StepIdentity /></FormSection>
-                <FormSection title="Workflow"><StepWorkflow containerRuntime={containerRuntime} /></FormSection>
+                <FormSection title="Workflow"><StepWorkflow catalog={catalog} containerRuntime={containerRuntime} /></FormSection>
                 <FormSection title="LLM Targets"><StepLlmTargets /></FormSection>
                 <FormSection title="Modules"><StepModules /></FormSection>
                 <FormSection title="Skills"><StepSkills /></FormSection>
                 <FormSection title="Prompts"><StepPrompts /></FormSection>
                 <FormSection title="Git"><StepGit /></FormSection>
-                <FormSection title="Review"><StepReview /></FormSection>
+                <FormSection title="Review"><StepReview catalog={catalog} /></FormSection>
               </div>
             )}
           </div>
@@ -273,6 +274,7 @@ function buildStepStatuses(
   wizardStep: number,
   highestCompleted: number,
   stepValues: Record<number, Record<string, unknown> | undefined>,
+  catalog?: readonly BeastCatalogEntry[],
 ): Record<number, 'complete' | 'error' | 'current' | 'locked'> {
   const statuses: Record<number, 'complete' | 'error' | 'current' | 'locked'> = {};
 
@@ -283,7 +285,7 @@ function buildStepStatuses(
       continue;
     }
 
-    statuses[i] = Object.keys(validateWizardStep(i, stepValues)).length > 0
+    statuses[i] = Object.keys(validateWizardStep(i, stepValues, catalog)).length > 0
       ? 'error'
       : i === wizardStep
         ? 'current'
