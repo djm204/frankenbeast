@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
-import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
+import { parseOrchestratorConfig, PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
 import type { InjectionTier } from '@franken/orchestrator';
 
 export interface FirewallScanResult {
@@ -20,21 +20,38 @@ interface FirewallAdapterDeps {
   scanFile(path: string): Promise<FirewallScanResult>;
 }
 
+interface FirewallAdapterOptions {
+  root?: string | undefined;
+  configPath?: string | undefined;
+}
+
+type SecurityProfile = 'strict' | 'standard' | 'permissive';
+
+interface CustomFirewallRule {
+  name: string;
+  pattern: string;
+  action: 'block' | 'warn' | 'log';
+  target: 'request' | 'response' | 'both';
+}
+
+interface FirewallScanConfig {
+  profile: SecurityProfile;
+  injectionDetection: boolean;
+  customRules: CustomFirewallRule[];
+}
+
 export function createFirewallAdapter(
   dbPathOrDeps: string | FirewallAdapterDeps,
   tier: InjectionTier = 'standard',
-  options: { root?: string | undefined } = {},
+  options: FirewallAdapterOptions = {},
 ): FirewallAdapter {
   if (typeof dbPathOrDeps !== 'string') {
     return dbPathOrDeps;
   }
 
   const store = createSqliteStore(dbPathOrDeps);
-  const patterns = tier === 'strict'
-    ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
-    : PATTERNS_ALL_TIERS;
-
   const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
+  const configPath = options.configPath ?? join(root, '.fbeast', 'config.json');
 
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
@@ -50,7 +67,7 @@ export function createFirewallAdapter(
 
   return {
     async scanText(input) {
-      const result = scanWithPatterns(input, patterns);
+      const result = scanWithConfig(input, loadFirewallScanConfig(configPath, tier));
       logScan(input, result);
       return result;
     },
@@ -58,7 +75,7 @@ export function createFirewallAdapter(
     async scanFile(path) {
       const safePath = resolveContained(path);
       const content = readFileSync(safePath, 'utf8');
-      const result = scanWithPatterns(content, patterns);
+      const result = scanWithConfig(content, loadFirewallScanConfig(configPath, tier));
       logScan(content, result);
       return result;
     },
@@ -73,10 +90,45 @@ export function createFirewallAdapter(
   }
 }
 
-function scanWithPatterns(input: string, patterns: RegExp[]): FirewallScanResult {
-  const matchedPatterns = patterns
+function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier): FirewallScanConfig {
+  const fallbackProfile: SecurityProfile = fallbackTier === 'strict' ? 'strict' : 'standard';
+  if (!existsSync(configPath)) {
+    return { profile: fallbackProfile, injectionDetection: true, customRules: [] };
+  }
+
+  const raw = readFileSync(configPath, 'utf8');
+  const parsed = parseOrchestratorConfig(JSON.parse(raw));
+  const security = parsed.security;
+  const profile = security?.profile ?? 'standard';
+  return {
+    profile,
+    injectionDetection: security?.injectionDetection ?? profile !== 'permissive',
+    customRules: security?.customRules ?? [],
+  };
+}
+
+function patternsForConfig(config: FirewallScanConfig): RegExp[] {
+  if (!config.injectionDetection) return [];
+  return config.profile === 'strict'
+    ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
+    : PATTERNS_ALL_TIERS;
+}
+
+function customRequestBlockPatterns(config: FirewallScanConfig): Array<{ name: string; pattern: RegExp }> {
+  return config.customRules
+    .filter((rule) => rule.action === 'block' && rule.target !== 'response')
+    .map((rule) => ({ name: rule.name, pattern: new RegExp(rule.pattern, 'i') }));
+}
+
+function scanWithConfig(input: string, config: FirewallScanConfig): FirewallScanResult {
+  const builtInMatches = patternsForConfig(config)
     .filter((pattern) => pattern.test(input))
     .map((pattern) => pattern.source);
+  const customMatches = customRequestBlockPatterns(config)
+    .filter((rule) => rule.pattern.test(input))
+    .map((rule) => `custom:${rule.name}`);
+
+  const matchedPatterns = [...builtInMatches, ...customMatches];
 
   return {
     verdict: matchedPatterns.length > 0 ? 'flagged' : 'clean',
