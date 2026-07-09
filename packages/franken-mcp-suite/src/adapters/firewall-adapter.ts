@@ -173,11 +173,69 @@ function assertSafeCustomRulePattern(pattern: string, index: number, configPath:
 }
 
 function hasUnsafeQuantifiedGroup(pattern: string): boolean {
+  if (hasNestedQuantifiedGroup(pattern)) return true;
   const simpleGroup = String.raw`\((?:[^()\\]|\\.)*`;
   const innerQuantifier = String.raw`(?:[+*]|\{\s*\d+\s*,?\s*\d*\s*\})`;
   const groupEndWithOuterQuantifier = String.raw`(?:[^()\\]|\\.)*\)\s*[+*?{]`;
   return new RegExp(`(?:${simpleGroup}${innerQuantifier}${groupEndWithOuterQuantifier})`).test(pattern)
     || new RegExp(`(?:${simpleGroup}[|]${groupEndWithOuterQuantifier})`).test(pattern);
+}
+
+function hasNestedQuantifiedGroup(pattern: string): boolean {
+  const groups: Array<{ hasNestedGroup: boolean; hasAlternation: boolean; hasQuantifier: boolean }> = [];
+
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (ch === '[') {
+      while (++i < pattern.length) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === ']') break;
+      }
+      continue;
+    }
+    if (ch === '(') {
+      if (groups.length > 0) groups[groups.length - 1]!.hasNestedGroup = true;
+      groups.push({ hasNestedGroup: false, hasAlternation: false, hasQuantifier: false });
+      continue;
+    }
+    if (ch === ')') {
+      const group = groups.pop();
+      if (!group) continue;
+      const quantifierIndex = nextNonWhitespaceIndex(pattern, i + 1);
+      const quantified = isQuantifierStart(pattern[quantifierIndex]);
+      if (quantified && (group.hasNestedGroup || group.hasAlternation || group.hasQuantifier)) {
+        return true;
+      }
+      if (quantified && groups.length > 0) {
+        groups[groups.length - 1]!.hasQuantifier = true;
+      }
+      continue;
+    }
+    if (groups.length === 0) continue;
+    if (ch === '|') {
+      groups[groups.length - 1]!.hasAlternation = true;
+    } else if (isQuantifierStart(ch)) {
+      groups[groups.length - 1]!.hasQuantifier = true;
+      if (ch === '{') {
+        while (++i < pattern.length) {
+          if (pattern[i] === '\\') i++;
+          else if (pattern[i] === '}') break;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function nextNonWhitespaceIndex(value: string, start: number): number {
+  let index = start;
+  while (index < value.length && /\s/.test(value[index]!)) index++;
+  return index;
 }
 
 function hasRepeatedQuantifiedAtom(pattern: string): boolean {

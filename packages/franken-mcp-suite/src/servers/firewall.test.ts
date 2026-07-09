@@ -197,13 +197,17 @@ describe('Firewall Server', () => {
     await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
   });
 
-  it('rejects nested bounded quantifiers before scanning', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'fw-unsafe-bounded-'));
+  it.each([
+    ['bounded-nested', '(a{1,})+$'],
+    ['nested-quantified-group', '^((a)*)+$'],
+    ['nested-ambiguous-group', '^((a|aa))+$'],
+  ])('rejects unsafe nested custom firewall regex %s before scanning', async (name, pattern) => {
+    const root = mkdtempSync(join(tmpdir(), `fw-unsafe-${name}-`));
     mkdirSync(join(root, '.fbeast'), { recursive: true });
     writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
       security: {
         customRules: [
-          { name: 'bounded-nested', pattern: '(a{1,})+$', action: 'block', target: 'request' },
+          { name, pattern, action: 'block', target: 'request' },
         ],
       },
     }));
