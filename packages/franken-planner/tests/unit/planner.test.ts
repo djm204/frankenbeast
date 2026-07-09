@@ -8,6 +8,8 @@ import {
   CyclicDependencyError,
   MaxRecoveryAttemptsError,
   RecursionDepthExceededError,
+  TaskNotFoundError,
+  UnknownErrorEscalatedError,
 } from '../../src/core/errors';
 import { createTaskId } from '../../src/core/types';
 import type { Task, TaskResult, Intent, KnownError, TaskId } from '../../src/core/types';
@@ -36,6 +38,10 @@ function success(id: string): TaskResult {
 
 function failure(id: string, message = 'task failed'): TaskResult {
   return { status: 'failure', taskId: createTaskId(id), error: new Error(message) };
+}
+
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
 }
 
 function makeGuardrails(goal = 'test goal'): GuardrailsModule {
@@ -354,6 +360,39 @@ describe('Planner — strategy domain exceptions', () => {
     if (result.status !== 'failed') throw new Error('unexpected');
     expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
     expect(result.error).toBe(error);
+  });
+
+  it('keeps executor rejections associated with the task that failed', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new TaskNotFoundError('dependency');
+    const executor = vi.fn().mockRejectedValue(error);
+    const recovery = { recover: vi.fn().mockRejectedValue(new UnknownErrorEscalatedError('t-1', error)) };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('t-1'));
+    expect(result.error).toBe(error);
+    expect(recovery.recover).toHaveBeenCalledWith(createTaskId('t-1'), error, graph, 1);
+  });
+
+  it('converts dangling expansion dependencies into failed plan results', async () => {
+    const parent = makeTask('parent');
+    const child: Task = { ...makeTask('child'), dependsOn: [createTaskId('missing')] };
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn().mockResolvedValue(expand('parent', [child]));
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBeInstanceOf(TaskNotFoundError);
+    expect(recovery.recover).not.toHaveBeenCalled();
   });
 });
 
