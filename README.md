@@ -543,7 +543,9 @@ cd packages/franken-orchestrator && npm run test:e2e
 cp .env.example .env
 $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
 
-# If you changed CHROMA_URL in .env, export that same endpoint before seed/verify.
+# .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
+# Override it only when ChromaDB runs at a different local port/host or a remote
+# TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # export CHROMA_URL=https://chromadb.example.com
 
 # Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
