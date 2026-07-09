@@ -222,6 +222,51 @@ type Bind = (host: string, port: 8080) => void;`;
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
   });
 
+  it('keeps service-named port identifiers reportable while ignoring non-port words', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const supportPort = 8080;
+const transportPort = 8443;
+const portalPort = 9000;
+const cfg = { support: 1000, transport: 443, portalId: 1234, portfolio: 7, support_portal: 8080 };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+      'Found hardcoded port number: 9000. Use environment variables or config.',
+    ]);
+  });
+
+  it('does not treat plural port tuple parameter types as runtime ports', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `function bind(host: string, ports: [8080, 8443]) {}
+type Binder = (host: string, ports: [8080, 8443]) => void;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('flags nested generic typed port declarations without flagging nested generic type arguments', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const runtimePort: Promise<Brand<number, 'Port'>> = 8080;
+makeConfig<Record<string, unknown>, { port: 8443 }>();
+class NestedGenericBaseConfig extends Base<Record<string, unknown>, { port: 9000 }> {}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('deduplicates plural port container literals already reported by property scans', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('const cfg = { ports: [8080] };'));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
   it('does not scan comments or strings for port-shaped assignments', async () => {
     const evaluator = new ScalabilityEvaluator();
     const content = `// const port = 8080
