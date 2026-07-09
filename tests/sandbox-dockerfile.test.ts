@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { readVitestFlag } from '../scripts/vitest-env.js';
@@ -13,7 +13,19 @@ function hasDocker(): boolean {
   return !result.error && result.status === 0;
 }
 
-const runDockerBuild = readVitestFlag(process.env, 'DOCKER_BUILD');
+function normalizeRequestedPath(arg: string): string {
+  const normalized = arg.replace(/:\d+(?::\d+)?$/u, '').replace(/\\/gu, '/');
+  if (isAbsolute(normalized)) {
+    return relative(process.cwd(), normalized).replace(/\\/gu, '/');
+  }
+  return normalized.replace(/^\.\//u, '');
+}
+
+const explicitDockerfileTestRequest = process.argv
+  .slice(2)
+  .map(normalizeRequestedPath)
+  .includes('tests/sandbox-dockerfile.test.ts');
+const runDockerBuild = readVitestFlag(process.env, 'DOCKER_BUILD') || explicitDockerfileTestRequest;
 const dockerIt = runDockerBuild && hasDocker() ? it : it.skip;
 
 describe('sandbox Dockerfile', () => {

@@ -6,6 +6,21 @@ import { readVitestFlags } from './scripts/vitest-env.js';
 const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD']);
 const optionsWithRequiredValue = new Set([
   '--config',
+  '--coverage.exclude',
+  '--coverage.extension',
+  '--coverage.include',
+  '--coverage.provider',
+  '--coverage.reporter',
+  '--coverage.reportsDirectory',
+  '--coverage.thresholds.branches',
+  '--coverage.thresholds.functions',
+  '--coverage.thresholds.lines',
+  '--coverage.thresholds.perFile',
+  '--coverage.thresholds.statements',
+  '--coverage.watermarks.branches',
+  '--coverage.watermarks.functions',
+  '--coverage.watermarks.lines',
+  '--coverage.watermarks.statements',
   '--dir',
   '--environment',
   '--exclude',
@@ -48,7 +63,7 @@ const collectRequestedPaths = (args: readonly string[]): string[] => {
     }
 
     if (arg.startsWith('-')) {
-      const optionName = arg.split('=', 1)[0];
+      const optionName = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
       if (optionsWithRequiredValue.has(optionName) && !arg.includes('=')) {
         skipOptionValue = true;
       }
