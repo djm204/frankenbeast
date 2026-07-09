@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseDotenv } from 'dotenv';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { NetworkConfigFieldsSchema } from '../network/network-config.js';
 import { createSecretStore } from '../network/secret-store.js';
 
 const SERVICE_IDENTITY = 'dashboard-web';
@@ -390,12 +390,14 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
-async function resolveDashboardOperatorToken(): Promise<string | undefined> {
+export async function resolveDashboardOperatorToken(): Promise<string | undefined> {
   const configPath = process.env.FRANKENBEAST_CONFIG_FILE || process.env.FRANKENBEAST_CONFIG_PATH;
   if (configPath) {
     try {
       const resolvedConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
-      const config = OrchestratorConfigSchema.parse(JSON.parse(await readFile(resolvedConfigPath, 'utf8')));
+      const config = NetworkConfigFieldsSchema.pick({ network: true }).parse(
+        JSON.parse(await readFile(resolvedConfigPath, 'utf8')),
+      );
       const tokenRef = config.network.operatorTokenRef?.trim();
       if (tokenRef) {
         const store = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {

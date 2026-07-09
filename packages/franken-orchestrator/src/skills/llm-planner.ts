@@ -10,6 +10,8 @@ type RawTask = {
   dependsOn?: unknown;
 };
 
+class PlanStructureError extends Error {}
+
 export class LlmPlanner implements IPlannerModule {
   private readonly llmClient: ILlmClient;
 
@@ -59,7 +61,10 @@ export class LlmPlanner implements IPlannerModule {
       }
 
       return { tasks };
-    } catch {
+    } catch (error) {
+      if (error instanceof PlanStructureError) {
+        throw error;
+      }
       return fallback;
     }
   }
@@ -86,11 +91,25 @@ export class LlmPlanner implements IPlannerModule {
     const objective = typeof raw?.objective === 'string' && raw.objective.trim().length > 0
       ? raw.objective.trim()
       : fallbackObjective;
+    const taskId = typeof raw?.id === 'string' && raw.id.trim().length > 0
+      ? raw.id.trim()
+      : `t${index + 1}`;
     const dependsOn = Array.isArray(raw?.dependsOn)
-      ? raw.dependsOn
-        .filter((dep): dep is string => typeof dep === 'string')
-        .map(dep => idMap.get(dep))
-        .filter((dep): dep is string => typeof dep === 'string')
+      ? raw.dependsOn.map((dep, depIndex) => {
+        if (typeof dep !== 'string') {
+          throw new PlanStructureError(
+            `Invalid plan structure: task '${taskId}' has non-string dependency at index ${depIndex}`,
+          );
+        }
+        const normalizedDep = dep.trim();
+        const mappedDep = idMap.get(normalizedDep);
+        if (mappedDep === undefined) {
+          throw new PlanStructureError(
+            `Invalid plan structure: task '${taskId}' depends on unknown task '${normalizedDep}'`,
+          );
+        }
+        return mappedDep;
+      })
       : [];
 
     return {

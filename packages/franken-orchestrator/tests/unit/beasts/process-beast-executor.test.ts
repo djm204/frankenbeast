@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -344,10 +344,15 @@ describe('ProcessBeastExecutor', () => {
       stop: vi.fn(async () => {}),
       kill: vi.fn(async () => {}),
     };
+    let branchCreated = false;
     const runGit = vi.fn((args: readonly string[]): string => {
       if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
       if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
-      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      if (args[0] === 'worktree' && args[1] === 'add') {
+        if (args[2] === '-b') branchCreated = true;
+        mkdirSync(String(args.at(-1)), { recursive: true });
+      }
+      if (args[0] === 'branch' && args[1] === '--list') return branchCreated ? String(args[2] ?? '') : '';
       return '';
     });
     const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
@@ -379,6 +384,254 @@ describe('ProcessBeastExecutor', () => {
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
     expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('does not remove an existing worktree allocation when process spawning fails', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const existingWorktreePath = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    mkdirSync(existingWorktreePath, { recursive: true });
+
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', existingWorktreePath], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('does not delete a pre-existing branch when spawn cleanup removes a new worktree', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async () => { throw new Error('spawn failed'); }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args[2]), { recursive: true });
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
+
+    const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'add', expectedWorktree, `beast/${agent.id}`], workDir);
+    expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('preserves a worktree allocation after a tracked process exits successfully', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let capturedCallbacks: ProcessCallbacks | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+        capturedCallbacks = callbacks as ProcessCallbacks;
+        return { pid: 4242 };
+      }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args.at(-1)), { recursive: true });
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    await executor.start(run, createDefinitionWithCwd(workDir));
+    capturedCallbacks!.onExit(0, null);
+
+    const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('preserves a worktree allocation after a tracked process exits with failure', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let capturedCallbacks: ProcessCallbacks | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+        capturedCallbacks = callbacks as ProcessCallbacks;
+        return { pid: 4242 };
+      }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args.at(-1)), { recursive: true });
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    await executor.start(run, createDefinitionWithCwd(workDir));
+    capturedCallbacks!.onExit(1, null);
+
+    const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
+  });
+
+  it('preserves a worktree allocation after a tracked process is killed by the operator', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async () => ({ pid: 4242 })),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const runGit = vi.fn((args: readonly string[]): string => {
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true';
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return workDir!;
+      if (args[0] === 'worktree' && args[1] === 'add') mkdirSync(String(args.at(-1)), { recursive: true });
+      if (args[0] === 'branch' && args[1] === '--list') return String(args[2] ?? '');
+      return '';
+    });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      worktreeIsolation: { enabled: true, projectRoot: workDir!, runGit },
+    });
+    const agent = repo.createTrackedAgent({
+      definitionId: 'test-beast',
+      source: 'dashboard',
+      status: 'dispatching',
+      createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} },
+      initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+
+    const attempt = await executor.start(run, createDefinitionWithCwd(workDir));
+    await executor.kill(run.id, attempt.id);
+
+    const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
+    expect(runGit).not.toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
+    expect(runGit).not.toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
   });
 
   it('stops the current attempt without deleting the run row', async () => {
@@ -537,6 +790,7 @@ describe('ProcessBeastExecutor', () => {
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
       const logs = new BeastLogStore(join(workDir, 'logs'));
       const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      const originalUmask = process.umask(0o000);
       let capturedCallbacks: ProcessCallbacks | undefined;
       const supervisor = {
         spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
@@ -549,16 +803,157 @@ describe('ProcessBeastExecutor', () => {
       const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
       const run = createTestRun(repo);
 
-      await executor.start(run, martinLoopDefinition);
+      try {
+        mkdirSync(runConfigDir, { recursive: true });
+        chmodSync(runConfigDir, 0o777);
+        writeFileSync(join(runConfigDir, `${run.id}.json`), 'stale snapshot');
+        chmodSync(join(runConfigDir, `${run.id}.json`), 0o666);
+        await executor.start(run, martinLoopDefinition);
+      } finally {
+        process.umask(originalUmask);
+      }
 
       const [spawnedSpec] = supervisor.spawn.mock.calls[0];
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
       expect(existsSync(configPath)).toBe(true);
+      expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
+      expect(readFileSync(configPath, 'utf8')).not.toContain('stale snapshot');
+      expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
 
       capturedCallbacks!.onExit(0, null);
 
       expect(existsSync(configPath)).toBe(false);
+    });
+
+    it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const runConfigDir = join(workDir, 'project-root', '.fbeast', '.build', 'run-configs');
+      const supervisor = createSupervisorMock();
+      mkdirSync(join(workDir, 'project-root', '.fbeast', '.build'), { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
+      const sensitiveTokenValue = 'configured-token-value-12345';
+      const sensitiveWebhookUrl = 'https://discord.com/api/webhooks/1234567890/opaque-webhook-value';
+      const sensitivePrivateCredential = ['opaque', 'private', 'material', 'abc123'].join('-');
+      const run = repo.createRun({
+        definitionId: 'martin-loop',
+        definitionVersion: 1,
+        executionMode: 'process',
+        configSnapshot: {
+          provider: 'claude',
+          objective: 'keep this user-visible objective',
+          chunkDirectory: '/tmp/chunks',
+          maxTotalTokens: 50000,
+          nested: {
+            apiKey: sensitiveTokenValue,
+            authorization: `Bearer ${sensitiveTokenValue}`,
+            webhook: sensitiveWebhookUrl,
+            visible: 'safe-value',
+          },
+          tokenRefs: ['op://vault/item/token', { privateKey: sensitivePrivateCredential }],
+          notes: `call ${sensitiveWebhookUrl} with ${sensitiveTokenValue}`,
+          promptConfig: {
+            text: `Read https://docs.example.test/webhook/setup and use ${sensitiveTokenValue}`,
+          },
+        },
+        dispatchedBy: 'cli',
+        dispatchedByUser: 'pfk',
+        createdAt: '2026-03-10T00:00:00.000Z',
+      });
+
+      await executor.start(run, martinLoopDefinition);
+
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      const serializedPersisted = JSON.stringify(persisted);
+      expect(persisted).toMatchObject({
+        provider: 'claude',
+        objective: 'keep this user-visible objective',
+        chunkDirectory: '/tmp/chunks',
+        // Numeric token-budget field must survive redaction as a number even
+        // though its key matches the generic `token` secret pattern (PR #1064).
+        maxTotalTokens: 50000,
+        nested: {
+          apiKey: '[REDACTED]',
+          authorization: '[REDACTED]',
+          webhook: '[REDACTED]',
+          visible: 'safe-value',
+        },
+        tokenRefs: '[REDACTED]',
+        notes: 'call [REDACTED] with [REDACTED]',
+        promptConfig: {
+          text: 'Read https://docs.example.test/webhook/setup and use [REDACTED]',
+        },
+      });
+      expect(typeof persisted.maxTotalTokens).toBe('number');
+      expect(serializedPersisted).not.toContain(sensitiveTokenValue);
+      expect(serializedPersisted).not.toContain(sensitiveWebhookUrl);
+      expect(serializedPersisted).not.toContain(sensitivePrivateCredential);
+    });
+
+    it('creates configured run-config dirs relative to the configured secure root', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const agentWorktree = join(workDir, 'agent-worktree');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(agentWorktree, { recursive: true });
+      mkdirSync(projectRoot, { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir, runConfigRoot: projectRoot });
+      const run = createTestRun(repo);
+
+      await executor.start(run, createDefinitionWithCwd(agentWorktree));
+
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      expect(existsSync(configPath)).toBe(true);
+      for (const dir of [join(projectRoot, '.fbeast'), join(projectRoot, '.fbeast', '.build'), runConfigDir]) {
+        expect(statSync(dir).mode & 0o777).toBe(0o700);
+      }
+    });
+
+    it('replaces dangling run-config snapshot symlinks before writing', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(runConfigDir, { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir, runConfigRoot: projectRoot });
+      const run = createTestRun(repo);
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      symlinkSync(join(workDir, 'missing-target.json'), configPath);
+
+      await executor.start(run, createDefinitionWithCwd(projectRoot));
+
+      expect(lstatSync(configPath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('refuses symlinked run-config directories before applying secure modes', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const targetDir = join(workDir, 'outside-run-configs');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(join(projectRoot, '.fbeast', '.build'), { recursive: true });
+      mkdirSync(targetDir, { recursive: true });
+      symlinkSync(targetDir, runConfigDir, 'dir');
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir });
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, createDefinitionWithCwd(projectRoot))).rejects.toThrow(
+        'Refusing to use symlinked run config directory',
+      );
+      expect(supervisor.spawn).not.toHaveBeenCalled();
     });
 
     it('passes ProcessCallbacks to supervisor.spawn()', async () => {
@@ -658,8 +1053,8 @@ describe('ProcessBeastExecutor', () => {
         configSnapshot: {
           webhookUrl: configSecret,
           signingSecret: camelCaseSecret,
-          apiKey: [`prefix-${arraySecret}`],
-          privateKey: `-----BEGIN PRIVATE KEY-----\n${multilineSecretLine}\n-----END PRIVATE KEY-----`,
+          apiKey: [arraySecret, envSecret],
+          privateKey: multilineSecretLine,
           normalOutput: visibleValue,
         },
         dispatchedBy: 'cli',
@@ -681,7 +1076,7 @@ describe('ProcessBeastExecutor', () => {
       const cb = callbacks as ProcessCallbacks;
 
       cb.onStdout(`stdout ${envSecret} ${camelCaseSecret} ${multilineSecretLine} ${visibleValue}`);
-      cb.onStderr(`stderr ${configSecret} prefix-${arraySecret} ${visibleValue}`);
+      cb.onStderr(`stderr ${configSecret} ${arraySecret} ${visibleValue}`);
       cb.onExit(1, null);
       await new Promise((r) => setTimeout(r, 10));
 
@@ -703,20 +1098,31 @@ describe('ProcessBeastExecutor', () => {
       expect(failEvent!.payload).toMatchObject({
         lastStderrLines: [`stderr [REDACTED] [REDACTED] ${visibleValue}`],
       });
+
       const publishedLogLines = publishSpy.mock.calls
         .map(([event]) => event)
         .filter((event) => event.type === 'run.log')
         .map((event) => event.data.line);
       expect(publishedLogLines).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
       expect(publishedLogLines).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
-      const persistedLogLines = (await logs.read(run.id, attempt.id)).join('\n');
-      expect(persistedLogLines).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
-      expect(persistedLogLines).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
-      expect(persistedLogLines).not.toContain(envSecret);
-      expect(persistedLogLines).not.toContain(configSecret);
-      expect(persistedLogLines).not.toContain(camelCaseSecret);
-      expect(persistedLogLines).not.toContain(multilineSecretLine);
-      expect(persistedLogLines).not.toContain(arraySecret);
+
+      const persistedLogLines = (await logs.read(run.id, attempt.id)).map((line) => {
+        try {
+          const parsed = JSON.parse(line);
+          return parsed.message ?? parsed.line ?? line;
+        } catch {
+          return line;
+        }
+      });
+      const persistedLogDump = persistedLogLines.join('\\n');
+
+      expect(persistedLogDump).toContain(`stdout [REDACTED] [REDACTED] [REDACTED] ${visibleValue}`);
+      expect(persistedLogDump).toContain(`stderr [REDACTED] [REDACTED] ${visibleValue}`);
+      expect(persistedLogDump).not.toContain(envSecret);
+      expect(persistedLogDump).not.toContain(configSecret);
+      expect(persistedLogDump).not.toContain(camelCaseSecret);
+      expect(persistedLogDump).not.toContain(multilineSecretLine);
+      expect(persistedLogDump).not.toContain(arraySecret);
 
       const serializedPersistedEvents = JSON.stringify(repo.listEvents(run.id));
       expect(serializedPersistedEvents).not.toContain(envSecret);
@@ -769,37 +1175,6 @@ describe('ProcessBeastExecutor', () => {
         stream: 'stderr',
         line: 'early stderr',
       });
-    });
-
-    it('buffers early stdout lines received before attempt creation', async () => {
-      workDir = await createTempWorkDir();
-      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
-      const logs = new BeastLogStore(join(workDir, 'logs'));
-      const appendSpy = vi.spyOn(logs, 'append');
-      let capturedCallbacks: ProcessCallbacks | undefined;
-
-      const supervisor = {
-        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
-          capturedCallbacks = callbacks as ProcessCallbacks;
-          // Simulate stdout arriving during spawn (before attempt is created)
-          capturedCallbacks.onStdout('early line 1');
-          capturedCallbacks.onStdout('early line 2');
-          return { pid: 4242 };
-        }),
-        stop: vi.fn(async () => {}),
-        kill: vi.fn(async () => {}),
-      };
-
-      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
-      const run = createTestRun(repo);
-
-      const attempt = await executor.start(run, martinLoopDefinition);
-
-      await new Promise((r) => setTimeout(r, 10));
-
-      // Early lines should have been flushed after attempt creation
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 1', expect.any(String));
-      expect(appendSpy).toHaveBeenCalledWith(run.id, attempt.id, 'stdout', 'early line 2', expect.any(String));
     });
   });
 

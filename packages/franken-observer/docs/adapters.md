@@ -80,7 +80,7 @@ import { vi } from 'vitest'
 import { LangfuseAdapter } from '@franken/observer'
 
 const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
-const adapter   = new LangfuseAdapter({ publicKey: 'pk', secretKey: 'sk', fetch: mockFetch })
+const adapter   = new LangfuseAdapter({ publicKey: process.env.LANGFUSE_PUBLIC_KEY!, secretKey: process.env.LANGFUSE_SECRET_KEY!, fetch: mockFetch })
 
 await adapter.flush(trace)
 expect(mockFetch).toHaveBeenCalledOnce()

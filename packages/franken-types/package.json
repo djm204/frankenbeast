@@ -1,6 +1,6 @@
 {
   "name": "@franken/types",
-  "version": "0.7.6",
+  "version": "0.8.1",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./path-containment": {
+      "import": "./dist/path-containment.js",
+      "types": "./dist/path-containment.d.ts"
     }
   },
   "files": [

@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
+const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
+const TEST_DISCORD_BOT_TOKEN = testCredential('TEST_DISCORD_BOT_TOKEN');
+const TEST_ROOT_ENV_TOKEN = testCredential('TEST_ROOT_ENV_TOKEN');
+const TEST_DASHBOARD_FILE_TOKEN = testCredential('TEST_DASHBOARD_FILE_TOKEN');
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
 const {
@@ -122,6 +129,8 @@ vi.mock('../../../src/cli/args.js', () => ({
 vi.mock('../../../src/cli/project-root.js', () => ({
   resolveProjectRoot: vi.fn((dir: string) => dir),
   generatePlanName: vi.fn(() => 'plan-2026-03-08'),
+  readActivePlanName: vi.fn(() => undefined),
+  writeActivePlanName: vi.fn(),
   getProjectPaths: vi.fn((root: string, planName?: string) => {
     const plansDir = planName ? `${root}/.fbeast/plans/${planName}` : `${root}/.fbeast/plans`;
     return {
@@ -138,6 +147,7 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     logFile: `${root}/.fbeast/.build/build.log`,
     designDocFile: `${plansDir}/design.md`,
     configFile: `${root}/.fbeast/config.json`,
+    activePlanFile: `${root}/.fbeast/active-plan`,
     llmResponseFile: `${plansDir}/llm-response.json`,
   };
   }),
@@ -236,9 +246,9 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
-import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
+import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
 
@@ -781,7 +791,7 @@ describe('main() execution', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.VITE_BEAST_OPERATOR_TOKEN = 'dashboard-operator-token';
+    process.env.VITE_BEAST_OPERATOR_TOKEN = TEST_DASHBOARD_OPERATOR_TOKEN;
     mockParseArgs.mockReturnValue({
       subcommand: undefined,
       networkAction: undefined,
@@ -838,6 +848,107 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('records the implicit active plan name for chained interactive subcommands', async () => {
+    await main();
+
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+  });
+
+  it('starts a fresh interview plan even when an active plan exists', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'interview' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith('/mock/project', 'plan-2026-03-08');
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+  });
+
+  it('persists active plan names when execution fails after the plan is established', async () => {
+    mockSessionStart.mockResolvedValueOnce({ status: 'failed' } as unknown as Awaited<ReturnType<typeof mockSessionStart>>);
+    const originalExitCode = process.exitCode;
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "1"');
+
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+    process.exitCode = originalExitCode;
+  });
+
+  it('persists active plan names before an interrupted execution exits', async () => {
+    mockSessionStart.mockImplementationOnce(() => {
+      expect(writeActivePlanName).toHaveBeenCalledWith(
+        expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+        'plan-2026-03-08',
+      );
+      process.exit(0);
+    });
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "0"');
+  });
+
+  it('does not mark issue batches as the active plan', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'issues', planName: 'batch-13' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+  });
+
+  it('reuses the recorded active plan for an implicit run across date rollover', async () => {
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.mocked(readActivePlanName).mockReturnValueOnce('plan-2026-03-07');
+    mockParseArgs.mockReturnValue({
+      subcommand: 'run',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith('/mock/project', 'plan-2026-03-07');
+    expect(logSpy).toHaveBeenCalledWith(
+      'No runnable default run plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-07. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-07`, or run `frankenbeast interview` first and then plan the generated design before running.',
+    );
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+    logSpy.mockRestore();
   });
 
   it('prints actionable guidance before provider preflight when no plan chunks exist', async () => {
@@ -1248,9 +1359,9 @@ describe('main() execution', () => {
       allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
       sessionStoreDir: '/mock/project/.fbeast/chat',
       projectName: 'project',
-      operatorToken: 'dashboard-operator-token',
+      operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
@@ -1266,7 +1377,7 @@ describe('main() execution', () => {
 
   it('passes literal uppercase Discord public keys into managed comms config', async () => {
     const publicKey = 'A'.repeat(64);
-    process.env.DISCORD_BOT_TOKEN = 'discord-token';
+    process.env.DISCORD_BOT_TOKEN = TEST_DISCORD_TOKEN;
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,
       maxDurationMs: 600_000,
@@ -1327,7 +1438,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       commsConfig: expect.objectContaining({
         channels: expect.objectContaining({
-          discord: expect.objectContaining({ token: 'discord-token', publicKey }),
+          discord: expect.objectContaining({ token: TEST_DISCORD_TOKEN, publicKey }),
         }),
       }),
     }));
@@ -1340,11 +1451,11 @@ describe('main() execution', () => {
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
     writeFileSync(
       join(root, '.env'),
-      'FRANKENBEAST_BEAST_OPERATOR_TOKEN=root-env-token\n',
+      `FRANKENBEAST_BEAST_OPERATOR_TOKEN=${TEST_ROOT_ENV_TOKEN}\n`,
     );
     writeFileSync(
       join(root, 'packages', 'franken-web', '.env.local'),
-      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+      `VITE_BEAST_OPERATOR_TOKEN=${TEST_DASHBOARD_FILE_TOKEN}\n`,
     );
 
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
@@ -1385,9 +1496,9 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      operatorToken: 'root-env-token',
+      operatorToken: TEST_ROOT_ENV_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'root-env-token',
+        operatorToken: TEST_ROOT_ENV_TOKEN,
       }),
     }));
   });
@@ -1402,7 +1513,7 @@ describe('main() execution', () => {
     );
     writeFileSync(
       join(root, 'packages', 'franken-web', '.env.local'),
-      'VITE_BEAST_OPERATOR_TOKEN=dashboard-file-token\n',
+      `VITE_BEAST_OPERATOR_TOKEN=${TEST_DASHBOARD_FILE_TOKEN}\n`,
     );
 
     delete process.env.VITE_BEAST_OPERATOR_TOKEN;
@@ -1443,9 +1554,9 @@ describe('main() execution', () => {
     await main();
 
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      operatorToken: 'dashboard-file-token',
+      operatorToken: TEST_DASHBOARD_FILE_TOKEN,
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-file-token',
+        operatorToken: TEST_DASHBOARD_FILE_TOKEN,
       }),
     }));
   });
@@ -1454,7 +1565,7 @@ describe('main() execution', () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-discord-public-key`);
     tempDirs.push(root);
     mkdirSync(join(root, 'packages', 'franken-web'), { recursive: true });
-    process.env.DISCORD_BOT_TOKEN = 'discord-bot-token';
+    process.env.DISCORD_BOT_TOKEN = TEST_DISCORD_BOT_TOKEN;
     delete process.env.DISCORD_PUBLIC_KEY;
 
     vi.mocked(loadConfig).mockImplementationOnce(async () => ({
@@ -1555,7 +1666,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastDaemon: expect.objectContaining({
         baseUrl: 'http://127.0.0.1:4999',
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1617,7 +1728,7 @@ describe('main() execution', () => {
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastDaemon: expect.objectContaining({
         baseUrl: 'http://127.0.0.1:4050',
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1676,7 +1787,7 @@ describe('main() execution', () => {
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       beastControl: expect.objectContaining({
-        operatorToken: 'dashboard-operator-token',
+        operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
@@ -1734,7 +1845,7 @@ describe('main() execution', () => {
 
     expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ root }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
-      beastControl: expect.objectContaining({ operatorToken: 'dashboard-operator-token' }),
+      beastControl: expect.objectContaining({ operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN }),
     }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
       beastDaemon: expect.anything(),
@@ -1820,7 +1931,7 @@ describe('main() execution', () => {
       beastLogsDir: '/mock/project/.fbeast/.build/beasts/logs',
       host: '127.0.0.1',
       port: 4050,
-      operatorToken: 'dashboard-operator-token',
+      operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
     }));
     expect(MockSession).not.toHaveBeenCalled();
   });
@@ -1907,14 +2018,71 @@ describe('main() execution', () => {
     expect(MockSession).not.toHaveBeenCalled();
   });
 
-  it('dispatches network help without creating a Session', async () => {
+  it('preserves provider command override approval when saving network config updates', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-trusted-network-save`);
+    const configFile = join(root, '.fbeast', 'config.json');
+    tempDirs.push(root);
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(configFile, JSON.stringify({
+      providers: {
+        overrides: {
+          codex: {
+            command: '/opt/frankenbeast/bin/codex',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/opt/frankenbeast/bin'],
+          },
+        },
+      },
+    }, null, 2));
+
+    const print = vi.fn();
+    await runNetworkCommand({
+      ...(mockParseArgs() as any),
+      subcommand: 'network',
+      networkAction: 'config',
+      networkSet: ['chat.model=gpt-5'],
+      config: configFile,
+      trustProviderCommandOverrides: true,
+    } as never, {
+      network: { mode: 'secure', secureBackend: 'local-encrypted', operatorTokenRef: 'operator-token-ref' },
+      beastsDaemon: { enabled: true, host: '127.0.0.1', port: 4050 },
+      chat: { enabled: true, host: '127.0.0.1', port: 3737, model: 'chat-model' },
+      dashboard: { enabled: true, host: '127.0.0.1', port: 5173, apiUrl: 'http://127.0.0.1:3737' },
+      comms: { enabled: false, host: '127.0.0.1', port: 3200, slack: { enabled: false }, discord: { enabled: false }, telegram: { enabled: false }, whatsapp: { enabled: false } },
+    } as never, root, {
+      configFile,
+      frankenbeastDir: join(root, '.fbeast'),
+    } as never, {
+      resolveServices: vi.fn(),
+      createSupervisor: vi.fn(() => ({ down: vi.fn(), status: vi.fn(), stop: vi.fn(), logs: vi.fn(), up: vi.fn(), stopAll: vi.fn() })),
+      print,
+      printError: vi.fn(),
+      renderHelp: vi.fn(() => 'network help'),
+      waitForShutdown: vi.fn(),
+    });
+
+    const saved = JSON.parse(readFileSync(configFile, 'utf-8'));
+    expect(saved.providers.overrides.codex).toMatchObject({
+      command: '/opt/frankenbeast/bin/codex',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/opt/frankenbeast/bin'],
+    });
+    expect(saved.chat.model).toBe('gpt-5');
+    expect(print).toHaveBeenCalledWith(`Saved network config to ${configFile}.`);
+  });
+
+  it('dispatches network help without resolving the project root or creating a Session', async () => {
+    const resolveProjectRootMock = vi.mocked(resolveProjectRoot);
+    resolveProjectRootMock.mockImplementation(() => {
+      throw new Error('Project root does not exist: /missing/project');
+    });
     mockParseArgs.mockReturnValue({
       subcommand: 'network',
       networkAction: 'help',
       networkTarget: undefined,
       networkDetached: false,
       networkSet: undefined,
-      baseDir: '/mock/project',
+      baseDir: '/missing/project',
       baseBranch: undefined,
       budget: 10,
       provider: 'claude',
@@ -1938,8 +2106,13 @@ describe('main() execution', () => {
       initNonInteractive: false,
     });
 
-    await main();
+    try {
+      await main();
+    } finally {
+      resolveProjectRootMock.mockImplementation((dir: string) => dir);
+    }
 
+    expect(resolveProjectRoot).not.toHaveBeenCalled();
     expect(MockSession).not.toHaveBeenCalled();
   });
 

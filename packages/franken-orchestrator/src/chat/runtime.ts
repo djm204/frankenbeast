@@ -19,7 +19,11 @@ const SLASH_COMMANDS = new Set([
 
 export interface ChatRuntimeState {
   sessionId: string;
+  approvalResolved?: boolean;
   pendingApproval: boolean;
+  pendingApprovalContext?: PendingApprovalContext;
+  pendingApprovalDescription?: string;
+  pendingApprovalRequestedAt?: string;
   projectId: string;
   transcript: TranscriptMessage[];
   beastContext?: ChatBeastContext | null | undefined;
@@ -40,6 +44,7 @@ export interface ChatRuntimeResult {
   pendingApproval: boolean;
   pendingApprovalContext?: PendingApprovalContext;
   pendingApprovalDescription?: string;
+  pendingApprovalRequestedAt?: string;
   providerContext?: {
     provider: string;
     model?: string;
@@ -59,10 +64,6 @@ export interface ChatRuntimeOptions {
   turnRunner: TurnRunner;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 function stateFromRunResult(runResult: TurnRunResult): string {
   switch (runResult.status) {
     case 'pending_approval':
@@ -72,6 +73,32 @@ function stateFromRunResult(runResult: TurnRunResult): string {
     case 'completed':
       return 'active';
   }
+}
+
+export interface ChatRuntimeRunOptions {
+  onEvent?: ((event: TurnEvent) => void) | undefined;
+}
+
+export function pendingApprovalRuntimeState(
+  pendingApproval: PendingApproval | null | undefined,
+  pendingApprovalState = false,
+): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription' | 'pendingApprovalRequestedAt'> {
+  if (!pendingApproval) {
+    return { pendingApproval: pendingApprovalState };
+  }
+
+  return {
+    pendingApproval: true,
+    pendingApprovalContext: {
+      ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
+      ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
+      ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
+      ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
+      ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+    },
+    pendingApprovalDescription: pendingApproval.description,
+    pendingApprovalRequestedAt: pendingApproval.requestedAt,
+  };
 }
 
 export class ChatRuntime {
@@ -85,22 +112,50 @@ export class ChatRuntime {
     this.turnRunner = options.turnRunner;
   }
 
-  async run(input: string, state: ChatRuntimeState): Promise<ChatRuntimeResult> {
+  async run(input: string, state: ChatRuntimeState, options?: ChatRuntimeRunOptions): Promise<ChatRuntimeResult> {
     const trimmed = input.trim();
-    if (trimmed.startsWith('/')) {
-      const command = trimmed.split(/\s+/)[0]?.toLowerCase();
-      if (command && SLASH_COMMANDS.has(command)) {
-        return this.runSlashCommand(command, trimmed, state);
+    const command = trimmed.startsWith('/') ? trimmed.split(/\s+/)[0]?.toLowerCase() : undefined;
+
+    if (state.pendingApproval && !state.approvalResolved && command !== '/approve') {
+      if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
+        return this.result({ ...state, pendingApproval: false }, [
+          { kind: 'approval', content: 'Rejected.' },
+        ], {
+          state: 'rejected',
+        });
       }
+
+      return this.result(state, [
+        {
+          kind: 'approval',
+          content: 'Approval is pending. Resolve the approval request before sending another message.',
+        },
+      ], {
+        ...(state.pendingApprovalContext !== undefined
+          ? { pendingApprovalContext: state.pendingApprovalContext }
+          : {}),
+        ...(state.pendingApprovalDescription !== undefined
+          ? { pendingApprovalDescription: state.pendingApprovalDescription }
+          : {}),
+        ...(state.pendingApprovalRequestedAt !== undefined
+          ? { pendingApprovalRequestedAt: state.pendingApprovalRequestedAt }
+          : {}),
+        state: 'pending_approval',
+      });
     }
 
-    return this.runTurn(trimmed, state);
+    if (command && SLASH_COMMANDS.has(command)) {
+      return this.runSlashCommand(command, trimmed, state, options);
+    }
+
+    return this.runTurn(trimmed, state, options);
   }
 
   private async runSlashCommand(
     command: string,
     raw: string,
     state: ChatRuntimeState,
+    options?: ChatRuntimeRunOptions,
   ): Promise<ChatRuntimeResult> {
     const description = raw.slice(command.length).trim();
 
@@ -116,7 +171,7 @@ export class ChatRuntime {
           kind: 'plan',
           planSummary: description,
           chunkCount: 0,
-        }, { sessionId: state.sessionId });
+        }, { sessionId: state.sessionId, onEvent: options?.onEvent });
         return this.result(state, [
           { kind: 'plan', content: runResult.summary },
         ], {
@@ -140,6 +195,7 @@ export class ChatRuntime {
           },
           state,
           'premium_execution',
+          options,
         );
       }
       case '/status':
@@ -171,7 +227,11 @@ export class ChatRuntime {
     }
   }
 
-  private async runTurn(input: string, state: ChatRuntimeState): Promise<ChatRuntimeResult> {
+  private async runTurn(
+    input: string,
+    state: ChatRuntimeState,
+    options?: ChatRuntimeRunOptions,
+  ): Promise<ChatRuntimeResult> {
     if (this.beastDispatchAdapter) {
       const beastResult = await this.beastDispatchAdapter.handle(input, {
         projectId: state.projectId,
@@ -248,7 +308,7 @@ export class ChatRuntime {
           },
         );
       case 'execute':
-        return this.runExecuteOutcome(result.outcome, { ...state, transcript }, result.tier);
+        return this.runExecuteOutcome(result.outcome, { ...state, transcript }, result.tier, options);
     }
   }
 
@@ -256,8 +316,12 @@ export class ChatRuntime {
     outcome: ExecuteOutcome,
     state: ChatRuntimeState,
     tier: string,
+    options?: ChatRuntimeRunOptions,
   ): Promise<ChatRuntimeResult> {
-    const runResult = await this.turnRunner.run(outcome, { sessionId: state.sessionId });
+    const runResult = await this.turnRunner.run(outcome, {
+      sessionId: state.sessionId,
+      onEvent: options?.onEvent,
+    });
     const pendingApproval = runResult.status === 'pending_approval';
     const pendingApprovalContext: PendingApprovalContext = {
       tool: 'execution',
@@ -298,6 +362,7 @@ export class ChatRuntime {
       outcome?: TurnOutcome;
       pendingApprovalContext?: PendingApprovalContext;
       pendingApprovalDescription?: string;
+      pendingApprovalRequestedAt?: string;
       state?: string;
       tier?: string | null;
       providerContext?: ChatRuntimeResult['providerContext'];
@@ -314,6 +379,9 @@ export class ChatRuntime {
         : {}),
       ...(extra?.pendingApprovalDescription !== undefined
         ? { pendingApprovalDescription: extra.pendingApprovalDescription }
+        : {}),
+      ...(extra?.pendingApprovalRequestedAt !== undefined
+        ? { pendingApprovalRequestedAt: extra.pendingApprovalRequestedAt }
         : {}),
       ...(extra?.providerContext ? { providerContext: extra.providerContext } : {}),
       ...(extra?.phase ? { phase: extra.phase } : {}),

@@ -50,6 +50,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
       eventBus,
       runConfigDir,
+      runConfigRoot: projectRoot,
       worktreeIsolation: {
         enabled: true,
         projectRoot,

@@ -1,11 +1,18 @@
-import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
+import type {
+  Evaluator,
+  EvaluationInput,
+  EvaluationResult,
+  EvaluationFinding,
+} from './evaluator.js';
+import { stripCommentsAndStringLiterals } from './source-sanitizer.js';
 
 const MAX_PARAMS = 5;
 const MAX_NESTING = 4;
 const MAX_FUNCTION_LINES = 50;
 
 const FUNCTION_PATTERN = /function\s+\w+\s*\(([^)]*)\)\s*\{([\s\S]*?)\}/g;
-const ARROW_FUNCTION_PATTERN = /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
+const ARROW_FUNCTION_PATTERN =
+  /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
 
 export class ComplexityEvaluator implements Evaluator {
   readonly name = 'complexity';
@@ -13,14 +20,20 @@ export class ComplexityEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     if (!input.content.trim()) {
-      return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
+      return {
+        evaluatorName: this.name,
+        verdict: 'pass',
+        score: 1,
+        findings: [],
+      };
     }
 
+    const sanitizedContent = stripCommentsAndStringLiterals(input.content);
     const findings: EvaluationFinding[] = [];
 
-    this.checkParameterCount(input.content, findings);
-    this.checkNestingDepth(input.content, findings);
-    this.checkFunctionLength(input.content, findings);
+    this.checkParameterCount(sanitizedContent, findings);
+    this.checkNestingDepth(sanitizedContent, findings);
+    this.checkFunctionLength(sanitizedContent, findings);
 
     const score = Math.max(0, 1 - findings.length * 0.25);
 
@@ -32,7 +45,10 @@ export class ComplexityEvaluator implements Evaluator {
     };
   }
 
-  private checkParameterCount(content: string, findings: EvaluationFinding[]): void {
+  private checkParameterCount(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     for (const pattern of [FUNCTION_PATTERN, ARROW_FUNCTION_PATTERN]) {
       for (const match of content.matchAll(pattern)) {
         const params = match[1]?.trim();
@@ -42,14 +58,18 @@ export class ComplexityEvaluator implements Evaluator {
           findings.push({
             message: `Function has ${count} parameters (max ${MAX_PARAMS}). Consider using an options object.`,
             severity: 'warning',
-            suggestion: 'Group related parameters into an options/config object',
+            suggestion:
+              'Group related parameters into an options/config object',
           });
         }
       }
     }
   }
 
-  private checkNestingDepth(content: string, findings: EvaluationFinding[]): void {
+  private checkNestingDepth(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     let maxDepth = 0;
     let currentDepth = 0;
 
@@ -66,12 +86,16 @@ export class ComplexityEvaluator implements Evaluator {
       findings.push({
         message: `Code nesting depth is ${maxDepth} levels (max ${MAX_NESTING}). Extract nested logic into separate functions.`,
         severity: 'warning',
-        suggestion: 'Use early returns, guard clauses, or extract helper functions to reduce nesting',
+        suggestion:
+          'Use early returns, guard clauses, or extract helper functions to reduce nesting',
       });
     }
   }
 
-  private checkFunctionLength(content: string, findings: EvaluationFinding[]): void {
+  private checkFunctionLength(
+    content: string,
+    findings: EvaluationFinding[],
+  ): void {
     for (const pattern of [FUNCTION_PATTERN, ARROW_FUNCTION_PATTERN]) {
       for (const match of content.matchAll(pattern)) {
         const body = match[2] ?? '';
@@ -80,7 +104,8 @@ export class ComplexityEvaluator implements Evaluator {
           findings.push({
             message: `Function is ${lineCount} lines long (max ${MAX_FUNCTION_LINES}). Break it into smaller functions.`,
             severity: 'warning',
-            suggestion: 'Extract logical sections into well-named helper functions',
+            suggestion:
+              'Extract logical sections into well-named helper functions',
           });
         }
       }

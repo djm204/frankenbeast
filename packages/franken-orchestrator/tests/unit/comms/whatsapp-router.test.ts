@@ -3,10 +3,11 @@ import { whatsappRouter } from '../../../src/comms/channels/whatsapp/whatsapp-ro
 import { createHmac } from 'node:crypto';
 import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
 import type { SessionMapper } from '../../../src/comms/core/session-mapper.js';
+import { testCredential } from '../../support/test-credentials.js';
 
 describe('whatsappRouter', () => {
   const appSecret = ['test', 'app', 'fixture'].join('-');
-  const verifyToken = 'test-token';
+  const verifyToken = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
@@ -33,7 +34,7 @@ describe('whatsappRouter', () => {
   }
 
   it('handles verification challenge', async () => {
-    const res = await app.request('/webhook?hub.mode=subscribe&hub.verify_token=test-token&hub.challenge=123');
+    const res = await app.request(`/webhook?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=123`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('123');
   });

@@ -19,7 +19,7 @@ import { handleSecurityCommand } from './security-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast, readActivePlanName, writeActivePlanName } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -750,6 +750,7 @@ async function createChatSurfaceDeps(
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
+    trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: true,
     verbose: args.verbose,
     reset: false,
@@ -797,6 +798,11 @@ export async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.subcommand === 'network' && (args.networkAction ?? 'help') === 'help') {
+    printLine(renderNetworkHelp());
+    return;
+  }
+
   const root = resolveProjectRoot(args.baseDir);
   if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
@@ -809,11 +815,15 @@ export async function main(): Promise<void> {
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides
+  const shouldReuseActivePlanName = !args.designDoc && (args.subcommand === 'plan' || args.subcommand === 'run');
+  const implicitPlanName = args.designDoc
+    ? generatePlanName(args.designDoc)
+    : (shouldReuseActivePlanName ? (readActivePlanName(root) ?? generatePlanName()) : generatePlanName());
   const planName = planDirOverride
     ? undefined
     : (args.planName ?? (args.subcommand === 'issues'
       ? undefined
-      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
+      : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
   const runPlanDir = planDirOverride ?? paths.plansDir;
@@ -1031,6 +1041,7 @@ export async function main(): Promise<void> {
           root,
           frankenbeastDir: paths.frankenbeastDir,
           configFile: paths.configFile,
+          allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
           getConfig: () => mutableConfig,
           setConfig: (nextConfig) => {
             mutableConfig = nextConfig;
@@ -1109,6 +1120,7 @@ export async function main(): Promise<void> {
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
+    trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: args.noPr,
     verbose: args.verbose,
     reset: args.reset,
@@ -1138,6 +1150,18 @@ export async function main(): Promise<void> {
     maxTotalTokens: config.maxTotalTokens,
     orchestratorConfig: config,
   });
+
+  const shouldPersistActivePlanName = planName && !planDirOverride && args.subcommand !== 'issues' && (
+    args.planName !== undefined
+    || args.designDoc !== undefined
+    || args.subcommand === 'interview'
+    || args.subcommand === 'plan'
+    || args.subcommand === undefined
+  );
+
+  if (shouldPersistActivePlanName) {
+    writeActivePlanName(paths, planName);
+  }
 
   // Issues subcommand dispatches to a separate flow
   if (args.subcommand === 'issues') {
@@ -1244,7 +1268,9 @@ async function persistNetworkConfigSets(args: CliArgs, paths: NetworkPaths): Pro
   }
 
   const updatedFileConfig = applyNetworkConfigSets(fileConfig, args.networkSet ?? []);
-  OrchestratorConfigSchema.parse(updatedFileConfig);
+  parseOrchestratorConfig(updatedFileConfig, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 
   await mkdir(dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(updatedFileConfig, null, 2) + '\n', 'utf-8');
@@ -1369,6 +1395,7 @@ export async function runNetworkCommand(
       repoRoot: root,
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
+      allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
     }),
     action === 'up' ? undefined : args.networkTarget,
   );

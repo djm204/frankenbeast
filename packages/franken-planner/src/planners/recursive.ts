@@ -1,6 +1,6 @@
-import { RecursionDepthExceededError } from '../core/errors.js';
+import { DuplicateTaskError, RecursionDepthExceededError } from '../core/errors.js';
 import { PlanGraph } from '../core/dag.js';
-import type { PlanResult, TaskResult } from '../core/types.js';
+import type { PlanResult, Task, TaskId, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
 /**
@@ -16,13 +16,14 @@ export class RecursivePlanner implements PlanningStrategy {
   constructor(private readonly maxDepth = 10) {}
 
   execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
-    return this._exec(graph, context, 0);
+    return this._exec(graph, context, 0, new Set());
   }
 
   private async _exec(
     graph: PlanGraph,
     context: PlanContext,
-    depth: number
+    depth: number,
+    completedTaskIds: ReadonlySet<TaskId>
   ): Promise<PlanResult> {
     if (depth > this.maxDepth) {
       throw new RecursionDepthExceededError(depth);
@@ -45,8 +46,13 @@ export class RecursivePlanner implements PlanningStrategy {
       }
 
       if (result.expand === true) {
-        const subGraph = PlanGraph.fromTasks(result.newTasks);
-        const subResult = await this._exec(subGraph, context, depth + 1);
+        const completedTaskIdsForExpansion = new Set<TaskId>([
+          ...completedTaskIds,
+          ...allResults.map((taskResult) => taskResult.taskId),
+          task.id,
+        ]);
+        const subGraph = this._buildSubGraph(result.newTasks, completedTaskIdsForExpansion);
+        const subResult = await this._exec(subGraph, context, depth + 1, completedTaskIdsForExpansion);
         if (subResult.status !== 'completed') {
           return subResult;
         }
@@ -57,6 +63,37 @@ export class RecursivePlanner implements PlanningStrategy {
     }
 
     return { status: 'completed', taskResults: allResults };
+  }
+
+  private _buildSubGraph(tasks: Task[], completedTaskIds: ReadonlySet<TaskId>): PlanGraph {
+    const nodes = new Map<Task['id'], Task>();
+
+    for (const task of tasks) {
+      if (nodes.has(task.id)) {
+        throw new DuplicateTaskError(task.id);
+      }
+      nodes.set(task.id, task);
+    }
+
+    const edges = new Map<Task['id'], Set<Task['id']>>();
+    const tasksWithInternalDependencies = tasks.map((task) => {
+      const internalDependencies: TaskId[] = [];
+      for (const dependencyId of task.dependsOn) {
+        if (nodes.has(dependencyId)) {
+          internalDependencies.push(dependencyId);
+          continue;
+        }
+        if (!completedTaskIds.has(dependencyId)) {
+          throw new Error(
+            `Recursive task '${task.id}' depends on unresolved external dependency '${dependencyId}'`
+          );
+        }
+      }
+      edges.set(task.id, new Set(internalDependencies));
+      return { ...task, dependsOn: internalDependencies };
+    });
+    PlanGraph.fromTasks(tasksWithInternalDependencies, { reason: 'recursive expansion' });
+    return PlanGraph.createWithRawEdges(nodes, edges, 0, 'recursive expansion');
   }
 
 }

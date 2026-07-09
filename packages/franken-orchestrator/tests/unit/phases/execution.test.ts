@@ -34,6 +34,98 @@ describe('runExecution', () => {
     expect(outcomes[1]!.taskId).toBe('t2');
   });
 
+  it('executes independent ready tasks in the same parallel wave', async () => {
+    const active = new Set<string>();
+    let observedOverlap = false;
+    const execute = vi.fn(async (skillId: string) => {
+      active.add(skillId);
+      if (skillId === 'alpha') {
+        await new Promise<void>(resolve => setTimeout(resolve, 25));
+      } else if (skillId === 'beta') {
+        observedOverlap = active.has('alpha');
+      }
+      active.delete(skillId);
+      return { output: `${skillId}-output`, tokensUsed: 1 };
+    });
+
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first independent task', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second independent task', requiredSkills: ['beta'], dependsOn: [] },
+      { id: 't3', objective: 'dependent task', requiredSkills: ['gamma'], dependsOn: ['t1', 't2'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 't2', 't3']);
+    expect(observedOverlap).toBe(true);
+  });
+
+  it('serializes ready CLI-backed tasks that share the checkout', async () => {
+    const active = new Set<string>();
+    let observedOverlap = false;
+    const cliExec = makeCliExecutor({
+      execute: vi.fn(async (skillId: string) => {
+        observedOverlap ||= active.size > 0;
+        active.add(skillId);
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
+        active.delete(skillId);
+        return { output: `${skillId}-output`, tokensUsed: 1 };
+      }),
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'cli:alpha', name: 'Alpha CLI', requiresHitl: false, executionType: 'cli' },
+        { id: 'cli:beta', name: 'Beta CLI', requiresHitl: false, executionType: 'cli' },
+      ]),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first cli task', requiredSkills: ['cli:alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second cli task', requiredSkills: ['cli:beta'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 't2']);
+    expect(cliExec.execute).toHaveBeenCalledTimes(2);
+    expect((cliExec.execute as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0])).toEqual(['cli:alpha', 'cli:beta']);
+    expect(observedOverlap).toBe(false);
+  });
+
+  it('serializes ready HITL-gated tasks so approval prompts do not overlap', async () => {
+    let activeApprovalCount = 0;
+    let observedOverlap = false;
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => {
+        observedOverlap ||= activeApprovalCount > 0;
+        activeApprovalCount += 1;
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
+        activeApprovalCount -= 1;
+        return { decision: 'approved' as const };
+      }),
+    });
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => [
+        { id: 'deploy-a', name: 'Deploy A', requiresHitl: true, executionType: 'function' as const },
+        { id: 'deploy-b', name: 'Deploy B', requiresHitl: true, executionType: 'function' as const },
+      ]),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first deploy', requiredSkills: ['deploy-a'], dependsOn: [] },
+      { id: 't2', objective: 'second deploy', requiredSkills: ['deploy-b'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, makeMemory(), makeObserver());
+
+    expect(outcomes.map(outcome => outcome.taskId)).toEqual(['t1', 't2']);
+    expect(governor.requestApproval).toHaveBeenCalledTimes(2);
+    expect(observedOverlap).toBe(false);
+  });
+
   it('records trace for each completed task', async () => {
     const memory = makeMemory();
     const c = ctx();
@@ -75,10 +167,48 @@ describe('runExecution', () => {
     expect(outcomes[0]!.error).toContain('dependencies');
   });
 
+  it('does not query skill descriptors for no-skill tasks', async () => {
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => {
+        throw new Error('manifest unavailable');
+      }),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'passthrough', requiredSkills: [], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toEqual(expect.objectContaining({ taskId: 't1', status: 'success' }));
+    expect(skills.getAvailableSkills).not.toHaveBeenCalled();
+  });
+
+  it('records descriptor lookup failures as task failures for required-skill tasks', async () => {
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => {
+        throw new Error('manifest unavailable');
+      }),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'requires alpha', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        taskId: 't1',
+        status: 'failure',
+        error: expect.stringContaining('manifest unavailable'),
+      }),
+    ]);
+  });
+
   it('checks HITL requirement and requests governor approval', async () => {
     const skills = makeSkills({
       getAvailableSkills: vi.fn(() => [
-        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+        { id: 'deploy', name: 'Deploy', requiresHitl: true, executionType: 'function' as const },
       ]),
     });
     const governor = makeGovernor();
@@ -96,7 +226,7 @@ describe('runExecution', () => {
   it('skips task when governor rejects', async () => {
     const skills = makeSkills({
       getAvailableSkills: vi.fn(() => [
-        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+        { id: 'deploy', name: 'Deploy', requiresHitl: true, executionType: 'function' as const },
       ]),
     });
     const governor = makeGovernor({
@@ -119,7 +249,7 @@ describe('runExecution', () => {
     const logger = makeLogger();
     const skills = makeSkills({
       getAvailableSkills: vi.fn(() => [
-        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+        { id: 'deploy', name: 'Deploy', requiresHitl: true, executionType: 'function' as const },
       ]),
     });
     const governor = makeGovernor({
@@ -190,6 +320,50 @@ describe('runExecution', () => {
     await expect(
       runExecution(c, makeSkills(), makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, undefined, checkpoint),
     ).rejects.toThrow('disk full');
+  });
+
+  it('drains parallel peers before surfacing wave persistence errors', async () => {
+    let slowPeerFinished = false;
+    const execute = vi.fn(async (_skillId: string, input: SkillInput) => {
+      if (input.objective === 'slow peer') {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        slowPeerFinished = true;
+      }
+      return { output: input.objective, tokensUsed: 1 };
+    });
+    const c = ctx([
+      { id: 't1', objective: 'fast failing checkpoint', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'slow peer', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn(() => false),
+      write: vi.fn((key: string) => {
+        if (key === 't1:done') {
+          throw new Error('disk full');
+        }
+      }),
+      readAll: vi.fn(() => new Set<string>()),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+    };
+
+    await expect(
+      runExecution(
+        c,
+        makeSkills({ hasSkill: vi.fn(() => true), execute }),
+        makeGovernor(),
+        makeMemory(),
+        makeObserver(),
+        undefined,
+        undefined,
+        undefined,
+        checkpoint,
+      ),
+    ).rejects.toThrow('disk full');
+
+    expect(slowPeerFinished).toBe(true);
   });
 
   it('throws if plan is missing', async () => {
@@ -525,6 +699,74 @@ describe('runExecution', () => {
     expect(c.circuitBreakerTripped).toBe(false);
   });
 
+  it('keeps the circuit breaker clear when peer wave failures are both recovered', async () => {
+    const failedOnce = new Set<string>();
+    const execute = vi.fn(async (_skillId: string, input: SkillInput) => {
+      if (input.objective.startsWith('write artifact') && !failedOnce.has(input.objective)) {
+        failedOnce.add(input.objective);
+        throw new Error('disk full while writing artifact');
+      }
+      return { output: input.objective, tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'write artifact one', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'write artifact two', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes).toHaveLength(4);
+    expect(outcomes.every(outcome => outcome.status === 'success')).toBe(true);
+    expect(c.circuitBreakerTripped).toBe(false);
+  });
+
+  it('keeps terminal peer wave failures from being requeued after recovery rebuilds pending', async () => {
+    const seenRecoverable = new Set<string>();
+    const execute = vi.fn(async (_skillId: string, input: SkillInput) => {
+      if (input.objective === 'recoverable artifact' && !seenRecoverable.has(input.objective)) {
+        seenRecoverable.add(input.objective);
+        throw new Error('disk full while writing artifact');
+      }
+      if (input.objective === 'unknown artifact') {
+        throw new Error('unknown transient explosion');
+      }
+      return { output: input.objective, tokensUsed: 1 };
+    });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: [],
+        knownErrors: ['disk full => free temporary files before retrying'],
+        rules: [],
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'recoverable artifact', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'unknown artifact', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes.filter(outcome => outcome.taskId === 't2')).toHaveLength(1);
+    expect(outcomes.find(outcome => outcome.taskId === 't2')).toEqual(expect.objectContaining({ status: 'failure' }));
+    expect(outcomes.some(outcome => outcome.taskId === 't1' && outcome.status === 'success')).toBe(true);
+    expect(c.circuitBreakerTripped).toBe(true);
+  });
+
   it('does not requeue terminal skipped tasks when recovery rebuilds the graph', async () => {
     const execute = vi
       .fn()
@@ -534,7 +776,7 @@ describe('runExecution', () => {
     const skills = makeSkills({
       hasSkill: vi.fn((id: string) => id === 'alpha'),
       execute,
-      getAvailableSkills: vi.fn(() => [{ id: 'hitl', name: 'HITL', requiresHitl: true }]),
+      getAvailableSkills: vi.fn(() => [{ id: 'hitl', name: 'HITL', requiresHitl: true, executionType: 'function' as const }]),
     });
     const governor = makeGovernor({
       requestApproval: vi.fn(async () => ({ decision: 'rejected', reason: 'nope' })),
@@ -1453,7 +1695,7 @@ describe('runExecution', () => {
     const logger = makeLogger();
     const skills = makeSkills({
       getAvailableSkills: vi.fn(() => [
-        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+        { id: 'deploy', name: 'Deploy', requiresHitl: true, executionType: 'function' as const },
       ]),
       hasSkill: vi.fn(() => true),
       execute: vi.fn(async () => ({ output: 'done', tokensUsed: 2 })),

@@ -11,6 +11,7 @@ import type {
   MemoryContext,
   ILogger,
   ICheckpointStore,
+  SkillDescriptor,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
@@ -37,6 +38,64 @@ export class HitlRejectedError extends Error {
     super(`Task ${taskId} rejected by governor: ${reason}`);
     this.name = 'HitlRejectedError';
   }
+}
+
+type PendingTaskEntry = [string, PlanTask];
+
+type WaveExecutionResult = {
+  readonly taskId: string;
+  readonly task: PlanTask;
+  readonly outcome: TaskOutcome;
+};
+
+function selectExecutableWave(
+  pendingEntries: readonly PendingTaskEntry[],
+  completed: ReadonlySet<string>,
+  skills: ISkillsModule,
+): PendingTaskEntry[] {
+  const readyEntries = pendingEntries.filter(([, task]) =>
+    task.dependsOn.every(dep => completed.has(dep)),
+  );
+
+  const firstReadyEntry = readyEntries[0];
+  if (!firstReadyEntry) {
+    return [];
+  }
+
+  if (taskRequiresSerializedExecution(firstReadyEntry[1], skills)) {
+    return [firstReadyEntry];
+  }
+
+  return readyEntries.filter(([, task]) =>
+    !taskRequiresSerializedExecution(task, skills),
+  );
+}
+
+function taskRequiresSerializedExecution(task: PlanTask, skills: ISkillsModule): boolean {
+  if (task.requiredSkills.length === 0) {
+    return false;
+  }
+
+  let availableSkills: readonly SkillDescriptor[];
+  try {
+    availableSkills = skills.getAvailableSkills();
+  } catch {
+    return false;
+  }
+
+  return task.requiredSkills.some(skillId => {
+    const descriptor = availableSkills.find(skill => skill.id === skillId);
+    return skillRequiresSerializedExecution(skillId, descriptor);
+  });
+}
+
+function skillRequiresSerializedExecution(
+  skillId: string,
+  descriptor: SkillDescriptor | undefined,
+): boolean {
+  return descriptor?.requiresHitl === true
+    || descriptor?.executionType === 'cli'
+    || (!descriptor && skillId.startsWith('cli:'));
 }
 
 function describeApprovalRejection(reason: string | undefined): string {
@@ -114,11 +173,9 @@ export async function runExecution(
       }
     }
 
-    const readyEntry = [...pending].find(([, task]) =>
-      task.dependsOn.every(dep => completed.has(dep)),
-    );
+    const readyEntries = selectExecutableWave([...pending], completed, skills);
 
-    if (!readyEntry) {
+    if (readyEntries.length === 0) {
       // All remaining tasks have unmet dependencies — deadlock
       ctx.circuitBreakerTripped = true;
       for (const task of pending.values()) {
@@ -132,72 +189,112 @@ export async function runExecution(
       break;
     }
 
-    const [taskId, task] = readyEntry;
-    pending.delete(taskId);
-
-    // Skip tasks already completed in a previous run (checkpoint recovery)
-    if (checkpoint?.has(`${task.id}:done`)) {
-      const checkpointedOutput = checkpoint.readTaskOutput?.(task.id);
-      logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-      if (checkpointedOutput?.found) {
-        completedOutputs.set(task.id, checkpointedOutput.output);
-      }
-      outcomes.push({ taskId: task.id, status: 'success', output: checkpointedOutput?.output });
-      completed.add(task.id);
-      continue;
+    for (const [taskId] of readyEntries) {
+      pending.delete(taskId);
     }
 
-    const outcome = await executeTask(
-      task,
-      skills,
-      governor,
-      memory,
-      observer,
-      ctx,
-      completedOutputs,
-      mcp,
-      logger,
-      cliExecutor,
-      checkpoint,
-      config,
-    );
+    logger.info('Execution: parallel wave start', {
+      size: readyEntries.length,
+      taskIds: readyEntries.map(([taskId]) => taskId),
+    });
 
-    if (outcome.status === 'success') {
-      outcomes.push(outcome);
-      // Persist the task output before the done marker so a crash after marking
-      // done can still rehydrate dependency outputs for downstream tasks.
-      checkpoint?.writeTaskOutput?.(task.id, outcome.output);
-      // Persist the checkpoint before mutating in-memory state so a crash here
-      // is recovered as "done" on restart instead of silently re-running the task.
-      checkpoint?.write(`${task.id}:done`);
-      completed.add(task.id);
-      completedOutputs.set(task.id, outcome.output);
-    } else if (outcome.status === 'skipped') {
-      outcomes.push(outcome);
-      terminalSkipped.add(task.id);
-    } else if (outcome.status === 'failure') {
-      const recovered = await recoverFailedTask({
-        ctx,
+    const settledWaveResults = await Promise.allSettled(readyEntries.map(async ([taskId, task]) => {
+      // Skip tasks already completed in a previous run (checkpoint recovery)
+      if (checkpoint?.has(`${task.id}:done`)) {
+        const checkpointedOutput = checkpoint.readTaskOutput?.(task.id);
+        logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
+        const outcome = { taskId: task.id, status: 'success' as const, output: checkpointedOutput?.output };
+        if (checkpointedOutput?.found) {
+          completedOutputs.set(task.id, checkpointedOutput.output);
+        }
+        completed.add(task.id);
+        return { taskId, task, outcome };
+      }
+
+      const outcome = await executeTask(
+        task,
+        skills,
         governor,
         memory,
-        task,
-        error: new Error(outcome.error ?? 'Task failed'),
-        pending,
-        completed,
-        knownTaskIds,
-        terminalSkipped,
-        terminalFailures,
-        recoveryAttempts,
-        checkpoint,
+        observer,
+        ctx,
+        completedOutputs,
+        mcp,
         logger,
-      });
+        cliExecutor,
+        checkpoint,
+        config,
+      );
 
-      if (recovered) {
-        maxIterations += 2;
-      } else {
-        await recordFailureTrace(memory, task, outcome.error ?? 'Task failed');
+      if (outcome.status === 'success') {
+        // Persist the task output before the done marker so a crash after marking
+        // done can still rehydrate dependency outputs for downstream tasks.
+        checkpoint?.writeTaskOutput?.(task.id, outcome.output);
+        // Persist the checkpoint before mutating in-memory state so a crash here
+        // is recovered as "done" on restart instead of silently re-running the task.
+        checkpoint?.write(`${task.id}:done`);
+        completed.add(task.id);
+        completedOutputs.set(task.id, outcome.output);
+      } else if (outcome.status === 'skipped') {
+        terminalSkipped.add(task.id);
+      }
+
+      return { taskId, task, outcome };
+    }));
+
+    const rejectedWaveResult = settledWaveResults.find(result => result.status === 'rejected');
+    if (rejectedWaveResult?.status === 'rejected') {
+      throw rejectedWaveResult.reason;
+    }
+
+    const waveResults: WaveExecutionResult[] = settledWaveResults.map(result => {
+      if (result.status === 'rejected') {
+        throw result.reason;
+      }
+      return result.value;
+    });
+
+    logger.info('Execution: parallel wave done', {
+      size: waveResults.length,
+      taskIds: waveResults.map(result => result.taskId),
+    });
+
+    const waveFailureIds = new Set(
+      waveResults
+        .filter(result => result.outcome.status === 'failure')
+        .map(result => result.task.id),
+    );
+
+    for (const { task, outcome } of waveResults) {
+      if (outcome.status === 'success' || outcome.status === 'skipped') {
         outcomes.push(outcome);
-        terminalFailures.add(task.id);
+      } else if (outcome.status === 'failure') {
+        const recovered = await recoverFailedTask({
+          ctx,
+          governor,
+          memory,
+          task,
+          error: new Error(outcome.error ?? 'Task failed'),
+          pending,
+          completed,
+          knownTaskIds,
+          terminalSkipped,
+          terminalFailures,
+          replacePendingTaskIds: waveFailureIds,
+          recoveryAttempts,
+          checkpoint,
+          logger,
+        });
+
+        if (recovered) {
+          maxIterations += 2;
+        } else {
+          await recordFailureTrace(memory, task, outcome.error ?? 'Task failed');
+          outcomes.push(outcome);
+          pending.delete(task.id);
+          terminalFailures.add(task.id);
+          ctx.circuitBreakerTripped = true;
+        }
       }
     }
   }
@@ -229,6 +326,7 @@ interface RecoveryAttemptInput {
   readonly knownTaskIds: Set<string>;
   readonly terminalSkipped: ReadonlySet<string>;
   readonly terminalFailures: ReadonlySet<string>;
+  readonly replacePendingTaskIds?: ReadonlySet<string> | undefined;
   readonly recoveryAttempts: Map<string, number>;
   readonly checkpoint?: ICheckpointStore | undefined;
   readonly logger: ILogger;
@@ -246,6 +344,7 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
     knownTaskIds,
     terminalSkipped,
     terminalFailures,
+    replacePendingTaskIds,
     recoveryAttempts,
     checkpoint,
     logger,
@@ -287,11 +386,12 @@ async function recoverFailedTask(input: RecoveryAttemptInput): Promise<boolean> 
 
     for (const recoveredTask of recoveredTasks) {
       knownTaskIds.add(recoveredTask.id);
+      const shouldReplacePending = replacePendingTaskIds?.has(recoveredTask.id) === true;
       if (
         !completed.has(recoveredTask.id) &&
         !terminalSkipped.has(recoveredTask.id) &&
         !terminalFailures.has(recoveredTask.id) &&
-        !pending.has(recoveredTask.id)
+        (!pending.has(recoveredTask.id) || shouldReplacePending)
       ) {
         pending.set(recoveredTask.id, recoveredTask);
       }

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -630,6 +630,17 @@ describe('Claude Code hook scripts', () => {
       }
     }
     tempRoots.length = 0;
+  });
+
+  it('uses cwd-relative DB paths in global Claude hook scripts', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const { preTool, postTool } = writeHookScripts(root, 'claude');
+
+    expect(readFileSync(preTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(postTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(preTool, 'utf8')).not.toContain(root);
+    expect(readFileSync(postTool, 'utf8')).not.toContain(root);
   });
 
   it('returns Claude block reason on stderr with exit 2 when the pre-tool hook blocks an action', () => {

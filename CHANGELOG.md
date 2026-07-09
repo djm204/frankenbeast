@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.44.0](https://github.com/djm204/frankenbeast/compare/v0.43.1...v0.44.0) (2026-07-08)
+
+
+### Features
+
+* **credentials:** externalize test credential placeholders ([#909](https://github.com/djm204/frankenbeast/issues/909)) ([b50ae79](https://github.com/djm204/frankenbeast/commit/b50ae797be6cbb77ea092c1ab3c8e30ed5274555)), closes [#518](https://github.com/djm204/frankenbeast/issues/518)
+
+
+### Miscellaneous
+
+* **repo:** track code comment debt markers ([#1278](https://github.com/djm204/frankenbeast/issues/1278)) ([158e522](https://github.com/djm204/frankenbeast/commit/158e522e41199286af5ff7e9d17490aa6615f534)), closes [#1077](https://github.com/djm204/frankenbeast/issues/1077)
+
+
+### Documentation
+
+* **cli:** document plain banner env toggle ([739438f](https://github.com/djm204/frankenbeast/commit/739438fb103988a06f2756cd88bf6827c7497ff9)), closes [#1264](https://github.com/djm204/frankenbeast/issues/1264)
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+* document Gemini API env keys ([1e41b8e](https://github.com/djm204/frankenbeast/commit/1e41b8edfbf37319c1f718cfe34bebf40def99f3))
+
+## [0.43.1](https://github.com/djm204/frankenbeast/compare/v0.43.0...v0.43.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* harden Beast run config snapshot permissions ([#895](https://github.com/djm204/frankenbeast/issues/895)) ([2b681cf](https://github.com/djm204/frankenbeast/commit/2b681cf5b111e883aa31001a898820ae30bf18e1))
+* **security:** pin Anthropic SDK override ([366972d](https://github.com/djm204/frankenbeast/commit/366972d6e386e7673ca059fd72614c67381be688)), closes [#587](https://github.com/djm204/frankenbeast/issues/587)
+
+
+### Documentation
+
+* record late codex follow-up lesson ([7efef5b](https://github.com/djm204/frankenbeast/commit/7efef5be68ff6a7c9da6a38e1552ccf96c9f0235))
+* refresh README project tree guides description ([#1142](https://github.com/djm204/frankenbeast/issues/1142)) ([823e5f5](https://github.com/djm204/frankenbeast/commit/823e5f5bc840149aca0ea3dcb87ebe43a745a3fc))
+
+
+### Tests
+
+* **web:** guard dev-server dependency upgrades ([#1060](https://github.com/djm204/frankenbeast/issues/1060)) ([7921136](https://github.com/djm204/frankenbeast/commit/792113659ced632c44f6208f9120cd61fa7e6632))
+
+## [0.43.0](https://github.com/djm204/frankenbeast/compare/v0.42.0...v0.43.0) (2026-07-07)
+
+
+### Features
+
+* **orchestrator:** execute ready tasks in parallel waves ([ef72620](https://github.com/djm204/frankenbeast/commit/ef726201c9153e08c5dea9079f6c1e2bb26d6f81)), closes [#497](https://github.com/djm204/frankenbeast/issues/497)
+
+
+### Bug Fixes
+
+* **cli:** make fbeast --help and -h exit cleanly ([a877043](https://github.com/djm204/frankenbeast/commit/a87704304cfe96f9fb1cdc5c9276038e0295ad37)), closes [#418](https://github.com/djm204/frankenbeast/issues/418)
+* **compose:** pin local observability images ([0dd9c16](https://github.com/djm204/frankenbeast/commit/0dd9c1626c623abca1820ea79d0cd885de7e2290)), closes [#754](https://github.com/djm204/frankenbeast/issues/754)
+* **critique:** ignore inert source text in evaluators ([#863](https://github.com/djm204/frankenbeast/issues/863)) ([99dbda1](https://github.com/djm204/frankenbeast/commit/99dbda1b9414200f9b54eb4394c09ea03531427e))
+* **orchestrator:** log pr creator fallback errors ([#840](https://github.com/djm204/frankenbeast/issues/840)) ([e49fa8d](https://github.com/djm204/frankenbeast/commit/e49fa8dc89bac80440cf2aee3bd42407b6db2cb7))
+* **orchestrator:** make sharp optional so the published CLI runs without it ([#854](https://github.com/djm204/frankenbeast/issues/854)) ([ff86b4a](https://github.com/djm204/frankenbeast/commit/ff86b4a0ef536b08791b55bc846bdeeeb7a0f970))
+* **orchestrator:** release supervisor exit on inherited stdio ([#876](https://github.com/djm204/frankenbeast/issues/876)) ([5bc0134](https://github.com/djm204/frankenbeast/commit/5bc0134986365b378f8f03ccd3752c79442e7696))
+* **orchestrator:** support init backend flag ([#869](https://github.com/djm204/frankenbeast/issues/869)) ([e9ea2bc](https://github.com/djm204/frankenbeast/commit/e9ea2bc263556ab757031de39bbff5ccd7e05d79))
+* remove unsafe eval test fixtures in critique tests ([#906](https://github.com/djm204/frankenbeast/issues/906)) ([d0f13fc](https://github.com/djm204/frankenbeast/commit/d0f13fc2fed79a55040cd5a569444b6ee65f29e0))
+* **security:** guard hard-coded example secrets ([#913](https://github.com/djm204/frankenbeast/issues/913)) ([fcecbab](https://github.com/djm204/frankenbeast/commit/fcecbabfa3b9c1a70dc96ce0a74a13ac1c07def9))
+* **security:** pin protobufjs transitive dependency ([6377bc9](https://github.com/djm204/frankenbeast/commit/6377bc975c63184e55bd121cbb51e380c869216b)), closes [#585](https://github.com/djm204/frankenbeast/issues/585)
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+* **tests:** remove recursive Turbo verification ([#878](https://github.com/djm204/frankenbeast/issues/878)) ([cbfa80b](https://github.com/djm204/frankenbeast/commit/cbfa80bb515030c296f1ff1b1b9a13e5f39a53eb))
+
+
+### Documentation
+
+* clarify operator token header example ([#1122](https://github.com/djm204/frankenbeast/issues/1122)) ([13fa66e](https://github.com/djm204/frankenbeast/commit/13fa66e168aa9baacad25bb0ddf8ecb7d2da45d3))
+
+
+### CI/CD
+
+* add daily deterministic security scan (semgrep + gitleaks + npm audit) ([#826](https://github.com/djm204/frankenbeast/issues/826)) ([e868142](https://github.com/djm204/frankenbeast/commit/e8681424f5dfa121ec94d2ff519d7551c9050f62))
+* add publish-smoke + workspace-dep guards to lock the boundary ([#860](https://github.com/djm204/frankenbeast/issues/860)) ([1e64b6f](https://github.com/djm204/frankenbeast/commit/1e64b6f65852302f416fac864748a47636c4f21a))
+
+
+### Tests
+
+* externalize credential fixtures ([#910](https://github.com/djm204/frankenbeast/issues/910)) ([84ff583](https://github.com/djm204/frankenbeast/commit/84ff5830a23095a32339a1970a3e2d6d0a443dca)), closes [#519](https://github.com/djm204/frankenbeast/issues/519)
+* **release-please:** derive expected package list from filesystem glob ([#1056](https://github.com/djm204/frankenbeast/issues/1056)) ([c3bd130](https://github.com/djm204/frankenbeast/commit/c3bd130719af12f05706df89e9b877a998412ea3))
+
 ## [0.42.0](https://github.com/djm204/frankenbeast/compare/v0.41.1...v0.42.0) (2026-07-06)
 
 

@@ -28,6 +28,7 @@ export type TurnEvent =
 
 export interface TurnRunOptions {
   sessionId: string;
+  onEvent?: ((event: TurnEvent) => void) | undefined;
 }
 
 export interface TurnRunResult {
@@ -57,6 +58,7 @@ export class TurnRunner extends EventEmitter {
       const event: TurnEvent = { type: 'approval_request', sessionId, data: { taskDescription: outcome.taskDescription } };
       events.push(event);
       this.emit('event', event);
+      options?.onEvent?.(event);
       return {
         status: 'pending_approval',
         summary: `Approval required: ${outcome.taskDescription}`,
@@ -67,6 +69,7 @@ export class TurnRunner extends EventEmitter {
     const startEvent: TurnEvent = { type: 'start', sessionId, data: { taskDescription: outcome.taskDescription } };
     events.push(startEvent);
     this.emit('event', startEvent);
+    options?.onEvent?.(startEvent);
 
     const executionResult = await this.executor.execute({ userInput: outcome.taskDescription });
 
@@ -76,6 +79,7 @@ export class TurnRunner extends EventEmitter {
     const completeEvent: TurnEvent = { type: 'complete', sessionId, data: { status: executionResult.status } };
     events.push(completeEvent);
     this.emit('event', completeEvent);
+    options?.onEvent?.(completeEvent);
 
     return { status, summary, events };
   }

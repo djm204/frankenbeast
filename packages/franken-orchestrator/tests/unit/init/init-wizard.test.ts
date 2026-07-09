@@ -5,6 +5,14 @@ import { runInitWizard, type InitWizardScope } from '../../../src/init/init-wiza
 import { createEmptyInitState } from '../../../src/init/init-types.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_MY_SECRET_OP_TOKEN = testCredential('TEST_MY_SECRET_OP_TOKEN');
+const TEST_TELEGRAM_SECRET_TOKEN = testCredential('TEST_TELEGRAM_SECRET_TOKEN');
+const TEST_WHATSAPP_ACCESS_TOKEN = testCredential('TEST_WHATSAPP_ACCESS_TOKEN');
+const TEST_WHATSAPP_PHONE_ID = testCredential('TEST_WHATSAPP_PHONE_ID');
+const TEST_WHATSAPP_APP_SECRET = testCredential('TEST_WHATSAPP_APP_SECRET');
+const TEST_WHATSAPP_VERIFY_TOKEN = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
@@ -110,12 +118,12 @@ describe('runInitWizard – with secretStore', () => {
       'n',      // Enable Comms?
       'claude', // Default provider
       'secure', // Security mode
-      'my-secret-op-token', // Operator token explicitly provided
+      TEST_MY_SECRET_OP_TOKEN, // Operator token explicitly provided
     ]);
     const secretStore = makeSecretStore({ available: true });
     const state = createEmptyInitState('/tmp/test-config.json');
     const result = await runInitWizard({ io, initialState: state, secretStore });
-    expect(secretStore.stored.get('network.operatorTokenRef')).toBe('my-secret-op-token');
+    expect(secretStore.stored.get('network.operatorTokenRef')).toBe(TEST_MY_SECRET_OP_TOKEN);
     expect(result.config.network.operatorTokenRef).toBe('network.operatorTokenRef');
   });
 
@@ -199,12 +207,12 @@ describe('runInitWizard – with Telegram and WhatsApp enabled', () => {
       'n',                    // Enable Discord?
       'y',                    // Enable Telegram?
       'telegram-bot-token',   // Telegram bot token (raw value)
-      'telegram-secret-token', // Telegram webhook secret token (raw value)
+      TEST_TELEGRAM_SECRET_TOKEN, // Telegram webhook secret token (raw value)
       'y',                    // Enable WhatsApp?
-      'wa-access-token',      // WhatsApp access token (raw value)
-      'wa-phone-number-id',   // WhatsApp phone number ID
-      'wa-app-secret',        // WhatsApp app secret (raw value)
-      'wa-verify-token',      // WhatsApp verify token (raw value)
+      TEST_WHATSAPP_ACCESS_TOKEN,      // WhatsApp access token (raw value)
+      TEST_WHATSAPP_PHONE_ID,   // WhatsApp phone number ID
+      TEST_WHATSAPP_APP_SECRET,        // WhatsApp app secret (raw value)
+      TEST_WHATSAPP_VERIFY_TOKEN,      // WhatsApp verify token (raw value)
       '',                     // Operator token (blank → auto)
     ]);
     const secretStore = makeSecretStore({ available: true });
@@ -216,15 +224,15 @@ describe('runInitWizard – with Telegram and WhatsApp enabled', () => {
     expect(result.config.comms.telegram.botTokenRef).toBe('comms.telegram.botTokenRef');
     expect(result.config.comms.telegram.webhookSecretTokenRef).toBe('comms.telegram.webhookSecretTokenRef');
     expect(secretStore.stored.get('comms.telegram.botTokenRef')).toBe('telegram-bot-token');
-    expect(secretStore.stored.get('comms.telegram.webhookSecretTokenRef')).toBe('telegram-secret-token');
+    expect(secretStore.stored.get('comms.telegram.webhookSecretTokenRef')).toBe(TEST_TELEGRAM_SECRET_TOKEN);
     expect(result.config.comms.whatsapp.enabled).toBe(true);
     expect(result.config.comms.whatsapp.accessTokenRef).toBe('comms.whatsapp.accessTokenRef');
-    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe('wa-phone-number-id');
+    expect(result.config.comms.whatsapp.phoneNumberIdRef).toBe(TEST_WHATSAPP_PHONE_ID);
     expect(result.config.comms.whatsapp.appSecretRef).toBe('comms.whatsapp.appSecretRef');
     expect(result.config.comms.whatsapp.verifyTokenRef).toBe('comms.whatsapp.verifyTokenRef');
-    expect(secretStore.stored.get('comms.whatsapp.accessTokenRef')).toBe('wa-access-token');
-    expect(secretStore.stored.get('comms.whatsapp.appSecretRef')).toBe('wa-app-secret');
-    expect(secretStore.stored.get('comms.whatsapp.verifyTokenRef')).toBe('wa-verify-token');
+    expect(secretStore.stored.get('comms.whatsapp.accessTokenRef')).toBe(TEST_WHATSAPP_ACCESS_TOKEN);
+    expect(secretStore.stored.get('comms.whatsapp.appSecretRef')).toBe(TEST_WHATSAPP_APP_SECRET);
+    expect(secretStore.stored.get('comms.whatsapp.verifyTokenRef')).toBe(TEST_WHATSAPP_VERIFY_TOKEN);
   });
 
   it('preserves existing Telegram and WhatsApp refs when rerunning scoped prompts without a secret store', async () => {

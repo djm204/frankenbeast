@@ -43,6 +43,7 @@ const SCHEMA = `
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
+    cost_source TEXT NOT NULL DEFAULT 'computed',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -71,6 +72,16 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.exec(SCHEMA);
+  const costColumns = db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
+  if (!costColumns.some((column) => column.name === 'cost_source')) {
+    try {
+      db.exec("ALTER TABLE cost_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'legacy'");
+    } catch (error) {
+      if (!(error instanceof Error) || !/duplicate column name: cost_source/i.test(error.message)) {
+        throw error;
+      }
+    }
+  }
 
   return {
     db,
