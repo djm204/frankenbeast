@@ -469,9 +469,17 @@ When `requireSignedApprovals` is `true`, the gateway throws `SignatureVerificati
 On APPROVE, the gateway can issue a scoped, time-limited `SessionToken` — the agent must present this token to invoke the approved skill:
 
 ```typescript
-import { SessionTokenStore, createSessionToken } from '@franken/governor';
+import {
+  ApprovalGateway,
+  SessionTokenStore,
+  createGovernorApp,
+  defaultConfig,
+} from '@franken/governor';
 
-const store = new SessionTokenStore();
+const store = new SessionTokenStore({
+  // Optional: share tokens across short-lived governor/hook processes.
+  persistenceFile: '.frankenbeast/governor-session-tokens.json',
+});
 
 // Tokens are created automatically by ApprovalGateway when sessionTokenStore is provided
 const gateway = new ApprovalGateway({
@@ -491,6 +499,14 @@ if (outcome.decision === 'APPROVE' && outcome.token) {
   // Revoke when done
   store.revoke(outcome.token.tokenId);
 }
+
+const app = createGovernorApp({
+  signingSecret: process.env.FRANKEN_GOVERNOR_SIGNING_SECRET,
+  sessionTokenStore: store,
+});
+
+// External callers can validate through POST /v1/approval/session/validate
+// with a signed body: { "tokenId": "...", "scope": "deploy-prod" }.
 ```
 
 `SessionToken` fields:
@@ -504,7 +520,7 @@ if (outcome.decision === 'APPROVE' && outcome.token) {
 | `grantedAt` | `Date` | When the token was issued |
 | `expiresAt` | `Date` | When the token expires |
 
-Expired tokens are automatically cleaned up on access.
+Expired tokens are automatically cleaned up on access and during persisted-store loading.
 
 ## Configuration
 

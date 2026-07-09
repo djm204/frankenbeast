@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
@@ -76,5 +79,77 @@ describe('SessionTokenStore', () => {
   it('isValid() returns false for unknown tokenId', () => {
     const store = new SessionTokenStore();
     expect(store.isValid('unknown')).toBe(false);
+  });
+
+  it('persists tokens so a new store instance can validate them', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const firstStore = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+
+      firstStore.store(token);
+
+      const secondStore = new SessionTokenStore({ persistenceFile });
+      expect(secondStore.get(token.tokenId)).toEqual(token);
+      expect(secondStore.isValid(token.tokenId, 'deploy')).toBe(true);
+      expect(secondStore.isValid(token.tokenId, 'other-scope')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reloads persisted tokens on access for already-running validator processes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const validatorStore = new SessionTokenStore({ persistenceFile });
+      const issuingStore = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+
+      expect(validatorStore.isValid(token.tokenId)).toBe(false);
+      issuingStore.store(token);
+
+      expect(validatorStore.get(token.tokenId)).toEqual(token);
+      expect(validatorStore.isValid(token.tokenId, 'deploy')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('observes cross-process revocations before validating', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const validatorStore = new SessionTokenStore({ persistenceFile });
+      const issuingStore = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+
+      issuingStore.store(token);
+      expect(validatorStore.isValid(token.tokenId)).toBe(true);
+
+      issuingStore.revoke(token.tokenId);
+      expect(validatorStore.isValid(token.tokenId)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes persisted tokens after expiry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const store = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(1000);
+      store.store(token);
+
+      vi.advanceTimersByTime(2000);
+
+      expect(store.get(token.tokenId)).toBeUndefined();
+      const persisted = JSON.parse(readFileSync(persistenceFile, 'utf8'));
+      expect(persisted).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
