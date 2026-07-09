@@ -1,4 +1,4 @@
-import type { Evaluator, EvaluationInput, EvaluationResult, CritiqueResult } from '../types/evaluation.js';
+import type { Evaluator, EvaluationInput, EvaluationResult, CritiquePipelineResult } from '../types/evaluation.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
 
@@ -17,7 +17,7 @@ export class CritiquePipeline {
     });
   }
 
-  async run(input: EvaluationInput): Promise<CritiqueResult> {
+  async run(input: EvaluationInput): Promise<CritiquePipelineResult> {
     if (this.evaluators.length === 0) {
       return { verdict: 'pass', overallScore: 1, results: [], shortCircuited: false };
     }

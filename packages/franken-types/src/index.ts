@@ -83,6 +83,7 @@ export type {
   McpServerConfig,
   AuthField,
   CritiqueContext,
+  ProviderCritiqueFinding,
   CritiqueResult,
   ProviderSkillConfig,
 } from './provider.js';

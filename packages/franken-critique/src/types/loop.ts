@@ -1,5 +1,5 @@
 import type { Score, SessionId, TaskId } from './common.js';
-import type { CritiqueResult, EvaluationFinding, EvaluationInput } from './evaluation.js';
+import type { CritiquePipelineResult, EvaluationFinding, EvaluationInput } from './evaluation.js';
 import type { EscalationRequest } from './contracts.js';
 
 /** Configuration for the critique loop. */
@@ -28,8 +28,8 @@ export interface CritiqueIteration {
   readonly index: number;
   /** The input that was evaluated in this iteration. */
   readonly input: EvaluationInput;
-  /** The critique result for this iteration. */
-  readonly result: CritiqueResult;
+  /** The aggregate critique pipeline result for this iteration. */
+  readonly result: CritiquePipelineResult;
   /** Timestamp when the iteration completed. */
   readonly completedAt: string;
 }

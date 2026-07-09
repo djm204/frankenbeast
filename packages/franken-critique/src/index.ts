@@ -9,6 +9,7 @@ export type {
   EvaluationInput,
   EvaluationFinding,
   EvaluationResult,
+  CritiquePipelineResult,
   CritiqueResult,
   Evaluator,
 } from './types/evaluation.js';
