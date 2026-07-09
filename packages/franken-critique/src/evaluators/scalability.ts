@@ -81,12 +81,25 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private checkHardcodedIPs(content: string, findings: EvaluationFinding[]): void {
     for (const match of content.matchAll(HARDCODED_IP_PATTERN)) {
+      const ipAddress = match[1] ?? '';
+      if (!this.isValidIPv4Address(ipAddress)) {
+        continue;
+      }
+
       findings.push({
-        message: `Found hardcoded IP address: "${match[1]}". Use environment variables or config.`,
+        message: `Found hardcoded IP address: "${ipAddress}". Use environment variables or config.`,
         severity: 'warning',
         suggestion: 'Move IP address to environment variable or DNS hostname',
       });
     }
+  }
+
+  private isValidIPv4Address(ipAddress: string): boolean {
+    const octets = ipAddress.split('.');
+    return octets.length === 4 && octets.every((octet) => {
+      const value = Number(octet);
+      return Number.isInteger(value) && value >= 0 && value <= 255;
+    });
   }
 
   private checkHardcodedPorts(content: string, findings: EvaluationFinding[]): void {
