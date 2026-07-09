@@ -30,13 +30,24 @@ describe('ScalabilityEvaluator', () => {
     expect(result.findings.some((f) => f.message.includes('hardcoded'))).toBe(true);
   });
 
-  it('flags hardcoded IP addresses', async () => {
+  it.each(['127.0.0.1', '192.168.1.10'])('flags valid hardcoded IPv4 address %s', async (ipAddress) => {
     const evaluator = new ScalabilityEvaluator();
-    const content = `const host = "192.168.1.100";`;
+    const content = `const host = "${ipAddress}";`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes('hardcoded'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes(`hardcoded IP address: "${ipAddress}"`))).toBe(true);
   });
+
+  it.each(['999.999.999.999', '300.1.2.3', '1.2.3.999'])(
+    'does not flag invalid dotted-quad %s as a hardcoded IPv4 address',
+    async (ipAddress) => {
+      const evaluator = new ScalabilityEvaluator();
+      const content = `const placeholder = "${ipAddress}";`;
+      const result = await evaluator.evaluate(createInput(content));
+
+      expect(result.findings.some((f) => f.message.includes('hardcoded IP address'))).toBe(false);
+    },
+  );
 
   it.each([
     ['bare declaration', 'const port = 8080;'],
