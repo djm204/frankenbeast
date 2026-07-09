@@ -7,8 +7,10 @@ const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E']);
 const requestedPaths = process.argv
   .slice(2)
   .filter((arg) => !arg.startsWith('-') && arg !== 'run');
-const requestedIntegration = requestedPaths.some((arg) => arg.includes('tests/integration/'));
-const requestedE2e = requestedPaths.some((arg) => arg.includes('e2e'));
+const requestedIntegration = requestedPaths.some(
+  (arg) => arg === 'tests/integration' || arg.startsWith('tests/integration/'),
+);
+const requestedE2e = requestedPaths.some((arg) => /(^|[/.-])e2e([/.-]|$)/u.test(arg));
 const runIntegration = vitestFlags.INTEGRATION || requestedIntegration;
 const runE2e = vitestFlags.E2E || requestedE2e;
 

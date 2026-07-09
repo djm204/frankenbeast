@@ -41,6 +41,7 @@ describe('Vitest environment flag helper', () => {
     const config = readFileSync(resolve(ROOT, 'vitest.config.ts'), 'utf-8');
 
     expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E'])");
+    expect(config).toContain("arg === 'tests/integration' || arg.startsWith('tests/integration/')");
     expect(config).toContain("'tests/**/*.test.ts'");
     expect(config).toContain("'tests/integration/**/*.test.ts'");
     expect(config).toMatch(/exclude:[\s\S]*runIntegration \|\| runE2e[\s\S]*tests\/integration\/\*\*\/\*\.test\.ts/);
