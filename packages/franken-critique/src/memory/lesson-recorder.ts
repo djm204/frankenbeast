@@ -11,8 +11,8 @@ export class LessonRecorder {
   }
 
   async record(result: CritiqueLoopResult, taskId: TaskId): Promise<void> {
-    // Only record lessons from multi-iteration passes
-    if (result.verdict !== 'pass' || result.iterations.length <= 1) {
+    // Only record lessons from multi-iteration pass/warn successes.
+    if ((result.verdict !== 'pass' && result.verdict !== 'warn') || result.iterations.length <= 1) {
       return;
     }
 

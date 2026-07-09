@@ -134,7 +134,7 @@ export interface ICritiqueModule {
 }
 
 export interface CritiqueResult {
-  readonly verdict: 'pass' | 'fail';
+  readonly verdict: 'pass' | 'warn' | 'fail';
   readonly findings: readonly CritiqueFinding[];
   readonly score: number;
   /**

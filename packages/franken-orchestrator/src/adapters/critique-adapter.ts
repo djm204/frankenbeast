@@ -48,6 +48,7 @@ export interface EscalationRequest {
 
 export type CritiqueLoopResult =
   | { readonly verdict: 'pass'; readonly iterations: readonly CritiqueIteration[] }
+  | { readonly verdict: 'warn'; readonly iterations: readonly CritiqueIteration[] }
   | { readonly verdict: 'fail'; readonly iterations: readonly CritiqueIteration[]; readonly correction: CorrectionRequest }
   | { readonly verdict: 'halted'; readonly iterations: readonly CritiqueIteration[]; readonly reason: string }
   | { readonly verdict: 'escalated'; readonly iterations: readonly CritiqueIteration[]; readonly escalation: EscalationRequest };
@@ -102,9 +103,9 @@ export class CritiquePortAdapter implements ICritiqueModule {
     const lastResult = lastIteration?.result;
     const findings = lastResult ? this.mapFindings(lastResult.results) : [];
 
-    if (loopResult.verdict === 'pass') {
+    if (loopResult.verdict === 'pass' || loopResult.verdict === 'warn') {
       return {
-        verdict: 'pass',
+        verdict: loopResult.verdict,
         findings,
         score: lastResult?.overallScore ?? 0,
       };

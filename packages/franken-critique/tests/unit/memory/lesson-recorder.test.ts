@@ -103,12 +103,12 @@ describe('LessonRecorder', () => {
     expect(call.timestamp).toBeTruthy();
   });
 
-  it('uses a warning-only terminal iteration as the applied correction', async () => {
+  it('records a lesson when multi-iteration recovery ends with warnings', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
 
     const result: CritiqueLoopResult = {
-      verdict: 'pass',
+      verdict: 'warn',
       iterations: [
         createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
         createIteration(1, 'warn', 'adr-compliance', [{ message: 'review ADR', severity: 'warning' }]),
@@ -120,6 +120,7 @@ describe('LessonRecorder', () => {
     const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
       correctionApplied: string;
     };
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
     expect(call.correctionApplied).toBe('Corrected in iteration 1');
   });
 
