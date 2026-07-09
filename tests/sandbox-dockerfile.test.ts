@@ -13,6 +13,37 @@ function hasDocker(): boolean {
   return !result.error && result.status === 0;
 }
 
+const optionsWithRequiredValue = new Set([
+  '--config',
+  '--coverage.exclude',
+  '--coverage.extension',
+  '--coverage.include',
+  '--coverage.provider',
+  '--coverage.reporter',
+  '--coverage.reportsDirectory',
+  '--coverage.thresholds.branches',
+  '--coverage.thresholds.functions',
+  '--coverage.thresholds.lines',
+  '--coverage.thresholds.statements',
+  '--coverage.watermarks.branches',
+  '--coverage.watermarks.functions',
+  '--coverage.watermarks.lines',
+  '--coverage.watermarks.statements',
+  '--dir',
+  '--environment',
+  '--exclude',
+  '--include',
+  '--pool',
+  '--project',
+  '--reporter',
+  '--root',
+  '--testNamePattern',
+  '--test-name-pattern',
+  '-c',
+  '-r',
+  '-t',
+]);
+
 function normalizeRequestedPath(arg: string): string {
   const normalized = arg.replace(/:\d+(?::\d+)?$/u, '').replace(/\\/gu, '/');
   if (isAbsolute(normalized)) {
@@ -21,9 +52,35 @@ function normalizeRequestedPath(arg: string): string {
   return normalized.replace(/^\.\//u, '');
 }
 
-const explicitDockerfileTestRequest = process.argv
-  .slice(2)
-  .map(normalizeRequestedPath)
+function collectRequestedPaths(args: readonly string[]): string[] {
+  const paths: string[] = [];
+  let skipOptionValue = false;
+
+  for (const arg of args) {
+    if (skipOptionValue) {
+      skipOptionValue = false;
+      continue;
+    }
+
+    if (arg === 'run') {
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      const optionName = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+      if (optionsWithRequiredValue.has(optionName) && !arg.includes('=')) {
+        skipOptionValue = true;
+      }
+      continue;
+    }
+
+    paths.push(normalizeRequestedPath(arg));
+  }
+
+  return paths;
+}
+
+const explicitDockerfileTestRequest = collectRequestedPaths(process.argv.slice(2))
   .includes('tests/sandbox-dockerfile.test.ts');
 const runDockerBuild = readVitestFlag(process.env, 'DOCKER_BUILD') || explicitDockerfileTestRequest;
 const dockerIt = runDockerBuild && hasDocker() ? it : it.skip;

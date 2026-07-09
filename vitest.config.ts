@@ -15,7 +15,6 @@ const optionsWithRequiredValue = new Set([
   '--coverage.thresholds.branches',
   '--coverage.thresholds.functions',
   '--coverage.thresholds.lines',
-  '--coverage.thresholds.perFile',
   '--coverage.thresholds.statements',
   '--coverage.watermarks.branches',
   '--coverage.watermarks.functions',
@@ -84,7 +83,7 @@ const explicitPathRequest = requestedPaths.length > 0;
 const runIntegration = vitestFlags.INTEGRATION;
 const runE2e = vitestFlags.E2E;
 const runDockerBuild = vitestFlags.DOCKER_BUILD || requestedDockerBuild;
-const optionalSuiteRequested = runIntegration || runE2e || runDockerBuild;
+const optionalSuiteRequested = runIntegration || runE2e;
 const include = explicitPathRequest || !optionalSuiteRequested
   ? ['tests/**/*.test.ts']
   : [

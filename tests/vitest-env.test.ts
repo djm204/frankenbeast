@@ -43,6 +43,8 @@ describe('Vitest environment flag helper', () => {
     expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD'])");
     expect(config).toContain('optionsWithRequiredValue');
     expect(config).toContain("'--coverage.exclude'");
+    expect(config).not.toContain("'--coverage.thresholds.perFile'");
+    expect(config).toContain('const optionalSuiteRequested = runIntegration || runE2e;');
     expect(config).toContain('collectRequestedPaths');
     expect(config).toContain("normalizeRequestedPath");
     expect(config).toContain("arg === 'tests/integration'");
