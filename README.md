@@ -322,7 +322,7 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM provider credentials** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for API-backed providers. Ollama-compatible provider registry entries use `OLLAMA_BASE_URL` instead of an API key; the local default is `http://localhost:11434`.
+- **LLM provider credentials** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for API-backed providers. `OLLAMA_BASE_URL` is documented for legacy/future Ollama-compatible builds, but it is not consumed by the current provider schema or Beast activation presets; the conventional local Ollama endpoint is `http://localhost:11434`.
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ### Beast project-root override
@@ -552,6 +552,11 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
+# Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
+# and readiness on http://localhost:3200/ready for verify-setup. The root
+# .env.example intentionally does not define a TEMPO_ENDPOINT override; pass
+# custom Tempo endpoints through TempoAdapter options instead.
+
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npx tsx scripts/seed.ts
 
@@ -636,7 +641,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
-| `OLLAMA_BASE_URL` | Provider registry | Only when using an Ollama-compatible provider entry | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons. It is intentionally absent from `.env.example` because the default local setup and current `fbeast mcp beast` presets do not consume it. |
+| `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
 | `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |

@@ -22,25 +22,25 @@ cp .env.example .env
 # For fbeast mcp beast --provider=anthropic-api, set ANTHROPIC_API_KEY.
 ```
 
-### Ollama endpoints
+### Ollama endpoint variable status
 
-`OLLAMA_BASE_URL` is the optional base URL for Ollama-compatible provider registry entries. Set it only when the run configuration or provider registry entry you are using selects an Ollama-backed provider; the `fbeast mcp beast --provider=...` activation shim does not currently include an Ollama preset, so `OLLAMA_BASE_URL` is not required for the supported `anthropic-api`, `codex-cli`, or `claude-cli` Beast activation paths above.
+`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable, not a currently supported local setup requirement. The current orchestrator provider config accepts `claude-cli`, `codex-cli`, `gemini-cli`, `anthropic-api`, `openai-api`, and `gemini-api`, and the `fbeast mcp beast --provider=...` activation shim accepts only the Beast presets documented below. Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build.
 
-For a local Ollama daemon that listens on the default port, use:
+If an Ollama-compatible provider is added back in a future build or a custom fork, the usual local daemon endpoint would be:
 
 ```bash
 export OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-For a non-default daemon, point the variable at that endpoint instead, for example:
+For a non-default daemon in such a build, the value would point at that endpoint instead, for example:
 
 ```bash
 export OLLAMA_BASE_URL=http://ollama.internal:11434
 ```
 
-The root `.env.example` intentionally leaves `OLLAMA_BASE_URL` out because the default local setup and current `fbeast mcp beast` presets do not consume it. Add it to your private `.env` only when your selected provider configuration needs an Ollama-compatible endpoint.
+The root `.env.example` intentionally leaves `OLLAMA_BASE_URL` out because the default local setup, the current provider schema, and the current `fbeast mcp beast` presets do not consume it.
 
-Quick verification, without exposing API keys:
+Endpoint-only verification, useful only when you are working with a build that actually supports an Ollama-compatible provider:
 
 ```bash
 curl "$OLLAMA_BASE_URL/api/tags"

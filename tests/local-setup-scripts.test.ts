@@ -150,8 +150,13 @@ describe('local setup scripts', () => {
     expect(readme).toContain('CHROMA_URL');
     expect(readme).toContain('http://localhost:8000');
     expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
+    expect(readme).toContain('Local Tempo exposes OTLP/HTTP writes on http://localhost:4318');
+    expect(readme).toContain('readiness on http://localhost:3200/ready');
+    expect(readme).toContain('does not define a TEMPO_ENDPOINT override');
+    expect(readme).toContain('TempoAdapter options');
     expect(readme).toContain('OLLAMA_BASE_URL');
     expect(readme).toContain('http://localhost:11434');
+    expect(readme).toContain('not consumed by the current provider schema');
     expect(readme).toContain('intentionally absent from `.env.example`');
     expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
     expect(readme).toContain('maxCritiqueIterations * 10000');
@@ -172,10 +177,11 @@ describe('local setup scripts', () => {
     const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
     const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
 
-    expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is the optional base URL');
+    expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable');
+    expect(runCliBeastGuide).toContain('Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build');
     expect(runCliBeastGuide).toContain('http://localhost:11434');
     expect(runCliBeastGuide).toContain('intentionally leaves `OLLAMA_BASE_URL` out');
-    expect(runCliBeastGuide).toContain('`fbeast mcp beast --provider=...` activation shim does not currently include an Ollama preset');
+    expect(runCliBeastGuide).toContain('current provider schema');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
