@@ -59,6 +59,7 @@ describe('ScalabilityEvaluator', () => {
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
+    ['template interpolation with comment brace', 'const text = `${/* } */ { port: 8080 }}`;'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
@@ -112,8 +113,13 @@ function bindGeneric<T extends { port: 8080 }>() {}
 const cfg = {} satisfies { port: 8080 };
 function bindHost(host: string, port: 8080) {}
 type BindHost = (host: string, port: 8080) => void;
+type ComplexConfig<T extends Record<string, unknown>> = { port: 8080 };
+type DefaultedConfig<T = {}> = { port: 8080 };
 class ImplementedPortConfig implements ListenerConfig {
   port: 8080;
+}
+class SemicolonlessPortConfig {
+  port: 8080
 }`;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -157,6 +163,8 @@ switch (true) {
 }
 const nestedTemplateString = \`\${"{ port: 8080 }"}\`;
 const nestedTemplateComment = \`\${/* { port: 8080 } */ value}\`;
+if (enabled) /{ port: 8080 }/.test(input);
+while (enabled) /{ port: 8080 }/.test(input);
 log('debug', "port: 8080");`;
     const result = await evaluator.evaluate(createInput(content));
 

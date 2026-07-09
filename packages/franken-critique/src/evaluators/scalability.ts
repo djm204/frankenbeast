@@ -147,7 +147,7 @@ export class ScalabilityEvaluator implements Evaluator {
   }
 
   private isClassFieldTypeAnnotation(content: string, portNumberIndex: number): boolean {
-    const suffix = content.slice(portNumberIndex).match(/^\d{2,5}\s*;/);
+    const suffix = content.slice(portNumberIndex).match(/^\d[\d_]*\s*(?:;|(?=[}\n]))/);
     if (!suffix) {
       return false;
     }
@@ -184,8 +184,8 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private startsTypeOnlyBrace(content: string, openBraceIndex: number): boolean {
     const prefix = content.slice(Math.max(0, openBraceIndex - 200), openBraceIndex);
-    const typeAliasContext = /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;{}]*$/s.test(prefix);
-    return /\b(?:type\s+\w+(?:<[^>{}]*>)?\s*=\s*|interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[\w$.,<>\s]+)?\s*|as\s*|satisfies\s*)$/s.test(prefix) ||
+    const typeAliasContext = /(?:^|[\n;])\s*type\s+\w+[\s\S]*=[^;{}]*$/s.test(prefix);
+    return /\b(?:type\s+\w+[\s\S]*=\s*|interface\s+\w+[\s\S]*|as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
@@ -319,6 +319,18 @@ export class ScalabilityEvaluator implements Evaluator {
         continue;
       }
 
+      if (current === '/' && content[index + 1] === '/') {
+        const lineEnd = content.indexOf('\n', index + 2);
+        index = lineEnd === -1 ? content.length : lineEnd + 1;
+        continue;
+      }
+
+      if (current === '/' && content[index + 1] === '*') {
+        const commentEnd = content.indexOf('*/', index + 2);
+        index = commentEnd === -1 ? content.length : commentEnd + 2;
+        continue;
+      }
+
       if (current === '"' || current === "'" || current === '`') {
         index = this.findQuotedRangeEnd(content, index);
         continue;
@@ -364,7 +376,7 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:case|return|throw|yield)\s*$|=>\s*$/.test(prefix);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:case|return|throw|yield)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {
