@@ -35,6 +35,10 @@ function installFakeHook(root: string): string {
     'PHASE="$1"',
     'shift',
     '',
+    'if [ -n "${FBEAST_CAPTURE_ARGV_FILE:-}" ]; then',
+    '  printf "%s\\n" "$@" > "$FBEAST_CAPTURE_ARGV_FILE"',
+    'fi',
+    '',
     'if [ "${FBEAST_HOOK_SHOULD_NOT_RUN:-}" = "1" ]; then',
     "  printf 'fbeast-hook should not have been invoked\\n' >&2",
     '  exit 99',
@@ -448,6 +452,36 @@ describe('Codex hook scripts', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('keeps leading-dash post-tool responses from being parsed as fbeast-hook options', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+
+    for (const client of ['codex', 'claude', 'gemini'] as const) {
+      const argvFile = join(root, `${client}-post-tool-argv.txt`);
+      const expectedDbPath = join(root, '.fbeast', 'beast.db');
+      const { postTool } = writeHookScripts(root, client);
+
+      const result = runScript(postTool, {
+        tool_name: 'read_file',
+        tool_response: '--db=/tmp/attacker.db',
+        session_id: 'sess-1',
+      }, binDir, {
+        FBEAST_CAPTURE_ARGV_FILE: argvFile,
+      });
+
+      expect(result.status, `${client}: ${result.stderr}`).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(readFileSync(argvFile, 'utf8').split('\n').filter(Boolean)).toEqual([
+        '--db',
+        expectedDbPath,
+        '--stdin-payload',
+        '--',
+        'read_file',
+      ]);
+    }
   });
 
   it('fails open when post-tool payload staging cannot create temp files', () => {
