@@ -4,6 +4,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,6 +13,7 @@ import type { SessionToken } from '../core/types.js';
 
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_STALE_MS = 30_000;
 
 export interface SessionTokenStoreOptions {
   /**
@@ -164,6 +166,9 @@ export class SessionTokenStore {
         lockFd = openSync(lockPath, 'wx', 0o600);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST' && this.reclaimStaleLock(lockPath)) {
+          continue;
+        }
         if (code !== 'EEXIST' || Date.now() >= deadline) {
           throw err;
         }
@@ -181,6 +186,19 @@ export class SessionTokenStore {
         const code = (err as NodeJS.ErrnoException).code;
         if (code !== 'ENOENT') throw err;
       }
+    }
+  }
+
+  private reclaimStaleLock(lockPath: string): boolean {
+    try {
+      const lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+      if (lockAgeMs < LOCK_STALE_MS) return false;
+      unlinkSync(lockPath);
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return true;
+      throw err;
     }
   }
 

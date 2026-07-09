@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
+import { RESPONSE_CODES, type ResponseCode, type SessionToken } from '../core/types.js';
 import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
 import {
   formatApprovalResponseSignaturePayload,
@@ -344,7 +344,12 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       return c.json({ error: { message: 'Invalid field: scope must be a string' } }, 400);
     }
 
-    const token = sessionTokenStore.get(body.tokenId);
+    let token: SessionToken | undefined;
+    try {
+      token = sessionTokenStore.get(body.tokenId);
+    } catch {
+      return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
+    }
     if (!token || (body.scope !== undefined && token.scope !== body.scope)) {
       return c.json({ valid: false }, 401);
     }

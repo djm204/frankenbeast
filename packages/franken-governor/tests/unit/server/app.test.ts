@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGovernorApp } from '../../../src/server/app.js';
@@ -426,6 +426,32 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(503);
       const body = await res.json();
       expect(body.error.message).toBe('Session token validation unavailable');
+    });
+
+    it('fails closed when persisted token storage becomes unreadable', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        const issuingStore = new SessionTokenStore({ persistenceFile });
+        const token = makeStoredToken(issuingStore);
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+        writeFileSync(persistenceFile, '{not-json');
+
+        const res = await app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: token.tokenId }),
+        });
+
+        expect(res.status).toBe(503);
+        const body = await res.json();
+        expect(body.error.message).toBe('Session token validation unavailable');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('requires signed validation requests in production mode', async () => {

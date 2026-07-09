@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -148,6 +148,27 @@ describe('SessionTokenStore', () => {
 
       unlinkSync(persistenceFile);
       expect(validatorStore.isValid(token.tokenId)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers stale lock files before writing persisted tokens', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const staleLockPath = `${persistenceFile}.lock`;
+      writeFileSync(staleLockPath, 'stale');
+      const staleTime = new Date(Date.now() - 60_000);
+      utimesSync(staleLockPath, staleTime, staleTime);
+
+      const store = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+
+      store.store(token);
+
+      expect(store.isValid(token.tokenId)).toBe(true);
+      expect(() => readFileSync(staleLockPath, 'utf8')).toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
