@@ -8,6 +8,7 @@ import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
   ApproveResult,
+  ChatSocketTicketResponse,
   ChatSessionResponse,
   ChatSessionSummary,
   MessageResult,
@@ -37,7 +38,7 @@ export interface ChatRoutesDeps {
   engine: ConversationEngine;
   runtime: ChatRuntime;
   turnRunner: TurnRunner;
-  issueSocketToken: (sessionId: string) => string;
+  issueSocketTicket: (sessionId: string) => string;
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
   chatRateLimit: BeastRateLimitOptions;
@@ -53,9 +54,8 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
 
 function sessionResponse(
   session: NonNullable<ReturnType<ISessionStore['get']>>,
-  socketToken: string,
 ): ChatSessionResponse {
-  return { ...session, socketToken };
+  return { ...session };
 }
 
 function firstForwardedAddress(header: string | undefined): string | undefined {
@@ -86,7 +86,7 @@ function chatMutationKey(sessionId: string): string {
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketTicket, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
   const limiter = new InMemoryRateLimiter(deps.chatRateLimit);
   const inFlightMutations = new Set<string>();
@@ -125,7 +125,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
     const response = {
-      data: sessionResponse(session, issueSocketToken(session.id)),
+      data: sessionResponse(session),
     } satisfies ApiDataEnvelope<ChatSessionResponse>;
     return c.json(response, 201);
   });
@@ -149,8 +149,16 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = c.req.param('id');
     const session = getSessionOrThrow(sessionStore, id);
     return c.json({
-      data: sessionResponse(session, issueSocketToken(session.id)),
+      data: sessionResponse(session),
     } satisfies ApiDataEnvelope<ChatSessionResponse>);
+  });
+
+  app.post('/v1/chat/sessions/:id/socket-ticket', (c) => {
+    const id = c.req.param('id');
+    getSessionOrThrow(sessionStore, id);
+    return c.json({
+      data: { ticket: issueSocketTicket(id) },
+    } satisfies ApiDataEnvelope<ChatSocketTicketResponse>);
   });
 
   // Submit message

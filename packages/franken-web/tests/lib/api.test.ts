@@ -91,6 +91,21 @@ describe('ChatApiClient', () => {
     });
   });
 
+  describe('createSocketTicket', () => {
+    it('exchanges an authenticated session request for a short-lived websocket ticket', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { ticket: 'socket-ticket-1' } }),
+      });
+
+      await expect(client.createSocketTicket('chat-123-abc')).resolves.toBe('socket-ticket-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/v1/chat/sessions/chat-123-abc/socket-ticket',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
+
   describe('createSession', () => {
     it('sends POST to /v1/chat/sessions and returns session data', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -102,7 +117,6 @@ describe('ChatApiClient', () => {
               projectId: 'proj-1',
               transcript: [],
               state: 'active',
-              socketToken: 'socket-token-1',
               tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
               costUsd: 0,
               createdAt: '2026-03-09T00:00:00Z',
@@ -114,7 +128,7 @@ describe('ChatApiClient', () => {
       const session = await client.createSession('proj-1');
       expect(session.id).toBe('chat-123-abc');
       expect(session.projectId).toBe('proj-1');
-      expect(session.socketToken).toBe('socket-token-1');
+      expect('socketToken' in session).toBe(false);
       expect(session.transcript).toEqual([]);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/v1/chat/sessions',
@@ -138,7 +152,6 @@ describe('ChatApiClient', () => {
               projectId: 'proj-1',
               transcript: [{ role: 'user', content: 'hello', timestamp: '2026-03-09T00:00:00Z' }],
               state: 'active',
-              socketToken: 'socket-token-2',
               tokenTotals: { cheap: 10, premiumReasoning: 0, premiumExecution: 0 },
               costUsd: 0.001,
               createdAt: '2026-03-09T00:00:00Z',
@@ -149,7 +162,7 @@ describe('ChatApiClient', () => {
 
       const session = await client.getSession('chat-123-abc');
       expect(session.id).toBe('chat-123-abc');
-      expect(session.socketToken).toBe('socket-token-2');
+      expect('socketToken' in session).toBe(false);
       expect(session.transcript).toHaveLength(1);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/v1/chat/sessions/chat-123-abc',

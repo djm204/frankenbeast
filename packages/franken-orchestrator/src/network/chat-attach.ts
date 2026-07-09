@@ -71,7 +71,6 @@ export async function resolveManagedChatAttachment(
 
 interface RemoteChatSession {
   sessionId: string;
-  token: string;
   socket: WebSocket;
 }
 
@@ -92,12 +91,25 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
   const body = await createResponse.json() as {
     data: {
       id: string;
-      socketToken: string;
     };
   };
+
+  const ticketResponse = await fetch(`${target.baseUrl}/v1/chat/sessions/${encodeURIComponent(body.data.id)}/socket-ticket`, {
+    method: 'POST',
+    headers,
+  });
+  if (!ticketResponse.ok) {
+    throw new Error(`Failed to mint remote chat websocket ticket (${ticketResponse.status})`);
+  }
+  const ticketBody = await ticketResponse.json() as {
+    data: {
+      ticket: string;
+    };
+  };
+
   const socket = new WebSocket(
     `${target.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
-    [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+    [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticketBody.data.ticket}`],
   );
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => resolve(), { once: true });
@@ -117,7 +129,6 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
 
   return {
     sessionId: body.data.id,
-    token: body.data.socketToken,
     socket,
   };
 }

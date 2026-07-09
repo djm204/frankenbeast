@@ -156,7 +156,7 @@ describe('Chat HTTP Routes', () => {
     const body = await res.json();
     expect(body.data.id).toBeDefined();
     expect(body.data.projectId).toBe('my-project');
-    expect(body.data.socketToken).toEqual(expect.any(String));
+    expect(body.data.socketToken).toBeUndefined();
   });
 
   it('GET /v1/chat/sessions lists session summaries and filters by project', async () => {
@@ -198,12 +198,12 @@ describe('Chat HTTP Routes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.id).toBe(created.id);
-    expect(body.data.socketToken).toEqual(expect.any(String));
+    expect(body.data.socketToken).toBeUndefined();
     expect(body.data.transcript).toEqual([]);
     expect(body.data.state).toBe('active');
   });
 
-  it('issues socket tokens that are scoped to the session id', async () => {
+  it('POST /v1/chat/sessions/:id/socket-ticket issues socket tickets scoped to the session id', async () => {
     const createRes = await app.request('/v1/chat/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -219,13 +219,14 @@ describe('Chat HTTP Routes', () => {
       sessionTokenSecret: secret,
     });
 
-    const res = await app.request(`/v1/chat/sessions/${created.id}`);
+    const res = await app.request(`/v1/chat/sessions/${created.id}/socket-ticket`, { method: 'POST' });
     const body = await res.json();
+    expect(body.data.ticket).toEqual(expect.any(String));
     expect(
       verifySessionToken({
         secret,
         sessionId: created.id,
-        token: body.data.socketToken,
+        token: body.data.ticket,
       }),
     ).toBe(true);
   });
