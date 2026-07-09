@@ -197,6 +197,21 @@ describe('Firewall Server', () => {
     await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
   });
 
+  it('rejects nested bounded quantifiers before scanning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-unsafe-bounded-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        customRules: [
+          { name: 'bounded-nested', pattern: '(a{1,})+$', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', { root });
+
+    await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
+  });
+
   it('fails closed when an explicit firewall config path is missing', async () => {
     const root = mkdtempSync(join(tmpdir(), 'fw-missing-config-'));
     mkdirSync(join(root, '.fbeast'), { recursive: true });

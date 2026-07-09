@@ -174,8 +174,9 @@ function assertSafeCustomRulePattern(pattern: string, index: number, configPath:
 
 function hasUnsafeQuantifiedGroup(pattern: string): boolean {
   const simpleGroup = String.raw`\((?:[^()\\]|\\.)*`;
+  const innerQuantifier = String.raw`(?:[+*]|\{\s*\d+\s*,?\s*\d*\s*\})`;
   const groupEndWithOuterQuantifier = String.raw`(?:[^()\\]|\\.)*\)\s*[+*?{]`;
-  return new RegExp(`(?:${simpleGroup}[+*]${groupEndWithOuterQuantifier})`).test(pattern)
+  return new RegExp(`(?:${simpleGroup}${innerQuantifier}${groupEndWithOuterQuantifier})`).test(pattern)
     || new RegExp(`(?:${simpleGroup}[|]${groupEndWithOuterQuantifier})`).test(pattern);
 }
 
