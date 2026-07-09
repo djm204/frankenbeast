@@ -55,7 +55,7 @@ describe('LessonRecorder', () => {
   });
 
   it('records a lesson when multi-iteration pass occurs (fail then pass)', async () => {
-    const forbiddenInvocationName = 'unsafeCall';
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
@@ -63,7 +63,7 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: `${forbiddenInvocationName}() detected`, severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [{ message: `${unsafeDynamicCallName}() detected`, severity: 'critical' }]),
         createIteration(1, 'pass'),
       ],
     };
@@ -74,7 +74,7 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).toHaveBeenCalledWith(
       expect.objectContaining({
         evaluatorName: 'safety',
-        failureDescription: expect.stringContaining(`${forbiddenInvocationName}()`),
+        failureDescription: expect.stringContaining(`${unsafeDynamicCallName}()`),
         taskId: 'test-task',
       }),
     );

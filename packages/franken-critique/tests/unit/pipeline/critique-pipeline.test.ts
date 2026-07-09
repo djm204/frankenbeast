@@ -129,7 +129,7 @@ describe('CritiquePipeline', () => {
   });
 
   it('short-circuits on safety evaluator failure', async () => {
-    const forbiddenInvocationName = 'unsafeCall';
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const safety = createMockEvaluator('safety', 'deterministic', {
       verdict: 'fail',
@@ -139,7 +139,7 @@ describe('CritiquePipeline', () => {
     const other = createMockEvaluator('other', 'heuristic');
 
     const pipeline = new CritiquePipeline([safety, other]);
-    const result = await pipeline.run(createInput(`${forbiddenInvocationName}("hack")`));
+    const result = await pipeline.run(createInput(`${unsafeDynamicCallName}("hack")`));
 
     expect(result.verdict).toBe('fail');
     expect(result.shortCircuited).toBe(true);
