@@ -176,11 +176,14 @@ const TOOLS: ToolFull[] = [
     },
     makeHandler: ({ planner }) => async (args) => {
       const planId = String(args['planId']);
-      const mermaid = await planner.visualize(planId);
-      if (!mermaid) {
+      const visualization = await planner.visualize(planId);
+      if (!visualization) {
         return { content: [{ type: 'text', text: `Plan not found: ${planId}` }], isError: true };
       }
-      const text = [`## Plan: ${planId}`, ``, '```mermaid', mermaid, '```'].join('\n');
+      if (visualization.kind === 'corrupt') {
+        return { content: [{ type: 'text', text: `Plan data is invalid/corrupt: ${visualization.reason}` }], isError: true };
+      }
+      const text = [`## Plan: ${planId}`, ``, '```mermaid', visualization.mermaid, '```'].join('\n');
       return { content: [{ type: 'text', text }] };
     },
   },

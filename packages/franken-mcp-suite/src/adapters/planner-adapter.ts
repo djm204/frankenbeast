@@ -22,9 +22,13 @@ export interface PlannerValidateResult {
   issues: string[];
 }
 
+export type PlannerVisualizeResult =
+  | { kind: 'found'; mermaid: string }
+  | { kind: 'corrupt'; reason: string };
+
 export interface PlannerAdapter {
   decompose(input: { objective: string; constraints?: string }): Promise<PlannerDecomposeResult>;
-  visualize(planId: string): Promise<string | null>;
+  visualize(planId: string): Promise<PlannerVisualizeResult | null>;
   validate(planId: string): Promise<PlannerValidateResult | null>;
 }
 
@@ -70,11 +74,15 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
     },
 
     async visualize(planId) {
-      const plan = loadPlan(planId);
-      if (!plan) {
+      const loaded = loadPlan(planId);
+      if (!loaded) {
         return null;
       }
+      if (loaded.kind === 'corrupt') {
+        return loaded;
+      }
 
+      const plan = loaded.plan;
       const graph = buildGraph(plan.tasks);
       const mermaidLines = ['graph TD'];
 
@@ -85,15 +93,22 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
         }
       }
 
-      return mermaidLines.join('\n');
+      return { kind: 'found', mermaid: mermaidLines.join('\n') };
     },
 
     async validate(planId) {
-      const plan = loadPlan(planId);
-      if (!plan) {
+      const loaded = loadPlan(planId);
+      if (!loaded) {
         return null;
       }
+      if (loaded.kind === 'corrupt') {
+        return {
+          verdict: 'invalid',
+          issues: [`Plan data is invalid/corrupt: ${loaded.reason}`],
+        };
+      }
 
+      const plan = loaded.plan;
       const issues: string[] = [];
       const taskIds = new Set(plan.tasks.map((task) => task.id));
 
@@ -123,13 +138,76 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
     },
   };
 
-  function loadPlan(planId: string): StoredPlan | null {
+  function loadPlan(planId: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } | null {
     const row = store.db.prepare('SELECT dag FROM plans WHERE id = ?').get(planId) as { dag: string } | undefined;
     if (!row) {
       return null;
     }
-    return JSON.parse(row.dag) as StoredPlan;
+
+    return decodeStoredPlan(row.dag);
   }
+}
+
+function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawDag);
+  } catch (error) {
+    return { kind: 'corrupt', reason: `stored plan DAG is not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  if (!isRecord(parsed)) {
+    return { kind: 'corrupt', reason: 'stored plan DAG must be an object' };
+  }
+
+  if (typeof parsed.objective !== 'string') {
+    return { kind: 'corrupt', reason: 'stored plan DAG objective must be a string' };
+  }
+  if (parsed.constraints !== null && parsed.constraints !== undefined && typeof parsed.constraints !== 'string') {
+    return { kind: 'corrupt', reason: 'stored plan DAG constraints must be a string or null' };
+  }
+  if (!Array.isArray(parsed.tasks)) {
+    return { kind: 'corrupt', reason: 'stored plan DAG tasks must be an array' };
+  }
+
+  const tasks: PlannerTask[] = [];
+  for (const [index, task] of parsed.tasks.entries()) {
+    if (!isRecord(task)) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}] must be an object` };
+    }
+    if (typeof task.id !== 'string' || task.id.length === 0) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].id must be a non-empty string` };
+    }
+    if (typeof task.title !== 'string') {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].title must be a string` };
+    }
+    if (!Array.isArray(task.deps) || !task.deps.every((dep) => typeof dep === 'string')) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].deps must be an array of strings` };
+    }
+    if (task.status !== 'pending' && task.status !== 'done') {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].status must be pending or done` };
+    }
+
+    tasks.push({
+      id: task.id,
+      title: task.title,
+      deps: task.deps,
+      status: task.status,
+    });
+  }
+
+  return {
+    kind: 'found',
+    plan: {
+      objective: parsed.objective,
+      constraints: parsed.constraints ?? null,
+      tasks,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function buildGraph(tasks: PlannerTask[]): PlanGraph {
