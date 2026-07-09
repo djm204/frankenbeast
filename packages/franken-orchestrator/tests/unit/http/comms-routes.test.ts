@@ -17,6 +17,7 @@ vi.mock('../../../src/comms/channels/whatsapp/whatsapp-adapter.js', () => ({
 import { commsRoutes } from '../../../src/http/routes/comms-routes.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
+import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
@@ -25,6 +26,7 @@ const TEST_WHATSAPP_ACCESS_TOKEN = testCredential('TEST_WHATSAPP_ACCESS_TOKEN');
 const TEST_WHATSAPP_VERIFY_TOKEN = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
 const TEST_TELEGRAM_BOT_TOKEN = ['123456', testCredential('TEST_TELEGRAM_BOT_TOKEN_SECRET')].join(':');
 const TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN = testCredential('TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN');
+const TEST_OPERATOR_TOKEN = testCredential('TEST_COMMS_OPERATOR_TOKEN');
 
 function minimalConfig(overrides?: Partial<CommsConfig>): CommsConfig {
   return {
@@ -112,6 +114,76 @@ describe('commsRoutes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ accepted: true });
+  });
+
+  it('requires operator authentication for generic comms routes when an operator token is configured', async () => {
+    const app = commsRoutes({
+      config: minimalConfig(),
+      runtime: mockRuntime(),
+      operatorToken: TEST_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    });
+
+    const missing = await app.request('/v1/comms/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelType: 'slack', sessionId: 's1', actionId: 'approve' }),
+    });
+    expect(missing.status).toBe(401);
+    await expect(missing.json()).resolves.toMatchObject({ error: { code: 'UNAUTHORIZED' } });
+
+    const authenticated = await app.request('/v1/comms/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TEST_OPERATOR_TOKEN}` },
+      body: JSON.stringify({ channelType: 'slack', sessionId: 's1', actionId: 'approve' }),
+    });
+    expect(authenticated.status).toBe(200);
+    await expect(authenticated.json()).resolves.toEqual({ accepted: true });
+  });
+
+  it('rejects generic comms routes from non-loopback peers when no operator token is configured', async () => {
+    const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
+
+    const external = await app.request('https://example.com/v1/comms/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channelType: 'slack',
+        externalUserId: 'U1',
+        externalChannelId: 'C1',
+        externalMessageId: 'M1',
+        text: 'hello',
+        receivedAt: new Date().toISOString(),
+        rawEvent: {},
+      }),
+    });
+
+    expect(external.status).toBe(403);
+    await expect(external.json()).resolves.toMatchObject({ error: { code: 'FORBIDDEN' } });
+  });
+
+  it('rejects malformed generic comms inbound payloads before invoking the runtime', async () => {
+    const runtime = mockRuntime();
+    const app = commsRoutes({ config: minimalConfig(), runtime });
+
+    const res = await app.request('/v1/comms/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channelType: 'slack',
+        externalUserId: 'U1',
+        externalChannelId: 'C1',
+        externalMessageId: 'M1',
+        text: '',
+        receivedAt: new Date().toISOString(),
+        rawEvent: {},
+        unexpected: true,
+      }),
+    });
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(runtime.processInbound).not.toHaveBeenCalled();
   });
 
   it('rejects oversized generic comms inbound JSON before parsing', async () => {
