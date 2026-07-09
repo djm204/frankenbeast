@@ -315,6 +315,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     retryMessage,
     send,
     sessionId: activeSessionId,
+    sessionState,
     showTypingIndicator,
     status,
     tier,
@@ -718,6 +719,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     getSidebarFocusableElements(sidebar).at(-1)?.focus();
   }
 
+  const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
+  const composerDisabled = status === 'connecting'
+    || status === 'sending'
+    || status === 'streaming'
+    || hasPendingApproval;
+  const composerDisabledReason = hasPendingApproval
+    ? 'Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.'
+    : undefined;
+
   return (
     <div className={`dashboard-shell ${isSidebarOpen ? 'dashboard-shell--nav-open' : ''}`}>
       <button
@@ -926,14 +936,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   }).catch(() => undefined);
                 }}
                 resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`}
-                retryDisabled={status !== 'idle' && status !== 'error'}
+                retryDisabled={hasPendingApproval || (status !== 'idle' && status !== 'error')}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
                 key={composerSessionKey}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
-                disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
+                disabled={composerDisabled}
+                disabledReasonText={composerDisabledReason}
                 onReconnect={reconnect}
                 onSend={send}
                 status={status}
@@ -944,9 +955,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
               <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
-                pending={Boolean(pendingApproval)}
+                pending={hasPendingApproval}
                 approval={pendingApproval}
-                description={pendingApproval?.description ?? ''}
+                description={pendingApproval?.description ?? (hasPendingApproval ? 'Approval is pending. Approve or reject it before sending another message.' : '')}
                 resolving={approvalResolving}
                 error={approvalError}
                 sessionId={activeSessionId}

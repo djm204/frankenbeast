@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { approvalRuntimeInput } from '../../chat/approval-input.js';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
-import type { ChatRuntime } from '../../chat/runtime.js';
+import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
@@ -161,9 +161,18 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const session = getSessionOrThrow(sessionStore, id);
 
     return withChatMutationAdmission(c, session.id, async () => {
+      if (session.pendingApproval || session.state === 'pending_approval') {
+        return c.json({
+          error: {
+            code: 'APPROVAL_PENDING',
+            message: 'Approval is pending. Resolve the approval request before sending another message.',
+          },
+        }, 409);
+      }
+
       const result = await runtime.run(content, {
         sessionId: session.id,
-        pendingApproval: Boolean(session.pendingApproval),
+        ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -175,7 +184,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
         ? {
             description: result.pendingApprovalDescription,
-            requestedAt: new Date().toISOString(),
+            requestedAt: result.pendingApprovalRequestedAt ?? new Date().toISOString(),
             ...result.pendingApprovalContext,
           }
         : null;
@@ -249,6 +258,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           result = await runtime.run(runtimeInput, {
             sessionId: session.id,
             pendingApproval: wasPendingApproval,
+            approvalResolved: true,
             projectId: session.projectId,
             transcript: session.transcript,
             ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),

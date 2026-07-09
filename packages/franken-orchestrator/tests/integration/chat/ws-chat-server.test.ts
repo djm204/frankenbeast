@@ -299,6 +299,120 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('does not acknowledge websocket messages rejected by pending approval', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute: vi.fn() }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-stale',
+      content: 'start another task',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events.map((event) => event.type)).not.toContain('message.accepted');
+    expect(events.map((event) => event.type)).not.toContain('message.delivered');
+    expect(events.map((event) => event.type)).not.toContain('message.read');
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_PENDING',
+    }));
+    expect(store.get(session.id)?.transcript).toEqual([]);
+    expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
+      requestedAt: '2026-03-09T00:00:00Z',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('acknowledges accepted websocket messages before the runtime turn completes', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    type RunResult = {
+      displayMessages: { kind: 'reply'; content: string }[];
+      events: unknown[];
+      pendingApproval: false;
+      state: 'active';
+      tier: 'cheap';
+      transcript: typeof session.transcript;
+    };
+    let resolveRun!: (value: RunResult) => void;
+    const runPromise = new Promise<RunResult>((resolve) => {
+      resolveRun = resolve;
+    });
+    const runtime = {
+      run: vi.fn(() => runPromise),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const receivePromise = controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-long-turn',
+      content: 'run a long task',
+    }));
+
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(sent.map((raw) => JSON.parse(raw) as { type: string })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'message.accepted' }),
+      expect.objectContaining({ type: 'message.delivered' }),
+      expect.objectContaining({ type: 'message.read' }),
+    ]));
+
+    resolveRun({
+      displayMessages: [{ kind: 'reply', content: 'ok' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active',
+      tier: 'cheap',
+      transcript: session.transcript,
+    });
+    await receivePromise;
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('emits execution events after an approved action runs', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

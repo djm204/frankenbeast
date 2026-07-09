@@ -75,4 +75,69 @@ describe('chat approval route persistence', () => {
     expect(stored?.state).toBe('rejected');
     expect(stored?.pendingApproval).toBeNull();
   });
+
+  it('preserves pending approval metadata when a stale HTTP message is blocked', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'start something else' }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: 'APPROVAL_PENDING',
+      message: expect.stringContaining('Approval is pending'),
+    });
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('pending_approval');
+    expect(stored?.pendingApproval).toEqual(expect.objectContaining({
+      description: 'Deploy the generated fix',
+      requestedAt: '2026-07-07T15:23:06.000Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    }));
+  });
+
+  it('blocks stale HTTP messages for legacy state-only pending approvals', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('should not run') };
+    const app = createChatApp({
+      sessionStore,
+      llm,
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'start something else' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(llm.complete).not.toHaveBeenCalled();
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('pending_approval');
+    expect(stored?.pendingApproval).toBeNull();
+  });
 });

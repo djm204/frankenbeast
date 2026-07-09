@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { approvalRuntimeInput } from '../chat/approval-input.js';
-import { ChatRuntime } from '../chat/runtime.js';
+import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
@@ -253,6 +253,16 @@ export class ChatSocketController {
     content: string,
     executionMode?: 'process' | 'container',
   ): Promise<void> {
+    if (session.pendingApproval || session.state === 'pending_approval') {
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_PENDING',
+        message: 'Approval is pending. Resolve the approval request before sending another message.',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
     this.emit(peer, {
       type: 'message.accepted',
       clientMessageId,
@@ -272,7 +282,7 @@ export class ChatSocketController {
 
     const result = await this.runtime.run(content, {
       sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
+      ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -284,7 +294,7 @@ export class ChatSocketController {
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
       ? {
           description: result.pendingApprovalDescription,
-          requestedAt: nowIso(),
+          requestedAt: result.pendingApprovalRequestedAt ?? nowIso(),
           ...result.pendingApprovalContext,
         }
       : null;
@@ -407,6 +417,7 @@ export class ChatSocketController {
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
         pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        approvalResolved: true,
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
