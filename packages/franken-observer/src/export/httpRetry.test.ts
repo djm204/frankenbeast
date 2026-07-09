@@ -83,4 +83,36 @@ describe('fetchWithRetry (issue #68)', () => {
       expect(delay).toBeLessThanOrEqual(250)
     }
   })
+
+  it('clamps invalid retry counts to preserve the initial attempt', async () => {
+    for (const maxRetries of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.9]) {
+      const sleep = noSleep()
+      const attempt = vi.fn().mockResolvedValue(serverError)
+      const res = await fetchWithRetry(attempt, { maxRetries, sleep })
+      expect(res).toEqual(serverError)
+      expect(attempt).toHaveBeenCalledTimes(maxRetries === 1.9 ? 2 : 1)
+      expect(sleep).toHaveBeenCalledTimes(maxRetries === 1.9 ? 1 : 0)
+    }
+  })
+
+  it('rejects invalid backoff bounds with clear errors before retry sleep', async () => {
+    const invalidOptions = [
+      { baseDelayMs: -1 },
+      { baseDelayMs: Number.NaN },
+      { baseDelayMs: Number.POSITIVE_INFINITY },
+      { maxDelayMs: -1 },
+      { maxDelayMs: Number.NaN },
+      { maxDelayMs: Number.POSITIVE_INFINITY },
+    ]
+
+    for (const options of invalidOptions) {
+      const sleep = noSleep()
+      const attempt = vi.fn().mockResolvedValue(serverError)
+      await expect(fetchWithRetry(attempt, { maxRetries: 1, ...options, sleep })).rejects.toThrow(
+        /baseDelayMs|maxDelayMs/,
+      )
+      expect(attempt).not.toHaveBeenCalled()
+      expect(sleep).not.toHaveBeenCalled()
+    }
+  })
 })

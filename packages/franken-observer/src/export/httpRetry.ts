@@ -3,7 +3,11 @@ import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 type FetchResponse = Awaited<ReturnType<FetchFn>>
 
 export interface HttpRetryOptions {
-  /** Max retry attempts after the initial try. Default: 0 (no retry). */
+  /**
+   * Max retry attempts after the initial try. Default: 0 (no retry).
+   * Invalid, negative, or non-finite values are clamped to 0; fractional
+   * values are floored so the initial attempt is never skipped.
+   */
   maxRetries?: number
   /** Base delay in ms before the first retry. Default: 200. */
   baseDelayMs?: number
@@ -24,6 +28,20 @@ function isTransientStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599)
 }
 
+function normalizeMaxRetries(maxRetries: number | undefined): number {
+  if (maxRetries === undefined) return 0
+  if (!Number.isFinite(maxRetries) || maxRetries < 0) return 0
+  return Math.floor(maxRetries)
+}
+
+function requireFiniteNonNegative(name: 'baseDelayMs' | 'maxDelayMs', value: number | undefined, defaultValue: number): number {
+  const normalized = value ?? defaultValue
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    throw new Error(`${name} must be a finite non-negative number`)
+  }
+  return normalized
+}
+
 /**
  * Invoke `attempt` with bounded exponential backoff. Retries only transient
  * failures: thrown errors (network), 5xx responses, and 429 rate-limit
@@ -36,9 +54,9 @@ export async function fetchWithRetry(
   attempt: () => Promise<FetchResponse>,
   options: HttpRetryOptions = {},
 ): Promise<FetchResponse> {
-  const maxRetries = options.maxRetries ?? 0
-  const baseDelayMs = options.baseDelayMs ?? 200
-  const maxDelayMs = options.maxDelayMs ?? 30_000
+  const maxRetries = normalizeMaxRetries(options.maxRetries)
+  const baseDelayMs = requireFiniteNonNegative('baseDelayMs', options.baseDelayMs, 200)
+  const maxDelayMs = requireFiniteNonNegative('maxDelayMs', options.maxDelayMs, 30_000)
   const jitter = options.jitter ?? true
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
 
