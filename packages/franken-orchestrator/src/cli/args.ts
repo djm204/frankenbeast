@@ -68,6 +68,7 @@ export interface CliArgs {
   provider: string;
   providerSpecified?: boolean | undefined;
   providers?: string[] | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   designDoc?: string | undefined;
   planDir?: string | undefined;
   planName?: string | undefined;
@@ -137,6 +138,8 @@ Options:
   --budget <usd>          Budget limit in USD (default: 10)
   --provider <name>       Provider name (default: claude)
   --providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
+  --trust-provider-command-overrides
+                           Explicitly approve trusted repo-configured provider command overrides
   --design-doc <path>     Path to design document
   --plan-dir <path>       Path to chunk files directory
   --plan-name <name>      Plan name (default: auto-generated from date)
@@ -301,7 +304,7 @@ function splitSkillAddArgs(args: string[]): { isSkillAdd: boolean; parsedFlagArg
   };
 }
 
-function parseFiniteDecimalOption(name: string, value: string, options: { min?: number } = {}): number {
+function parseFiniteDecimalOption(name: string, value: string, options: { min?: number; minExclusive?: number } = {}): number {
   const trimmed = value.trim();
   if (!DECIMAL_PATTERN.test(trimmed)) {
     throw new TypeError(`Invalid ${name}: expected a finite number, got '${value}'`);
@@ -314,6 +317,9 @@ function parseFiniteDecimalOption(name: string, value: string, options: { min?: 
 
   if (options.min !== undefined && parsed < options.min) {
     throw new TypeError(`Invalid ${name}: expected a value >= ${options.min}, got ${value}`);
+  }
+  if (options.minExclusive !== undefined && parsed <= options.minExclusive) {
+    throw new TypeError(`Invalid ${name}: expected a value > ${options.minExclusive}, got ${value}`);
   }
 
   return parsed;
@@ -369,6 +375,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       budget: { type: 'string' },
       provider: { type: 'string' },
       providers: { type: 'string' },
+      'trust-provider-command-overrides': { type: 'boolean', default: false },
       'design-doc': { type: 'string' },
       'plan-dir': { type: 'string' },
       'plan-name': { type: 'string' },
@@ -539,7 +546,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   }
 
   const budget = values.budget !== undefined
-    ? parseFiniteDecimalOption('--budget', values.budget, { min: 0 })
+    ? parseFiniteDecimalOption('--budget', values.budget, { minExclusive: 0 })
     : 10;
   const port = values.port !== undefined
     ? parseIntegerOption('--port', values.port, { min: 0, max: 65535 })
@@ -580,6 +587,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     provider,
     providerSpecified: values.provider !== undefined,
     providers,
+    trustProviderCommandOverrides: values['trust-provider-command-overrides'] ?? false,
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],
     planName: values['plan-name'],

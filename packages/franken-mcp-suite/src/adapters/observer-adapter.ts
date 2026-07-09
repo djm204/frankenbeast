@@ -26,6 +26,7 @@ export interface ObserverCostSummary {
     promptTokens: number;
     completionTokens: number;
     costUsd: number;
+    unknownModel?: boolean;
   }>;
 }
 
@@ -57,18 +58,39 @@ export interface ObserverCostInput {
   costUsd?: number;
 }
 
+export interface ObserverCostLogResult {
+  costUsd: number;
+  unknownModel: boolean;
+}
+
 export interface ObserverAdapter {
   log(input: ObserverLogInput): Promise<ObserverLogResult>;
-  logCost(input: ObserverCostInput): Promise<void>;
+  logCost(input: ObserverCostInput): Promise<ObserverCostLogResult>;
   cost(input: { sessionId?: string }): Promise<ObserverCostSummary>;
   trail(sessionId: string): Promise<ObserverTrailEntry[]>;
   verify(sessionId: string): Promise<ObserverVerifyResult>;
 }
 
+function hasDefaultPricing(model: string): boolean {
+  return DEFAULT_PRICING[model] !== undefined;
+}
+
+function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
+  if (row.cost_usd > 0 || row.cost_source === 'explicit') {
+    return false;
+  }
+  if (row.cost_source === 'legacy') {
+    return !hasDefaultPricing(row.model);
+  }
+  return true;
+}
+
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
-    onUnknownModel: () => {},
+    onUnknownModel: (model) => {
+      process.stderr.write(`[fbeast-observer] Unknown model "${model}" — cost will be recorded as $0.0000 until pricing is configured.\n`);
+    },
   });
 
   return {
@@ -109,20 +131,23 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     },
 
     async logCost(input) {
+      const unknownModel = input.costUsd === undefined && !hasDefaultPricing(input.model);
       const costUsd = input.costUsd ?? costCalculator.calculate({
         model: input.model,
         promptTokens: input.promptTokens,
         completionTokens: input.completionTokens,
       });
       store.db.prepare(`
-        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd);
+        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, cost_source)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd, input.costUsd === undefined ? 'computed' : 'explicit');
+
+      return { costUsd, unknownModel };
     },
 
     async cost(input) {
       let sql = `
-        SELECT model, prompt_tokens, completion_tokens, cost_usd
+        SELECT model, prompt_tokens, completion_tokens, cost_usd, cost_source
         FROM cost_ledger
       `;
       const params: unknown[] = [];
@@ -137,14 +162,10 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         prompt_tokens: number;
         completion_tokens: number;
         cost_usd: number;
+        cost_source: string;
       }>;
 
-      const grouped = new Map<string, {
-        model: string;
-        promptTokens: number;
-        completionTokens: number;
-        costUsd: number;
-      }>();
+      const grouped = new Map<string, ObserverCostSummary['byModel'][number]>();
 
       for (const row of rows) {
         const current = grouped.get(row.model) ?? {
@@ -156,13 +177,16 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
         current.promptTokens += row.prompt_tokens;
         current.completionTokens += row.completion_tokens;
-        current.costUsd += row.cost_usd > 0
-          ? row.cost_usd
-          : costCalculator.calculate({
+        if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
+          current.unknownModel = true;
+        }
+        current.costUsd += shouldRepriceStoredCost(row)
+          ? costCalculator.calculate({
               model: row.model,
               promptTokens: row.prompt_tokens,
               completionTokens: row.completion_tokens,
-            });
+            })
+          : row.cost_usd;
 
         grouped.set(row.model, current);
       }

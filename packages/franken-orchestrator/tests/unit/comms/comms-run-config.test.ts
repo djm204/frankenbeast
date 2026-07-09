@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { testCredential } from '../../support/test-credentials.js';
 import {
   CommsRunConfigSchema,
   resolveCommsSecrets,
@@ -41,16 +42,21 @@ describe('CommsRunConfigSchema', () => {
   });
 });
 
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const TEST_SLACK_SIGNING_SECRET = testCredential('TEST_SLACK_SIGNING_SECRET');
+const TEST_DISCORD_BOT_TOKEN = testCredential('TEST_DISCORD_BOT_TOKEN');
+const TEST_TELEGRAM_BOT_TOKEN = testCredential('TEST_TELEGRAM_BOT_TOKEN');
+
 describe('resolveCommsSecrets', () => {
   it('resolves slack secrets from env', () => {
     const config = CommsRunConfigSchema.parse({
       channels: { slack: { enabled: true } },
     });
     const secrets = resolveCommsSecrets(config, {
-      SLACK_BOT_TOKEN: 'xoxb-test',
-      SLACK_SIGNING_SECRET: 'sig-secret',
+      SLACK_BOT_TOKEN: TEST_SLACK_BOT_TOKEN,
+      SLACK_SIGNING_SECRET: TEST_SLACK_SIGNING_SECRET,
     });
-    expect(secrets.slack).toEqual({ token: 'xoxb-test', signingSecret: 'sig-secret' });
+    expect(secrets.slack).toEqual({ token: TEST_SLACK_BOT_TOKEN, signingSecret: TEST_SLACK_SIGNING_SECRET });
   });
 
   it('throws when required secret is missing', () => {
@@ -64,8 +70,8 @@ describe('resolveCommsSecrets', () => {
     const config = CommsRunConfigSchema.parse({
       channels: { telegram: { enabled: true, botTokenRef: 'MY_TG_TOKEN' } },
     });
-    const secrets = resolveCommsSecrets(config, { MY_TG_TOKEN: 'tg-123' });
-    expect(secrets.telegram).toEqual({ botToken: 'tg-123' });
+    const secrets = resolveCommsSecrets(config, { MY_TG_TOKEN: TEST_TELEGRAM_BOT_TOKEN });
+    expect(secrets.telegram).toEqual({ botToken: TEST_TELEGRAM_BOT_TOKEN });
   });
 
   it('preserves literal Discord public keys when no env value exists', () => {
@@ -73,9 +79,9 @@ describe('resolveCommsSecrets', () => {
     const config = CommsRunConfigSchema.parse({
       channels: { discord: { enabled: true, publicKeyRef: publicKey } },
     });
-    const secrets = resolveCommsSecrets(config, { DISCORD_BOT_TOKEN: 'discord-token' });
+    const secrets = resolveCommsSecrets(config, { DISCORD_BOT_TOKEN: TEST_DISCORD_BOT_TOKEN });
 
-    expect(secrets.discord).toEqual({ token: 'discord-token', publicKey });
+    expect(secrets.discord).toEqual({ token: TEST_DISCORD_BOT_TOKEN, publicKey });
   });
 
   it('rejects unresolved Discord public key ref names', () => {
@@ -83,7 +89,7 @@ describe('resolveCommsSecrets', () => {
       channels: { discord: { enabled: true, publicKeyRef: 'DISCORD_PUBLIC_KEY' } },
     });
 
-    expect(() => resolveCommsSecrets(config, { DISCORD_BOT_TOKEN: 'discord-token' }))
+    expect(() => resolveCommsSecrets(config, { DISCORD_BOT_TOKEN: TEST_DISCORD_BOT_TOKEN }))
       .toThrow('DISCORD_PUBLIC_KEY not found in environment');
   });
 

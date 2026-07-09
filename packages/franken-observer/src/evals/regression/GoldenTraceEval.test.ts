@@ -66,6 +66,20 @@ describe('GoldenTraceEval', () => {
       expect(result.details?.['extraSpans']).toContain('lookup')
     })
 
+    it('fails when the actual trace has the same span names in a different order', async () => {
+      const trace = makeActualTrace(['summarise', 'search', 'plan'])
+      const result = await runner.run(ev, { actual: trace, golden })
+      expect(result.status).toBe('fail')
+      expect(result.reason).toContain('Span order mismatch at index 0')
+      expect(result.details?.['spanOrderMismatch']).toEqual({
+        index: 0,
+        expected: 'plan',
+        actual: 'summarise',
+        expectedSequence: ['plan', 'search', 'summarise'],
+        actualSequence: ['summarise', 'search', 'plan'],
+      })
+    })
+
     it('fails when the actual trace is empty but golden has spans', async () => {
       const trace = makeActualTrace([])
       const result = await runner.run(ev, { actual: trace, golden })

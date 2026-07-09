@@ -11,9 +11,14 @@ import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-por
 import type { SkillManager } from '../../../src/skills/skill-manager.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_CONTROL_PLANE_OPERATOR_TOKEN');
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/control-plane-auth');
-const OPERATOR_TOKEN = 'test-operator-token';
+const OPERATOR_TOKEN = TEST_OPERATOR_TOKEN;
+const INVALID_OPERATOR_TOKEN = `${OPERATOR_TOKEN}-invalid`;
 
 function minimalCommsConfig(): CommsConfig {
   return { orchestrator: {}, channels: {} } as CommsConfig;
@@ -189,9 +194,114 @@ describe('control-plane operator auth', () => {
     it('rejects an invalid operator token', async () => {
       const app = buildApp();
       const res = await app.request('/v1/network/status', {
-        headers: { Authorization: 'Bearer wrong-token' },
+        headers: { Authorization: `Bearer ${INVALID_OPERATOR_TOKEN}` },
       });
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('body-size limits', () => {
+    const oversizedJsonBody = JSON.stringify({ payload: 'x'.repeat(16 * 1024) });
+
+    it('rejects oversized network payloads before handlers mutate config', async () => {
+      const setConfig = vi.fn();
+      const app = buildApp({
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => defaultConfig(),
+          setConfig,
+        },
+      });
+
+      const res = await app.request('/v1/network/config', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setConfig).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized skill payloads before handlers install skills', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        install: vi.fn(),
+        installCustom: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(skillManager.install).not.toHaveBeenCalled();
+      expect(skillManager.installCustom).not.toHaveBeenCalled();
+    });
+
+    it('allows larger skill context Markdown payloads through the context endpoint', async () => {
+      const skillManager = {
+        listInstalled: vi.fn().mockReturnValue([]),
+        getEnabledSkills: vi.fn().mockReturnValue([]),
+        writeContext: vi.fn(),
+      } as unknown as SkillManager;
+      const app = buildApp({ skillManager });
+
+      const content = 'x'.repeat(20 * 1024);
+      const res = await app.request('/api/skills/example/context', {
+        method: 'PUT',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(skillManager.writeContext).toHaveBeenCalledWith('example', content);
+    });
+
+    it.each(['/v1/comms/inbound', '/v1/comms/action'])(
+      'rejects oversized comms payloads for %s before gateway processing',
+      async (path) => {
+        const runtime = mockCommsRuntime();
+        const app = buildApp({ commsRuntime: runtime });
+
+        const res = await app.request(path, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: oversizedJsonBody,
+        });
+
+        expect(res.status).toBe(413);
+        expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+        expect(runtime.processInbound).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects oversized security config payloads before applying updates', async () => {
+      const setSecurityConfig = vi.fn();
+      const app = buildApp({
+        securityConfig: {
+          getSecurityConfig: () => resolveSecurityConfig('standard'),
+          setSecurityConfig,
+        },
+      });
+
+      const res = await app.request('/api/security', {
+        method: 'PATCH',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: oversizedJsonBody,
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+      expect(setSecurityConfig).not.toHaveBeenCalled();
     });
   });
 
@@ -224,7 +334,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+            slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),
@@ -262,7 +372,7 @@ describe('control-plane operator auth', () => {
         commsConfig: {
           orchestrator: {},
           channels: {
-            slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+            slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
           },
         } as CommsConfig,
         commsRuntime: mockCommsRuntime(),

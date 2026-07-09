@@ -26,7 +26,7 @@ describe('Observer Server', () => {
   it('delegates log, logCost, cost, and trail calls to the observer adapter', async () => {
     const observer = {
       log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
-      logCost: vi.fn().mockResolvedValue(undefined),
+      logCost: vi.fn().mockResolvedValue({ costUsd: 0, unknownModel: true }),
       cost: vi.fn().mockResolvedValue({
         totalPromptTokens: 3000,
         totalCompletionTokens: 1300,
@@ -72,6 +72,8 @@ describe('Observer Server', () => {
       sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
     });
     expect(logCostResult.content[0]!.text).toContain('1000');
+    expect(logCostResult.content[0]!.text).toContain('$0.0000');
+    expect(logCostResult.content[0]!.text).toContain('unknown model');
 
     const costResult = await costTool.handler({ sessionId: 'sess-1' });
     expect(observer.cost).toHaveBeenCalledWith({ sessionId: 'sess-1' });

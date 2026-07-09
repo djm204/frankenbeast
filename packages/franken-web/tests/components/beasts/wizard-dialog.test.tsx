@@ -30,10 +30,15 @@ describe('WizardDialog', () => {
     expect(toggle).toBeTruthy();
   });
 
-  it('footer launch uses the shared config shape for non-default workflows', () => {
+  it('footer launch uses backend-aligned config shape for non-default workflows', () => {
     const onLaunch = vi.fn();
     useBeastStore.getState().setStepValues(0, { name: 'Footer Agent' });
-    useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' });
+    useBeastStore.getState().setStepValues(1, {
+      workflowType: 'martin-loop',
+      provider: 'codex',
+      objective: 'Implement chunks',
+      chunkDirectory: 'tasks/chunks',
+    });
     useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
 
     render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={onLaunch} />);
@@ -43,11 +48,31 @@ describe('WizardDialog', () => {
 
     expect(onLaunch).toHaveBeenCalledWith({
       identity: { name: 'Footer Agent' },
-      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
+      workflow: {
+        workflowType: 'martin-loop',
+        provider: 'codex',
+        objective: 'Implement chunks',
+        chunkDirectory: 'tasks/chunks',
+      },
       executionMode: 'process',
-      designDocPath: 'docs/design.md',
-      outputDir: 'tasks/chunks',
+      provider: 'codex',
+      objective: 'Implement chunks',
+      chunkDirectory: 'tasks/chunks',
     });
+  });
+
+  it('blocks launch on review when backend-required workflow fields are missing', () => {
+    const onLaunch = vi.fn();
+    useBeastStore.getState().setStepValues(0, { name: 'Footer Agent' });
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview', goal: 'Draft design' });
+    useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
+
+    render(<WizardDialog isOpen={true} onClose={vi.fn()} onLaunch={onLaunch} />);
+
+    expect(screen.getByRole('button', { name: /launch/i })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('alert').textContent).toContain('Design interview output path is required.');
+    fireEvent.click(screen.getByText('Launch Agent'));
+    expect(onLaunch).not.toHaveBeenCalled();
   });
 
   it('keeps the launch progress status region mounted before launching', () => {

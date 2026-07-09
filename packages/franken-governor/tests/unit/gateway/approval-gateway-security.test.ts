@@ -66,15 +66,59 @@ describe('ApprovalGateway — security integration', () => {
   it('throws SignatureVerificationError when requireSignedApprovals is true and signature is invalid', async () => {
     const verifier = new SignatureVerifier(signingFixture);
     const channel = makeFakeChannel({ signature: 'invalid-sig' });
+    const auditRecorder = makeFakeAuditRecorder();
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
-      auditRecorder: makeFakeAuditRecorder(),
+      auditRecorder,
+      config,
+      signatureVerifier: verifier,
+    });
+    const request = makeRequest();
+
+    await expect(gateway.requestApproval(request)).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ requestId: request.requestId, signature: 'invalid-sig' }),
+      { securityFailure: 'signature-verification' },
+    );
+  });
+
+  it('audits missing signatures before rejecting signed approval flows', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const channel = makeFakeChannel({ signature: undefined });
+    const auditRecorder = makeFakeAuditRecorder();
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config,
+      signatureVerifier: verifier,
+    });
+    const request = makeRequest();
+
+    await expect(gateway.requestApproval(request)).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ requestId: request.requestId }),
+      { securityFailure: 'signature-verification' },
+    );
+  });
+
+  it('preserves SignatureVerificationError when audit logging a failed signature also fails', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const channel = makeFakeChannel({ signature: 'invalid-sig' });
+    const auditRecorder = { record: vi.fn().mockRejectedValue(new Error('audit unavailable')) };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
       config,
       signatureVerifier: verifier,
     });
 
     await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledOnce();
   });
 
   it('passes when requireSignedApprovals is true and signature is valid', async () => {
@@ -180,6 +224,56 @@ describe('ApprovalGateway — security integration', () => {
 
     const outcome = await wiredGateway.requestApproval(makeRequest());
     expect(outcome.decision).toBe('APPROVE');
+  });
+
+  it('refreshes the config-derived verifier when config.signingSecret changes', async () => {
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'old-secret' };
+    const channel = makeFakeChannel();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config,
+    });
+
+    const sign = (secret: string, requestId: string) => new SignatureVerifier(secret).sign(
+      formatApprovalResponseSignaturePayload({ requestId, decision: 'APPROVE' }),
+    );
+
+    vi.mocked(channel.requestApproval)
+      .mockResolvedValueOnce({
+        requestId: 'req-old',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('old-secret', 'req-old'),
+      })
+      .mockResolvedValueOnce({
+        requestId: 'req-stale',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('old-secret', 'req-stale'),
+      })
+      .mockResolvedValueOnce({
+        requestId: 'req-new',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('new-secret', 'req-new'),
+      });
+
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-old' }))).resolves.toMatchObject({
+      decision: 'APPROVE',
+    });
+
+    config.signingSecret = 'new-secret';
+
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-stale' }))).rejects.toThrow(
+      SignatureVerificationError,
+    );
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-new' }))).resolves.toMatchObject({
+      decision: 'APPROVE',
+    });
   });
 
   it('rejects an unsigned response whose requestId does not match the active request', async () => {

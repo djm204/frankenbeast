@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { OrchestratorConfigSchema, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { listSupportedCommsTransports } from './comms-transport-registry.js';
 import type { InitState, SupportedCommsTransportId } from './init-types.js';
 import type { ISecretStore } from '../network/secret-store.js';
@@ -26,6 +26,7 @@ interface RunInitWizardOptions {
   baseConfig?: OrchestratorConfig | undefined;
   scope?: readonly InitWizardScope[] | undefined;
   secretStore?: ISecretStore | undefined;
+  allowTrustedProviderCommandOverrides?: boolean | undefined;
 }
 
 function stateValue<T>(state: InitState, key: string): T | undefined {
@@ -74,8 +75,12 @@ async function askText(io: InterviewIO, prompt: string, defaultValue: string): P
   return trimmed.length > 0 ? trimmed : defaultValue;
 }
 
-function buildConfig(baseConfig: OrchestratorConfig, state: InitState): OrchestratorConfig {
-  return OrchestratorConfigSchema.parse({
+function buildConfig(
+  baseConfig: OrchestratorConfig,
+  state: InitState,
+  options: { allowTrustedProviderCommandOverrides?: boolean | undefined } = {},
+): OrchestratorConfig {
+  return parseOrchestratorConfig({
     ...baseConfig,
     providers: {
       ...baseConfig.providers,
@@ -126,6 +131,8 @@ function buildConfig(baseConfig: OrchestratorConfig, state: InitState): Orchestr
         verifyTokenRef: stateValue<string>(state, 'comms.whatsapp.verifyTokenRef') ?? baseConfig.comms.whatsapp.verifyTokenRef,
       },
     },
+  }, {
+    allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
   });
 }
 
@@ -209,7 +216,9 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
       securityMode,
       answers: { ...options.initialState.answers },
     };
-    return { config: buildConfig(config, nextState), state: nextState };
+    return { config: buildConfig(config, nextState, {
+      allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+    }), state: nextState };
   }
 
   const selectedCommsTransports: SupportedCommsTransportId[] = enableComms
@@ -450,7 +459,9 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
   };
 
   return {
-    config: buildConfig(config, nextState),
+    config: buildConfig(config, nextState, {
+      allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
+    }),
     state: nextState,
   };
 }

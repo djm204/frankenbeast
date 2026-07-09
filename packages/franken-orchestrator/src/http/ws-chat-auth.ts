@@ -1,4 +1,5 @@
 import { TransportSecurityService } from './security/transport-security.js';
+import { createHash } from 'node:crypto';
 
 export const CHAT_SOCKET_TOKEN_TTL_MS = 5 * 60 * 1000;
 
@@ -24,6 +25,53 @@ export interface VerifyChatSocketRequestOptions {
 
 const SESSION_SCOPE = 'chat-session';
 const transportSecurity = new TransportSecurityService();
+
+function tokenFingerprint(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function tokenExpiresAt(token: string): number | null {
+  const [encodedPayload] = token.split('.');
+  if (!encodedPayload) {
+    return null;
+  }
+  try {
+    const payload = Buffer.from(encodedPayload, 'base64url').toString('utf8');
+    const [, , expiresAtRaw] = payload.split('.');
+    const expiresAt = Number(expiresAtRaw);
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  } catch {
+    return null;
+  }
+}
+
+export class ChatSocketSessionTicketStore {
+  private readonly consumed = new Map<string, number>();
+
+  isConsumed(token: string): boolean {
+    this.cleanup();
+    return this.consumed.has(tokenFingerprint(token));
+  }
+
+  consume(token: string): boolean {
+    this.cleanup();
+    const fingerprint = tokenFingerprint(token);
+    if (this.consumed.has(fingerprint)) {
+      return false;
+    }
+    this.consumed.set(fingerprint, tokenExpiresAt(token) ?? Date.now() + CHAT_SOCKET_TOKEN_TTL_MS);
+    return true;
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [fingerprint, expiresAt] of this.consumed) {
+      if (expiresAt < now) {
+        this.consumed.delete(fingerprint);
+      }
+    }
+  }
+}
 
 export function createSessionTokenSecret(): string {
   return transportSecurity.createSecret();

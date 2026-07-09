@@ -4,6 +4,8 @@
 
 MOD-04 is responsible for high-level reasoning. It takes a complex goal (e.g., "Implement Multi-Currency UI for Staples") and decomposes it into a sequence of actionable sub-tasks. It ensures the agent doesn't "hallucinate spirals" by maintaining a structured state of progress.
 
+Current status: this outline preserves the original MOD-era framing as historical design context. Current planning execution is implemented through `@franken/orchestrator`, and MCP-exposed planning tools live in `@franken/mcp-suite`. Treat the root `README.md` and root `package.json` workspaces as the authoritative package map.
+
 ## 2. The Planning Logic
 
 ### 2.1 Task Decomposition (The DAG)
@@ -11,7 +13,7 @@ MOD-04 is responsible for high-level reasoning. It takes a complex goal (e.g., "
 The Planner converts a user prompt into a **Directed Acyclic Graph (DAG)** of tasks. Each task includes:
 
 - **Objective:** What needs to be achieved.
-- **Required Skills:** Which tools from `@djm204/agent-skills` are needed.
+- **Required Capabilities:** Which orchestrator capabilities, MCP tools, or provider-backed skills are needed.
 - **Dependencies:** Which tasks must be completed first (e.g., "Define Schema" before "Generate Component").
 
 ### 2.2 Dynamic Replanning
@@ -34,7 +36,7 @@ Before selecting a tool, the Planner must output a "Rationale" block. This allow
 
 - **Input:** Sanitized intent from **MOD-01**.
 - **Context:** ADRs and project rules pulled from **MOD-03 Semantic Memory**.
-- **Tooling:** Available capabilities discovered via **MOD-02 (@djm204/agent-skills)**.
+- **Tooling:** Available capabilities come from the orchestrator provider/skill plumbing and the `@franken/mcp-suite` tool registry, not a standalone MOD-02 skills package.
 
 ## 5. Human-in-the-Loop (HITL) Integration
 

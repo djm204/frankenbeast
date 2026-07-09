@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.2.3](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.2...franken-web-v0.2.3) (2026-07-08)
+
+
+### Bug Fixes
+
+* **web:** hide placeholder dashboard routes ([#1272](https://github.com/djm204/frankenbeast/issues/1272)) ([4af005d](https://github.com/djm204/frankenbeast/commit/4af005d584a9468e77fade5921eee65c3c926269))
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
+## [0.2.2](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.1...franken-web-v0.2.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **chat:** emit execution events after approval ([#877](https://github.com/djm204/frankenbeast/issues/877)) ([752f8ef](https://github.com/djm204/frankenbeast/commit/752f8ef2c56215d9c9cfb7cefe9f96a4a31cc49c))
+* **cli:** show network help before root resolution ([71ebc60](https://github.com/djm204/frankenbeast/commit/71ebc60bcb292f228098759ffe22ba295cd7f34c)), closes [#414](https://github.com/djm204/frankenbeast/issues/414)
+* **orchestrator:** make websocket session tickets one-time ([b6cf0a5](https://github.com/djm204/frankenbeast/commit/b6cf0a519797610bf3dedec894f28749f85b0868)), closes [#608](https://github.com/djm204/frankenbeast/issues/608)
+* **orchestrator:** validate chunk plan design docs ([#884](https://github.com/djm204/frankenbeast/issues/884)) ([27a0451](https://github.com/djm204/frankenbeast/commit/27a045115db56d5695d83c588d01aa5bfbc50609))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+* **web:** label skill catalog search field ([#846](https://github.com/djm204/frankenbeast/issues/846)) ([87e4295](https://github.com/djm204/frankenbeast/commit/87e42952f5554ff15b7560b88d622904e25b2227))
+* **web:** prevent duplicate chat input echo ([#889](https://github.com/djm204/frankenbeast/issues/889)) ([479ab18](https://github.com/djm204/frankenbeast/commit/479ab1828846f4cc3b6542a158ca6b4e7dbd483c))
+* **web:** remove outdated chat placeholder warning ([ddfd4ba](https://github.com/djm204/frankenbeast/commit/ddfd4ba65f1356584cf87007ace0512a790be1b9))
+* **web:** show analytics JSON copy feedback ([edae673](https://github.com/djm204/frankenbeast/commit/edae6733d200897c23bfc5d76a4822f400376317)), closes [#633](https://github.com/djm204/frankenbeast/issues/633)
+* **web:** use active route as page heading ([4392947](https://github.com/djm204/frankenbeast/commit/4392947c4fc89a32682ce8d934d520c90096693f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.2.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.0...franken-web-v0.2.1) (2026-07-06)
 
 

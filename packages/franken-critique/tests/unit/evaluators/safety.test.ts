@@ -257,7 +257,7 @@ describe('SafetyEvaluator', () => {
     const evaluator = new SafetyEvaluator(port);
 
     const result = await evaluator.evaluate(
-      createInput(`${unsafeDynamicCall('\"x\"')}; exec("y")`),
+      createInput(`${unsafeDynamicCall('"code"')}; exec("y")`),
     );
 
     expect(result.verdict).toBe('fail');
@@ -964,14 +964,20 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
-  it('terminates catastrophic regex evaluation that reaches the runtime matcher', async () => {
+  it('terminates regex evaluation when the runtime matcher exceeds its timeout', async () => {
+    vi.useFakeTimers();
     const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
       regexMatchesWithTimeout(pattern: string, content: string): Promise<boolean | 'timeout'>;
     };
 
-    await expect(
-      evaluator.regexMatchesWithTimeout('(a+)+$', `${'a'.repeat(100)}!`),
-    ).resolves.toBe('timeout');
+    try {
+      const result = evaluator.regexMatchesWithTimeout('(a+)+$', `${'a'.repeat(100)}!`);
+      await vi.advanceTimersByTimeAsync(2_001);
+
+      await expect(result).resolves.toBe('timeout');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects genuinely unsafe nested quantifiers without catastrophic backtracking', async () => {

@@ -54,6 +54,25 @@ describe('GovernorAuditRecorder', () => {
     expect(trace.tags).toContain('hitl:approved');
   });
 
+  it('records signature verification failures as security failures even for attempted APPROVE responses', async () => {
+    const port = makeFakeMemoryPort();
+    const recorder = new GovernorAuditRecorder(port);
+
+    await recorder.record(
+      makeRequest(),
+      makeResponse({ decision: 'APPROVE', signature: 'invalid-sig' }),
+      { securityFailure: 'signature-verification' },
+    );
+
+    const trace = port.calls[0]!;
+    const output = trace.output as { decision: string; securityFailure: string };
+    expect(trace.status).toBe('failure');
+    expect(trace.tags).toContain('hitl:signature-verification-failed');
+    expect(trace.tags).toContain('hitl:security-failure');
+    expect(output.decision).toBe('APPROVE');
+    expect(output.securityFailure).toBe('signature-verification');
+  });
+
   it('records REGEN with status failure and tag hitl:rejected', async () => {
     const port = makeFakeMemoryPort();
     const recorder = new GovernorAuditRecorder(port);

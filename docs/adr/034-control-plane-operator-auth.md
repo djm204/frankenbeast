@@ -63,7 +63,7 @@ that present no token or an incorrect token are rejected with `401` via
   clients remain same-origin and do not receive the long-lived operator token.
 - Trade-off: Non-browser first-party callers of the network/comms/security/
   skills/dashboard/analytics APIs must send the operator token
-  (`Authorization: Bearer <token>` or `x-frankenbeast-operator-token`) once a token
+  (`Authorization: Bearer <token>` or `x-frankenbeast-operator-token: <token>`) once a token
   is configured. Vite dev browser requests rely on the server-side proxy to
   attach the token.
 - Trade-off: Mirroring ADR-034, when no operator token is configured the gate

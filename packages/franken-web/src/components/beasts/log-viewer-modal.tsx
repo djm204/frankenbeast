@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import type { TrackedAgentEvent } from '../../lib/beast-api';
@@ -10,8 +10,33 @@ interface LogViewerModalProps {
   events: TrackedAgentEvent[];
 }
 
+function getFullscreenErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (error instanceof DOMException && error.message) {
+    return error.message;
+  }
+  return 'The browser denied fullscreen mode.';
+}
+
 export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModalProps) {
   const [search, setSearch] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(document.fullscreenElement));
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  const isFullscreenSupported =
+    typeof document.documentElement.requestFullscreen === 'function' &&
+    typeof document.exitFullscreen === 'function';
+
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const filteredLogs = search
     ? logs.filter((l) => l.toLowerCase().includes(search.toLowerCase()))
@@ -20,11 +45,23 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
     ? events.filter((e) => e.message.toLowerCase().includes(search.toLowerCase()))
     : events;
 
-  function handleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      document.documentElement.requestFullscreen();
+  async function handleFullscreen() {
+    if (!isFullscreenSupported) {
+      return;
+    }
+
+    setFullscreenError(null);
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    } catch (error) {
+      setFullscreenError(`Fullscreen request failed: ${getFullscreenErrorMessage(error)}`);
+      setIsFullscreen(Boolean(document.fullscreenElement));
     }
   }
 
@@ -43,7 +80,20 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
               onChange={(e) => setSearch(e.target.value)}
               className="bg-beast-control border border-beast-border rounded-lg px-3 py-1.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent w-64"
             />
-            <button type="button" onClick={handleFullscreen} className="p-1.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors" aria-label="Toggle fullscreen">
+            <button
+              type="button"
+              onClick={handleFullscreen}
+              disabled={!isFullscreenSupported}
+              className="p-1.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-beast-subtle disabled:hover:bg-transparent"
+              aria-label={
+                isFullscreenSupported
+                  ? isFullscreen
+                    ? 'Exit fullscreen'
+                    : 'Enter fullscreen'
+                  : 'Fullscreen is not supported'
+              }
+              title={isFullscreenSupported ? undefined : 'Fullscreen is not supported in this browser'}
+            >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
               </svg>
@@ -56,6 +106,11 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
               </button>
             </Dialog.Close>
           </div>
+          {fullscreenError ? (
+            <div role="status" aria-live="polite" className="px-4 py-2 text-sm text-beast-danger border-b border-beast-border bg-beast-danger/10">
+              {fullscreenError}
+            </div>
+          ) : null}
           <ScrollArea.Root className="flex-1 overflow-hidden">
             <ScrollArea.Viewport className="h-full w-full p-4">
               <div className="space-y-1 font-mono text-xs text-beast-muted">

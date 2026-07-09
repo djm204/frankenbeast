@@ -1,5 +1,6 @@
 import { SkillTrigger, TriggerRegistry } from '@franken/governor';
 import type { TriggerResult, TriggerSeverity } from '@franken/governor';
+import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
@@ -87,7 +88,7 @@ export interface GovernorCheckResult {
 
 export interface GovernorBudgetStatus {
   totalSpendUsd: number;
-  byModel: Array<{ model: string; costUsd: number }>;
+  byModel: Array<{ model: string; costUsd: number; unknownModel?: boolean }>;
 }
 
 export interface GovernorAdapter {
@@ -131,6 +132,16 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
+  if (row.cost_usd > 0 || row.cost_source === 'explicit') {
+    return false;
+  }
+  if (row.cost_source === 'legacy') {
+    return DEFAULT_PRICING[row.model] === undefined;
+  }
+  return true;
+}
+
 function assessAction(action: string, context: string): GovernorCheckResult {
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
@@ -166,6 +177,11 @@ function assessAction(action: string, context: string): GovernorCheckResult {
 
 export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   const store = createSqliteStore(dbPath);
+  const costCalculator = new CostCalculator(DEFAULT_PRICING, {
+    onUnknownModel: (model) => {
+      process.stderr.write(`[fbeast-governor] Unknown model "${model}" — budget status will report $0.0000 until pricing is configured.\n`);
+    },
+  });
 
   return {
     async check(input) {
@@ -181,14 +197,36 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
     async budgetStatus() {
       const rows = store.db.prepare(`
-        SELECT model, SUM(cost_usd) as total_cost
+        SELECT model, prompt_tokens, completion_tokens, cost_usd, cost_source
         FROM cost_ledger
-        GROUP BY model
-      `).all() as Array<{ model: string; total_cost: number }>;
+      `).all() as Array<{ model: string; prompt_tokens: number; completion_tokens: number; cost_usd: number; cost_source: string }>;
+
+      const grouped = new Map<string, { model: string; costUsd: number; unknownModel?: boolean }>();
+
+      for (const row of rows) {
+        const hasPricing = DEFAULT_PRICING[row.model] !== undefined;
+        const costUsd = shouldRepriceStoredCost(row)
+          ? costCalculator.calculate({
+              model: row.model,
+              promptTokens: row.prompt_tokens,
+              completionTokens: row.completion_tokens,
+            })
+          : row.cost_usd;
+        const current = grouped.get(row.model) ?? { model: row.model, costUsd: 0 };
+
+        current.costUsd += costUsd;
+        if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasPricing) {
+          current.unknownModel = true;
+        }
+
+        grouped.set(row.model, current);
+      }
+
+      const byModel = Array.from(grouped.values());
 
       return {
-        totalSpendUsd: rows.reduce((sum, row) => sum + row.total_cost, 0),
-        byModel: rows.map((row) => ({ model: row.model, costUsd: row.total_cost })),
+        totalSpendUsd: byModel.reduce((sum, row) => sum + row.costUsd, 0),
+        byModel,
       };
     },
   };

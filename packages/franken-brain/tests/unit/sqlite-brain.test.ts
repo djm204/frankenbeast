@@ -287,6 +287,31 @@ describe('SqliteBrain', () => {
       expect(row?.value).toBe('"value1"');
     });
 
+    it('checkpoint() rolls back working memory flush when checkpoint insert fails', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { get: (key: string) => { value: string } | undefined };
+        };
+      }).db;
+
+      brain.working.set('key1', 'value1');
+      db.exec(`
+        CREATE TRIGGER fail_checkpoint_insert
+        BEFORE INSERT ON checkpoints
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated checkpoint insert failure');
+        END;
+      `);
+
+      expect(() => brain.recovery.checkpoint(makeState())).toThrow(
+        'simulated checkpoint insert failure',
+      );
+
+      const row = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(row).toBeUndefined();
+    });
+
     it('lastCheckpoint() returns most recent', () => {
       brain.recovery.checkpoint(makeState({ step: 1 }));
       brain.recovery.checkpoint(makeState({ step: 2 }));
@@ -381,6 +406,48 @@ describe('SqliteBrain', () => {
       expect(brain2.recovery.lastCheckpoint()).toBeNull();
       expect(brain2.working.get('key')).toBe('val');
       brain2.close();
+    });
+
+    it('hydrate() rolls back working memory, episodic replay, and checkpoint together on failure', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+      const snapshot: BrainSnapshot = {
+        version: 1,
+        timestamp: '2026-07-09T00:00:00Z',
+        working: { fresh: 'snapshot' },
+        episodic: [
+          {
+            type: 'success',
+            summary: 'first event should roll back',
+            createdAt: '2026-07-09T00:00:00Z',
+          },
+          {
+            type: 'failure',
+            summary: undefined,
+            createdAt: '2026-07-09T00:01:00Z',
+          } as unknown as EpisodicEvent,
+        ],
+        checkpoint: {
+          runId: 'run-rollback',
+          phase: 'execution',
+          step: 1,
+          context: {},
+          timestamp: '2026-07-09T00:02:00Z',
+        },
+        metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+      };
+
+      try {
+        expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.keys()).toEqual([]);
+        expect(reopened.episodic.count()).toBe(0);
+        expect(reopened.recovery.lastCheckpoint()).toBeNull();
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('hydrate creates independent brain instance', () => {

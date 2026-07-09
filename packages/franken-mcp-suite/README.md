@@ -14,7 +14,7 @@ would leave the registered servers unable to start.
 # Global install (publishes the fbeast + fbeast-* binaries onto PATH)
 npm install -g @franken/mcp-suite
 # …or, from a clone of this monorepo:
-#   npm install && npm link --workspace=packages/franken-mcp-suite
+#   npm install && npm run local:link && npm run local:verify-cli
 
 # Initialize for your project
 cd your-project
@@ -30,7 +30,7 @@ fbeast mcp init --pick=memory,firewall,governor
 fbeast mcp init --mode=proxy
 ```
 
-`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate config. Override with `--client=claude|gemini|codex`.
+`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate project-scoped config. For Claude, MCP servers are written to the current project's `.mcp.json` and optional hooks/instructions to `.claude/settings.json` / `.claude/`; for Gemini, MCP servers and optional hooks are written to `.gemini/settings.json`. fbeast does not mutate your user-global Claude/Gemini settings by default, preventing one project's MCP database/root from being reused in another checkout. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
 
@@ -91,6 +91,24 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 | `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
+
+### Central audit session ids
+
+The server-side central audit path records dispatched MCP tool calls even when
+`fbeast mcp init` registers standalone servers without client hooks. Those
+audit records use the first available session id in this order:
+
+1. `FBEAST_SESSION_ID`
+2. `CLAUDE_SESSION_ID`
+3. the fallback `fbeast-central-dispatch`
+
+Set `FBEAST_SESSION_ID` when you want all standalone MCP servers in a run to
+write under an explicit operator-chosen id. If neither env var is set, query the
+default central trail from the shared database with:
+
+```typescript
+fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
+```
 
 ## Combined server
 

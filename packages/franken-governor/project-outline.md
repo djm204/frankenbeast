@@ -3,10 +3,12 @@
 ## 1. Overview
 MOD-07 is the "Safety Valve." It provides the infrastructure for the agent to pause, export its state, and wait for human intervention. It ensures that high-stakes actions (deployments, destructive operations, or high-cost tasks) never happen without your explicit **ACK**.
 
+Current status: this outline preserves the original MOD-era framing as historical design context. Current governance and HITL flows are implemented through `@franken/governor` and `@franken/orchestrator`, with MCP-facing tooling exposed by `@franken/mcp-suite`. Treat the root `README.md` and root `package.json` workspaces as authoritative.
+
 ## 2. Trigger Conditions (When to Pause)
 The agent is programmed to trigger an HITL exception in the following scenarios:
 - **Low Confidence:** When the **Self-Critique (MOD-06)** module flags a high probability of hallucination.
-- **High-Stakes Skills:** Any skill in **MOD-02** marked with `requires_hitl: true`.
+- **High-Stakes Skills:** Any orchestrator capability, provider-backed skill, or MCP tool that requires explicit HITL approval.
 - **Budget Breaches:** When **MOD-05 (Observability)** detects a token spend exceeding the per-task limit.
 - **Ambiguity:** When the **Planner (MOD-04)** cannot resolve a dependency or finds a conflict in the **ADRs (MOD-03)**.
 

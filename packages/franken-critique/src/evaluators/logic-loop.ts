@@ -88,12 +88,197 @@ function fenceRanges(code: string): Range[] {
   }));
 }
 
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'case',
+  'delete',
+  'else',
+  'in',
+  'instanceof',
+  'new',
+  'of',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+  'await',
+]);
+
+const CONTEXTUAL_REGEX_PREFIX_KEYWORDS = new Set(['await', 'yield', 'of']);
+
+function previousToken(code: string, beforeIndex: number): string | null {
+  let cursor = beforeIndex;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  const end = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  return end === cursor + 1 ? null : code.slice(cursor + 1, end);
+}
+
+function contextualKeywordCanPrefixRegex(code: string, tokenStart: number, token: string): boolean {
+  // `of` is only a keyword inside `for (… of …)`; a `/` following `of` is
+  // division in all realistic code (`of` as an identifier, or the pathological
+  // `for (x of /re/)`), so it never introduces a regex here.
+  if (token === 'of') return false;
+
+  // `await`/`yield` are unary operators: a regex can follow them at an
+  // expression position — after an operator or opening bracket, after a block
+  // open `{`, or after another regex-prefix keyword (e.g. `return await /re/`).
+  //
+  // `;` is deliberately excluded: after a statement terminator these words may
+  // be plain identifiers in malformed/sloppy snippets (e.g.
+  // `var await = 1; await / loop() / 2`), where the `/` is division. Since a
+  // recursion detector must not hide a self-call, the ambiguous statement-start
+  // case is treated as division rather than masking it as a regex operand.
+  let cursor = tokenStart - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  if (cursor < 0) return true;
+  if ('([{=,:!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const previous = previousToken(code, cursor);
+  return previous != null && REGEX_PREFIX_KEYWORDS.has(previous);
+}
+
 function isRegexLiteralStart(code: string, index: number): boolean {
   let cursor = index - 1;
   while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
   if (cursor < 0) return true;
 
-  return '([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!);
+  if ('([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const tokenEnd = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  if (tokenEnd === cursor + 1 || code[cursor] === '.') return false;
+  // The token scan above is ASCII-only. If the run is preceded by a Unicode
+  // identifier character, the apparent keyword is really the tail of a longer
+  // identifier (e.g. `πreturn`), so the following `/` is division, not a regex.
+  if (cursor >= 0 && /[\p{ID_Continue}\u200C\u200D]/u.test(code[cursor]!)) return false;
+
+  const token = code.slice(cursor + 1, tokenEnd);
+  if (!REGEX_PREFIX_KEYWORDS.has(token)) return false;
+  if (CONTEXTUAL_REGEX_PREFIX_KEYWORDS.has(token)) {
+    return contextualKeywordCanPrefixRegex(code, cursor + 1, token);
+  }
+  return true;
+}
+
+function scanQuotedRange(code: string, index: number, ranges: Range[]): number {
+  const quote = code[index];
+  const start = index;
+  index += 1;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === quote) {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanLineCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index = code.indexOf('\n', index + 2);
+  if (index < 0) index = code.length;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanBlockCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  const end = code.indexOf('*/', index + 2);
+  index = end < 0 ? code.length : end + 2;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanRegexRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index += 1;
+  let inCharacterClass = false;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === '[') inCharacterClass = true;
+    if (code[index] === ']') inCharacterClass = false;
+    if (code[index] === '/' && !inCharacterClass) {
+      index += 1;
+      while (/[a-z]/i.test(code[index] ?? '')) index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanTemplateRange(code: string, index: number, ranges: Range[]): number {
+  let segmentStart = index;
+  index += 1;
+
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+
+    if (code[index] === '$' && code[index + 1] === '{') {
+      ranges.push({ start: segmentStart, end: index + 2 });
+      index += 2;
+      let expressionDepth = 1;
+
+      while (index < code.length && expressionDepth > 0) {
+        const char = code[index];
+        const next = code[index + 1];
+
+        if (char === '\\') {
+          index += 2;
+          continue;
+        }
+        if (char === '\'' || char === '"') {
+          index = scanQuotedRange(code, index, ranges);
+          continue;
+        }
+        if (char === '`') {
+          index = scanTemplateRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '/') {
+          index = scanLineCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '*') {
+          index = scanBlockCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && isRegexLiteralStart(code, index)) {
+          index = scanRegexRange(code, index, ranges);
+          continue;
+        }
+        if (char === '{') expressionDepth += 1;
+        if (char === '}') expressionDepth -= 1;
+        index += 1;
+      }
+
+      segmentStart = index - 1;
+      continue;
+    }
+
+    if (code[index] === '`') {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+
+  ranges.push({ start: segmentStart, end: index });
+  return index;
 }
 
 function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
@@ -106,98 +291,36 @@ function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
       index = fenced.end;
       continue;
     }
+    if (isIndexInRanges(ranges, index)) {
+      index += 1;
+      continue;
+    }
 
     const char = code[index];
     const next = code[index + 1];
 
-    if ((char === '\'' || char === '"') && !isIndexInRanges(ranges, index)) {
-      const quote = char;
-      const start = index;
-      index += 1;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === quote) {
-          index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start, end: index });
+    if (char === '\'' || char === '"') {
+      index = scanQuotedRange(code, index, ranges);
       continue;
     }
 
-    if (char === '`' && !isIndexInRanges(ranges, index)) {
-      let segmentStart = index;
-      index += 1;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === '$' && code[index + 1] === '{') {
-          ranges.push({ start: segmentStart, end: index + 2 });
-          index += 2;
-          let expressionDepth = 1;
-          while (index < code.length && expressionDepth > 0) {
-            if (code[index] === '\\') {
-              index += 2;
-              continue;
-            }
-            if (code[index] === '{') expressionDepth += 1;
-            if (code[index] === '}') expressionDepth -= 1;
-            index += 1;
-          }
-          segmentStart = index - 1;
-          continue;
-        }
-        if (code[index] === '`') {
-          index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start: segmentStart, end: index });
+    if (char === '`') {
+      index = scanTemplateRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && next === '/') {
-      const start = index;
-      index = code.indexOf('\n', index + 2);
-      if (index < 0) index = code.length;
-      ranges.push({ start, end: index });
+      index = scanLineCommentRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && next === '*') {
-      const start = index;
-      const end = code.indexOf('*/', index + 2);
-      index = end < 0 ? code.length : end + 2;
-      ranges.push({ start, end: index });
+      index = scanBlockCommentRange(code, index, ranges);
       continue;
     }
 
     if (char === '/' && isRegexLiteralStart(code, index)) {
-      const start = index;
-      index += 1;
-      let inCharacterClass = false;
-      while (index < code.length) {
-        if (code[index] === '\\') {
-          index += 2;
-          continue;
-        }
-        if (code[index] === '[') inCharacterClass = true;
-        if (code[index] === ']') inCharacterClass = false;
-        if (code[index] === '/' && !inCharacterClass) {
-          index += 1;
-          while (/[a-z]/i.test(code[index] ?? '')) index += 1;
-          break;
-        }
-        index += 1;
-      }
-      ranges.push({ start, end: index });
+      index = scanRegexRange(code, index, ranges);
       continue;
     }
 
@@ -715,7 +838,11 @@ function fallbackRecursionFindings(code: string): EvaluationFinding[] {
     const selfCall = new RegExp(`\\b${escapeRegExpLiteral(fnName)}\\s*\\(`).exec(snippet.slice(match[0].length));
     if (!selfCall) continue;
     const beforeCall = snippet.slice(0, match[0].length + selfCall.index);
-    if (/\b(if|return|throw)\b/.test(beforeCall)) continue;
+    // Unicode-aware keyword boundaries: ASCII `\b` treats a non-ASCII letter as
+    // a word boundary, so `\breturn\b` would false-match inside an identifier
+    // like `πreturn` and wrongly treat it as a base-case guard. Require the
+    // keyword not to be adjacent to any identifier-continue character.
+    if (/(?<![\p{ID_Continue}$])(?:if|return|throw)(?![\p{ID_Continue}$])/u.test(beforeCall)) continue;
     findings.push({
       message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
       severity: 'critical',

@@ -29,9 +29,12 @@ jobs:
 
       - run: npm run audit:security
 
-      - run: npm run test:root -- tests/workspaces.test.ts
+      - run: npm run test:root -- tests/workspaces.test.ts tests/unit/web-dev-server-dependency-policy.test.ts tests/unit/todo-markers.test.ts
 
       - run: npm run lint:security
+
+      - name: Track code comment debt markers
+        run: npm run audit:todos
 
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs

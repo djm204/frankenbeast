@@ -262,31 +262,31 @@ By default, `fbeast mcp init` installs 7 individual servers with all tools visib
 
 ## MCP Tools Reference
 
-Once installed, your MCP-compatible client has access to these tools:
+Once installed, your MCP-compatible client has access to the tools registered in `packages/franken-mcp-suite/src/shared/tool-registry.ts`. Keep this walkthrough aligned with that registry and the package README when the MCP surface changes.
 
 | Tool | Server | Description |
 |------|--------|-------------|
-| `fbeast_memory_frontload` | memory | Load all working + episodic memory from this database as context |
-| `fbeast_memory_store` | memory | Store a key/value entry; working/recovery entries update by key, episodic entries append events |
-| `fbeast_memory_query` | memory | Search memory by keyword |
-| `fbeast_memory_forget` | memory | Delete a working memory entry |
-| `fbeast_plan_decompose` | planner | Break a task into a DAG of steps |
-| `fbeast_plan_status` | planner | Get current plan status |
+| `fbeast_memory_store` | memory | Store a key/value entry in working, episodic, or recovery memory |
+| `fbeast_memory_query` | memory | Search memory entries by keyword substring |
+| `fbeast_memory_frontload` | memory | Load all memory entries from this database as context |
+| `fbeast_memory_forget` | memory | Delete a working memory entry by key |
+| `fbeast_plan_decompose` | planner | Create a scaffold DAG for a task objective |
+| `fbeast_plan_status` | planner | Get status and visualization for a plan |
 | `fbeast_plan_validate` | planner | Validate a plan DAG for cycles and missing dependencies |
-| `fbeast_critique_evaluate` | critique | Score output quality (0–1), suggest improvements |
+| `fbeast_critique_evaluate` | critique | Score output quality, verdict, and findings |
 | `fbeast_critique_compare` | critique | Compare original and revised content with score deltas |
-| `fbeast_firewall_scan` | firewall | Scan input for prompt injection |
+| `fbeast_firewall_scan` | firewall | Detect prompt injection in text input |
 | `fbeast_firewall_scan_file` | firewall | Read a file and scan its contents for prompt injection patterns |
-| `fbeast_observer_log` | observer | Log a tool call event to the audit trail |
+| `fbeast_observer_log` | observer | Append a tool-call or decision event to the audit trail |
 | `fbeast_observer_log_cost` | observer | Record LLM token usage and cost for a call |
-| `fbeast_observer_cost` | observer | Get cost summary by model |
-| `fbeast_observer_trail` | observer | Retrieve audit trail for a session |
+| `fbeast_observer_cost` | observer | Get token and cost summaries by model |
+| `fbeast_observer_trail` | observer | Retrieve the ordered audit trail for a session |
 | `fbeast_observer_verify` | observer | Verify the full audit hash chain for a session |
 | `fbeast_governor_check` | governor | Check whether an action should proceed |
 | `fbeast_governor_budget` | governor | Get current spend against budget |
-| `fbeast_skills_list` | skills | List available skills |
+| `fbeast_skills_list` | skills | List available skills by category |
 | `fbeast_skills_discover` | skills | Search skills by keyword or capability |
-| `fbeast_skills_load` | skills | Load a skill by name |
+| `fbeast_skills_load` | skills | Load full skill content by name |
 
 ---
 

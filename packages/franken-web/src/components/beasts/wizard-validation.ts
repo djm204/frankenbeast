@@ -5,17 +5,26 @@ type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 
 type WorkflowValues = {
   workflowType?: unknown;
+  goal?: unknown;
   topic?: unknown;
   outputPath?: unknown;
   docPath?: unknown;
   outputDir?: unknown;
   provider?: unknown;
   objective?: unknown;
+  chunkDirectory?: unknown;
   chunkDir?: unknown;
 };
 
 function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
+}
+
+function isRepoRelativeMarkdownDesignDocPath(value: string): boolean {
+  if (value.includes('\0')) return false;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return false;
+  if (value.split(/[\\/]+/).includes('..')) return false;
+  return /\.(?:md|mdx|markdown)$/i.test(value);
 }
 
 export function validateWizardStep(step: number, stepValues: WizardStepValues): WizardValidationErrors {
@@ -35,7 +44,7 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
     }
 
     if (values.workflowType === 'design-interview') {
-      if (isBlank(values.topic)) {
+      if (isBlank(values.goal ?? values.topic)) {
         errors.topic = 'Design interview goal is required.';
       }
       if (isBlank(values.outputPath)) {
@@ -44,8 +53,11 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
     }
 
     if (values.workflowType === 'chunk-plan') {
-      if (isBlank(values.docPath)) {
+      const docPath = values.docPath;
+      if (isBlank(docPath)) {
         errors.docPath = 'Design doc path is required.';
+      } else if (typeof docPath !== 'string' || !isRepoRelativeMarkdownDesignDocPath(docPath)) {
+        errors.docPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
       }
       if (isBlank(values.outputDir)) {
         errors.outputDir = 'Output directory is required.';
@@ -59,7 +71,7 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
       if (isBlank(values.objective)) {
         errors.objective = 'Objective is required.';
       }
-      if (isBlank(values.chunkDir)) {
+      if (isBlank(values.chunkDirectory ?? values.chunkDir)) {
         errors.chunkDir = 'Chunk directory path is required.';
       }
     }

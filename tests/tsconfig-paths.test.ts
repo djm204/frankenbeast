@@ -12,6 +12,7 @@ const EXPECTED_ALIASES: Record<string, string> = {
   '@franken/observer': './packages/franken-observer/src/index.ts',
   '@franken/critique': './packages/franken-critique/src/index.ts',
   '@franken/governor': './packages/franken-governor/src/index.ts',
+  '@franken/types/path-containment': './packages/franken-types/src/path-containment.ts',
   '@franken/types': './packages/franken-types/src/index.ts',
   '@franken/orchestrator': './packages/franken-orchestrator/src/index.ts',
 };
@@ -24,8 +25,8 @@ describe('tsconfig.json path aliases', () => {
     expect(paths).toBeDefined();
   });
 
-  it('has exactly 7 aliases', () => {
-    expect(Object.keys(paths)).toHaveLength(7);
+  it('has exactly 8 aliases', () => {
+    expect(Object.keys(paths)).toHaveLength(8);
   });
 
   for (const [alias, expectedPath] of Object.entries(EXPECTED_ALIASES)) {

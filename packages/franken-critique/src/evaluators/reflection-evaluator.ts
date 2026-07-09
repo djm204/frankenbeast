@@ -133,7 +133,11 @@ export class ReflectionEvaluator implements Evaluator {
   }
 
   private parseSeverity(reflection: string): number {
-    const match = reflection.match(/SEVERITY:\s*(\d+)/i);
+    const firstNonEmptyLine = reflection
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim();
+    const match = firstNonEmptyLine?.match(/^SEVERITY:\s*(\d+)\b/i);
     if (match) {
       return Math.min(10, Math.max(1, parseInt(match[1]!, 10)));
     }

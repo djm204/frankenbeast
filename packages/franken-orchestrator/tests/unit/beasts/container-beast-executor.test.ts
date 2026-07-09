@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { chownSync, mkdirSync, statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-po
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
-import type { BeastProcessSpec } from '../../../src/beasts/types.js';
+import type { BeastDefinition, BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
 describe('ContainerBeastExecutor', () => {
@@ -56,7 +57,7 @@ describe('ContainerBeastExecutor', () => {
       label: 'Test Beast',
       description: 'Test beast',
       executionModeDefault: 'container' as const,
-      configSchema: { parse: (value: unknown) => value },
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
       buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: { FRANKENBEAST_RUN_CONFIG: '/workspace/config.json' } }),
@@ -82,6 +83,88 @@ describe('ContainerBeastExecutor', () => {
     expect(spawned[0].command).toBe('docker');
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--name', `fbeast-${run.id}-attempt-1`]));
     expect(spawned[0].args).toEqual(expect.arrayContaining(['--network', 'none']));
+
+    const userFlag = spawned[0].args.indexOf('--user');
+    const containerUser = spawned[0].args[userFlag + 1]!;
+    const [expectedUid, expectedGid] = containerUser.split(':').map((part) => Number.parseInt(part, 10));
+    const configDir = join(workDir, '.fbeast', '.build', 'run-configs');
+    const configPath = join(configDir, `${run.id}.json`);
+    for (const dir of [join(workDir, '.fbeast'), join(workDir, '.fbeast', '.build'), configDir]) {
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(dir).uid).toBe(expectedUid);
+      expect(statSync(dir).gid).toBe(expectedGid);
+    }
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(statSync(configPath).uid).toBe(expectedUid);
+    expect(statSync(configPath).gid).toBe(expectedGid);
+  });
+
+  it('uses the current Docker user for run-config ownership when the workspace appears after construction', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-container-executor-'));
+    const workspaceHostPath = join(workDir, 'late-workspace');
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logStore = new BeastLogStore(join(workDir, 'logs'));
+    const spawned: BeastProcessSpec[] = [];
+    const fakeSupervisor: ProcessSupervisorLike = {
+      spawn: vi.fn(async (spec: BeastProcessSpec, _callbacks: ProcessCallbacks) => {
+        spawned.push(spec);
+        return { pid: 4242 };
+      }),
+      stop: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+    };
+    const eventualWorkspaceUid = typeof process.getuid === 'function' && process.getuid() === 0
+      ? 10001
+      : (typeof process.getuid === 'function' ? process.getuid() : 1000);
+    const eventualWorkspaceGid = typeof process.getgid === 'function' && process.getuid?.() !== 0
+      ? process.getgid()
+      : 10001;
+    const fallbackUser = eventualWorkspaceUid === 12345 ? '23456:23456' : '12345:12345';
+    const executor = new ContainerBeastExecutor({
+      repository,
+      logStore,
+      supervisorFactory: () => fakeSupervisor,
+      policy: {
+        ...DEFAULT_SANDBOX_POLICY,
+        user: fallbackUser,
+        image: 'fbeast/sandbox:test',
+        workspaceHostPath,
+      },
+    });
+    mkdirSync(workspaceHostPath, { recursive: true });
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      chownSync(workspaceHostPath, eventualWorkspaceUid, eventualWorkspaceGid);
+    }
+    const run = repository.createRun({
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'container',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const definition: BeastDefinition = {
+      id: 'test-beast',
+      version: 1,
+      label: 'Test Beast',
+      description: 'Test beast',
+      executionModeDefault: 'container',
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
+      interviewPrompts: [],
+      telemetryLabels: {},
+      buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workspaceHostPath, env: {} }),
+    };
+
+    await executor.start(run, definition);
+
+    const userFlag = spawned[0].args.indexOf('--user');
+    const containerUser = spawned[0].args[userFlag + 1]!;
+    const [expectedUid, expectedGid] = containerUser.split(':').map((part) => Number.parseInt(part, 10));
+    expect(containerUser).not.toBe(fallbackUser);
+    const configPath = join(workspaceHostPath, '.fbeast', '.build', 'run-configs', `${run.id}.json`);
+    expect(statSync(configPath).uid).toBe(expectedUid);
+    expect(statSync(configPath).gid).toBe(expectedGid);
   });
 
   it('uses a distinct Docker container name for each retry attempt', async () => {
@@ -120,7 +203,7 @@ describe('ContainerBeastExecutor', () => {
       label: 'Test Beast',
       description: 'Test beast',
       executionModeDefault: 'container' as const,
-      configSchema: { parse: (value: unknown) => value },
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
       buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: {} }),
