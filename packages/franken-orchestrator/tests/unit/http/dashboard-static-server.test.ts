@@ -178,6 +178,53 @@ describe('dashboard static server', () => {
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/webhooks/telegram');
   });
 
+  it('strips bot-token webhook paths before proxying so tokens are not forwarded', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok'));
+    globalThis.fetch = fetchMock;
+
+    const botToken = '123456789:ABCdefghIJKlmnoPQRStuv';
+    const response = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${botToken}`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(response.status).toBe(200);
+    const [firstTargetUrl] = fetchMock.mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(firstTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram');
+
+    const encodedTokenRequest = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${encodeURIComponent(botToken)}`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(encodedTokenRequest.status).toBe(200);
+    const [secondTargetUrl] = fetchMock.mock.calls[1] as [RequestInfo, RequestInit];
+    expect(String(secondTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram');
+
+    const encodedSeparatorRequest = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${botToken}%2Fextra`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(encodedSeparatorRequest.status).toBe(200);
+    const [thirdTargetUrl] = fetchMock.mock.calls[2] as [RequestInfo, RequestInit];
+    expect(String(thirdTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram%2Fextra');
+  });
+
   it('forwards non-GET request bodies through the HTTP static proxy', async () => {
     const staticDir = await createDashboardDist();
     dirs.push(staticDir);
