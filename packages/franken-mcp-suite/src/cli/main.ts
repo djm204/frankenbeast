@@ -100,6 +100,11 @@ function resolveClient(): McpClient {
   return clientArg ?? detectMcpClient({ cwd: process.cwd(), homeDir: homedir(), exists: existsSync });
 }
 
+function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
+  const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  return [projectDir];
+}
+
 function reportMcpInitError(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`fbeast mcp init: ${message}`);
@@ -202,9 +207,10 @@ switch (subcommand) {
     const { runUninstall } = await import('./uninstall.js');
     const root = process.cwd();
     const client = resolveClient();
-    const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+    const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
+    const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
     const purge = process.argv.includes('--purge') ? true : undefined;
-    await runUninstall({ root, claudeDir, client, purge });
+    await runUninstall({ root, claudeDir, jsonConfigDirs, client, purge });
     break;
   }
   case 'beast': {

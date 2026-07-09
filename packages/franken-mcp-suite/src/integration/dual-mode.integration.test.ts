@@ -37,13 +37,13 @@ describe('dual-mode integration', () => {
 
     runInit({ root, claudeDir, hooks: true, servers: ['memory', 'planner'] });
 
-    const settingsPath = join(claudeDir, 'settings.json');
-    const before = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const mcpConfigPath = join(root, '.mcp.json');
+    const before = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'));
     const mcpBefore = JSON.parse(JSON.stringify(before.mcpServers));
 
     await runBeastMode(['--provider=anthropic-api'], noopDeps(root));
 
-    const after = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    const after = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'));
     expect(after.mcpServers).toEqual(mcpBefore);
 
     const config = FbeastConfig.load(root);
