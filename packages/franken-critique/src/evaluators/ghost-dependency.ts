@@ -253,17 +253,17 @@ function canStartNativeDynamicImport(
 
   const statementStart = Math.max(
     content.lastIndexOf(';', importIndex - 1),
-    content.lastIndexOf('\n', importIndex - 1),
     content.lastIndexOf('{', importIndex - 1),
     content.lastIndexOf('}', importIndex - 1),
   );
   const prefix = content.slice(statementStart + 1, importIndex);
   const startsAfterObjectBrace = content[statementStart] === '{';
+  const isTernaryBranch = prefix.includes('?');
 
   return !(
     /\btype\s+[A-Za-z_$][\w$]*(?:\s*<[^;>{}]*>)?\s*=\s*$/.test(prefix) ||
-    /\btypeof\s*$/.test(prefix) ||
-    (!startsAfterObjectBrace && /:\s*$/.test(prefix)) ||
+    (/\btype\b/.test(prefix) && /\btypeof\s*$/.test(prefix)) ||
+    (!startsAfterObjectBrace && !isTernaryBranch && /:\s*$/.test(prefix)) ||
     /\b(?:interface|type)\b[^;{}]*\bextends\s*$/.test(prefix)
   );
 }

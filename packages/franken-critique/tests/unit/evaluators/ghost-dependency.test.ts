@@ -168,6 +168,8 @@ describe('GhostDependencyEvaluator', () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
       type Ghost = import('ghost-package').Ghost;
+      type MultilineGhost =
+        import('ghost-package').Ghost;
       type GhostModule = typeof import('ghost-package');
       const plugin = loader.import('unknown-lib');
       this.#import('private-loader');
@@ -182,15 +184,23 @@ describe('GhostDependencyEvaluator', () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
       const loaders = { plugin: import('ghost-package') };
+      const multilineLoaders = {
+        plugin: import('another-ghost')
+      };
+      const selected = ready ? import('zod') : import('missing-branch');
+      const runtimeTypeof = typeof import('runtime-ghost');
       await import('zod', { with: makeOptions(require('unknown-lib')) });
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(2);
+    expect(result.findings).toHaveLength(5);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
+        expect.stringContaining('another-ghost'),
+        expect.stringContaining('missing-branch'),
+        expect.stringContaining('runtime-ghost'),
         expect.stringContaining('unknown-lib'),
       ]),
     );
