@@ -785,7 +785,11 @@ describe('ws chat server', () => {
     const approvalResolved = sent
       .map((raw) => JSON.parse(raw) as { type: string })
       .filter((event) => event.type === 'turn.approval.resolved');
-    expect(approvalResolved).toHaveLength(2);
+    expect(approvalResolved).toHaveLength(1);
+    const rateLimited = sent
+      .map((raw) => JSON.parse(raw) as { type: string; code?: string })
+      .filter((event) => event.type === 'turn.error' && event.code === 'RATE_LIMITED');
+    expect(rateLimited).toHaveLength(1);
 
     rmSync(TMP, { recursive: true, force: true });
   });

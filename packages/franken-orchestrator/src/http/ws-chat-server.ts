@@ -17,7 +17,7 @@ import {
   type ServerSocketEvent,
 } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
-import { chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -45,6 +45,7 @@ export interface ChatSocketControllerOptions {
   operatorToken?: string | undefined;
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
+  chatMutationAdmission?: ChatMutationAdmission;
   maxMessageBytes?: number;
 }
 
@@ -165,6 +166,7 @@ export class ChatSocketController {
   private readonly tokenSecret: string;
   private readonly operatorToken: string | undefined;
   private readonly chatRateLimiter: InMemoryRateLimiter;
+  private readonly chatMutationAdmission: ChatMutationAdmission;
   private readonly maxMessageBytes: number;
 
   constructor(options: ChatSocketControllerOptions) {
@@ -178,6 +180,7 @@ export class ChatSocketController {
     this.tokenSecret = options.tokenSecret;
     this.operatorToken = options.operatorToken;
     this.chatRateLimiter = options.chatRateLimiter ?? createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+    this.chatMutationAdmission = options.chatMutationAdmission ?? new ChatMutationAdmission(this.chatRateLimiter);
     this.maxMessageBytes = options.maxMessageBytes ?? DEFAULT_CHAT_SOCKET_MAX_MESSAGE_BYTES;
   }
 
@@ -300,7 +303,7 @@ export class ChatSocketController {
         if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection)) {
           return;
         }
-        await this.handleApproval(peer, session, event.approved);
+        await this.runWithSessionTurn(peer, session, () => this.handleApproval(peer, session, event.approved));
         return;
       case 'message.read':
         this.emit(peer, {
@@ -358,7 +361,7 @@ export class ChatSocketController {
     session: ChatSession,
     work: () => Promise<void>,
   ): Promise<void> {
-    if (this.activeSessionTurns.has(session.id)) {
+    if (!this.chatMutationAdmission.begin(session.id)) {
       this.emitRateLimitError(peer, 'A chat turn is already running for this chat session.');
       return;
     }
@@ -368,6 +371,7 @@ export class ChatSocketController {
       await work();
     } finally {
       this.activeSessionTurns.delete(session.id);
+      this.chatMutationAdmission.end(session.id);
     }
   }
 
@@ -476,12 +480,12 @@ export class ChatSocketController {
     peer: ChatSocketPeer,
     connection: ConnectionState,
   ): boolean {
-    const result = this.chatRateLimiter.take(chatClientKey({
+    const allowed = this.chatMutationAdmission.takeRateLimit(chatClientKey({
       action: 'message',
       operatorToken: this.operatorToken,
       remoteAddress: connection.remoteAddress,
     }));
-    if (result.allowed) {
+    if (allowed) {
       return true;
     }
     this.emit(peer, {
