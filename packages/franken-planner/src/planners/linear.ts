@@ -1,5 +1,5 @@
 import { PlanGraph } from '../core/dag.js';
-import { RecursionDepthExceededError } from '../core/errors.js';
+import { RationaleRejectedError, RecursionDepthExceededError } from '../core/errors.js';
 import type { PlanResult, PlanningStrategyName, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
 
@@ -26,7 +26,19 @@ export class LinearPlanner implements PlanningStrategy {
     const taskResults: TaskResult[] = [];
 
     for (const task of tasks) {
-      const result = await context.executor(task);
+      let result: TaskResult;
+      try {
+        result = await context.executor(task);
+      } catch (err) {
+        if (err instanceof RationaleRejectedError) {
+          throw err;
+        }
+        result = {
+          status: 'failure',
+          taskId: task.id,
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
       taskResults.push(result);
 
       if (result.status === 'failure') {

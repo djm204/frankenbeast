@@ -1,4 +1,9 @@
-import { DuplicateTaskError, RecursionDepthExceededError } from '../core/errors.js';
+import {
+  DuplicateTaskError,
+  RationaleRejectedError,
+  RecursionDepthExceededError,
+  TaskNotFoundError,
+} from '../core/errors.js';
 import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, Task, TaskId, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy } from './types.js';
@@ -33,7 +38,19 @@ export class RecursivePlanner implements PlanningStrategy {
     const allResults: TaskResult[] = [];
 
     for (const task of tasks) {
-      const result = await context.executor(task);
+      let result: TaskResult;
+      try {
+        result = await context.executor(task);
+      } catch (err) {
+        if (err instanceof RationaleRejectedError) {
+          throw err;
+        }
+        result = {
+          status: 'failure',
+          taskId: task.id,
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
 
       if (result.status === 'failure') {
         allResults.push(result);
@@ -84,9 +101,7 @@ export class RecursivePlanner implements PlanningStrategy {
           continue;
         }
         if (!completedTaskIds.has(dependencyId)) {
-          throw new Error(
-            `Recursive task '${task.id}' depends on unresolved external dependency '${dependencyId}'`
-          );
+          throw new TaskNotFoundError(dependencyId);
         }
       }
       edges.set(task.id, new Set(internalDependencies));

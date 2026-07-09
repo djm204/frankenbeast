@@ -16,6 +16,8 @@ export interface ProxyServerDeps {
   dbPath: string;
   /** Project root used to constrain filesystem-backed proxy tools. */
   root?: string | undefined;
+  /** Active fbeast config path used by config-backed tools such as firewall scans. */
+  configPath?: string | undefined;
   /** Governance gate applied to the *resolved* target tool (defaults to the dbPath-backed gate). */
   governance?: GovernanceGate;
   /** Server-side audit sink for resolved tool calls (defaults to the dbPath-backed observer). */
@@ -34,7 +36,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
 
   function getAdapters(): AdapterSet {
     if (!cachedAdapters) {
-      cachedAdapters = createAdapterSet(dbPath, { root });
+      cachedAdapters = createAdapterSet(dbPath, { root, configPath: deps.configPath });
     }
     return cachedAdapters;
   }
@@ -155,9 +157,9 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
 // CLI entry point
 if (isMain(import.meta.url)) {
   const { values } = parseArgs({
-    options: { db: { type: 'string', default: '.fbeast/beast.db' }, root: { type: 'string' } },
+    options: { db: { type: 'string', default: '.fbeast/beast.db' }, root: { type: 'string' }, config: { type: 'string' } },
   });
-  const server = createProxyServer({ dbPath: values['db']!, root: values['root'] });
+  const server = createProxyServer({ dbPath: values['db']!, root: values['root'], configPath: values['config'] });
   server.start().catch((err) => {
     console.error('fbeast-proxy failed to start:', err);
     process.exit(1);

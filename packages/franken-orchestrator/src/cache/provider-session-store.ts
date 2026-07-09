@@ -64,7 +64,7 @@ export class ProviderSessionStore {
       const raw = await readFile(filePath, 'utf8');
       return JSON.parse(raw) as StoredProviderSessionRecord;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
         return undefined;
       }
       throw error;
