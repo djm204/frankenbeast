@@ -51,31 +51,33 @@ describe('fbeast init', () => {
     expect(content).toContain('fbeast_memory_frontload');
   });
 
-  it('writes MCP server config to settings.json', () => {
+  it('writes Claude MCP server config to project .mcp.json', () => {
     const root = tmpDir();
     dirs.push(root);
 
     runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
 
-    const settingsPath = join(root, '.claude', 'settings.json');
-    expect(existsSync(settingsPath)).toBe(true);
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
-    expect(settings.mcpServers['fbeast-planner']).toBeDefined();
-    expect(settings.mcpServers['fbeast-critique']).toBeDefined();
-    expect(settings.mcpServers['fbeast-firewall']).toBeDefined();
-    expect(settings.mcpServers['fbeast-observer']).toBeDefined();
-    expect(settings.mcpServers['fbeast-governor']).toBeDefined();
-    expect(settings.mcpServers['fbeast-skills']).toBeDefined();
+    const mcpPath = join(root, '.mcp.json');
+    expect(existsSync(mcpPath)).toBe(true);
+    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf-8'));
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-planner']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-critique']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-firewall']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-observer']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-governor']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-skills']).toBeDefined();
+    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers).toBeUndefined();
   });
 
-  it('merges with existing settings.json comments and trailing commas without overwriting', () => {
+  it('merges with existing Claude .mcp.json comments and trailing commas without overwriting', () => {
     const root = tmpDir();
     dirs.push(root);
     const claudeDir = join(root, '.claude');
     mkdirSync(claudeDir, { recursive: true });
-    const settingsPath = join(claudeDir, 'settings.json');
-    writeFileSync(settingsPath, `{
+    const mcpPath = join(root, '.mcp.json');
+    writeFileSync(mcpPath, `{
       // Existing user-managed MCP server.
       "mcpServers": {
         "my-other-server": { "command": "other" },
@@ -85,10 +87,10 @@ describe('fbeast init', () => {
 
     runInit({ root, claudeDir, hooks: false });
 
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    expect(settings.mcpServers['my-other-server']).toBeDefined();
-    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
-    expect(settings.customKey).toBe(true);
+    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf-8'));
+    expect(mcpConfig.mcpServers['my-other-server']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.customKey).toBe(true);
   });
 
   it('respects pick list', () => {
@@ -97,10 +99,10 @@ describe('fbeast init', () => {
 
     runInit({ root, claudeDir: join(root, '.claude'), hooks: false, servers: ['memory', 'critique'] });
 
-    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
-    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
-    expect(settings.mcpServers['fbeast-critique']).toBeDefined();
-    expect(settings.mcpServers['fbeast-planner']).toBeUndefined();
+    const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-critique']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-planner']).toBeUndefined();
   });
 
   it('writes Claude hooks when hooks are enabled', () => {
@@ -139,8 +141,8 @@ describe('fbeast init', () => {
     const preCmd = (settings.hooks.PreToolUse[0] as any).hooks[0].command as string;
     const postCmd = (settings.hooks.PostToolUse[0] as any).hooks[0].command as string;
 
-    expect(preCmd).toBe(`'${join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')}'`);
-    expect(postCmd).toBe(`'${join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')}'`);
+    expect(preCmd).toBe(`'${join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')}'`);
+    expect(postCmd).toBe(`'${join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')}'`);
   });
 
   it('uses project config dir instead of mutating home settings when no project-level dir exists yet', () => {
@@ -362,7 +364,7 @@ describe('fbeast init', () => {
     ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
   });
 
-  it('uses cwd-relative database paths for global Claude settings across project roots', () => {
+  it('uses cwd-relative database paths for Claude .mcp.json across project roots', () => {
     const globalConfigDir = tmpDir();
     const rootA = tmpDir();
     const rootB = tmpDir();
@@ -372,13 +374,18 @@ describe('fbeast init', () => {
 
     runInit({ root: rootB, claudeDir: globalConfigDir, hooks: false, servers: ['memory'] });
 
-    const settings = JSON.parse(readFileSync(join(globalConfigDir, 'settings.json'), 'utf-8'));
-    expect(settings.mcpServers['fbeast-memory']).toEqual({
+    const configA = JSON.parse(readFileSync(join(rootA, '.mcp.json'), 'utf-8'));
+    const configB = JSON.parse(readFileSync(join(rootB, '.mcp.json'), 'utf-8'));
+    expect(configA.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
       args: ['--db', join('.fbeast', 'beast.db')],
     });
-    expect(JSON.stringify(settings.mcpServers)).not.toContain(rootA);
-    expect(JSON.stringify(settings.mcpServers)).not.toContain(rootB);
+    expect(configB.mcpServers['fbeast-memory']).toEqual({
+      command: 'fbeast-memory',
+      args: ['--db', join('.fbeast', 'beast.db')],
+    });
+    expect(JSON.stringify(configA.mcpServers)).not.toContain(rootA);
+    expect(JSON.stringify(configB.mcpServers)).not.toContain(rootB);
   });
 
   it('proxy mode writes single fbeast-proxy entry (not 7) for claude client', () => {
@@ -387,11 +394,11 @@ describe('fbeast init', () => {
 
     runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'proxy' });
 
-    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
-    const keys = Object.keys(settings.mcpServers);
+    const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
+    const keys = Object.keys(mcpConfig.mcpServers);
     expect(keys).toEqual(['fbeast-proxy']);
-    expect(settings.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join('.fbeast', 'beast.db')] });
-    expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
+    expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', join('.fbeast', 'beast.db')] });
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
   });
 
   it('proxy mode writes single fbeast-proxy entry for gemini client', () => {
@@ -408,16 +415,16 @@ describe('fbeast init', () => {
     expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
   });
 
-  it('standard mode (default) still writes 7 individual entries', () => {
+  it('standard mode (default) still writes 7 individual Claude .mcp.json entries', () => {
     const root = tmpDir();
     dirs.push(root);
 
     runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'standard' });
 
-    const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
-    expect(Object.keys(settings.mcpServers).length).toBe(7);
-    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
-    expect(settings.mcpServers['fbeast-proxy']).toBeUndefined();
+    const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
+    expect(Object.keys(mcpConfig.mcpServers).length).toBe(7);
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });
 
   it('proxy mode for codex writes only the project-scoped fbeast-proxy entry', () => {

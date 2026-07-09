@@ -30,7 +30,7 @@ fbeast mcp init --pick=memory,firewall,governor
 fbeast mcp init --mode=proxy
 ```
 
-`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate project-scoped config. For Claude and Gemini, fbeast writes `.claude/settings.json` or `.gemini/settings.json` in the current project instead of mutating your user-global settings file, preventing one project's MCP database/root from being reused in another checkout. Override with `--client=claude|gemini|codex`.
+`fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate project-scoped config. For Claude, MCP servers are written to the current project's `.mcp.json` and optional hooks/instructions to `.claude/settings.json` / `.claude/`; for Gemini, MCP servers and optional hooks are written to `.gemini/settings.json`. fbeast does not mutate your user-global Claude/Gemini settings by default, preventing one project's MCP database/root from being reused in another checkout. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
 

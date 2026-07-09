@@ -95,10 +95,15 @@ function initJsonClient(options: {
     settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
   }
 
-  // Add MCP server entries. Claude/Gemini settings.json can be global, so keep
-  // project paths cwd-relative instead of pinning the first initialized checkout
-  // into every future client session.
-  const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
+  // Add MCP server entries. Claude project-scoped MCP registrations belong in
+  // .mcp.json; Gemini uses .gemini/settings.json. Keep paths cwd-relative so a
+  // config file never pins one checkout's absolute database path into another.
+  const mcpConfigPath = client === 'claude' ? join(root, '.mcp.json') : settingsPath;
+  let mcpConfig: Record<string, unknown> = client === 'claude' ? {} : settings;
+  if (client === 'claude' && existsSync(mcpConfigPath)) {
+    mcpConfig = parseJsonObjectWithComments(readFileSync(mcpConfigPath, 'utf-8'));
+  }
+  const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = join('.fbeast', 'beast.db');
   const proxyArgs = ['--db', dbPath];
   if (mode === 'proxy') {
@@ -108,7 +113,7 @@ function initJsonClient(options: {
       mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
     }
   }
-  settings['mcpServers'] = mcpServers;
+  mcpConfig['mcpServers'] = mcpServers;
 
   // Hooks
   if (hooks) {
@@ -117,20 +122,23 @@ function initJsonClient(options: {
       config.hooks = true;
       config.save();
     } else {
-      // Gemini: write shell scripts, reference them in BeforeTool/AfterTool
-      const scripts = writeHookScripts(root, 'gemini');
-      settings['hooks'] = mergeGeminiHooks(settings['hooks'], scripts);
+      // Gemini: write shell scripts, reference project-relative paths in BeforeTool/AfterTool
+      writeHookScripts(root, 'gemini');
+      settings['hooks'] = mergeGeminiHooks(settings['hooks'], projectRelativeHookScripts('gemini'));
       config.hooks = true;
       config.save();
     }
   }
 
+  if (client === 'claude') {
+    writeJsonFileAtomic(mcpConfigPath, mcpConfig);
+  }
   writeJsonFileAtomic(settingsPath, settings);
 
   printLine(`fbeast initialized in ${root}`);
   printLine(`  Config:     ${config.configPath}`);
   printLine(`  Database:   ${config.dbPath}`);
-  printLine(`  MCP config: ${settingsPath}`);
+  printLine(`  MCP config: ${mcpConfigPath}`);
   printLine(`  Servers:    ${mode === 'proxy' ? 'fbeast-proxy (proxy mode)' : servers.join(', ')}`);
   if (hooks) printLine(`  Hooks:      enabled (${client})`);
 }
@@ -247,6 +255,18 @@ function tomlString(value: string): string {
 
 // ─── Hook config builders ─────────────────────────────────────────────────────
 
+function projectRelativeHookScripts(client: 'claude' | 'gemini'): { preTool: string; postTool: string } {
+  return client === 'claude'
+    ? {
+        preTool: join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh'),
+        postTool: join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh'),
+      }
+    : {
+        preTool: join('.fbeast', 'hooks', 'gemini-before-tool.sh'),
+        postTool: join('.fbeast', 'hooks', 'gemini-after-tool.sh'),
+      };
+}
+
 /**
  * Claude Code: PreToolUse / PostToolUse with generated shell scripts that read JSON from stdin.
  */
@@ -254,7 +274,8 @@ function mergeClaudeHooks(
   existing: unknown,
   root: string,
 ): Record<string, unknown[]> {
-  const scripts = writeHookScripts(root, 'claude');
+  writeHookScripts(root, 'claude');
+  const scripts = projectRelativeHookScripts('claude');
   const fbeastHooks: Record<string, unknown[]> = {
     PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] }],
     PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] }],
