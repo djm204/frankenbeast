@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { ChatShell } from '../../src/components/chat-shell.js';
+import { ChatShell, buildInitAction } from '../../src/components/chat-shell.js';
 import { useDashboardStore } from '../../src/stores/dashboard-store.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
@@ -436,6 +436,30 @@ afterEach(() => {
     },
     attempts: [],
     events: [],
+  });
+});
+
+describe('buildInitAction', () => {
+  it('reads chunk-plan design doc paths from the nested wizard workflow config', () => {
+    expect(buildInitAction('chunk-plan', {
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md' },
+      outputDir: 'tasks/chunks',
+      executionMode: 'process',
+    }, 'sess-1')).toMatchObject({
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/design.md',
+      chatSessionId: 'sess-1',
+    });
+  });
+
+  it('prefers normalized chunk-plan design doc paths when present', () => {
+    expect(buildInitAction('chunk-plan', {
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/from-workflow.md' },
+      designDocPath: 'docs/from-normalized.md',
+    }, undefined)).toMatchObject({
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/from-normalized.md',
+    });
   });
 });
 
