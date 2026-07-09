@@ -65,6 +65,10 @@ export class CritiquePipeline {
         result = await evaluator.evaluate(input);
       } catch (error) {
         results.push(createEvaluatorExceptionResult(evaluator, error));
+        if (evaluator.name === SAFETY_EVALUATOR_NAME) {
+          shortCircuited = true;
+          break;
+        }
         continue;
       }
 

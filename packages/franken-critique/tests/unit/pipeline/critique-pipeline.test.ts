@@ -209,6 +209,30 @@ describe('CritiquePipeline', () => {
     expect(later.evaluate).toHaveBeenCalledTimes(1);
   });
 
+  it('short-circuits after converting a safety evaluator exception into a structured failure', async () => {
+    const safety = createThrowingEvaluator('safety', 'deterministic', new Error('guardrails unavailable'));
+    const other = createMockEvaluator('other', 'heuristic');
+
+    const pipeline = new CritiquePipeline([safety, other]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.shortCircuited).toBe(true);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]).toMatchObject({
+      evaluatorName: 'safety',
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        {
+          severity: 'critical',
+          message: expect.stringContaining('guardrails unavailable'),
+        },
+      ],
+    });
+    expect(other.evaluate).not.toHaveBeenCalled();
+  });
+
   it('calculates average score across all evaluators', async () => {
     const a = createMockEvaluator('a', 'deterministic', { score: 0.8 });
     const b = createMockEvaluator('b', 'heuristic', { score: 0.6 });
