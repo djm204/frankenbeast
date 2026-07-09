@@ -72,6 +72,12 @@ describe('ScalabilityEvaluator', () => {
     ['runtime config after type declaration', 'interface Listener { host: string }\nconst cfg = { port: 8080 };'],
     ['parenthesized runtime config', 'const cfg = ({ host: "x", port: 8080, secure: true });'],
     ['nested runtime config object', 'const cfg = { host: "x", server: { port: 8080 } };'],
+    ['lowercase compound port declaration', 'const serverport = 8080; const apiport = 8443;'],
+    ['plural port container object map', 'const cfg = { ports: { http: 8080, https: 8443 } };'],
+    ['plural port container array after ignored string', 'const cfg = { ports: ["8080", 8443] };'],
+    ['typed declaration with generic comma annotation', 'const port: Brand<number, "Port"> = 8080;'],
+    ['logical property assignment default', 'config.port ??= 8080; config.serverPort ||= 8443;'],
+    ['top-level quoted port key fragment', '"server-port": 8080'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
@@ -153,6 +159,7 @@ type BindHost = (host: string, port: 8080) => void;
 class Server { bind(host: string, port: 8080) {} }
 const tupleArgs: [host: string, port: 8080] = value;
 const tupleLiteralArgs: [protocol: 'http', port: 8080] = value;
+const tupleInsideGeneric: Array<[host: string, port: 8080]> = [];
 const inlineUnion: Base | { port: 8080 } = makeCfg();
 const inlineIntersection = {} as Base & { port: 8080 };
 type ComplexConfig<T extends Record<string, unknown>> = { port: 8080 };
@@ -171,7 +178,12 @@ const AnonymousPortConfig = class {
 }
 class SemicolonlessPortConfig {
   port: 8080
-}`;
+}
+interface LongGeneratedListenerConfig<T extends Record<string, unknown> = Record<string, unknown>> extends BaseGeneratedListenerConfigWithEnoughCharactersToPushTheOpeningBracePastTheOldShortContextWindow, OtherGeneratedListenerConfigWithEnoughCharactersToPushTheOpeningBracePastTheOldShortContextWindow {
+  port: 3000;
+}
+type SplitConfig =
+  { port: 8080 };`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
