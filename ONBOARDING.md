@@ -12,23 +12,22 @@ Use this checklist for a first local checkout or when rebuilding a development e
 - [ ] Install Node.js `>=22.13.0 <23 || >=24.0.0 <26`.
   - The pinned local default is recorded in `.nvmrc`.
   - `engine-strict=true` means unsupported Node versions fail during npm operations.
-- [ ] Verify npm is available, then use Corepack to activate the repository-pinned npm version:
+- [ ] Verify npm is available. If you need to install Corepack before cloning, activate the literal npm version pinned by this repository:
 
   ```bash
   node --version
   npm --version
   if ! command -v corepack >/dev/null 2>&1; then npm install -g corepack; fi
   corepack enable npm
-  corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
-  npm run check:package-manager
+  corepack prepare npm@11.5.1 --activate
   ```
 
 - [ ] Install Docker if you plan to run optional local infrastructure with `docker compose`.
   - The compose stack is only needed for ChromaDB, Grafana, and Tempo.
   - Unit and integration tests do not require the full compose stack.
-- [ ] Install or configure at least one provider path if you plan to run the CLI, chat server, or dashboard chat.
-  - API-backed providers read `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`.
-  - CLI-backed paths depend on the corresponding local CLI being installed and logged in.
+- [ ] Install and log in to at least one supported CLI provider if you plan to run the CLI, chat server, or dashboard chat locally.
+  - The default chat path resolves CLI providers such as `claude`, `codex`, or `gemini` from the local machine.
+  - API keys such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` are for API-backed provider configurations and should be exported into the runtime environment when that path is intentionally configured.
 - [ ] Choose where secrets should live before running `frankenbeast init`.
   - Default: local encrypted file at `.fbeast/secrets.enc`.
   - Alternatives: OS keychain, 1Password, or Bitwarden via `network.secureBackend` in `.fbeast/config.json`.
@@ -42,9 +41,11 @@ Use this checklist for a first local checkout or when rebuilding a development e
   cd frankenbeast
   ```
 
-- [ ] Install dependencies with the pinned npm version:
+- [ ] Re-activate the repository-pinned npm version from inside the checkout, then install dependencies:
 
   ```bash
+  corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+  npm run check:package-manager
   npm install
   ```
 
@@ -57,10 +58,9 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
   Common local values:
 
-  - Provider keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`.
   - Semantic memory endpoint: `CHROMA_URL=http://localhost:8000` for the local compose stack.
-  - Local encrypted secrets in headless runtime paths: `FRANKENBEAST_PASSPHRASE`.
   - Dashboard/Beast controls: `FRANKENBEAST_BEAST_OPERATOR_TOKEN`, kept server-side only.
+  - Provider API keys and the local-encrypted `FRANKENBEAST_PASSPHRASE` must be present in the process environment for commands that read `process.env` directly. Export them in the shell or launch wrapper that starts `frankenbeast`, `chat-server`, or CI jobs; do not assume writing them to `.env` alone makes every runtime path load them.
 
 - [ ] Build the workspace packages:
 
@@ -129,10 +129,14 @@ Use this checklist for a first local checkout or when rebuilding a development e
 
 ### Beast controls in the dashboard
 
-- [ ] Run `frankenbeast init` before enabling Beast controls so the backend has module settings, a secret backend, and `network.operatorTokenRef`:
+- [ ] Run init against the same project root the backend will use before enabling Beast controls. If you have not run `npm run local:link`, use the built CLI entrypoint from this checkout:
 
   ```bash
-  frankenbeast init
+  # Same-repo dashboard setup
+  node packages/franken-orchestrator/dist/cli/run.js init
+
+  # MCP-mode dashboard for another governed project
+  node packages/franken-orchestrator/dist/cli/run.js init --base-dir /path/to/your-project
   ```
 
 - [ ] Keep the operator token server-side.
@@ -174,12 +178,12 @@ Use this checklist for a first local checkout or when rebuilding a development e
   Supported values are `local-encrypted`, `os-keychain`, `1password`, and `bitwarden`.
 
 - [ ] For the default `local-encrypted` backend:
-  - Run `frankenbeast init` interactively to create the encrypted vault.
+  - Run the init command from the Beast controls section interactively to create the encrypted vault.
   - In CI or other headless runtime paths, export only the passphrase variable before commands that must resolve stored secrets:
 
     ```bash
     export FRANKENBEAST_PASSPHRASE=<passphrase>
-    frankenbeast run --config .fbeast/config.json
+    node packages/franken-orchestrator/dist/cli/run.js run --config .fbeast/config.json
     ```
 
 - [ ] For `os-keychain`, set the backend in `.fbeast/config.json`, then run `frankenbeast init`; no passphrase prompt is required.
