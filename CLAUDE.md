@@ -139,4 +139,5 @@ Common patterns that MUST be ignored:
 
 - Create new `.mdc` files in `.cursor/rules/` for project-specific rules
 - Edit existing files directly; changes take effect immediately
-- Re-run to update: `npx @djm204/agent-skills javascript-expert qa-engineering testing web-backend ml-ai`
+- The checked-in root assistant rules are maintained from this repository. When workflow guidance changes, update the supported source in [`djm204/agent-workflow-skills`](https://github.com/djm204/agent-workflow-skills), then copy the relevant Claude/Cursor guidance into `.cursor/rules/` with a focused reviewable diff.
+- Do not regenerate the root `.cursor/rules/*.mdc` files with the legacy `@djm204/agent-skills` package; package-level `project-outline.md` cleanup is tracked separately from this root assistant-guide maintenance path.
