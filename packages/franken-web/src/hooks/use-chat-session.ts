@@ -474,6 +474,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setSocketGeneration((current) => current + 1);
       })
       .catch((error) => {
+        if (!sessionStillCurrent(capturedSessionId)) {
+          return;
+        }
         setStatus('error');
         setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
         addErrorBanner(makeBanner(
