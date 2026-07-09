@@ -111,11 +111,21 @@ Supported mode values:
 - `secure`
 - `insecure`
 
-Current secure backend preference order:
+Current default secure backend: `local-encrypted`.
 
-1. `1Password`
-2. `Bitwarden`
-3. OS secure store
-4. local encrypted store
+Supported `network.secureBackend` values:
 
-The local encrypted store is allowed, but it is not the optimal solution.
+- `1password`
+- `bitwarden`
+- `os-keychain`
+- `local-encrypted`
+
+`frankenbeast network` and `frankenbeast init` use the configured `network.secureBackend` value. If the key is unset, the config schema defaults to `local-encrypted`, and interactive init may prompt for `FRANKENBEAST_PASSPHRASE` to create or open the local encrypted vault.
+
+For production operators, prefer a managed secret backend when available, such as `1password`, `bitwarden`, or `os-keychain`. Select one explicitly in project config instead of relying on automatic backend discovery:
+
+```bash
+node packages/franken-orchestrator/dist/cli/run.js network config --set network.secureBackend=1password
+```
+
+Use `local-encrypted` for offline, CI/CD, or minimal deployments where a managed secret backend is not available.
