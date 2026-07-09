@@ -24,6 +24,24 @@ function escapePrometheusLabelValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"')
 }
 
+function assertValidTokenDelta(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `PrometheusAdapter: ${label} must be a non-negative safe integer, received ${value}`,
+    )
+  }
+}
+
+function safeAddTokenCounter(current: number, delta: number, label: string): number {
+  const next = current + delta
+  if (!Number.isSafeInteger(next)) {
+    throw new RangeError(
+      `PrometheusAdapter: ${label} total ${next} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+    )
+  }
+  return next
+}
+
 /**
  * Write-only ExportAdapter that accumulates token, span, and (optionally)
  * cost counters from flushed traces and exposes them in Prometheus text
@@ -51,11 +69,48 @@ export class PrometheusAdapter implements ExportAdapter {
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
     const flushedSpanIds = this.flushedSpanIdsByTrace.get(trace.id)
+    const flushableSpans = trace.spans.filter(
+      span => !(flushedSpanIds?.has(span.id) ?? false) && span.status !== 'active',
+    )
+
+    // Validate token metadata before mutating any counters. A malformed span in
+    // a batch must not partially advance span/token/cost counters or poison the
+    // repeated-flush dedupe cache.
+    const pendingTokenCounters = new Map<string, TokenCounts>()
+    for (const [model, counts] of this.tokenCounters) {
+      pendingTokenCounters.set(model, { ...counts })
+    }
+
+    for (const span of flushableSpans) {
+      const model = span.metadata['model']
+      if (typeof model !== 'string') continue
+
+      const promptTokens = span.metadata['promptTokens']
+      const completionTokens = span.metadata['completionTokens']
+      if (typeof promptTokens === 'number') {
+        assertValidTokenDelta(promptTokens, 'promptTokens')
+      }
+      if (typeof completionTokens === 'number') {
+        assertValidTokenDelta(completionTokens, 'completionTokens')
+      }
+      if (typeof promptTokens !== 'number' && typeof completionTokens !== 'number') continue
+
+      const prompt = typeof promptTokens === 'number' ? promptTokens : 0
+      const completion = typeof completionTokens === 'number' ? completionTokens : 0
+      const existing = pendingTokenCounters.get(model) ?? { prompt: 0, completion: 0 }
+      const nextPrompt = safeAddTokenCounter(existing.prompt, prompt, `${model} prompt`)
+      const nextCompletion = safeAddTokenCounter(
+        existing.completion,
+        completion,
+        `${model} completion`,
+      )
+      safeAddTokenCounter(nextPrompt, nextCompletion, `${model} token`)
+      pendingTokenCounters.set(model, { prompt: nextPrompt, completion: nextCompletion })
+    }
+
     const newlyFlushedSpanIds: string[] = []
 
-    for (const span of trace.spans) {
-      if (flushedSpanIds?.has(span.id) || span.status === 'active') continue
-
+    for (const span of flushableSpans) {
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)
 
@@ -74,8 +129,8 @@ export class PrometheusAdapter implements ExportAdapter {
 
         const existing = this.tokenCounters.get(model) ?? { prompt: 0, completion: 0 }
         this.tokenCounters.set(model, {
-          prompt: existing.prompt + prompt,
-          completion: existing.completion + completion,
+          prompt: safeAddTokenCounter(existing.prompt, prompt, `${model} prompt`),
+          completion: safeAddTokenCounter(existing.completion, completion, `${model} completion`),
         })
 
         // Cost counter — only when pricing table covers this model
