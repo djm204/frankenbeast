@@ -500,8 +500,9 @@ if (outcome.decision === 'APPROVE' && outcome.token) {
   store.revoke(outcome.token.tokenId);
 }
 
+const signingSecret = process.env.FRANKEN_GOVERNOR_SIGNING_SECRET;
 const app = createGovernorApp({
-  signingSecret: process.env.FRANKEN_GOVERNOR_SIGNING_SECRET,
+  ...(signingSecret ? { signingSecret } : {}),
   sessionTokenStore: store,
 });
 

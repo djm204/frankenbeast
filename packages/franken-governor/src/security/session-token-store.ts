@@ -41,7 +41,6 @@ export class SessionTokenStore {
 
     if (this.isExpired(token)) {
       this.tokens.delete(tokenId);
-      this.persist();
       return undefined;
     }
 
@@ -68,7 +67,10 @@ export class SessionTokenStore {
       raw = readFileSync(this.persistenceFile, 'utf8');
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return;
+      if (code === 'ENOENT') {
+        this.tokens.clear();
+        return;
+      }
       throw err;
     }
 
@@ -91,8 +93,7 @@ export class SessionTokenStore {
       }
     }
 
-    // Drop expired tokens as soon as a new process observes them.
-    this.persist();
+    // Expired entries are ignored on read and pruned on the next write.
   }
 
   private deserialize(value: unknown): SessionToken | null {

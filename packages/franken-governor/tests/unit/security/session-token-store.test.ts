@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -135,7 +135,25 @@ describe('SessionTokenStore', () => {
     }
   });
 
-  it('removes persisted tokens after expiry', () => {
+  it('clears cached tokens when the backing file disappears', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const validatorStore = new SessionTokenStore({ persistenceFile });
+      const issuingStore = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+
+      issuingStore.store(token);
+      expect(validatorStore.isValid(token.tokenId)).toBe(true);
+
+      unlinkSync(persistenceFile);
+      expect(validatorStore.isValid(token.tokenId)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores expired tokens on read and prunes them on the next write', () => {
     const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
     const persistenceFile = join(dir, 'tokens.json');
     try {
@@ -146,8 +164,15 @@ describe('SessionTokenStore', () => {
       vi.advanceTimersByTime(2000);
 
       expect(store.get(token.tokenId)).toBeUndefined();
+      const beforeWrite = JSON.parse(readFileSync(persistenceFile, 'utf8'));
+      expect(beforeWrite).toHaveLength(1);
+
+      const fresh = makeToken(10_000);
+      store.store(fresh);
+
       const persisted = JSON.parse(readFileSync(persistenceFile, 'utf8'));
-      expect(persisted).toEqual([]);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].tokenId).toBe(fresh.tokenId);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
