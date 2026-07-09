@@ -167,6 +167,19 @@ describe('dashboard static server', () => {
     expect(encodedTokenRequest.status).toBe(200);
     const [secondTargetUrl] = fetchMock.mock.calls[1] as [RequestInfo, RequestInit];
     expect(String(secondTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram');
+
+    const encodedSeparatorRequest = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${botToken}%2Fextra`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(encodedSeparatorRequest.status).toBe(200);
+    const [thirdTargetUrl] = fetchMock.mock.calls[2] as [RequestInfo, RequestInit];
+    expect(String(thirdTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram%2Fextra');
   });
 
   it('forwards non-GET request bodies through the HTTP static proxy', async () => {

@@ -116,7 +116,7 @@ function sanitizeWebhookPathForProxy(pathname: string): string {
   // Rewrite potentially sensitive Telegram webhook paths that accidentally include the bot token
   // so we never forward that token to internal services.
   return pathname.replace(
-    /(\/webhooks\/telegram)\/\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=$|\/)/i,
+    /(\/webhooks\/telegram)\/\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=$|\/|%2F)/i,
     '$1',
   );
 }
