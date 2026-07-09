@@ -39,7 +39,7 @@ describe('fbeast init', () => {
     expect(config.root).toBe(root);
   });
 
-  it('creates .claude dir and drops instructions file', () => {
+  it('creates .claude dir and drops conditional instructions file', () => {
     const root = tmpDir();
     dirs.push(root);
 
@@ -49,6 +49,9 @@ describe('fbeast init', () => {
     expect(existsSync(instrPath)).toBe(true);
     const content = readFileSync(instrPath, 'utf-8');
     expect(content).toContain('fbeast_memory_frontload');
+    expect(content).toContain('When `fbeast_*` MCP tools are available');
+    expect(content).toContain('If the tools are not available in your current tool schema');
+    expect(content).not.toContain('You have access to fbeast MCP tools');
   });
 
   it('writes MCP server config to settings.json', () => {
@@ -221,7 +224,7 @@ describe('fbeast init', () => {
     expect(beforeHooks.some((e: any) => (e.hooks?.[0]?.command as string)?.includes('fbeast'))).toBe(true);
   });
 
-  it('writes AGENTS.md with fbeast loop instructions when --client=codex', () => {
+  it('writes AGENTS.md with conditional fbeast loop instructions when --client=codex', () => {
     const root = tmpDir();
     dirs.push(root);
     const mockSpawn = () => ({ status: 0 });
@@ -233,6 +236,9 @@ describe('fbeast init', () => {
     const content = readFileSync(agentsPath, 'utf-8');
     expect(content).toContain('fbeast_memory_frontload');
     expect(content).toContain('fbeast_governor_check');
+    expect(content).toContain('When `fbeast_*` MCP tools are available');
+    expect(content).toContain('If the tools are not available in your current tool schema');
+    expect(content).not.toContain('You have access to fbeast MCP tools');
     expect(content).toContain('<!-- fbeast-start -->');
     expect(content).toContain('<!-- fbeast-end -->');
   });
