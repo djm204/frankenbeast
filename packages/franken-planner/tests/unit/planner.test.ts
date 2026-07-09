@@ -206,6 +206,33 @@ describe('Planner — self-correction loop', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('does not replay completed predecessor tasks during self-correction retries', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const executedTaskIds: TaskId[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      executedTaskIds.push(task.id);
+      if (task.id === createTaskId('t-2') && !executedTaskIds.includes(createTaskId('fix-t-2-attempt-1'))) {
+        return Promise.resolve(failure('t-2', 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(executedTaskIds).toEqual([
+      createTaskId('t-1'),
+      createTaskId('t-2'),
+      createTaskId('fix-t-2-attempt-1'),
+      createTaskId('t-2'),
+    ]);
+  });
+
   it('returns failed when max recovery attempts exceeded', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
@@ -220,6 +247,29 @@ describe('Planner — self-correction loop', () => {
     const result = await planner.plan('do something');
 
     expect(result.status).toBe('failed');
+  });
+
+  it('preserves completed predecessors in terminal failed recovery results', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('t-2')) return Promise.resolve(failure('t-2', 'disk full'));
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory, maxRecoveryAttempts: 1 });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('t-1'),
+      createTaskId('fix-t-2-attempt-1'),
+      createTaskId('t-2'),
+    ]);
   });
 
   it('tracks recovery attempts independently for each failed task', async () => {

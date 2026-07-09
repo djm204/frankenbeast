@@ -16,7 +16,7 @@ export class RecursivePlanner implements PlanningStrategy {
   constructor(private readonly maxDepth = 10) {}
 
   execute(graph: PlanGraph, context: PlanContext): Promise<PlanResult> {
-    return this._exec(graph, context, 0, new Set());
+    return this._exec(graph, context, 0, context.completedTaskIds ?? new Set());
   }
 
   private async _exec(
@@ -33,6 +33,10 @@ export class RecursivePlanner implements PlanningStrategy {
     const allResults: TaskResult[] = [];
 
     for (const task of tasks) {
+      if (completedTaskIds.has(task.id)) {
+        continue;
+      }
+
       const result = await context.executor(task);
 
       if (result.status === 'failure') {

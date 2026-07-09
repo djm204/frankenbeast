@@ -85,6 +85,24 @@ describe('LinearPlanner — happy path', () => {
     expect(result.taskResults).toHaveLength(2);
   });
 
+  it('skips tasks already completed by an earlier recovery iteration', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const executor = vi.fn().mockImplementation((task: Task) => Promise.resolve(success(task.id)));
+
+    const result = await new LinearPlanner().execute(graph, {
+      executor,
+      completedTaskIds: new Set([createTaskId('t-1')]),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledOnce();
+    expect(executor).toHaveBeenCalledWith(expect.objectContaining({ id: createTaskId('t-2') }));
+    if (result.status !== 'completed') throw new Error('unexpected status');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([createTaskId('t-2')]);
+  });
+
   it('executes expanded sub-tasks before continuing the linear plan', async () => {
     const parent = makeTask('parent');
     const sibling = makeTask('sibling');
@@ -177,7 +195,6 @@ describe('LinearPlanner — failure handling', () => {
     expect(result.failedTaskId).toBe(createTaskId('parent'));
     expect(result.error.message).toBe('sub exploded');
     expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
-      createTaskId('parent'),
       createTaskId('sub'),
     ]);
   });
