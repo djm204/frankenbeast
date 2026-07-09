@@ -571,6 +571,10 @@ const port: Brand<
 
   it('covers follow-up Codex plural and markdown fence cases', async () => {
     const evaluator = new ScalabilityEvaluator();
+    const cleanResult = await evaluator.evaluate(createInput('const cfg = { transports_by_mode: { bus: 8080 }, supports_by_mode: { retries: 8443 } };'));
+
+    expect(cleanResult.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+
     const content = `Here is the problematic config:
 \`\`\`ts
 const markdownPort = 8080;
