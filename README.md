@@ -305,7 +305,7 @@ Historical docs and ADRs may still mention removed packages such as `frankenfire
 ### Core Principles
 
 - **Determinism over probabilism.** Regex-based injection scanning, schema validation, HMAC verification — these do not hallucinate.
-- **LLM-agnostic.** The firewall is a model-agnostic proxy. Adding a new provider means implementing one `IAdapter` interface.
+- **LLM-agnostic.** Provider extension is split by surface: CLI execution/chat providers implement `ICliProvider` in `@franken/orchestrator`, while API-backed clients live in the provider registry and config loading paths.
 - **Immutable safety constraints.** Guardrails live in the firewall pipeline, not in the LLM prompt. They cannot be compressed or forgotten.
 - **Human-in-the-loop as a first-class primitive.** High-stakes actions require cryptographically signed human approval.
 - **Full auditability.** Every decision is traced, costed, and exportable.
@@ -852,7 +852,7 @@ frankenbeast/
 - [Quickstart Guide](docs/guides/quickstart.md) — get running in 7 steps
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) — start the WebSocket chat server and dashboard locally
 - [Run the Network Operator](docs/guides/run-network-operator.md) — start Frankenbeast request-serving services through `frankenbeast network`
-- [Add an LLM Provider](docs/guides/add-llm-provider.md) — implement `IAdapter` in 4 steps
+- [Add an LLM Provider](docs/guides/add-llm-provider.md) — add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry
 - [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
 - [ADRs](docs/adr/) — architectural decisions and rationale
