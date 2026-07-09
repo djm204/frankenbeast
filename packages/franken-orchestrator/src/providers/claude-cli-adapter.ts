@@ -12,6 +12,13 @@ import type {
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
+
+function terminateRunningProcess(proc: ChildProcess): void {
+  if (proc.exitCode === null && proc.signalCode === null) {
+    proc.kill();
+  }
+}
 
 export interface ClaudeCliOptions {
   binaryPath?: string;
@@ -97,7 +104,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   buildArgs(request: LlmRequest): string[] {
-    const args = ['-p', '--output-format', 'stream-json'];
+    const args = ['-p', '--output-format', 'stream-json', '--verbose'];
     if (request.systemPrompt) {
       args.push('--append-system-prompt', request.systemPrompt);
     }
@@ -138,97 +145,211 @@ export class ClaudeCliAdapter implements ILlmProvider {
       null;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let emittedText = false;
+    let emittedToolUse = false;
+    let streamCompleted = false;
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-
-      const type = parsed['type'] as string;
-
-      if (type === 'content_block_start') {
-        const block = parsed['content_block'] as Record<string, unknown>;
-        if (block?.['type'] === 'tool_use') {
-          currentToolUse = {
-            id: block['id'] as string,
-            name: block['name'] as string,
-            inputJson: '',
-          };
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
         }
-      } else if (type === 'content_block_delta') {
-        const delta = parsed['delta'] as Record<string, unknown>;
-        if (delta?.['type'] === 'text_delta') {
-          yield { type: 'text', content: delta['text'] as string };
-        } else if (
-          delta?.['type'] === 'input_json_delta' &&
-          currentToolUse
-        ) {
-          currentToolUse.inputJson += delta['partial_json'] as string;
-        }
-      } else if (type === 'content_block_stop') {
-        if (currentToolUse) {
-          let input: unknown = {};
-          try {
-            input = JSON.parse(currentToolUse.inputJson);
-          } catch {
-            /* empty input */
+
+        const type = parsed['type'] as string;
+
+        if (type === 'result') {
+          const resultText = typeof parsed['result'] === 'string' ? parsed['result'] : '';
+          const errorText =
+            typeof parsed['error'] === 'string'
+              ? parsed['error']
+              : ((parsed['error'] as Record<string, unknown> | undefined)?.['message'] as string | undefined) ?? '';
+          const errors = Array.isArray(parsed['errors']) ? parsed['errors'].filter((value): value is string => typeof value === 'string') : [];
+          const subtype = parsed['subtype'] as string | undefined;
+          const isErrorResult = parsed['is_error'] === true || subtype === 'error' || subtype?.startsWith('error_') === true;
+          if (isErrorResult) {
+            const message = resultText.trim() || errorText.trim() || errors.join('\n').trim() || 'claude returned an error result frame';
+            yield {
+              type: 'error',
+              error: message,
+              retryable: message.includes('rate') || message.includes('overloaded'),
+            };
+            return;
           }
+          if (resultText.length > 0 && !emittedText) {
+            yield { type: 'text', content: resultText };
+            emittedText = true;
+          }
+          const usage = parsed['usage'] as Record<string, number> | undefined;
+          totalInputTokens =
+            usage?.['input_tokens'] ??
+            usage?.['inputTokens'] ??
+            (parsed['total_input_tokens'] as number | undefined) ??
+            totalInputTokens;
+          totalOutputTokens =
+            usage?.['output_tokens'] ??
+            usage?.['outputTokens'] ??
+            (parsed['total_output_tokens'] as number | undefined) ??
+            totalOutputTokens;
+          if (!emittedText && !emittedToolUse) {
+            yield {
+              type: 'error',
+              error: 'claude result frame contained no text output',
+              retryable: false,
+            };
+            return;
+          }
+          streamCompleted = true;
           yield {
-            type: 'tool_use',
-            id: currentToolUse.id,
-            name: currentToolUse.name,
-            input,
+            type: 'done',
+            usage: {
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              totalTokens: totalInputTokens + totalOutputTokens,
+            },
           };
-          currentToolUse = null;
+          return;
+        } else if (type === 'content_block_start') {
+          const block = parsed['content_block'] as Record<string, unknown>;
+          if (block?.['type'] === 'tool_use') {
+            currentToolUse = {
+              id: block['id'] as string,
+              name: block['name'] as string,
+              inputJson: '',
+            };
+          }
+        } else if (type === 'content_block_delta') {
+          const delta = parsed['delta'] as Record<string, unknown>;
+          if (delta?.['type'] === 'text_delta') {
+            yield { type: 'text', content: delta['text'] as string };
+            emittedText = true;
+          } else if (
+            delta?.['type'] === 'input_json_delta' &&
+            currentToolUse
+          ) {
+            currentToolUse.inputJson += delta['partial_json'] as string;
+          }
+        } else if (type === 'content_block_stop') {
+          if (currentToolUse) {
+            let input: unknown = {};
+            try {
+              input = JSON.parse(currentToolUse.inputJson);
+            } catch {
+              /* empty input */
+            }
+            yield {
+              type: 'tool_use',
+              id: currentToolUse.id,
+              name: currentToolUse.name,
+              input,
+            };
+            emittedToolUse = true;
+            currentToolUse = null;
+          }
+        } else if (type === 'message_delta') {
+          const usage = parsed['usage'] as
+            | Record<string, number>
+            | undefined;
+          if (usage) {
+            totalOutputTokens = usage['output_tokens'] ?? totalOutputTokens;
+          }
+        } else if (type === 'message_start') {
+          const message = parsed['message'] as Record<string, unknown> | undefined;
+          const usage = message?.['usage'] as Record<string, number> | undefined;
+          if (usage) {
+            totalInputTokens = usage['input_tokens'] ?? 0;
+          }
+        } else if (type === 'assistant') {
+          const message = parsed['message'] as Record<string, unknown> | undefined;
+          const usage = message?.['usage'] as Record<string, number> | undefined;
+          if (usage) {
+            totalInputTokens = usage['input_tokens'] ?? usage['inputTokens'] ?? totalInputTokens;
+            totalOutputTokens = usage['output_tokens'] ?? usage['outputTokens'] ?? totalOutputTokens;
+          }
+          const content = (message?.['content'] ?? parsed['content']) as unknown;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (!block || typeof block !== 'object') continue;
+              const record = block as Record<string, unknown>;
+              if (record['type'] === 'text' && typeof record['text'] === 'string') {
+                yield { type: 'text', content: record['text'] };
+                emittedText = true;
+              } else if (record['type'] === 'tool_use') {
+                yield {
+                  type: 'tool_use',
+                  id: (record['id'] as string) ?? crypto.randomUUID(),
+                  name: record['name'] as string,
+                  input: record['input'] ?? {},
+                };
+                emittedToolUse = true;
+              }
+            }
+          } else {
+            const parts: string[] = [];
+            tryExtractTextFromNode(content ?? message ?? parsed, parts);
+            const text = parts.join('');
+            if (text.length > 0) {
+              yield { type: 'text', content: text };
+              emittedText = true;
+            }
+          }
+        } else if (type === 'user') {
+          continue;
+        } else if (type === 'message_stop') {
+          if (!emittedText && !emittedToolUse) {
+            yield {
+              type: 'error',
+              error: 'claude stream completed without parseable text',
+              retryable: true,
+            };
+            return;
+          }
+          streamCompleted = true;
+          yield {
+            type: 'done',
+            usage: {
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              totalTokens: totalInputTokens + totalOutputTokens,
+            },
+          };
+          return;
+        } else if (type === 'error') {
+          const error = parsed['error'] as Record<string, unknown> | undefined;
+          const message =
+            (error?.['message'] as string) ?? 'Unknown error';
+          const retryable =
+            message.includes('rate') || message.includes('overloaded');
+          yield { type: 'error', error: message, retryable };
+          return;
         }
-      } else if (type === 'message_delta') {
-        const usage = parsed['usage'] as
-          | Record<string, number>
-          | undefined;
-        if (usage) {
-          totalOutputTokens = usage['output_tokens'] ?? totalOutputTokens;
-        }
-      } else if (type === 'message_start') {
-        const message = parsed['message'] as Record<string, unknown> | undefined;
-        const usage = message?.['usage'] as Record<string, number> | undefined;
-        if (usage) {
-          totalInputTokens = usage['input_tokens'] ?? 0;
-        }
-      } else if (type === 'message_stop') {
-        yield {
-          type: 'done',
-          usage: {
-            inputTokens: totalInputTokens,
-            outputTokens: totalOutputTokens,
-            totalTokens: totalInputTokens + totalOutputTokens,
-          },
-        };
-        return;
-      } else if (type === 'error') {
-        const error = parsed['error'] as Record<string, unknown> | undefined;
-        const message =
-          (error?.['message'] as string) ?? 'Unknown error';
-        const retryable =
-          message.includes('rate') || message.includes('overloaded');
-        yield { type: 'error', error: message, retryable };
-        return;
       }
-    }
 
-    // If process exited without message_stop, check exit code
-    const exitCode = await new Promise<number | null>((resolve) => {
-      proc.on('close', resolve);
-    });
-    if (exitCode !== 0) {
-      yield {
-        type: 'error',
-        error: `claude process exited with code ${exitCode}`,
-        retryable: false,
-      };
+      // If process exited without message_stop, check exit code
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      if (exitCode !== 0) {
+        yield {
+          type: 'error',
+          error: `claude process exited with code ${exitCode}`,
+          retryable: false,
+        };
+      } else if (!emittedText) {
+        yield {
+          type: 'error',
+          error: 'claude process exited without producing a result frame or text output',
+          retryable: false,
+        };
+      }
+    } finally {
+      rl.close();
+      if (!streamCompleted) {
+        terminateRunningProcess(proc);
+      }
     }
   }
 }

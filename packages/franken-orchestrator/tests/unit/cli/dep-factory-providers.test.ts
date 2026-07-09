@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
-import { OrchestratorConfigSchema } from '../../../src/config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../../../src/config/orchestrator-config.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 
 // ── Mock heavy dependencies to isolate provider wiring ──
@@ -255,6 +255,32 @@ describe('dep-factory provider wiring', () => {
     mockBridgeReplayManifest.length = 0;
   });
 
+  it('reports session artifact cleanup failures instead of swallowing them', async () => {
+    const { removeSessionArtifactIfPresent } = await import('../../../src/cli/dep-factory.js');
+    const testDir = resolve(tmpdir(), `fb-cleanup-warning-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const artifactPath = resolve(testDir, 'session.checkpoint');
+    const warn = vi.fn();
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(artifactPath, 'checkpoint data');
+
+    try {
+      const removed = removeSessionArtifactIfPresent(
+        artifactPath,
+        () => { throw new Error('permission denied'); },
+        warn,
+      );
+
+      expect(removed).toBe(false);
+      expect(existsSync(artifactPath)).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to remove session artifact ${artifactPath}: permission denied`),
+        'dep-factory',
+      );
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
   it('throws descriptive error for unknown provider name', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({ provider: 'unknown-provider' });
@@ -369,6 +395,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: { command: '/tmp/malicious-shell', trustCommandOverride: true },
       },
@@ -381,6 +408,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: {
           command: '/usr/local/bin/claude',
@@ -400,7 +428,8 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const { BeastLogger } = await import('../../../src/logging/beast-logger.js');
     const opts = makeOpts({
-      orchestratorConfig: OrchestratorConfigSchema.parse({
+      trustProviderCommandOverrides: true,
+      orchestratorConfig: parseOrchestratorConfig({
         consolidatedProviders: [
           {
             name: 'local-claude',
@@ -410,7 +439,7 @@ describe('dep-factory provider wiring', () => {
             trustedCommandPaths: ['/usr/local/bin/'],
           },
         ],
-      }),
+      }, { allowTrustedProviderCommandOverrides: true }),
     });
 
     await createCliDeps(opts);
@@ -484,6 +513,7 @@ describe('dep-factory provider wiring', () => {
     const opts = makeOpts({
       provider: 'codex',
       providers: ['codex'],
+      trustProviderCommandOverrides: true,
       providersConfig: {
         codex: {
           command: '/usr/local/bin/codex',
@@ -546,6 +576,27 @@ describe('dep-factory provider wiring', () => {
     expect(issueManifest[0]?.runId).toBe('issue-89');
     expect(sessionManifest).toHaveLength(1);
     expect(sessionManifest[0]?.runId).toBe('cli-session-1');
+  });
+
+  it('does not let a corrupt existing replay manifest abort other finalize writes', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({ runSessionId: 'cli-session-1' });
+    const result = await createCliDeps(opts);
+    const auditDir = resolve(opts.paths.root, '.fbeast', 'audit');
+    mkdirSync(auditDir, { recursive: true });
+    writeFileSync(resolve(auditDir, 'issue-89.replay.json'), '{not valid json', 'utf8');
+    mockBridgeReplayManifest.push(
+      { version: 1, kind: 'llm.request', runId: 'issue-89', timestamp: '2026-05-25T00:00:00.000Z', contentRef: 'a'.repeat(64) },
+      { version: 1, kind: 'tool.result', runId: 'cli-session-1', timestamp: '2026-05-25T00:00:01.000Z', contentRef: 'b'.repeat(64) },
+    );
+
+    await result.finalize();
+
+    const issueManifest = JSON.parse(readFileSync(resolve(auditDir, 'issue-89.replay.json'), 'utf8')) as Array<{ runId: string }>;
+    const sessionManifest = JSON.parse(readFileSync(resolve(auditDir, 'cli-session-1.replay.json'), 'utf8')) as Array<{ runId: string }>;
+
+    expect(issueManifest).toEqual([expect.objectContaining({ runId: 'issue-89' })]);
+    expect(sessionManifest).toEqual([expect.objectContaining({ runId: 'cli-session-1' })]);
   });
 
   it('clears issue-scoped runtime artifacts when reset is requested', async () => {

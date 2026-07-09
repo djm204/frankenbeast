@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
+import { RESPONSE_CODES, type ResponseCode, type SessionToken } from '../core/types.js';
 import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
 import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
+import { SessionTokenStore } from '../security/session-token-store.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -24,6 +25,10 @@ export interface GovernorAppOptions {
    * `GET /health`) is available — no in-process caller can be waiting on it.
    */
   registry?: ApprovalWaiterRegistry;
+  /** Shared session token store used by the validation endpoint. */
+  sessionTokenStore?: SessionTokenStore;
+  /** JSON file used to share session tokens across governor processes. */
+  sessionTokenStorePath?: string;
 }
 
 /** Maximum age (seconds) for a Slack request timestamp before it is rejected as a replay. */
@@ -43,6 +48,8 @@ const SHA256_HEX_LENGTH = 64;
 type GovernorSignatureVerificationResult =
   | { ok: true }
   | { ok: false; reason: 'missing' | 'malformed' | 'invalid' };
+
+type ParsedJsonBody = Record<string, unknown>;
 
 function normalizeGovernorSignature(signature: string): Buffer | null {
   const trimmed = signature.trim();
@@ -80,10 +87,23 @@ function verifyGovernorSignature(
   return { ok: true };
 }
 
+function parseJsonBody(rawBody: Buffer): ParsedJsonBody | null {
+  if (rawBody.length === 0) return {};
+
+  try {
+    const parsed: unknown = JSON.parse(rawBody.toString('utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as ParsedJsonBody)
+      : {};
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Produce a signature for a resolved `ApprovalResponse` matching the format
  * `ApprovalGateway.verifySignature` expects (HMAC-SHA256 hex digest of
- * `requestId:<id>|decision:<decision>`, via `SignatureVerifier`).
+ * `requestId:<id>|decision:<decision>|respondedBy:<operator>|feedback:<tagged-feedback>`, via `SignatureVerifier`).
  *
  * Without this, a caller awaiting the approval through `ApprovalGateway`
  * with `config.requireSignedApprovals: true` would always unblock only to
@@ -91,17 +111,19 @@ function verifyGovernorSignature(
  * handed to the registry never carried a `signature` (see issue #411 review
  * follow-up). The HTTP handlers below have already authenticated the
  * caller (via `x-governor-signature` or the Slack signature scheme) before
- * calling this, so re-signing the canonical `{requestId, decision}` payload
+ * calling this, so re-signing the canonical approval response payload
  * with the same governor `signingSecret` is safe and lets the two
  * signature schemes compose.
  */
 function signApprovalResponse(
   requestId: string,
   decision: ResponseCode,
+  respondedBy: string,
+  feedback: string | undefined,
   signingSecret: string,
 ): string {
   return new SignatureVerifier(signingSecret).sign(
-    formatApprovalResponseSignaturePayload({ requestId, decision }),
+    formatApprovalResponseSignaturePayload({ requestId, decision, respondedBy, feedback }),
   );
 }
 
@@ -131,6 +153,14 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
+  let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
+  if (!sessionTokenStore && options.sessionTokenStorePath) {
+    try {
+      sessionTokenStore = new SessionTokenStore({ persistenceFile: options.sessionTokenStorePath });
+    } catch {
+      sessionTokenStore = undefined;
+    }
+  }
 
   // Health check
   app.get('/health', (c) => {
@@ -143,9 +173,42 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
   // POST /v1/approval/request — submit an approval request
   app.post('/v1/approval/request', async (c) => {
-    const body = await c.req.json();
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
 
-    if (!body.requestId || !body.taskId || !body.summary) {
+    // Approval requests create actionable human-approval state, so authenticate
+    // them the same way approval responses are authenticated. Tests may opt in
+    // to unsigned requests explicitly, but production fails closed.
+    if (!options.signingSecret) {
+      if (!options.allowUnsignedApprovalsForTests) {
+        return c.json({ error: { message: 'Signing secret required for approval requests' } }, 401);
+      }
+    } else {
+      const verification = verifyGovernorSignature(
+        c.req.header('x-governor-signature'),
+        rawBody,
+        options.signingSecret,
+      );
+      if (!verification.ok && verification.reason === 'missing') {
+        return c.json({ error: { message: 'Missing signature' } }, 401);
+      }
+      if (!verification.ok && verification.reason === 'malformed') {
+        return c.json({ error: { message: 'Malformed signature' } }, 401);
+      }
+      if (!verification.ok) {
+        return c.json({ error: { message: 'Invalid signature' } }, 401);
+      }
+    }
+
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
+
+    if (
+      typeof body.requestId !== 'string' || body.requestId.length === 0
+      || typeof body.taskId !== 'string' || body.taskId.length === 0
+      || typeof body.summary !== 'string' || body.summary.length === 0
+    ) {
       return c.json(
         { error: { message: 'Missing required fields: requestId, taskId, summary' } },
         400,
@@ -164,10 +227,8 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());
-    let body: { requestId?: string; decision?: string; respondedBy?: string; feedback?: string };
-    try {
-      body = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf8')) : {};
-    } catch {
+    const body = parseJsonBody(rawBody);
+    if (!body) {
       return c.json({ error: { message: 'Malformed JSON body' } }, 400);
     }
 
@@ -194,7 +255,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       }
     }
 
-    if (!body.requestId || !body.decision) {
+    if (typeof body.requestId !== 'string' || typeof body.decision !== 'string') {
       return c.json(
         { error: { message: 'Missing required fields: requestId, decision' } },
         400,
@@ -223,7 +284,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // (a valid x-governor-signature, or explicitly allowed unsigned for
     // tests); see `signApprovalResponse` for why this is safe to attach.
     const signature = options.signingSecret
-      ? signApprovalResponse(body.requestId, decision, options.signingSecret)
+      ? signApprovalResponse(body.requestId, decision, respondedBy, feedback, options.signingSecret)
       : undefined;
 
     // Wake the real waiter (if any) registered via `HttpApprovalChannel`, so
@@ -243,6 +304,71 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId: body.requestId,
       decision: body.decision,
       status: 'resolved',
+    });
+  });
+
+  // POST /v1/approval/session/validate — validate a session token for
+  // external callers. The endpoint fails closed when no shared token store is
+  // configured, so deployments cannot accidentally treat an unavailable
+  // validation path as success.
+  app.post('/v1/approval/session/validate', async (c) => {
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
+
+    if (!options.signingSecret) {
+      if (!options.allowUnsignedApprovalsForTests) {
+        return c.json({ error: { message: 'Signing secret required for session token validation' } }, 401);
+      }
+    } else {
+      const verification = verifyGovernorSignature(
+        c.req.header('x-governor-signature'),
+        rawBody,
+        options.signingSecret,
+      );
+      if (!verification.ok && verification.reason === 'missing') {
+        return c.json({ error: { message: 'Missing signature' } }, 401);
+      }
+      if (!verification.ok && verification.reason === 'malformed') {
+        return c.json({ error: { message: 'Malformed signature' } }, 401);
+      }
+      if (!verification.ok) {
+        return c.json({ error: { message: 'Invalid signature' } }, 401);
+      }
+    }
+
+    if (!sessionTokenStore) {
+      return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
+    }
+
+    if (typeof body.tokenId !== 'string' || body.tokenId.length === 0) {
+      return c.json({ error: { message: 'Missing required field: tokenId' } }, 400);
+    }
+    if (body.scope !== undefined && typeof body.scope !== 'string') {
+      return c.json({ error: { message: 'Invalid field: scope must be a string' } }, 400);
+    }
+
+    let token: SessionToken | undefined;
+    try {
+      token = sessionTokenStore.get(body.tokenId);
+    } catch {
+      return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
+    }
+    if (!token || (body.scope !== undefined && token.scope !== body.scope)) {
+      return c.json({ valid: false }, 401);
+    }
+
+    return c.json({
+      valid: true,
+      token: {
+        approvalId: token.approvalId,
+        scope: token.scope,
+        grantedBy: token.grantedBy,
+        grantedAt: token.grantedAt.toISOString(),
+        expiresAt: token.expiresAt.toISOString(),
+      },
     });
   });
 
@@ -333,7 +459,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // `ApprovalGateway.requireSignedApprovals` accepts it too (see
     // `signApprovalResponse`).
     const slackSignature = options.signingSecret
-      ? signApprovalResponse(requestId, decision, options.signingSecret)
+      ? signApprovalResponse(
+        requestId,
+        decision,
+        payload.user?.id ?? payload.user?.username ?? 'slack',
+        undefined,
+        options.signingSecret,
+      )
       : undefined;
 
     registry.resolve(requestId, {

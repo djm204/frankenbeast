@@ -34,12 +34,33 @@ function createPassingPipeline(): CritiquePipeline {
   return new CritiquePipeline([evaluator]);
 }
 
-function createFailingPipeline(findings: readonly EvaluationFinding[] = [{ message: 'issue found', severity: 'warning' }]): CritiquePipeline {
+function createWarningPipeline(): CritiquePipeline {
   const evaluator: Evaluator = {
-    name: 'mock',
+    name: 'warning-rule',
     category: 'deterministic',
     evaluate: vi.fn().mockResolvedValue({
-      evaluatorName: 'mock',
+      evaluatorName: 'warning-rule',
+      verdict: 'warn',
+      score: 0.7,
+      findings: [{ message: 'review before shipping', severity: 'warning' }],
+    }),
+  };
+  return new CritiquePipeline([evaluator]);
+}
+
+interface FailingPipelineOptions {
+  readonly evaluatorName?: string;
+  readonly findings?: readonly EvaluationFinding[];
+}
+
+function createFailingPipeline(options: FailingPipelineOptions = {}): CritiquePipeline {
+  const evaluatorName = options.evaluatorName ?? 'mock';
+  const findings = options.findings ?? [{ message: 'issue found', severity: 'warning' }];
+  const evaluator: Evaluator = {
+    name: evaluatorName,
+    category: 'deterministic',
+    evaluate: vi.fn().mockResolvedValue({
+      evaluatorName,
       verdict: 'fail',
       score: 0.3,
       findings,
@@ -65,6 +86,15 @@ describe('CritiqueLoop', () => {
 
     expect(result.verdict).toBe('pass');
     expect(result.iterations).toHaveLength(1);
+  });
+
+  it('returns warn on first iteration when pipeline passes with warnings', async () => {
+    const loop = new CritiqueLoop(createWarningPipeline(), []);
+    const result = await loop.run(createInput('warning-bearing code'), createConfig());
+
+    expect(result.verdict).toBe('warn');
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]!.result.verdict).toBe('warn');
   });
 
   it('returns fail with correction when pipeline fails', async () => {
@@ -156,6 +186,52 @@ describe('CritiqueLoop', () => {
     expect(result.iterations).toHaveLength(1);
   });
 
+  it('tracks failure history across iterations without mutating the public readonly contract', async () => {
+    const evaluatorName = 'failure-history-evaluator';
+    const observedFailures: number[] = [];
+    const breaker: CircuitBreaker = {
+      name: 'failure-history-observer',
+      check: vi.fn().mockImplementation(async (state: LoopState) => {
+        observedFailures.push(state.failureHistory.get(evaluatorName) ?? 0);
+        return { tripped: false };
+      }),
+    };
+
+    const loop = new CritiqueLoop(createFailingPipeline({ evaluatorName }), [breaker]);
+    const result = await loop.run(createInput('bad code'), createConfig({ maxIterations: 2 }));
+
+    expect(result.verdict).toBe('fail');
+    expect(observedFailures).toEqual([0, 1]);
+  });
+
+  it('isolates internal failure history from runtime breaker mutation', async () => {
+    const evaluatorName = 'isolated-evaluator';
+    const observedFailures: number[] = [];
+    const mutatingBreaker: CircuitBreaker = {
+      name: 'mutating-breaker',
+      check: vi.fn().mockImplementation(async (state: LoopState) => {
+        (state.failureHistory as Map<string, number>).set(evaluatorName, 999);
+        return { tripped: false };
+      }),
+    };
+    const observingBreaker: CircuitBreaker = {
+      name: 'observing-breaker',
+      check: vi.fn().mockImplementation(async (state: LoopState) => {
+        observedFailures.push(state.failureHistory.get(evaluatorName) ?? 0);
+        return { tripped: false };
+      }),
+    };
+
+    const loop = new CritiqueLoop(createFailingPipeline({ evaluatorName }), [
+      mutatingBreaker,
+      observingBreaker,
+    ]);
+    const result = await loop.run(createInput('bad code'), createConfig({ maxIterations: 2 }));
+
+    expect(result.verdict).toBe('fail');
+    expect(observedFailures).toEqual([0, 1]);
+  });
+
   it('re-checks spend breakers after the terminal iteration (post phase)', async () => {
     // A phase:'both' breaker that is under budget before the iteration but trips
     // once the iteration's spend is recorded. Without the post-iteration check a
@@ -196,7 +272,7 @@ describe('CritiqueLoop', () => {
       { message: 'security issue', severity: 'critical' as const },
       { message: 'style issue', severity: 'info' as const },
     ];
-    const loop = new CritiqueLoop(createFailingPipeline(findings), []);
+    const loop = new CritiqueLoop(createFailingPipeline({ findings }), []);
     const result = await loop.run(createInput('code'), createConfig({ maxIterations: 1 }));
 
     expect(result.verdict).toBe('fail');

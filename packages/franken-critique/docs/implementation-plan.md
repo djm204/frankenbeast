@@ -165,7 +165,7 @@ Define all core types and port interfaces. No implementation code.
 
 ### Files
 - `src/types/common.ts` — `Severity`, `Verdict`, `Score`
-- `src/types/evaluation.ts` — `EvaluationInput`, `EvaluationResult`, `CritiqueResult`, `Evaluator` interface
+- `src/types/evaluation.ts` — `EvaluationInput`, `EvaluationResult`, `CritiquePipelineResult`, deprecated compatibility alias `CritiqueResult`, `Evaluator` interface
 - `src/types/contracts.ts` — `GuardrailsPort`, `MemoryPort`, `ObservabilityPort`, `EscalationPort`
 - `src/types/loop.ts` — `LoopState`, `LoopConfig`, `CritiqueLoopResult`, `CorrectionRequest`, `CritiqueIteration`, `CircuitBreaker` interface
 

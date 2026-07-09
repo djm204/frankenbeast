@@ -1,11 +1,15 @@
 # Issue: `frankenfirewall` Publicly Exports Adapters That Only Throw
 
+> **Historical archive notice (2026-07-09):** This document is preserved from the pre-consolidation 2026-03 audit. It may mention removed packages such as `franken-mcp`, `frankenfirewall`, `franken-comms`, `franken-heartbeat`, or legacy root scripts such as `test:all`. Use the status annotations in `docs/issues/INDEX.md` and the live `package.json`/`packages/*` workspaces as the source of truth for current contributor work.
+
 Severity: medium
 Area: `frankenfirewall`
 
 ## Summary
 
 The package root exports `GeminiAdapter` and `MistralAdapter`, but both classes are unfinished adapter shells that throw on every interface method.
+
+**Current status (2026-07)**: this is a historical `frankenfirewall` finding. The `frankenfirewall` package was removed during consolidation, and the old `GeminiAdapter` / `MistralAdapter` class names are not supported public APIs in the current monorepo. They should be treated as unimplemented historical placeholders, not as experimental adapters to build on. Current provider work belongs in `@franken/orchestrator` (for example, the supported `GeminiProvider` CLI provider); there is no supported Mistral provider today.
 
 ## Intended Behavior
 
@@ -32,3 +36,8 @@ Anything exported from the package root should either be supported or clearly ma
 
 - Either implement these adapters, move them behind an experimental entrypoint, or stop exporting them from the package root.
 - Document support status explicitly.
+
+## Resolution note
+
+- The obsolete package no longer exports these adapter shells.
+- Their historical unimplemented / not supported status is documented here and in `docs/guides/add-llm-provider.md` so current contributors do not mistake the names for supported extension points.

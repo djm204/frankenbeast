@@ -4,11 +4,18 @@ import { LinearPlanner } from '../../src/planners/linear';
 import { StubHITLGate } from '../../src/hitl/stub-hitl-gate';
 import { RecoveryController } from '../../src/recovery/recovery-controller';
 import { PlanGraph } from '../../src/core/dag';
+import {
+  CyclicDependencyError,
+  MaxRecoveryAttemptsError,
+  RecursionDepthExceededError,
+  TaskNotFoundError,
+  UnknownErrorEscalatedError,
+} from '../../src/core/errors';
 import { createTaskId } from '../../src/core/types';
-import type { Task, TaskResult, Intent, KnownError } from '../../src/core/types';
+import type { Task, TaskResult, Intent, KnownError, TaskId } from '../../src/core/types';
 import type { GuardrailsModule } from '../../src/modules/mod01';
 import type { SelfCritiqueModule } from '../../src/modules/mod07';
-import type { GraphBuilder, TaskExecutor } from '../../src/planners/types';
+import type { GraphBuilder, PlanningStrategy, TaskExecutor } from '../../src/planners/types';
 import type { HITLGate } from '../../src/hitl/types';
 import type { MemoryModule } from '../../src/modules/mod03';
 import type { TaskModification } from '../../src/hitl/types';
@@ -31,6 +38,10 @@ function success(id: string): TaskResult {
 
 function failure(id: string, message = 'task failed'): TaskResult {
   return { status: 'failure', taskId: createTaskId(id), error: new Error(message) };
+}
+
+function expand(id: string, newTasks: Task[]): TaskResult {
+  return { status: 'success', taskId: createTaskId(id), expand: true, newTasks };
 }
 
 function makeGuardrails(goal = 'test goal'): GuardrailsModule {
@@ -57,6 +68,10 @@ interface PlannerOptions {
   memory?: MemoryModule;
   selfCritique?: SelfCritiqueModule;
   maxRecoveryAttempts?: number;
+  strategy?: PlanningStrategy;
+  recovery?: {
+    recover(failedTaskId: TaskId, error: Error, graph: PlanGraph, attempt: number): Promise<PlanGraph>;
+  };
 }
 
 function buildPlanner(opts: PlannerOptions = {}): {
@@ -68,7 +83,9 @@ function buildPlanner(opts: PlannerOptions = {}): {
   const executor = opts.executor ?? vi.fn().mockResolvedValue(success('t-1'));
   const hitlGate = opts.hitlGate ?? new StubHITLGate();
   const memory = opts.memory ?? makeMemory();
-  const recovery = new RecoveryController(memory, undefined, undefined, opts.maxRecoveryAttempts ?? 3);
+  const recovery =
+    opts.recovery ??
+    new RecoveryController(memory, undefined, undefined, opts.maxRecoveryAttempts ?? 3);
   const guardrails = makeGuardrails();
   const graphBuilder = makeGraphBuilder(graph);
 
@@ -77,7 +94,7 @@ function buildPlanner(opts: PlannerOptions = {}): {
     graphBuilder,
     executor,
     hitlGate,
-    new LinearPlanner(),
+    opts.strategy ?? new LinearPlanner(),
     recovery,
     opts.selfCritique
   );
@@ -200,6 +217,33 @@ describe('Planner — self-correction loop', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('does not replay completed predecessor tasks during self-correction retries', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const executedTaskIds: TaskId[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      executedTaskIds.push(task.id);
+      if (task.id === createTaskId('t-2') && !executedTaskIds.includes(createTaskId('fix-t-2-attempt-1'))) {
+        return Promise.resolve(failure('t-2', 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(executedTaskIds).toEqual([
+      createTaskId('t-1'),
+      createTaskId('t-2'),
+      createTaskId('fix-t-2-attempt-1'),
+      createTaskId('t-2'),
+    ]);
+  });
+
   it('returns failed when max recovery attempts exceeded', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
@@ -216,6 +260,102 @@ describe('Planner — self-correction loop', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('preserves completed predecessors in terminal failed recovery results', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('t-2')) return Promise.resolve(failure('t-2', 'disk full'));
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory, maxRecoveryAttempts: 1 });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('t-1'),
+      createTaskId('fix-t-2-attempt-1'),
+      createTaskId('t-2'),
+    ]);
+  });
+
+  it('tracks recovery attempts independently for each failed task', async () => {
+    const t1 = makeTask('t-1');
+    const t2 = makeTask('t-2');
+    const graph = PlanGraph.empty().addTask(t1).addTask(t2);
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const failedOnce = new Set<string>();
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if ((task.id === createTaskId('t-1') || task.id === createTaskId('t-2')) && !failedOnce.has(task.id)) {
+        failedOnce.add(task.id);
+        return Promise.resolve(failure(task.id, 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+
+    const { planner } = buildPlanner({ graph, executor, memory, maxRecoveryAttempts: 1 });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: createTaskId('fix-t-1-attempt-1') })
+    );
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: createTaskId('fix-t-2-attempt-1') })
+    );
+  });
+
+  it('counts recovery attempts by original failed-task lineage', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const ke: KnownError = { pattern: 'disk full', description: '', fixSuggestion: 'free space' };
+    const memory = makeMemory([ke]);
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('fix-fix-t-1-attempt-1-attempt-1')) {
+        return Promise.resolve(success(task.id));
+      }
+      return Promise.resolve(failure(task.id, 'disk full'));
+    });
+
+    const recoverCalls: Array<{ failedTaskId: TaskId; attempt: number }> = [];
+
+    const recovery = {
+      recover: vi.fn(async (failedTaskId: TaskId, _err: Error, graph: PlanGraph, attempt: number) => {
+        recoverCalls.push({ failedTaskId, attempt });
+
+        if (failedTaskId.startsWith('fix-') && attempt > 1) {
+          throw new MaxRecoveryAttemptsError(failedTaskId, 1);
+        }
+        if (recoverCalls.length >= 3) {
+          throw new MaxRecoveryAttemptsError(failedTaskId, 1);
+        }
+
+        const fixTask = {
+          id: createTaskId(`fix-${failedTaskId}-attempt-${attempt}`),
+          objective: `Attempt-${attempt} fix for ${failedTaskId}`,
+          requiredSkills: [],
+          dependsOn: [],
+          status: 'pending' as const,
+        };
+
+        return graph.insertFixItTask(failedTaskId, fixTask);
+      }),
+    };
+
+    const { planner } = buildPlanner({ graph, executor, memory, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    expect(recoverCalls).toEqual([
+      { failedTaskId: createTaskId('t-1'), attempt: 1 },
+      { failedTaskId: createTaskId('fix-t-1-attempt-1'), attempt: 2 },
+    ]);
+  });
+
   it('returns failed when error is unknown (no known fix)', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const memory = makeMemory([]); // no known errors
@@ -225,6 +365,84 @@ describe('Planner — self-correction loop', () => {
     const result = await planner.plan('do something');
 
     expect(result.status).toBe('failed');
+  });
+});
+
+describe('Planner — strategy domain exceptions', () => {
+  it('converts cyclic dependency errors from strategies into failed plan results', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new CyclicDependencyError('Graph contains a cycle');
+    const strategy: PlanningStrategy = {
+      name: 'linear',
+      execute: vi.fn().mockRejectedValue(error),
+    };
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, strategy, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
+    expect(result.taskResults).toEqual([
+      {
+        status: 'failure',
+        taskId: createTaskId('planner-domain-error'),
+        error,
+      },
+    ]);
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
+  it('converts recursion depth errors from strategies into failed plan results', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new RecursionDepthExceededError(11);
+    const strategy: PlanningStrategy = {
+      name: 'linear',
+      execute: vi.fn().mockRejectedValue(error),
+    };
+
+    const { planner } = buildPlanner({ graph, strategy });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
+  });
+
+  it('keeps executor rejections associated with the task that failed', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new TaskNotFoundError('dependency');
+    const executor = vi.fn().mockRejectedValue(error);
+    const recovery = { recover: vi.fn().mockRejectedValue(new UnknownErrorEscalatedError('t-1', error)) };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('t-1'));
+    expect(result.error).toBe(error);
+    expect(recovery.recover).toHaveBeenCalledWith(createTaskId('t-1'), error, graph, 1);
+  });
+
+  it('converts dangling expansion dependencies into failed plan results', async () => {
+    const parent = makeTask('parent');
+    const child: Task = { ...makeTask('child'), dependsOn: [createTaskId('missing')] };
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn().mockResolvedValue(expand('parent', [child]));
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBeInstanceOf(TaskNotFoundError);
+    expect(recovery.recover).not.toHaveBeenCalled();
   });
 });
 

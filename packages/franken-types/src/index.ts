@@ -83,6 +83,7 @@ export type {
   McpServerConfig,
   AuthField,
   CritiqueContext,
+  ProviderCritiqueFinding,
   CritiqueResult,
   ProviderSkillConfig,
 } from './provider.js';
@@ -95,6 +96,7 @@ export {
 
 // Web/API contract DTOs
 export * from './api-contracts.js';
+
 
 // Skill schemas
 export type { McpConfig, SkillInfo, SkillToolManifest } from './skill.js';

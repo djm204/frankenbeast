@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolveContainedExistingPath, resolveContainedPath } from '@franken/types/path-containment';
 import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
 
@@ -9,10 +9,10 @@ export class ReplayContentStore {
   private readonly dir: string;
 
   constructor(baseDir: string) {
-    this.dir = join(baseDir, 'blobs');
-    if (!existsSync(this.dir)) {
-      mkdirSync(this.dir, { recursive: true });
-    }
+    mkdirSync(baseDir, { recursive: true });
+    const blobDir = resolveContainedPath(baseDir, 'blobs', 'replayBlobsDir');
+    mkdirSync(blobDir, { recursive: true });
+    this.dir = resolveContainedExistingPath(baseDir, 'blobs', 'replayBlobsDir');
   }
 
   put(content: string): string {
@@ -36,6 +36,18 @@ export class ReplayContentStore {
     if (!SHA256_HEX_REF.test(ref)) {
       throw new Error('Replay content ref must be exactly 64 lowercase sha256 hex characters');
     }
-    return join(this.dir, ref);
+    const containedPath = resolveContainedPath(this.dir, ref, 'replayBlobPath');
+    try {
+      if (lstatSync(containedPath).isSymbolicLink()) {
+        throw new Error('replayBlobPath must not be a symbolic link');
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
+      }
+    }
+    return existsSync(containedPath)
+      ? resolveContainedExistingPath(this.dir, ref, 'replayBlobPath')
+      : containedPath;
   }
 }

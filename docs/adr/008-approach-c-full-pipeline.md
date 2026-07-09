@@ -8,7 +8,7 @@ Approach A ([ADR-007](007-cli-skill-execution-type.md)) provided CLI skill primi
 
 We needed the orchestrator to own the full pipeline: accept an idea in any form, decompose it into executable chunks, run them through the existing CLI skill pipeline, checkpoint progress for crash recovery, and create a PR at the end.
 
-Design reference: [`docs/plans/2026-03-05-approach-c-full-pipeline-design.md`](../plans/2026-03-05-approach-c-full-pipeline-design.md)
+Design reference: the original `docs/plans/2026-03-05-approach-c-full-pipeline-design.md` planning artifact has been retired; this ADR is the canonical retained design record for the Approach C full pipeline.
 
 ## Decision
 Three input modes converge to a single `PlanGraph` that executes through the existing Approach A pipeline:

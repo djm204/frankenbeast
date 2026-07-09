@@ -8,44 +8,70 @@ function readJson(relPath: string): unknown {
   return JSON.parse(readFileSync(resolve(ROOT, relPath), 'utf-8'));
 }
 
+function expandWorkspacePackageDirs(workspaces: string[]): string[] {
+  const packageDirs = new Set<string>();
+
+  for (const workspace of workspaces) {
+    if (workspace.endsWith('/*') && workspace.indexOf('*') === workspace.length - 1) {
+      const parentDir = workspace.slice(0, -2);
+      for (const entry of readdirSync(resolve(ROOT, parentDir), { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          packageDirs.add(`${parentDir}/${entry.name}`);
+        }
+      }
+      continue;
+    }
+
+    if (!workspace.includes('*')) {
+      packageDirs.add(workspace);
+      continue;
+    }
+
+    throw new Error(`Unsupported workspace glob in release policy test: ${workspace}`);
+  }
+
+  return [...packageDirs].sort();
+}
+
 describe('release-please monorepo config', () => {
   const config = readJson('release-please-config.json') as {
-    packages: Record<string, { 'release-type'?: string; component?: string }>;
+    packages: Record<
+      string,
+      { 'release-type'?: string; component?: string; 'exclude-paths'?: string[] }
+    >;
   };
   const manifest = readJson('.release-please-manifest.json') as Record<string, string>;
-  const rootPackage = readJson('package.json') as { version: string };
-  const packageDirs = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const rootPackage = readJson('package.json') as { version: string; workspaces: string[] };
+  const packageDirs = expandWorkspacePackageDirs(rootPackage.workspaces);
+  const releasePackageDirs = packageDirs.filter((dir) => dir !== '.');
 
   it('config has root "." entry preserved', () => {
     expect(config.packages['.']).toBeDefined();
     expect(config.packages['.']['release-type']).toBe('node');
   });
 
-  it('config has entries for every package release-managed in this repo', () => {
-    for (const dir of packageDirs) {
-      const key = `packages/${dir}`;
-      expect(config.packages[key], `missing config entry for ${key}`).toBeDefined();
+  it('config has an explicit release policy for every workspace package', () => {
+    for (const dir of releasePackageDirs) {
+      expect(config.packages[dir], `missing config entry for ${dir}`).toBeDefined();
     }
+
+    const packageKeys = Object.keys(config.packages).filter((key) => key !== '.').sort();
+    expect(packageKeys).toEqual(releasePackageDirs);
   });
 
-  it('config has at least 11 package entries (root + 10 modules)', () => {
-    expect(Object.keys(config.packages).length).toBeGreaterThanOrEqual(11);
+  it('root release excludes every workspace package path', () => {
+    expect(config.packages['.']['exclude-paths']?.sort()).toEqual(releasePackageDirs);
   });
 
   it('each package entry has release-type "node"', () => {
-    for (const dir of packageDirs) {
-      const key = `packages/${dir}`;
-      expect(config.packages[key]?.['release-type'], `${key} missing release-type`).toBe('node');
+    for (const dir of releasePackageDirs) {
+      expect(config.packages[dir]?.['release-type'], `${dir} missing release-type`).toBe('node');
     }
   });
 
   it('each package entry has a component name', () => {
-    for (const dir of packageDirs) {
-      const key = `packages/${dir}`;
-      expect(config.packages[key]?.component, `${key} missing component`).toBeTruthy();
+    for (const dir of releasePackageDirs) {
+      expect(config.packages[dir]?.component, `${dir} missing component`).toBeTruthy();
     }
   });
 
@@ -53,22 +79,19 @@ describe('release-please monorepo config', () => {
     expect(manifest['.']).toBe(rootPackage.version);
   });
 
-  it('manifest has entries for every package release-managed in this repo', () => {
-    for (const dir of packageDirs) {
-      const key = `packages/${dir}`;
-      expect(manifest[key], `missing manifest entry for ${key}`).toBeDefined();
+  it('manifest has entries for every release-managed workspace package', () => {
+    for (const dir of releasePackageDirs) {
+      expect(manifest[dir], `missing manifest entry for ${dir}`).toBeDefined();
     }
-  });
 
-  it('manifest has at least 11 entries', () => {
-    expect(Object.keys(manifest).length).toBeGreaterThanOrEqual(11);
+    const manifestPackageKeys = Object.keys(manifest).filter((key) => key !== '.').sort();
+    expect(manifestPackageKeys).toEqual(releasePackageDirs);
   });
 
   it('manifest versions match actual package.json versions', () => {
-    for (const dir of packageDirs) {
-      const key = `packages/${dir}`;
-      const pkg = readJson(`packages/${dir}/package.json`) as { version: string };
-      expect(manifest[key], `${key} version mismatch`).toBe(pkg.version);
+    for (const dir of releasePackageDirs) {
+      const pkg = readJson(`${dir}/package.json`) as { version: string };
+      expect(manifest[dir], `${dir} version mismatch`).toBe(pkg.version);
     }
   });
 
@@ -89,15 +112,15 @@ describe('release-please monorepo config', () => {
   });
 
   it('no per-module release-please-config.json files exist', () => {
-    for (const dir of packageDirs) {
-      const configPath = resolve(ROOT, `packages/${dir}/release-please-config.json`);
+    for (const dir of releasePackageDirs) {
+      const configPath = resolve(ROOT, `${dir}/release-please-config.json`);
       expect(existsSync(configPath), `${configPath} should not exist`).toBe(false);
     }
   });
 
   it('no per-module .release-please-manifest.json files exist', () => {
-    for (const dir of packageDirs) {
-      const manifestPath = resolve(ROOT, `packages/${dir}/.release-please-manifest.json`);
+    for (const dir of releasePackageDirs) {
+      const manifestPath = resolve(ROOT, `${dir}/.release-please-manifest.json`);
       expect(existsSync(manifestPath), `${manifestPath} should not exist`).toBe(false);
     }
   });

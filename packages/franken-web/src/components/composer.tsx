@@ -5,6 +5,7 @@ export interface ComposerProps {
   connectionStatus: ConnectionStatus;
   clearedFailedDraft?: { content: string; nonce: number };
   disabled: boolean;
+  disabledReasonText?: string;
   onReconnect?: () => void;
   onSend: (content: string) => Promise<void> | void;
   status: SessionStatus;
@@ -76,12 +77,13 @@ function canRetryConnection(connectionStatus: ConnectionStatus): boolean {
   return connectionStatus === 'disconnected' || connectionStatus === 'offline' || connectionStatus === 'error';
 }
 
-export function Composer({ connectionStatus, clearedFailedDraft, disabled, onReconnect, onSend, status }: ComposerProps) {
+export function Composer({ connectionStatus, clearedFailedDraft, disabled, disabledReasonText, onReconnect, onSend, status }: ComposerProps) {
   const [error, setError] = useState<{ content: string; message: string } | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
   const lastClearedFailedDraftNonceRef = useRef<number | null>(null);
-  const helpText = disabledReason(status)
+  const helpText = disabledReasonText
+    ?? disabledReason(status)
     ?? connectionHelp(connectionStatus)
     ?? 'Type a message, then press Dispatch or Ctrl+Enter to send.';
   const liveStatus = `${connectionStatusLabel(connectionStatus)}. ${sessionStatusLabel(status)}.`;

@@ -332,18 +332,6 @@ button {
   line-height: 1.35;
 }
 
-.sidebar__status {
-  flex-shrink: 0;
-  padding: 0.28rem 0.58rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-muted);
-  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .sidebar__link:hover,
 .sidebar__link--active {
   transform: translateX(4px);

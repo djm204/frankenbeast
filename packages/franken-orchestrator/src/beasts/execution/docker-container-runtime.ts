@@ -64,7 +64,7 @@ function workspaceMount(policy: SandboxPolicy): string {
   return `${policy.workspaceHostPath}:${policy.workspaceContainerPath}${accessMode}`;
 }
 
-function writableWorkspaceUser(policy: SandboxPolicy): `${number}:${number}` {
+export function writableWorkspaceUser(policy: SandboxPolicy): `${number}:${number}` {
   if (policy.readOnlyWorkspaceMount) {
     return policy.user;
   }

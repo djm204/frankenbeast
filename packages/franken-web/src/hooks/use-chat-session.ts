@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  type ApproveResult,
   ChatApiClient,
   type ChatSession,
   type PendingApproval,
@@ -65,6 +66,7 @@ export interface UseChatSessionResult {
   reconnect: () => void;
   send: (content: string) => Promise<void>;
   sessionId: string | null;
+  sessionState: string | null;
   showTypingIndicator: boolean;
   status: SessionStatus;
   tier: string | null;
@@ -211,6 +213,31 @@ function appendOrUpdateAssistantMessage(
   return [...messages, nextMessage];
 }
 
+function activityEventsFromApproveResult(result: ApproveResult, approved: boolean): ActivityEvent[] {
+  const timestamp = new Date().toISOString();
+  return [
+    {
+      type: 'turn.approval.resolved',
+      data: { approved },
+      timestamp,
+    },
+    ...(result.events ?? []).flatMap((event): ActivityEvent[] => {
+      if (!event || typeof event !== 'object' || !('type' in event)) {
+        return [];
+      }
+      const turnEvent = event as { type: unknown; data?: Record<string, unknown> };
+      if (turnEvent.type !== 'start' && turnEvent.type !== 'progress' && turnEvent.type !== 'complete') {
+        return [];
+      }
+      return [{
+        type: `turn.execution.${turnEvent.type}`,
+        ...(turnEvent.data !== undefined ? { data: turnEvent.data } : {}),
+        timestamp,
+      }];
+    }),
+  ];
+}
+
 function updateReceipt(
   messages: ChatMessage[],
   messageId: string,
@@ -229,6 +256,10 @@ function markMessageFailed(messages: ChatMessage[], messageId: string, error: st
       ? { ...message, receipt: 'failed', error, canRetry }
       : message
   ));
+}
+
+function isFailedUserDraftForContent(message: ChatMessage, content: string): boolean {
+  return message.role === 'user' && message.receipt === 'failed' && message.content === content;
 }
 
 function applySessionSnapshot(session: ChatSession): ChatMessage[] {
@@ -343,6 +374,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [projectId, setProjectId] = useState(opts.projectId);
   const [sessionId, setSessionId] = useState<string | null>(opts.sessionId ?? null);
+  const [sessionState, setSessionState] = useState<string | null>(null);
   const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [socketToken, setSocketToken] = useState<string | null>(null);
   const [socketGeneration, setSocketGeneration] = useState(0);
@@ -358,6 +390,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   useEffect(() => {
     clientRef.current = new ChatApiClient(opts.baseUrl);
   }, [opts.baseUrl]);
+  const activeSessionIdRef = useRef<string | null>(sessionId);
   const readyRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingSendsRef = useRef<Map<string, PendingSend>>(new Map());
@@ -373,6 +406,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   function dismissError(id: string) {
     errorActionRef.current.delete(id);
     setErrorBanners((current) => current.filter((item) => item.id !== id));
+  }
+
+  function sessionStillCurrent(capturedSessionId: string): boolean {
+    return activeSessionIdRef.current === capturedSessionId;
   }
 
   function notifyClearedFailedDrafts(contents: string[]) {
@@ -416,11 +453,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
-    void clientRef.current.getSession(sessionId)
-      .then((refreshed) => {
-        setSocketToken(refreshed.socketToken);
+    const capturedSessionId = sessionId;
+    void clientRef.current.getSession(capturedSessionId)
+      .then(async (refreshed) => {
+        if (!sessionStillCurrent(capturedSessionId) || refreshed.id !== capturedSessionId) {
+          return;
+        }
+        const ticket = await clientRef.current.createSocketTicket(refreshed.id);
+        if (!sessionStillCurrent(refreshed.id)) {
+          return;
+        }
+        setSocketToken(ticket);
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
+        setSessionState(refreshed.state);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setStatus('idle');
@@ -428,7 +474,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setSocketGeneration((current) => current + 1);
       })
       .catch((error) => {
+        if (!sessionStillCurrent(capturedSessionId)) {
+          return;
+        }
         setStatus('error');
+        setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
         addErrorBanner(makeBanner(
           'Unable to refresh chat session',
           errorMessage(error, 'The chat API did not return a refreshed session.'),
@@ -464,7 +514,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     updateApprovalResolving(false);
     setMessages([]);
     lastMessageRef.current = null;
+    activeSessionIdRef.current = null;
     setSessionId(null);
+    setSessionState(null);
     setSocketToken(null);
     setPendingApproval(null);
     setShowTypingIndicator(false);
@@ -481,13 +533,16 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         const session = opts.sessionId
           ? await client.getSession(opts.sessionId)
           : await client.createSession(opts.projectId);
+        const ticket = await client.createSocketTicket(session.id);
 
         if (cancelled) {
           return;
         }
 
-        setSocketToken(session.socketToken);
+        activeSessionIdRef.current = session.id;
+        setSocketToken(ticket);
         setSessionId(session.id);
+        setSessionState(session.state);
         setProjectId(session.projectId);
         setMessages(applySessionSnapshot(session));
         setPendingApproval(session.pendingApproval ?? null);
@@ -522,8 +577,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     function handleOnline() {
+      failAllPendingSends(new Error('Connection is reconnecting before the server acknowledged the message.'));
       setConnectionStatus('reconnecting');
-      setSocketGeneration((current) => current + 1);
+      refreshSession();
     }
 
     window.addEventListener('online', handleOnline);
@@ -541,8 +597,17 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     let shouldReconnect = true;
+    let reconnectRefreshInFlight = false;
     setConnectionStatus('connecting');
     readyRef.current = false;
+
+    function refreshBeforeReconnect() {
+      if (reconnectRefreshInFlight) {
+        return;
+      }
+      reconnectRefreshInFlight = true;
+      refreshSession();
+    }
 
     const socket = new WebSocket(
       clientRef.current.socketUrl(sessionId, socketToken),
@@ -570,6 +635,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             readyRef.current = true;
             setMessages((current) => reconcileRecoveryMessages(current, payload.transcript));
             setPendingApproval(payload.pendingApproval ?? null);
+            setSessionState(payload.state);
             setProjectId(payload.projectId);
           }
           return;
@@ -631,6 +697,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setActivity((current) => [...current, payload]);
           return;
         case 'turn.approval.requested':
+          setSessionState('pending_approval');
           setPendingApproval({
             description: payload.description,
             requestedAt: payload.timestamp,
@@ -660,6 +727,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
           return;
         case 'turn.approval.resolved':
+          setSessionState(payload.approved ? 'approved' : 'rejected');
           setPendingApproval(null);
           setApprovalError(null);
           updateApprovalResolving(false);
@@ -673,6 +741,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ]);
           return;
         case 'turn.error':
+          if (payload.code === 'APPROVAL_PENDING') {
+            void refreshSession();
+          }
           updateApprovalResolving(false);
           setApprovalError(payload.message);
           setActivity((current) => [
@@ -710,6 +781,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       if (socketRef.current !== socket) {
         return;
       }
+      const hadPendingSends = pendingSendsRef.current.size > 0;
       failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
         updateApprovalResolving(false);
@@ -724,6 +796,15 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         'Reconnect',
         'socket_error',
       ));
+      if (!shouldReconnect || hadPendingSends) {
+        return;
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setConnectionStatus('offline');
+        return;
+      }
+      setConnectionStatus('reconnecting');
+      refreshBeforeReconnect();
     };
 
     socket.onclose = () => {
@@ -742,7 +823,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         }
         setConnectionStatus('reconnecting');
-        setSocketGeneration((current) => current + 1);
+        refreshBeforeReconnect();
       } else {
         setConnectionStatus('disconnected');
       }
@@ -763,37 +844,54 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     const clientMessageId = makeId('user');
+    const optimisticMessage: ChatMessage = {
+      id: clientMessageId,
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+      receipt: 'sending',
+    };
+    const optimisticAdd = Boolean(socket && socket.readyState === 1);
     lastMessageRef.current = { clientMessageId, content };
     setErrorBanners((current) => current.filter((item) => item.action !== 'retry-message'));
-    setMessages((current) => [
-      ...current.filter((message) => !(message.role === 'user' && message.receipt === 'failed' && message.content === content)),
-      {
-        id: clientMessageId,
-        role: 'user',
-        content,
-        timestamp: new Date().toISOString(),
-        receipt: 'sending',
-      },
-    ]);
+    if (optimisticAdd) {
+      setMessages((current) => [
+        ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
+        optimisticMessage,
+      ]);
+    }
     setStatus('sending');
 
-    if (!socket || socket.readyState !== 1) {
+    if (!optimisticAdd) {
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
+        if (!sessionStillCurrent(sessionId)) {
+          return;
+        }
         setTier(result.tier);
         try {
           const refreshed = await clientRef.current.getSession(sessionId);
+          if (!sessionStillCurrent(sessionId)) {
+            return;
+          }
           readyRef.current = true;
           setMessages((current) => mergeSessionSnapshot(
-            current.filter((message) => message.id !== clientMessageId),
+            current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
             refreshed,
           ));
           setPendingApproval(refreshed.pendingApproval ?? null);
+          setSessionState(refreshed.state);
           setTokenTotals(refreshed.tokenTotals);
           setCostUsd(refreshed.costUsd);
           setStatus('idle');
         } catch (error) {
-          setMessages((current) => updateReceipt(current, clientMessageId, 'accepted'));
+          if (!sessionStillCurrent(sessionId)) {
+            return;
+          }
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
+            { ...optimisticMessage, receipt: 'accepted' },
+          ]);
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',
             errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
@@ -804,10 +902,29 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
         }
       } catch (error) {
+        if (!sessionStillCurrent(sessionId)) {
+          return;
+        }
+        try {
+          const refreshed = await clientRef.current.getSession(sessionId);
+          if (sessionStillCurrent(sessionId)) {
+            readyRef.current = true;
+            setMessages((current) => mergeSessionSnapshot(current, refreshed));
+            setPendingApproval(refreshed.pendingApproval ?? null);
+            setSessionState(refreshed.state);
+            setTokenTotals(refreshed.tokenTotals);
+            setCostUsd(refreshed.costUsd);
+          }
+        } catch {
+          // Preserve the original send failure while keeping the draft retryable.
+        }
         const sendError = error instanceof Error
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
-        setMessages((current) => markMessageFailed(current, clientMessageId, sendError.message));
+        setMessages((current) => [
+          ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
+          { ...optimisticMessage, receipt: 'failed', error: sendError.message, canRetry: true },
+        ]);
         addErrorBanner(makeBanner(
           'Message was not sent',
           sendError.message,
@@ -821,13 +938,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
+    const liveSocket = socket as WebSocket;
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
       }, SOCKET_SEND_ACK_TIMEOUT_MS);
       pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
       try {
-        socket.send(JSON.stringify({
+        liveSocket.send(JSON.stringify({
           type: 'message.send',
           clientMessageId,
           content,
@@ -864,18 +982,30 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
     if (!socket || socket.readyState !== 1) {
       try {
-        await clientRef.current.approve(sessionId, approved);
+        const approvalResult = await clientRef.current.approve(sessionId, approved);
         const refreshed = await clientRef.current.getSession(sessionId);
         readyRef.current = true;
-        setMessages((current) => mergeSessionSnapshot(current, refreshed));
+        setMessages((current) => {
+          const withSnapshot = mergeSessionSnapshot(current, refreshed);
+          const approvedDisplays = (approvalResult.displayMessages ?? []).flatMap((display): Array<{ content: string }> => {
+            if (!display || typeof display !== 'object' || !('content' in display)) {
+              return [];
+            }
+            const content = (display as { content: unknown }).content;
+            return typeof content === 'string' ? [{ content }] : [];
+          });
+          return approvedDisplays.reduce((messages, display) => appendOrUpdateAssistantMessage(messages, {
+            type: 'assistant.message.complete',
+            messageId: makeId('assistant'),
+            content: display.content,
+            timestamp: new Date().toISOString(),
+          }), withSnapshot);
+        });
         setPendingApproval(refreshed.pendingApproval ?? null);
+        setSessionState(refreshed.state);
         setActivity((current) => [
           ...current,
-          {
-            type: 'turn.approval.resolved',
-            data: { approved },
-            timestamp: new Date().toISOString(),
-          },
+          ...activityEventsFromApproveResult(approvalResult, approved),
         ]);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
@@ -921,6 +1051,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     retryMessage,
     send,
     sessionId,
+    sessionState,
     showTypingIndicator,
     status,
     tier,

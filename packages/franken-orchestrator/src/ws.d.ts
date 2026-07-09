@@ -7,13 +7,14 @@ declare module 'ws' {
   export interface WebSocket {
     close(code?: number, reason?: string): void;
     on(event: 'message', listener: (data: RawData) => void): this;
+    on(event: 'error', listener: (error: Error) => void): this;
     on(event: 'close', listener: () => void): this;
     send(data: string): void;
     terminate(): void;
   }
 
   export class WebSocketServer {
-    constructor(options: { noServer?: boolean });
+    constructor(options: { noServer?: boolean; maxPayload?: number });
     clients: Set<WebSocket>;
     close(callback?: (err?: Error) => void): void;
     handleUpgrade(

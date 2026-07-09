@@ -17,7 +17,9 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
     stdin,
     stderr: new PassThrough(),
     pid: 1234,
-    kill: vi.fn(),
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
   });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
 
@@ -27,7 +29,10 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
       stdout.write(line + '\n');
     }
     stdout.end();
-    setImmediate(() => proc.emit('close', exitCode));
+    setImmediate(() => {
+      proc.exitCode = exitCode;
+      proc.emit('close', exitCode);
+    });
   });
 
   return proc;
@@ -70,11 +75,12 @@ describe('ClaudeCliAdapter', () => {
   });
 
   describe('buildArgs()', () => {
-    it('includes -p and --output-format stream-json', () => {
+    it('includes -p, --output-format stream-json, and --verbose', () => {
       const args = adapter.buildArgs({ systemPrompt: '', messages: [] });
       expect(args).toContain('-p');
       expect(args).toContain('--output-format');
       expect(args).toContain('stream-json');
+      expect(args).toContain('--verbose');
     });
 
     it('adds --append-system-prompt when provided', () => {
@@ -140,6 +146,163 @@ describe('ClaudeCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 } });
     });
 
+    it('parses Claude CLI result wrapper frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'result',
+          result: 'Final Claude CLI answer',
+          usage: { input_tokens: 12, output_tokens: 7 },
+        }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Final Claude CLI answer' },
+        { type: 'done', usage: { inputTokens: 12, outputTokens: 7, totalTokens: 19 } },
+      ]);
+    });
+
+    it('reads top-level Claude result token totals', async () => {
+      const proc = mockSpawn([
+        JSON.stringify({ type: 'result', result: 'Final answer', usage: {}, total_input_tokens: 21, total_output_tokens: 8 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 } });
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('treats Claude error result subtypes as failures', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', subtype: 'error_max_turns', result: '', errors: ['turn limit reached'] }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'turn limit reached', retryable: false });
+    });
+
+    it('does not duplicate Claude result text after assistant deltas', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'final answer' } }),
+        JSON.stringify({ type: 'result', result: 'final answer', total_input_tokens: 4, total_output_tokens: 2 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'final answer' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 } });
+    });
+
+    it('allows Claude tool-only result frames to complete without text', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'tool-only', name: 'Read', input: { file_path: 'README.md' } }] },
+        }),
+        JSON.stringify({ type: 'result', result: '', total_input_tokens: 5, total_output_tokens: 0 }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'tool_use', id: 'tool-only', name: 'Read', input: { file_path: 'README.md' } },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 0, totalTokens: 5 } },
+      ]);
+    });
+
+    it('emits Claude tool-use blocks from assistant frames', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } }] },
+        }),
+        JSON.stringify({ type: 'result', result: 'done' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } });
+      expect(events[1]).toEqual({ type: 'text', content: 'done' });
+    });
+
+    it('emits Claude assistant-frame content in provider order', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'text', text: 'I will read ' },
+              { type: 'tool_use', id: 'tool-ordered', name: 'Read', input: { file_path: 'README.md' } },
+              { type: 'text', text: ' after that.' },
+            ],
+          },
+        }),
+        JSON.stringify({ type: 'result', result: '' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'I will read ' },
+        { type: 'tool_use', id: 'tool-ordered', name: 'Read', input: { file_path: 'README.md' } },
+        { type: 'text', content: ' after that.' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
+    it('preserves Claude assistant-frame whitespace and usage', async () => {
+      mockSpawn([
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            usage: { input_tokens: 12, output_tokens: 6 },
+            content: [{ type: 'text', text: '  formatted answer\n' }],
+          },
+        }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: '  formatted answer\n' });
+      expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 12, outputTokens: 6, totalTokens: 18 } });
+    });
+
+    it('ignores Claude user tool-result frames before the final result', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'secret tool stdout' }] } }),
+        JSON.stringify({ type: 'result', result: 'Final assistant answer' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'text', content: 'Final assistant answer' });
+    });
+
+    it('ignores Claude system frames before the final result', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'system', subtype: 'hook_progress', output: 'internal hook status' }),
+        JSON.stringify({ type: 'result', result: 'Final assistant answer' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events).toEqual([
+        { type: 'text', content: 'Final assistant answer' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
+    it('preserves Claude result-frame error messages', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'result', is_error: true, result: '', error: 'permission denied' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'permission denied', retryable: false });
+    });
+
+    it('errors when a successful process produces no parseable text or result frame', async () => {
+      mockSpawn([], 0);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: 'claude process exited without producing a result frame or text output',
+        retryable: false,
+      });
+    });
+
+    it('fails closed when Claude message_stop arrives without text or tools', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+        JSON.stringify({ type: 'message_stop' }),
+      ]);
+      const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
+      expect(events[0]).toEqual({ type: 'error', error: 'claude stream completed without parseable text', retryable: true });
+    });
+
     it('parses tool_use events with accumulated input', async () => {
       mockSpawn([
         JSON.stringify({ type: 'content_block_start', content_block: { type: 'tool_use', id: 'tu-1', name: 'read_file' } }),
@@ -159,11 +322,24 @@ describe('ClaudeCliAdapter', () => {
     });
 
     it('emits retryable error on rate limit', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'error', error: { message: 'rate limit exceeded' } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit exceeded', retryable: true });
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+    });
+
+    it('kills the spawned Claude process when stream iteration stops early', async () => {
+      const proc = mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } }),
+      ]);
+      const iterator = adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] });
+
+      await expect(iterator.next()).resolves.toEqual({ value: { type: 'text', content: 'partial' }, done: false });
+      await iterator.return(undefined);
+
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`: the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md) and ADR-031 for the earlier consolidation history; do not treat the deleted pre-consolidation MCP package as the current MCP suite.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`, matching the canonical inventories in [README.md](../README.md#current-workspace-packages) and [docs/guides/quickstart.md](guides/quickstart.md#project-structure): the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-real-monorepo-migration.md) and ADR-031 for the earlier consolidation history; the historical `franken-mcp` package was removed, while the current `@franken/mcp-suite` workspace remains active.
 
 ## Modules
 
@@ -153,7 +153,7 @@ Most packages build with `tsc`; `franken-web` uses `tsc && vite build`.
 
 1. **ProviderRegistry only active in reflection path**: Task execution flows through `CliLlmAdapter → MartinLoop → spawn()`. Multi-provider failover applies to heartbeat/reflection calls only. By design — middleware applies to in-process prompt text, not subprocess stdio.
 2. **SkillManagerAdapter.execute() and McpSdkAdapter.callTool() are stubs**: Return hardcoded strings. Real MCP tool dispatch is a future effort.
-3. **No `--non-interactive` flag**: Headless usage relies on starting at `plan` or `run` with existing inputs.
+3. **Init-only `--non-interactive` verification**: `frankenbeast init --non-interactive` skips guided prompts and verifies that config and init state are already complete. Use normal interactive init or `--repair` for setup changes; broader headless execution still starts at `plan` or `run` with existing inputs.
 4. **No top-level `provider` or `dashboard` CLI subcommands**: Current subcommands are `init`, `interview`, `plan`, `run`, `beasts`, `issues`, `chat`, `chat-server`, `beasts-daemon`, `network`, `skill`, and `security` (see `packages/franken-orchestrator/src/cli/args.ts`). Provider/dashboard capabilities are exposed through provider config, `chat-server`, the HTTP dashboard routes, and `franken-web`.
 5. **Explicit `--resume` semantics**: Cold `frankenbeast run` clears existing execution checkpoint/chunk-session state before starting. `frankenbeast run --resume` preserves that state and fails fast when no checkpoint exists, so resumed runs are an intentional control path rather than implicit checkpoint reuse (ADR-033).
 

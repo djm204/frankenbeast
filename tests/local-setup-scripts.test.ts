@@ -93,6 +93,10 @@ describe('local setup scripts', () => {
 
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
+    const readme = read('README.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const mcpSuiteReadme = read('packages/franken-mcp-suite/README.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -126,9 +130,155 @@ describe('local setup scripts', () => {
     for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
     }
+    expect(envExample).not.toMatch(/^# ── Firewall Server ──$/m);
+    expect(envExample).not.toMatch(/^#?\s*FIREWALL_PORT\s*=/m);
+    expect(envExample).not.toMatch(/frankenfirewall|firewall proxy|port 9090/i);
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('Grafana\'s built-in admin/admin default is insecure');
     expect(envExample).toContain('Generate a unique local password before uncommenting');
+    expect(envExample).toContain('Do not use VITE_BEAST_OPERATOR_TOKEN');
+    expect(envExample).not.toMatch(/^#?\s*VITE_BEAST_OPERATOR_TOKEN=/m);
+
+    for (const doc of [readme, quickstart, runCliBeastGuide]) {
+      expect(doc).toContain('ANTHROPIC_API_KEY');
+      expect(doc).toContain('OPENAI_API_KEY');
+      expect(doc).toContain('GOOGLE_API_KEY');
+      expect(doc).toContain('GEMINI_API_KEY');
+    }
+
+    expect(readme).toContain('CHROMA_URL');
+    expect(readme).toContain('http://localhost:8000');
+    expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
+    expect(readme).toContain('Local Tempo exposes OTLP/HTTP writes on http://localhost:4318');
+    expect(readme).toContain('readiness on http://localhost:3200/ready');
+    expect(readme).toContain('does not define a TEMPO_ENDPOINT override');
+    expect(readme).toContain('TempoAdapter options');
+    expect(readme).toContain('OLLAMA_BASE_URL');
+    expect(readme).toContain('http://localhost:11434');
+    expect(readme).toContain('not consumed by the current provider schema');
+    expect(readme).toContain('intentionally absent from `.env.example`');
+    expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
+    expect(readme).toContain('`frankenbeast init` configures the orchestrator/backend control plane');
+    expect(readme).toContain('It is separate from `fbeast mcp init`');
+    expect(readme).toContain('frankenbeast init --verify');
+    expect(readme).toContain('review token prompts carefully');
+    expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('Choose the secret backend before the first init run');
+    expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
+    expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
+    expect(readme).toContain('it applies the same `network.secureBackend` choice');
+    expect(readme).toContain('Chat, Dashboard, and Comms modules');
+    expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
+    expect(readme).toContain('frankenbeast run --config .fbeast/config.json');
+    expect(readme).toContain('does not prove every completed step');
+    expect(readme).toContain('create a fresh vault, answer wizard prompts, decrypt the secret vault, or resolve secret refs');
+    expect(readme).toContain('does not resolve secret refs');
+    expect(readme).toContain('leaving it blank can generate a replacement token');
+    expect(mcpSuiteReadme).toContain('FRANKENBEAST_CONFIG_FILE=/path/to/your-project/.fbeast/config.json');
+    expect(mcpSuiteReadme).toContain('or `FRANKENBEAST_CONFIG_PATH`');
+    expect(mcpSuiteReadme).toContain('FRANKENBEAST_PASSPHRASE');
+    expect(mcpSuiteReadme).toContain('does not move the local encrypted vault root');
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(readme).toContain(frankenOverride);
+    }
+  });
+
+  it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+
+    expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable');
+    expect(runCliBeastGuide).toContain('Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build');
+    expect(runCliBeastGuide).toContain('http://localhost:11434');
+    expect(runCliBeastGuide).toContain('intentionally leaves `OLLAMA_BASE_URL` out');
+    expect(runCliBeastGuide).toContain('current provider schema');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
+    expect(providersMatch).not.toBeNull();
+    const supportedProviders = providersMatch?.[1] ?? '';
+    for (const provider of ['anthropic-api', 'codex-cli', 'claude-cli']) {
+      expect(supportedProviders).toContain(provider);
+      expect(runCliBeastGuide).toContain(`--provider=${provider}`);
+    }
+    expect(supportedProviders).not.toContain('ollama');
+  });
+
+  it('keeps the root README provider-extension guidance on current provider surfaces', () => {
+    const readme = read('README.md');
+
+    expect(readme).not.toContain('Adding a new provider means implementing one `IAdapter` interface');
+    expect(readme).not.toContain('implement `IAdapter` in 4 steps');
+    expect(readme).not.toMatch(/firewall is a model-agnostic proxy/i);
+    expect(readme).toContain('CLI execution/chat providers implement `ICliProvider`');
+    expect(readme).toContain('API-backed clients live in the provider registry and config loading paths');
+    expect(readme).toContain(
+      'add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry',
+    );
+  });
+
+  it('keeps root AI assistant rule regeneration guidance on the supported workflow source', () => {
+    for (const docPath of ['CLAUDE.md', 'GEMINI.md']) {
+      const doc = read(docPath);
+
+      expect(doc).toContain('djm204/agent-workflow-skills');
+      expect(doc).toContain('package-level `project-outline.md` cleanup is tracked separately');
+      expect(doc).toContain('Do not regenerate the root `.cursor/rules/*.mdc` files');
+      expect(doc).not.toContain('npx @djm204/agent-skills');
+      expect(doc).not.toMatch(/Re-run to update:/i);
+    }
+  });
+
+  it('keeps CLAUDE.md workspace package map aligned with live package manifests', () => {
+    const claudeGuide = read('CLAUDE.md');
+    const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((dir) => existsSync(join(ROOT, 'packages', dir, 'package.json')))
+      .sort();
+
+    const packageScopes = packageDirs.map((dir) => {
+      const manifest = JSON.parse(read(`packages/${dir}/package.json`)) as { name: string };
+      return manifest.name;
+    });
+
+    expect(packageDirs).toEqual([
+      'franken-brain',
+      'franken-critique',
+      'franken-governor',
+      'franken-mcp-suite',
+      'franken-observer',
+      'franken-orchestrator',
+      'franken-planner',
+      'franken-types',
+      'franken-web',
+      'live-bench',
+    ]);
+
+    for (const dir of packageDirs) {
+      expect(claudeGuide).toContain(`${dir}/`);
+    }
+    for (const scope of packageScopes) {
+      expect(claudeGuide).toContain(scope);
+    }
+
+    expect(claudeGuide).toContain('The root `package.json` declares `packages/*`');
+    expect(claudeGuide).toContain('@franken/types');
+    expect(claudeGuide).not.toContain('@frankenbeast/types');
+    expect(claudeGuide).toContain('not standalone workspaces anymore');
   });
 });

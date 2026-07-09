@@ -67,6 +67,7 @@ describe('createLlmProvider', () => {
     expect(gemini).toBeInstanceOf(GeminiCliAdapter);
     expect((gemini as GeminiCliAdapter).buildArgs(request)).toEqual([
       '-p',
+      '',
       '--output-format',
       'stream-json',
       '-m',
@@ -107,6 +108,7 @@ describe('createLlmProvider', () => {
       '-p',
       '--output-format',
       'stream-json',
+      '--verbose',
       '--append-system-prompt',
       'test',
       '--model',

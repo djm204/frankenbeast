@@ -5,9 +5,7 @@ import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governo
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
-import type { ToolInputSchema } from './server-factory.js';
-
-export type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
   brain: BrainAdapter;
@@ -19,9 +17,11 @@ export interface AdapterSet {
   skills: SkillsAdapter;
 }
 
+export type ToolServer = 'memory' | 'planner' | 'critique' | 'firewall' | 'observer' | 'governor' | 'skills';
+
 interface ToolStub {
   name: string;
-  server: 'memory' | 'planner' | 'critique' | 'firewall' | 'observer' | 'governor' | 'skills';
+  server: ToolServer;
   description: string;
 }
 
@@ -30,20 +30,22 @@ interface ToolFull extends ToolStub {
   makeHandler: (adapters: AdapterSet) => (args: Record<string, unknown>) => Promise<ToolResult>;
 }
 
+export type ServerAdapterDeps = Partial<AdapterSet>;
+
 function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined {
   if (value === undefined) return fallback;
   const parsed = String(value).split(',').map((p) => p.trim()).filter((p) => p.length > 0);
   return parsed.length > 0 ? parsed : fallback;
 }
 
-export function createAdapterSet(dbPath: string, options: { root?: string | undefined } = {}): AdapterSet {
+export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
   return {
     brain: createBrainAdapter(dbPath),
     observer: createObserverAdapter(dbPath),
     governor: createGovernorAdapter(dbPath),
     planner: createPlannerAdapter(dbPath),
     critique: createCritiqueAdapter(),
-    firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root }),
+    firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root, configPath: options.configPath }),
     skills: createSkillsAdapter(dbPath),
   };
 }
@@ -214,7 +216,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         content: { type: 'string', description: 'Code or text to evaluate' },
         criteria: { type: 'string', description: 'Comma-separated criteria: correctness, readability, security, complexity' },
-        evaluators: { type: 'string', description: 'Comma-separated evaluator names (e.g. logic-loop, complexity)' },
+        evaluators: { type: 'string', description: 'Comma-separated evaluator names. Supported values: logic-loop, complexity, conciseness. Unknown names are rejected.' },
       },
       required: ['content'],
     },
@@ -338,8 +340,9 @@ const TOOLS: ToolFull[] = [
       const promptTokens = Number(args['promptTokens']);
       const completionTokens = Number(args['completionTokens']);
       const costUsdArg = args['costUsd'] != null ? Number(args['costUsd']) : undefined;
-      await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
-      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model}` }] };
+      const result = await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
+      const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
+      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
     },
   },
   {
@@ -358,7 +361,7 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded.' }] };
       }
-      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
+      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },
@@ -437,7 +440,7 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded yet.' }] };
       }
-      const lines = [`## Budget Status`, '', ...summary.byModel.map((row) => `- ${row.model}: $${row.costUsd.toFixed(4)}`), '', `**Total spend:** $${summary.totalSpendUsd.toFixed(4)}`];
+      const lines = [`## Budget Status`, '', ...summary.byModel.map((row) => `- ${row.model}: $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total spend:** $${summary.totalSpendUsd.toFixed(4)}`];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },
@@ -514,6 +517,17 @@ const TOOLS: ToolFull[] = [
 export const TOOL_STUBS: ToolStub[] = TOOLS.map(({ name, server, description }) => ({ name, server, description }));
 
 export const TOOL_REGISTRY: Map<string, ToolFull> = new Map(TOOLS.map((t) => [t.name, t]));
+
+export function createToolDefsForServer(server: ToolServer, adapters: ServerAdapterDeps): ToolDef[] {
+  return TOOLS
+    .filter((tool) => tool.server === server)
+    .map(({ name, description, inputSchema, makeHandler }) => ({
+      name,
+      description,
+      inputSchema,
+      handler: makeHandler(adapters as AdapterSet),
+    }));
+}
 
 export function searchTools(query?: string): ToolStub[] {
   if (!query) return TOOL_STUBS;

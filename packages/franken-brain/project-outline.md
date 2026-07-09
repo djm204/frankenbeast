@@ -3,6 +3,8 @@
 ## 1. Overview
 MOD-03 provides the "tiered" memory architecture for the Frankenbeast. It ensures that the agent can recall past successes/failures, adhere to architectural standards, and maintain context without hitting token limits.
 
+Current status: this outline preserves the original MOD-era framing as historical design context. Treat the root `README.md`, root `package.json` workspaces, `@franken/orchestrator`, and `@franken/mcp-suite` as the authoritative current implementation map.
+
 ## 2. The Tiered Memory Architecture
 
 ### 2.1 Working Memory (The Context Window)
@@ -12,7 +14,7 @@ MOD-03 provides the "tiered" memory architecture for the Frankenbeast. It ensure
 
 ### 2.2 Episodic Memory (The Execution Trace)
 - **Role:** A history of specific actions taken and their results.
-- **Logic:** If a skill from `@djm204/agent-skills` fails (e.g., a build error), the result is stored here. 
+- **Logic:** If an orchestrator step, MCP tool, or provider-backed skill fails (e.g., a build error), the result is stored here.
 - **Recall:** Before starting a new task, the Planner queries Episodic Memory: *"Have I tried to fix this bug before? What was the outcome?"*
 
 ### 2.3 Semantic Memory (The Knowledge Base)

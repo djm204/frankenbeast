@@ -17,6 +17,9 @@ export class InMemoryRateLimiter {
   constructor(private readonly options: BeastRateLimitOptions) {}
 
   take(key: string): { allowed: boolean; remaining: number } {
+    if (this.options.max <= 0) {
+      return { allowed: false, remaining: 0 };
+    }
     const now = Date.now();
     const current = this.counters.get(key);
     if (!current || current.resetAt <= now) {

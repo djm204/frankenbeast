@@ -72,6 +72,22 @@ describe('runBeastMode', () => {
     expect(raw.beast.acknowledged_cli_risk).toBe(true);
   });
 
+  it('rejects unsupported provider values before saving config or launching beast catalog', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const deps = makeDeps(root);
+    const configPath = join(root, '.fbeast', 'config.json');
+
+    await expect(runBeastMode(['--provider=local-llm'], deps)).rejects.toThrow(TypeError);
+    await expect(runBeastMode(['--provider=local-llm'], deps)).rejects.toThrow(
+      'Unsupported beast provider: local-llm',
+    );
+
+    expect(existsSync(configPath)).toBe(false);
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.exec).not.toHaveBeenCalled();
+  });
+
   it('aborts if claude-cli confirmation denied', async () => {
     const root = tmpDir();
     dirs.push(root);
@@ -143,6 +159,8 @@ describe('runBeastMode', () => {
     await runBeastMode([], deps);
 
     const message = mockLog.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(message).toContain('npm run local:link');
+    expect(message).toContain('npm run local:verify-cli');
     expect(message).toContain('npm install -g @franken/orchestrator');
     expect(message).toContain('frankenbeast beasts catalog');
     expect(message).not.toContain('npm link --workspace=franken-orchestrator');

@@ -4,8 +4,12 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
-import { createDashboardStaticResponse, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
+import { createDashboardStaticResponse, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
+import { createSecretStore } from '../../../src/network/secret-store.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 async function createDashboardDist(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-dashboard-dist-'));
   await mkdir(join(dir, 'assets'), { recursive: true });
@@ -17,11 +21,22 @@ async function createDashboardDist(): Promise<string> {
 describe('dashboard static server', () => {
   let dirs: string[] = [];
   const originalFetch = globalThis.fetch;
+  const originalCwd = process.cwd();
+  const originalConfigFile = process.env.FRANKENBEAST_CONFIG_FILE;
+  const originalConfigPath = process.env.FRANKENBEAST_CONFIG_PATH;
+  const originalPassphrase = process.env.FRANKENBEAST_PASSPHRASE;
 
   afterEach(async () => {
     await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
     dirs = [];
     globalThis.fetch = originalFetch;
+    process.chdir(originalCwd);
+    if (originalConfigFile === undefined) delete process.env.FRANKENBEAST_CONFIG_FILE;
+    else process.env.FRANKENBEAST_CONFIG_FILE = originalConfigFile;
+    if (originalConfigPath === undefined) delete process.env.FRANKENBEAST_CONFIG_PATH;
+    else process.env.FRANKENBEAST_CONFIG_PATH = originalConfigPath;
+    if (originalPassphrase === undefined) delete process.env.FRANKENBEAST_PASSPHRASE;
+    else process.env.FRANKENBEAST_PASSPHRASE = originalPassphrase;
     vi.restoreAllMocks();
   });
 
@@ -51,6 +66,54 @@ describe('dashboard static server', () => {
     expect(health.status).toBe(200);
   });
 
+  it('gates dashboard routes while the build is running but still allows backend proxy routes', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    globalThis.fetch = fetchMock;
+
+    const clientRoute = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/'),
+      staticDir,
+      { buildStatus: { state: 'building' } },
+    );
+    const asset = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/assets/app.js'),
+      staticDir,
+      { buildStatus: { state: 'building' } },
+    );
+    const proxied = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/api/dashboard', {
+        headers: { origin: 'http://dashboard.local' },
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', buildStatus: { state: 'building' } },
+    );
+
+    expect(clientRoute.status).toBe(503);
+    await expect(clientRoute.text()).resolves.toContain('Dashboard build in progress');
+    expect(asset.status).toBe(503);
+    expect(proxied.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('gates dashboard routes after a build failure instead of serving stale assets', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+
+    const response = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/beasts'),
+      staticDir,
+      { buildStatus: { state: 'failed', message: 'npm exited 1' } },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toContain('Dashboard build failed: npm exited 1');
+  });
+
   it('fails health when the dashboard build is missing', async () => {
     const staticDir = await mkdtemp(join(tmpdir(), 'franken-dashboard-empty-'));
     dirs.push(staticDir);
@@ -75,13 +138,41 @@ describe('dashboard static server', () => {
         headers: { origin: 'http://dashboard.local' },
       }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242/base/', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242/base/', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(proxied.status).toBe(200);
     const [targetUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/base/api/dashboard?fresh=1');
-    expect(new Headers(init.headers).get('authorization')).toBe('Bearer operator-token');
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
+  });
+
+  it('loads dashboard operator token from network config even when provider trust metadata is unapproved', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'franken-dashboard-config-'));
+    dirs.push(projectRoot);
+    process.chdir(projectRoot);
+    process.env.FRANKENBEAST_PASSPHRASE = 'dashboard-token-test-passphrase';
+    const configFile = join(projectRoot, 'frankenbeast.json');
+    process.env.FRANKENBEAST_CONFIG_FILE = configFile;
+    delete process.env.FRANKENBEAST_CONFIG_PATH;
+    const store = createSecretStore('local-encrypted', { projectRoot, passphrase: process.env.FRANKENBEAST_PASSPHRASE });
+    await store.store('dashboard-token', 'from-secret-store');
+    await writeFile(configFile, JSON.stringify({
+      network: {
+        secureBackend: 'local-encrypted',
+        operatorTokenRef: 'dashboard-token',
+      },
+      providers: {
+        overrides: {
+          custom: {
+            command: '/usr/local/bin/custom-provider',
+            trustCommandOverride: true,
+          },
+        },
+      },
+    }), 'utf8');
+
+    await expect(resolveDashboardOperatorToken()).resolves.toBe('from-secret-store');
   });
 
   it('rejects cross-site proxy requests when an operator token is configured', async () => {
@@ -95,7 +186,7 @@ describe('dashboard static server', () => {
         headers: { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
       }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(403);
@@ -111,7 +202,7 @@ describe('dashboard static server', () => {
     const response = await createDashboardStaticResponse(
       new Request('http://dashboard.local/api/dashboard'),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(403);
@@ -127,12 +218,59 @@ describe('dashboard static server', () => {
     const response = await createDashboardStaticResponse(
       new Request('http://dashboard.local/webhooks/telegram', { method: 'POST', body: '{}' }),
       staticDir,
-      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
     );
 
     expect(response.status).toBe(200);
     const [targetUrl] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/webhooks/telegram');
+  });
+
+  it('strips bot-token webhook paths before proxying so tokens are not forwarded', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok'));
+    globalThis.fetch = fetchMock;
+
+    const botToken = '123456789:ABCdefghIJKlmnoPQRStuv';
+    const response = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${botToken}`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(response.status).toBe(200);
+    const [firstTargetUrl] = fetchMock.mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(firstTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram');
+
+    const encodedTokenRequest = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${encodeURIComponent(botToken)}`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(encodedTokenRequest.status).toBe(200);
+    const [secondTargetUrl] = fetchMock.mock.calls[1] as [RequestInfo, RequestInit];
+    expect(String(secondTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram');
+
+    const encodedSeparatorRequest = await createDashboardStaticResponse(
+      new Request(`http://dashboard.local/webhooks/telegram/${botToken}%2Fextra`, {
+        method: 'POST',
+        body: '{}',
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: 'operator-token' },
+    );
+
+    expect(encodedSeparatorRequest.status).toBe(200);
+    const [thirdTargetUrl] = fetchMock.mock.calls[2] as [RequestInfo, RequestInit];
+    expect(String(thirdTargetUrl)).toBe('http://127.0.0.1:4242/webhooks/telegram%2Fextra');
   });
 
   it('forwards non-GET request bodies through the HTTP static proxy', async () => {
@@ -157,7 +295,7 @@ describe('dashboard static server', () => {
       port: 0,
       staticDir,
       apiTarget: `http://127.0.0.1:${backendAddress.port}`,
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
     });
     const dashboardAddress = dashboard.address();
     if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');

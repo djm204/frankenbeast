@@ -13,6 +13,12 @@ import type {
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
+function terminateRunningProcess(proc: ChildProcess): void {
+  if (proc.exitCode === null && proc.signalCode === null) {
+    proc.kill();
+  }
+}
+
 export interface CodexCliOptions {
   binaryPath?: string;
   model?: string;
@@ -124,76 +130,86 @@ export class CodexCliAdapter implements ILlmProvider {
     const rl = createInterface({ input: proc.stdout! });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let streamCompleted = false;
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-
-      const type = parsed['type'] as string;
-
-      if (type === 'message' || type === 'content') {
-        const content = parsed['content'] as string | undefined;
-        if (content) {
-          yield { type: 'text', content };
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
         }
-      } else if (type === 'function_call' || type === 'tool_call') {
-        yield {
-          type: 'tool_use',
-          id: (parsed['id'] as string) ?? crypto.randomUUID(),
-          name: parsed['name'] as string,
-          input: parsed['arguments'] ?? parsed['input'] ?? {},
-        };
-      } else if (type === 'usage' || type === 'done') {
-        const usage = (parsed['usage'] as Record<string, number>) ?? parsed;
-        totalInputTokens =
-          (usage['input_tokens'] as number) ?? totalInputTokens;
-        totalOutputTokens =
-          (usage['output_tokens'] as number) ?? totalOutputTokens;
-        if (type === 'done') {
+
+        const type = parsed['type'] as string;
+
+        if (type === 'message' || type === 'content') {
+          const content = parsed['content'] as string | undefined;
+          if (content) {
+            yield { type: 'text', content };
+          }
+        } else if (type === 'function_call' || type === 'tool_call') {
           yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
+            type: 'tool_use',
+            id: (parsed['id'] as string) ?? crypto.randomUUID(),
+            name: parsed['name'] as string,
+            input: parsed['arguments'] ?? parsed['input'] ?? {},
           };
+        } else if (type === 'usage' || type === 'done') {
+          const usage = (parsed['usage'] as Record<string, number>) ?? parsed;
+          totalInputTokens =
+            (usage['input_tokens'] as number) ?? totalInputTokens;
+          totalOutputTokens =
+            (usage['output_tokens'] as number) ?? totalOutputTokens;
+          if (type === 'done') {
+            streamCompleted = true;
+            yield {
+              type: 'done',
+              usage: {
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+                totalTokens: totalInputTokens + totalOutputTokens,
+              },
+            };
+            return;
+          }
+        } else if (type === 'error') {
+          const message =
+            (parsed['message'] as string) ?? 'Unknown error';
+          const retryable =
+            message.includes('rate') || message.includes('429');
+          yield { type: 'error', error: message, retryable };
           return;
         }
-      } else if (type === 'error') {
-        const message =
-          (parsed['message'] as string) ?? 'Unknown error';
-        const retryable =
-          message.includes('rate') || message.includes('429');
-        yield { type: 'error', error: message, retryable };
-        return;
       }
-    }
 
-    // Stream ended without a done/error frame — check exit code
-    const exitCode = await new Promise<number | null>((resolve) => {
-      proc.on('close', resolve);
-    });
-    if (exitCode !== 0 && exitCode !== null) {
-      yield {
-        type: 'error',
-        error: `codex process exited with code ${exitCode}`,
-        retryable: false,
-      };
-    } else {
-      yield {
-        type: 'done',
-        usage: {
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          totalTokens: totalInputTokens + totalOutputTokens,
-        },
-      };
+      // Stream ended without a done/error frame — check exit code
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      if (exitCode !== 0 && exitCode !== null) {
+        yield {
+          type: 'error',
+          error: `codex process exited with code ${exitCode}`,
+          retryable: false,
+        };
+      } else {
+        streamCompleted = true;
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
+        };
+      }
+    } finally {
+      rl.close();
+      if (!streamCompleted) {
+        terminateRunningProcess(proc);
+      }
     }
   }
 }

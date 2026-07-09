@@ -27,8 +27,9 @@ describe('createBeastDeps', () => {
       mcpSupport: true,
       maxContextTokens: 1_000_000,
     });
-    expect((provider as { buildArgs(request: unknown): string[] }).buildArgs({})).toEqual([
+    expect((provider as unknown as { buildArgs(request: unknown): string[] }).buildArgs({ systemPrompt: '' })).toEqual([
       '-p',
+      '',
       '--output-format',
       'stream-json',
       '-m',

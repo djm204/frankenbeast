@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseDotenv } from 'dotenv';
-import { OrchestratorConfigSchema } from '../config/orchestrator-config.js';
+import { NetworkConfigFieldsSchema } from '../network/network-config.js';
 import { createSecretStore } from '../network/secret-store.js';
 
 const SERVICE_IDENTITY = 'dashboard-web';
@@ -25,9 +25,29 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+const VALID_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+type DashboardBuildStatus =
+  | { state: 'ready' }
+  | { state: 'building' }
+  | { state: 'failed'; message: string };
+
+const HOP_BY_HOP_HEADERS = [
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+] as const;
+
 export interface DashboardStaticResponseOptions {
   apiTarget?: string | undefined;
   operatorToken?: string | undefined;
+  signal?: AbortSignal | undefined;
+  buildStatus?: DashboardBuildStatus | undefined;
 }
 
 export interface DashboardStaticServerOptions extends DashboardStaticResponseOptions {
@@ -56,6 +76,17 @@ function normalizeBaseUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   return trimmed.replace(/\/+$/, '');
+}
+
+
+function removeHopByHopHeaders(headers: Headers): void {
+  const connectionTokens = headers.get('connection')
+    ?.split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token && VALID_HEADER_NAME.test(token)) ?? [];
+  for (const header of [...HOP_BY_HOP_HEADERS, 'host', ...connectionTokens]) {
+    headers.delete(header);
+  }
 }
 
 function isSameOriginProxyRequest(request: Request): boolean {
@@ -96,7 +127,7 @@ async function createProxyResponse(
 
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
-  headers.delete('host');
+  removeHopByHopHeaders(headers);
   if (options.operatorToken) {
     headers.set('authorization', `Bearer ${options.operatorToken}`);
   }
@@ -105,17 +136,35 @@ async function createProxyResponse(
     method: request.method,
     headers,
     redirect: 'manual',
+    ...(options.signal ? { signal: options.signal } : {}),
   };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = await request.arrayBuffer();
   }
-  return fetch(targetUrl, init);
+  const upstreamResponse = await fetch(targetUrl, init);
+  const responseHeaders = new Headers(upstreamResponse.headers);
+  removeHopByHopHeaders(responseHeaders);
+  return new Response(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    statusText: upstreamResponse.statusText,
+    headers: responseHeaders,
+  });
+}
+
+function sanitizeWebhookPathForProxy(pathname: string): string {
+  // Rewrite potentially sensitive Telegram webhook paths that accidentally include the bot token
+  // so we never forward that token to internal services.
+  return pathname.replace(
+    /(\/webhooks\/telegram)\/\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=$|\/|%2F)/i,
+    '$1',
+  );
 }
 
 function resolveProxyTargetUrl(apiTarget: string, sourceUrl: URL): URL {
   const targetBase = new URL(`${apiTarget}/`);
   const basePath = targetBase.pathname.replace(/\/+$/, '');
-  targetBase.pathname = `${basePath}${sourceUrl.pathname}`.replace(/\/+/g, '/');
+  const sanitizedPathname = sanitizeWebhookPathForProxy(sourceUrl.pathname);
+  targetBase.pathname = `${basePath}${sanitizedPathname}`.replace(/\/+/g, '/');
   targetBase.search = sourceUrl.search;
   return targetBase;
 }
@@ -149,6 +198,22 @@ async function readStaticFile(filePath: string): Promise<Response | undefined> {
   }
 }
 
+function dashboardBuildUnavailableResponse(buildStatus: DashboardBuildStatus): Response | undefined {
+  if (buildStatus.state === 'building') {
+    return response('Dashboard build in progress', {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  if (buildStatus.state === 'failed') {
+    return response(`Dashboard build failed: ${buildStatus.message}`, {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  return undefined;
+}
+
 export async function createDashboardStaticResponse(
   request: Request,
   staticDir: string,
@@ -156,6 +221,23 @@ export async function createDashboardStaticResponse(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') {
+    if (options.buildStatus?.state === 'building') {
+      return response(JSON.stringify({ service: SERVICE_IDENTITY, ok: false, reason: 'dashboard-build-building' }), {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
+    if (options.buildStatus?.state === 'failed') {
+      return response(JSON.stringify({
+        service: SERVICE_IDENTITY,
+        ok: false,
+        reason: 'dashboard-build-failed',
+        message: options.buildStatus.message,
+      }), {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
     const indexPath = resolveSafeAssetPath(staticDir, '/index.html');
     const index = indexPath ? await readStaticFile(indexPath) : undefined;
     if (!index) {
@@ -173,6 +255,11 @@ export async function createDashboardStaticResponse(
   if (isReservedBackendPath(url.pathname)) {
     return await createProxyResponse(request, options)
       ?? response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
+
+  const unavailable = options.buildStatus ? dashboardBuildUnavailableResponse(options.buildStatus) : undefined;
+  if (unavailable) {
+    return unavailable;
   }
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -315,25 +402,44 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   });
 }
 
-function startOptionalBuild(options: DashboardStaticServerOptions): void {
+function startOptionalBuild(options: DashboardStaticServerOptions): DashboardBuildStatus {
   if (!options.buildCommand) {
-    return;
+    return { state: 'ready' };
   }
+  const status: DashboardBuildStatus = { state: 'building' };
   const child = spawn(options.buildCommand, options.buildArgs ?? [], {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'inherit',
   });
-  child.once('exit', (code) => {
-    if (code && code !== 0) {
-      console.error(`Dashboard build command exited with status ${code}`);
-    }
+  child.once('error', (error) => {
+    Object.assign(status, { state: 'failed', message: error.message });
   });
+  child.once('exit', (code, signal) => {
+    if (code === 0) {
+      Object.assign(status, { state: 'ready' });
+      return;
+    }
+    const message = signal
+      ? `Dashboard build command terminated by signal ${signal}`
+      : `Dashboard build command exited with status ${code ?? 'unknown'}`;
+    Object.assign(status, { state: 'failed', message });
+    console.error(message);
+  });
+  return status;
 }
 
 export async function startDashboardStaticServer(options: DashboardStaticServerOptions): Promise<HttpServer> {
+  let buildStatus: DashboardBuildStatus = options.buildCommand ? { state: 'building' } : { state: 'ready' };
   const server = createServer((req, res) => {
     const host = req.headers.host ?? `${options.host}:${options.port}`;
+    const abortController = new AbortController();
+    const abortRequest = () => abortController.abort();
+    req.once('aborted', abortRequest);
+    req.once('error', abortRequest);
+    res.once('close', () => {
+      if (!res.writableEnded) abortRequest();
+    });
     void readIncomingBody(req)
       .then(async (body) => {
         const requestInit: RequestInit = { headers: headersFromIncoming(req.headers) };
@@ -345,7 +451,11 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
         }
         const requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
         const request = new Request(requestUrl, requestInit);
-        const staticResponse = await createDashboardStaticResponse(request, options.staticDir, options);
+        const staticResponse = await createDashboardStaticResponse(request, options.staticDir, {
+          ...options,
+          buildStatus,
+          signal: abortController.signal,
+        });
         await writeWebResponse(staticResponse, req.method, res);
       })
       .catch((error) => {
@@ -364,10 +474,10 @@ export async function startDashboardStaticServer(options: DashboardStaticServerO
     server.once('error', rejectListen);
     server.listen(options.port, options.host, () => {
       server.off('error', rejectListen);
+      buildStatus = startOptionalBuild(options);
       resolveListen();
     });
   });
-  startOptionalBuild(options);
   return server;
 }
 
@@ -380,12 +490,16 @@ async function readOperatorTokenFromEnvFile(filePath: string): Promise<string | 
   }
 }
 
-async function resolveDashboardOperatorToken(): Promise<string | undefined> {
-  const configPath = process.env.FRANKENBEAST_CONFIG_FILE || process.env.FRANKENBEAST_CONFIG_PATH;
+export async function resolveDashboardOperatorToken(): Promise<string | undefined> {
+  const configPath = process.env.FRANKENBEAST_CONFIG_FILE
+    || process.env.FRANKENBEAST_CONFIG_PATH
+    || join(process.cwd(), '.fbeast', 'config.json');
   if (configPath) {
     try {
       const resolvedConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
-      const config = OrchestratorConfigSchema.parse(JSON.parse(await readFile(resolvedConfigPath, 'utf8')));
+      const config = NetworkConfigFieldsSchema.pick({ network: true }).parse(
+        JSON.parse(await readFile(resolvedConfigPath, 'utf8')),
+      );
       const tokenRef = config.network.operatorTokenRef?.trim();
       if (tokenRef) {
         const store = createSecretStore(config.network.secureBackend ?? 'local-encrypted', {

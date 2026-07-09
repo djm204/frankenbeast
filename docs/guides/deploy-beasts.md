@@ -22,10 +22,10 @@ The dashboard talks to two local services when run through `frankenbeast network
 
 Use the operator token already configured for the repo, or update the configured token first and then reuse that same value for the backend and Vite dev proxy. In initialized repos, the backend may resolve `network.operatorTokenRef` from the configured secret store before it reads token environment variables, so exporting a throwaway value only for the dashboard proxy can make browser requests fail with 401s.
 
-For a new local-only setup without a stored token, set one shell variable and reuse it for both processes:
+For a new local-only setup without a stored token, generate one shell variable and reuse it for both processes:
 
 ```bash
-export OPERATOR_TOKEN='dev-operator-token'
+export OPERATOR_TOKEN="$(openssl rand -hex 32)"
 export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 ```
 
@@ -66,7 +66,9 @@ npm --workspace @franken/orchestrator run chat-server -- --provider codex
 npm --workspace @franken/orchestrator run chat-server -- --allow-origin http://localhost:5173
 ```
 
-If you bind to a non-loopback host or run in managed network mode, the server refuses to start without an operator token.
+If the daemon or chat server is launched by a wrapper from outside the intended checkout, pass the explicit CLI root with `--base-dir /absolute/path/to/project`. The README's [Beast project-root override](../../README.md#beast-project-root-override) documents the narrower `FBEAST_ROOT` fallback used by Beast service construction and built-in run configs when no explicit root is supplied; keep it aligned with `--base-dir` if both are set.
+
+If you bind to a non-loopback host, the server refuses to start without an operator token. The same fail-closed rule applies when `chat-server` is launched by `frankenbeast network`: the supervisor sets the internal `FRANKENBEAST_NETWORK_MANAGED=1` child-process marker, and managed `chat-server` requires an operator token even on loopback. Do not export this marker for normal standalone debugging; unset it for local standalone `chat-server` runs, or provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` / the configured secret-store token when intentionally exercising managed semantics.
 
 ## 2. Start the dashboard
 
@@ -142,7 +144,11 @@ Use the dashboard wizard to create a tracked agent, choose the supported executi
 2. Click **Create Agent**.
 3. Fill the wizard:
    - **Identity**: name/description for the tracked agent.
-   - **Workflow**: choose `chunk-plan` for a dashboard-launched tracked run on current main. The catalog may also list `design-interview` and `martin-loop`, but launch those through CLI/API until the dashboard supplies their strict config fields. The wizard may also show UI-only presets such as `issues-agent`; those are not deployable Beast catalog entries until their backend definition exists.
+   - **Workflow**: choose a deployable Beast workflow and provide the required fields the dashboard renders for that definition:
+     - `design-interview`: **Goal** (`goal`) and **Output Path** (`outputPath`).
+     - `chunk-plan`: **Design Doc Path** (`designDocPath`) and **Output Directory** (`outputDir`). The design doc path must be repo-relative, must not contain `..` traversal, and must point to a Markdown file.
+     - `martin-loop`: **Provider** (`provider`), **Objective** (`objective`), and **Chunk Directory Path** (`chunkDirectory`).
+     - UI-only presets such as `issues-agent` are not deployable Beast catalog entries until their backend definition exists.
    - **LLM Targets**: select provider/model routing.
    - **Modules**: keep guardrail modules enabled unless you intentionally need a narrower run.
    - **Skills** and **Prompts**: attach context and prompt material.
@@ -150,7 +156,7 @@ Use the dashboard wizard to create a tracked agent, choose the supported executi
 4. Review the generated launch config.
 5. Click **Launch**.
 
-The dashboard creates a tracked agent first. For supported tracked-agent workflows, starting the agent dispatches the linked Beast run. If the agent does not start immediately, select it in the list and click **Start** from the detail panel. If validation fails because required definition fields are missing, use the raw CLI/API run path for that definition instead.
+The dashboard creates a tracked agent first. For supported tracked-agent workflows, starting the agent dispatches the linked Beast run. If the agent does not start immediately, select it in the list and click **Start** from the detail panel. If validation fails, correct the highlighted workflow field values or use the raw CLI/API run path when you need to submit a config shape the wizard does not expose.
 
 ## 5. Monitor status, events, and logs
 
@@ -212,9 +218,11 @@ frankenbeast beasts delete <agent-id>
 
 - The backend token and server-side proxy token differ. Use or update the configured operator token, then make the backend and Vite proxy resolve that same token for chat, network, dashboard, and Beast routes; do not assume a dummy browser env value overrides a stored backend token.
 
-`A dashboard launch fails validation for design-interview or martin-loop`
+`A dashboard launch fails validation`
 
-- Expected on current main. The tracked-agent wizard does not yet populate the strict definition fields for those runs. Launch them through the CLI/API with their required config fields instead.
+- Check the highlighted workflow fields before launching. `design-interview` requires `goal` and `outputPath`; `chunk-plan` requires a repo-relative Markdown `designDocPath` plus `outputDir`; `martin-loop` requires `provider`, `objective`, and `chunkDirectory`.
+- For file and directory fields, browsers may expose fake paths from pickers. Enter the path the backend should resolve, such as a repo-relative design document path or the real chunk directory path, instead of relying on a browser-only fake path.
+- If you need optional or advanced config fields that the wizard does not render, use the raw CLI/API run path and submit the complete config explicitly.
 
 `Container mode fails to start`
 

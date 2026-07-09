@@ -110,6 +110,24 @@ describe('RecursivePlanner — happy path', () => {
     expect(result.taskResults).toHaveLength(2);
   });
 
+  it('skips tasks already completed by an earlier recovery iteration', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const executor = vi.fn().mockImplementation((task: Task) => Promise.resolve(success(task.id)));
+
+    const result = await new RecursivePlanner().execute(graph, {
+      executor,
+      completedTaskIds: new Set([createTaskId('t-1')]),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledOnce();
+    expect(executor).toHaveBeenCalledWith(expect.objectContaining({ id: createTaskId('t-2') }));
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([createTaskId('t-2')]);
+  });
+
   it('sub-tasks respect their own dependency order', async () => {
     const sub1 = makeTask('sub-1');
     const sub2: Task = {
@@ -131,6 +149,27 @@ describe('RecursivePlanner — happy path', () => {
     expect(callOrder.indexOf(createTaskId('sub-1'))).toBeLessThan(
       callOrder.indexOf(createTaskId('sub-2'))
     );
+  });
+
+  it('allows expanded sub-tasks to depend on already executed parent tasks outside the sub-graph', async () => {
+    const parent = makeTask('parent');
+    const child: Task = {
+      ...makeTask('child'),
+      dependsOn: [createTaskId('parent')],
+    };
+    const graph = PlanGraph.empty().addTask(parent);
+
+    const callOrder: string[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      callOrder.push(task.id);
+      if (task.id === createTaskId('parent')) return Promise.resolve(expand('parent', [child]));
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new RecursivePlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('completed');
+    expect(callOrder).toEqual([createTaskId('parent'), createTaskId('child')]);
   });
 
   it('handles nested expansion (depth 2)', async () => {

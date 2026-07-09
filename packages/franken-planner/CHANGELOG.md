@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.4.12](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.11...@franken/planner-v0.4.12) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
+## [0.4.11](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.10...@franken/planner-v0.4.11) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+## [0.4.10](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.9...@franken/planner-v0.4.10) (2026-07-07)
+
+
+### Bug Fixes
+
+* **planner:** detect cycles in parallel planner ([b6102c3](https://github.com/djm204/frankenbeast/commit/b6102c3f6fc1f2c12e35599ac2fc6e83929e8cf0)), closes [#687](https://github.com/djm204/frankenbeast/issues/687)
+* **planner:** isolate recovery attempts per task ([#890](https://github.com/djm204/frankenbeast/issues/890)) ([c0f0b4d](https://github.com/djm204/frankenbeast/commit/c0f0b4d9d197d40e5cb4492e824445d3c397542c))
+* **planner:** preserve recursive subgraph dependencies ([#893](https://github.com/djm204/frankenbeast/issues/893)) ([999b6a2](https://github.com/djm204/frankenbeast/commit/999b6a2dd0ccd7709dbb5760518cdfbc7c18a9f2))
+* **planner:** reject dangling raw DAG edges ([fcb271d](https://github.com/djm204/frankenbeast/commit/fcb271d444ed439baa32533cc6faa44e9d7a6260)), closes [#847](https://github.com/djm204/frankenbeast/issues/847)
+* **planner:** support dynamic expansions in planners ([#924](https://github.com/djm204/frankenbeast/issues/924)) ([482ca64](https://github.com/djm204/frankenbeast/commit/482ca64aa9e205a85b921a2ad64f519088b192c1))
+* **publish:** add files allowlist to governor/planner/types so dist actually ships ([#844](https://github.com/djm204/frankenbeast/issues/844)) ([46cb1a1](https://github.com/djm204/frankenbeast/commit/46cb1a1f1517da3cf88d589894fdc30b863b8e99))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Tests
+
+* **planner:** cover missing raw DAG dependencies ([#921](https://github.com/djm204/frankenbeast/issues/921)) ([02ec022](https://github.com/djm204/frankenbeast/commit/02ec0224b85aa010dbee6725b6cf8c8b8b56ed7e)), closes [#916](https://github.com/djm204/frankenbeast/issues/916)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
 ## [0.4.9](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.8...@franken/planner-v0.4.9) (2026-07-06)
 
 

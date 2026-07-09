@@ -2,6 +2,7 @@ import type {
   ApiDataEnvelope,
   ApiErrorEnvelope,
   ApproveResult,
+  ChatSocketTicketResponse,
   ChatSessionResponse as ChatSession,
   ChatSessionSummary,
   MessageResult,
@@ -95,6 +96,14 @@ export class ChatApiClient {
     return this.request<ChatSession>(`/v1/chat/sessions/${encodeURIComponent(id)}`, {
       method: 'GET',
     });
+  }
+
+  async createSocketTicket(sessionId: string): Promise<string> {
+    const response = await this.request<ChatSocketTicketResponse>(
+      `/v1/chat/sessions/${encodeURIComponent(sessionId)}/socket-ticket`,
+      { method: 'POST' },
+    );
+    return response.ticket;
   }
 
   async listSessions(projectId?: string): Promise<ChatSessionSummary[]> {

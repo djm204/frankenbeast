@@ -7,6 +7,24 @@ export interface TokenUsage {
   model?: string
 }
 
+function assertValidTokenDelta(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `SpanLifecycle: ${label} must be a non-negative safe integer, received ${value}`,
+    )
+  }
+}
+
+function safeAddTokenCounts(a: number, b: number): number {
+  const sum = a + b
+  if (!Number.isSafeInteger(sum)) {
+    throw new RangeError(
+      `SpanLifecycle: token total ${sum} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+    )
+  }
+  return sum
+}
+
 export const SpanLifecycle = {
   setMetadata(span: Span, data: Record<string, unknown>): void {
     if (span.status !== 'active') {
@@ -29,9 +47,13 @@ export const SpanLifecycle = {
     if (span.status !== 'active') {
       throw new Error(`Cannot record token usage on a ${span.status} span (id: ${span.id})`)
     }
-    // Record to the counter next: it validates the token counts and may throw
-    // on bad/overflowing input. Doing it before mutating the span keeps the
-    // rejection atomic — a rejected record leaves the span untouched.
+    assertValidTokenDelta(usage.promptTokens, 'promptTokens')
+    assertValidTokenDelta(usage.completionTokens, 'completionTokens')
+    const totalTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
+
+    // Record to the counter next: it may throw if the new model/global totals
+    // would overflow. Doing it before mutating the span keeps the rejection
+    // atomic — a rejected record leaves the span untouched.
     if (counter !== undefined && usage.model !== undefined) {
       counter.record({
         model: usage.model,
@@ -42,7 +64,7 @@ export const SpanLifecycle = {
     const data: Record<string, unknown> = {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
-      totalTokens: usage.promptTokens + usage.completionTokens,
+      totalTokens,
     }
     if (usage.model !== undefined) {
       data['model'] = usage.model

@@ -60,10 +60,12 @@ function collectDependents(services: ManagedNetworkServiceState[], target: strin
 export class NetworkSupervisor {
   private readonly now: () => string;
   private readonly startupAttempts: number;
+  private readonly startupAttemptsExplicit: boolean;
   private readonly startupDelayMs: number;
 
   constructor(private readonly deps: NetworkSupervisorDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.startupAttemptsExplicit = deps.startupAttempts !== undefined;
     this.startupAttempts = deps.startupAttempts ?? 20;
     this.startupDelayMs = deps.startupDelayMs ?? 250;
   }
@@ -190,7 +192,7 @@ export class NetworkSupervisor {
 
         if (preflight.action === 'reuse') {
           const existingService = existingState?.services.find((candidate) => candidate.id === service.id);
-          services.push({
+          const reusedService: ManagedNetworkServiceState = {
             id: existingService?.id ?? service.id,
             pid: existingService?.pid ?? 0,
             detached: existingService?.detached ?? options.detached,
@@ -204,7 +206,11 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : existingService?.channels ? { channels: existingService.channels } : {}),
             ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : existingService?.hostServiceId ? { hostServiceId: existingService.hostServiceId } : {}),
             ...(existingService?.inProcess ? { inProcess: existingService.inProcess } : {}),
-          });
+          };
+          services.push(reusedService);
+          if (!await this.waitForHealthy(reusedService)) {
+            throw new Error(`Service ${service.id} failed healthcheck during startup`);
+          }
           continue;
         }
 
@@ -328,11 +334,14 @@ export class NetworkSupervisor {
   }
 
   private async waitForHealthy(service: ManagedNetworkServiceState): Promise<boolean> {
-    for (let attempt = 0; attempt < this.startupAttempts; attempt += 1) {
+    const startupAttempts = service.serviceIdentity === 'dashboard-web' && !this.startupAttemptsExplicit
+      ? Math.max(this.startupAttempts, 240)
+      : this.startupAttempts;
+    for (let attempt = 0; attempt < startupAttempts; attempt += 1) {
       if (await this.deps.healthcheck(service)) {
         return true;
       }
-      if (attempt < this.startupAttempts - 1) {
+      if (attempt < startupAttempts - 1) {
         await sleep(this.startupDelayMs);
       }
     }

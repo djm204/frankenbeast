@@ -12,7 +12,7 @@ Production tasks require cryptographic proof that a specific human approved the 
 
 Use HMAC-SHA256 signatures via Node.js `node:crypto`. The `ApprovalResponse` includes an optional `signature` field. A `SignatureVerifier` validates signatures against a shared secret using timing-safe comparison. For non-production environments, signature verification is skipped (configurable via `config.requireSignedApprovals`).
 
-The signature payload is `JSON.stringify({ requestId, decision })` — the minimum data needed to prove the decision is authentic.
+The signature payload is a deterministic, non-JSON approval-response byte string formatted as `requestId:<url-encoded-id>|decision:<url-encoded-decision>|respondedBy:<url-encoded-responder>|feedback:<feedback-state>`. `feedback:<feedback-state>` is `feedback:u` when feedback is omitted and `feedback:s:<url-encoded-feedback>` when feedback is present. Signing `respondedBy` and `feedback` ensures the recorded responder identity and optional rationale cannot be tampered with after the decision is signed.
 
 ## Consequences
 

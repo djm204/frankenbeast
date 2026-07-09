@@ -36,14 +36,39 @@ describe('SignatureVerifier', () => {
   });
 
   it('sign + verify round-trip succeeds for approval response payloads', () => {
-    const payload = formatApprovalResponseSignaturePayload({ requestId: 'req-001', decision: 'APPROVE' });
+    const payload = formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+      respondedBy: 'human',
+    });
     const sig = verifier.sign(payload);
     expect(verifier.verify(payload, sig)).toBe(true);
   });
 
   it('formats approval response payloads without relying on JSON key order', () => {
-    expect(formatApprovalResponseSignaturePayload({ requestId: 'req-001', decision: 'APPROVE' }))
-      .toBe('requestId:req-001|decision:APPROVE');
+    expect(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+      respondedBy: 'human@example.com',
+      feedback: 'ship it',
+    }))
+      .toBe('requestId:req-001|decision:APPROVE|respondedBy:human%40example.com|feedback:s:ship%20it');
+  });
+
+  it('distinguishes absent feedback from literal feedback values', () => {
+    expect(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+      respondedBy: 'human',
+    }))
+      .toBe('requestId:req-001|decision:APPROVE|respondedBy:human|feedback:u');
+    expect(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+      respondedBy: 'human',
+      feedback: '',
+    }))
+      .toBe('requestId:req-001|decision:APPROVE|respondedBy:human|feedback:s:');
   });
 
   it('produces deterministic signatures for same input', () => {

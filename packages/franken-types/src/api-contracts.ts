@@ -54,13 +54,17 @@ export const ChatSessionResponseSchema = z.object({
   pendingApproval: PendingApprovalSchema.nullable().optional(),
   beastContext: ChatBeastContextSchema.nullable().optional(),
   routingMetadata: z.record(z.unknown()).optional(),
-  socketToken: z.string(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type ChatSessionResponse = z.infer<typeof ChatSessionResponseSchema>;
+
+export const ChatSocketTicketResponseSchema = z.object({
+  ticket: z.string(),
+});
+export type ChatSocketTicketResponse = z.infer<typeof ChatSocketTicketResponseSchema>;
 
 export const ChatSessionSummarySchema = z.object({
   id: z.string(),
@@ -92,6 +96,10 @@ export const ApproveResultSchema = z.object({
   id: z.string(),
   approved: z.boolean(),
   state: z.string(),
+  outcome: TurnOutcomeSchema.optional(),
+  tier: z.string().optional(),
+  displayMessages: z.array(z.unknown()).optional(),
+  events: z.array(z.unknown()).optional(),
 });
 export type ApproveResult = z.infer<typeof ApproveResultSchema>;
 

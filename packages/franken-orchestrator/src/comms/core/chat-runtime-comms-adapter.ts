@@ -5,6 +5,8 @@ import type {
 } from './comms-runtime-port.js';
 import type { OutboundMessageStatus } from './types.js';
 import type { ChatRuntime, ChatRuntimeState } from '../../chat/runtime.js';
+import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey } from '../../http/chat-rate-limit.js';
 
 export interface CommsSessionStore {
   load(id: string): Promise<CommsSession | null>;
@@ -20,6 +22,10 @@ export interface CommsSession {
   beastContext?: unknown;
   routingMetadata?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export interface ChatRuntimeCommsAdapterOptions {
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 function normalizeRoutingMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -43,13 +49,29 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
   constructor(
     private readonly runtime: ChatRuntime,
     private readonly sessionStore: CommsSessionStore,
+    private readonly options: ChatRuntimeCommsAdapterOptions = {},
   ) {}
 
   async processInbound(
     input: CommsInboundInput,
   ): Promise<CommsInboundResult> {
-    // Load or create session
     let session = await this.sessionStore.load(input.sessionId);
+    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session?.routingMetadata);
+    const principal = input.externalUserId === 'system'
+      ? `${input.channelType}:session:${input.sessionId}`
+      : `${input.channelType}:user:${input.externalUserId}`;
+
+    if (this.options.chatRateLimiter && !this.options.chatRateLimiter.take(chatClientKey({
+      action: 'message',
+      principal,
+    })).allowed) {
+      return {
+        text: 'Rate limit exceeded. Please wait before sending another chat message.',
+        status: 'reply',
+        ...(routingMetadata ? { metadata: routingMetadata } : {}),
+      };
+    }
+
     if (!session) {
       session = await this.sessionStore.create(input.sessionId, {
         channelType: input.channelType,
@@ -67,7 +89,6 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
 
     // Run through ChatRuntime
     const result = await this.runtime.run(input.text, state);
-    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session.routingMetadata);
     const pendingApproval = result.pendingApproval
       ? result.pendingApprovalDescription
         ? {

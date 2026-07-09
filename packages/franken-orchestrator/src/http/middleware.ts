@@ -30,6 +30,10 @@ export const requestId = createMiddleware(async (c, next) => {
   await next();
 });
 
+export const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
+export const BEAST_CONTROL_MAX_BODY_SIZE = 1024 * 1024;
+export const SKILL_CONTEXT_MAX_BODY_SIZE = 1024 * 1024;
+
 export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
   const result = schema.safeParse(body);
   if (!result.success) {

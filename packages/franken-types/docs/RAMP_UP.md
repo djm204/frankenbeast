@@ -9,6 +9,7 @@ The package ensures architectural consistency across the monorepo by enforcing a
 - **Branded IDs**: Prevents ID confusion at compile time (e.g., you cannot pass a `SessionId` where a `ProjectId` is expected).
 - **Result Monad**: Standardized error handling without throwing exceptions in core logic.
 - **Severity Enums**: Unified severity levels used by Firewall, Critique, and Heartbeat.
+- **Provider Critique Findings**: `ProviderCritiqueFinding` is the primary provider/evaluator finding shape; the older `CritiqueResult` export remains as a deprecated compatibility alias and should not be confused with `@franken/critique` pipeline results.
 - **LLM Interfaces**: Defines `ILlmClient` and `IResultLlmClient` to ensure interchangeable provider adapters.
 
 ## Key Exports

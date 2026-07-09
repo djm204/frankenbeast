@@ -20,7 +20,11 @@ export interface ResolveClientConfigDirInput {
 
 /**
  * Returns the config directory for file-based clients (claude, gemini).
- * Prefers a project-level dir if it exists, falls back to home-level.
+ * Always returns the project-level dir for JSON clients so `fbeast init` writes
+ * project-scoped MCP registrations instead of mutating user-global
+ * settings.json files with fbeast server entries. Detection may still use
+ * home-level config dirs to infer the requested client, but registration is
+ * intentionally rooted in the current project.
  * Not applicable for codex — use the codex CLI instead.
  */
 export function resolveClientConfigDir(input: ResolveClientConfigDirInput): string {
@@ -29,11 +33,7 @@ export function resolveClientConfigDir(input: ResolveClientConfigDirInput): stri
     // codex doesn't have a writable config dir — return home/.codex for reference only
     return join(input.homeDir, '.codex');
   }
-  const projectDir = join(input.cwd, dirName);
-  if (input.exists(projectDir)) {
-    return projectDir;
-  }
-  return join(input.homeDir, dirName);
+  return join(input.cwd, dirName);
 }
 
 /**
