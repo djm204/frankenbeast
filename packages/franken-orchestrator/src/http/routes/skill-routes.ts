@@ -31,6 +31,27 @@ export function createSkillRoutes(deps: {
     return c.json({ skills });
   });
 
+  app.get('/:name/health', async (c) => {
+    const name = c.req.param('name');
+    let mcpConfig;
+    try {
+      mcpConfig = deps.skillManager.readMcpConfig(name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      if (message.startsWith('Invalid skill name ')) {
+        return c.json({ error: message }, 404);
+      }
+      return c.json({ error: `Failed to read MCP config for skill '${name}'` }, 500);
+    }
+
+    if (!mcpConfig) {
+      return c.json({ error: `Skill '${name}' not found` }, 404);
+    }
+
+    const health = await healthChecker.getStatus(name, mcpConfig);
+    return c.json({ health });
+  });
+
   app.get('/catalog/:provider', async (c) => {
     const providerName = c.req.param('provider');
     const providers = await deps.providerRegistry.listProviders();
@@ -75,27 +96,6 @@ export function createSkillRoutes(deps: {
     }
 
     return c.json({ error: 'Must provide catalogEntry or custom' }, 400);
-  });
-
-  app.get('/:name/health', async (c) => {
-    const name = c.req.param('name');
-    let mcpConfig;
-    try {
-      mcpConfig = deps.skillManager.readMcpConfig(name);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed';
-      return c.json({ error: message }, 404);
-    }
-
-    if (!mcpConfig) {
-      return c.json({ error: `Skill '${name}' not found` }, 404);
-    }
-
-    const trustMcpServerCommands = c.req.query('trustMcpServerCommands') === 'true';
-    const health = await healthChecker.getStatus(name, mcpConfig, {
-      trustMcpServerCommands,
-    });
-    return c.json({ health });
   });
 
   app.patch('/:name', async (c) => {

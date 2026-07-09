@@ -124,19 +124,13 @@ Response shape:
 }
 ```
 
-`status` is an aggregate of the per-server statuses:
+`status` is an aggregate of the per-server statuses emitted by `SkillHealthChecker`:
 
-- `connected`: every probed MCP server exited cleanly during the short health probe.
+- `connected`: every trusted MCP server probe exited cleanly during the short health check.
 - `error`: at least one trusted probe failed to spawn or exited non-zero.
-- `unknown`: the server could not be safely or conclusively probed. This includes the default passive API behavior, where Frankenbeast does not execute commands from skill manifests, and long-running MCP servers that stay alive without a readiness signal.
+- `unknown`: the server could not be safely or conclusively probed. This is the normal API response for command-based skills because the public endpoint is passive and does not execute commands from skill manifests. It can also mean a long-running MCP server stayed alive without a readiness signal.
 
-The endpoint is passive by default. To execute the configured MCP server command for an authenticated, trusted skill, add `?trustMcpServerCommands=true`:
-
-```bash
-curl 'http://127.0.0.1:3737/api/skills/github/health?trustMcpServerCommands=true'
-```
-
-Only use the trusted probe for skill directories you control. Custom adapters can consume the same JSON shape (`health.name`, aggregate `health.status`, and `health.serverStatuses[]`) to render status badges or block automation when a required server is `error`.
+The endpoint is intentionally passive: it reads the skill's `mcp.json` and returns the checker response without spawning the manifest command. Custom adapters can consume the JSON shape (`health.name`, aggregate `health.status`, and `health.serverStatuses[]`) to render status badges or block automation when a required server is `error`. If an adapter runs `SkillHealthChecker` directly in a trusted local context, only pass `trustMcpServerCommands: true` for skill directories you control.
 
 ### Central audit session ids
 
