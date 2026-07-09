@@ -503,6 +503,8 @@ Numeric env values are parsed as numbers and then validated with the same schema
 
 Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
 
+`FRANKENBEAST_NETWORK_MANAGED=1` is an internal child-process marker owned by `frankenbeast network`. The supervisor sets it for managed services such as `chat-server`; operators normally should not export it for standalone local debugging. Managed children suppress the normal CLI startup banner, and managed `chat-server` fails closed without an operator token even on loopback. If a standalone `chat-server` run unexpectedly asks for an operator token on `127.0.0.1` or `localhost`, unset `FRANKENBEAST_NETWORK_MANAGED`; if you intentionally exercise managed semantics, provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or the configured secret-store token reference.
+
 ### Project Layout
 
 Running `frankenbeast` in any project creates:
