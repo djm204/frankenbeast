@@ -67,7 +67,13 @@ function quoteCmdArg(arg: string): string {
   // This string is parsed first by cmd.exe and then forwarded by the npm .cmd shim
   // via %*. Keep metacharacters literal by grouping every argv entry in quotes,
   // not by caret-escaping characters that would then leak into the child argv.
-  return `"${arg.replace(/"/g, '""').replace(/%/g, '^%')}"`;
+  // Backslashes immediately before quotes must be doubled so the downstream
+  // Windows argv parser preserves them instead of treating them as quote escapes.
+  const escaped = arg
+    .replace(/(\\*)"/g, (_match, backslashes: string) => `${backslashes}${backslashes}""`)
+    .replace(/(\\+)$/g, '$1$1')
+    .replace(/%/g, '^%');
+  return `"${escaped}"`;
 }
 
 function isWindowsShellShim(command: string): boolean {
