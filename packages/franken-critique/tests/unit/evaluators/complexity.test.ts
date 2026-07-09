@@ -216,6 +216,43 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('flags typed arrows with object-union return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a: string, b: number, c: boolean, d: Date, e: RegExp, f: URL): { ok: boolean } | null => { return { ok: true }; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('does not collect expression-bodied arrows as block functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const value = () => ({ ok: true });\nif (a) { doThing(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('counts typed callback parameters with generic return commas', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(cb: () => Result<string, number>, b: number, c: boolean, d: Date, e: RegExp, f: URL) { return cb; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags long functions with function-type object return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `function make(): () => { ok: boolean } {\n${lines.join('\n')}\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
   it('flags deeply nested code', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;

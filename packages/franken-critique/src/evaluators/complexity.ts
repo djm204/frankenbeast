@@ -36,10 +36,15 @@ function findMatchingDelimiter(
   return -1;
 }
 
+function isTypeOperandPrefix(char: string): boolean {
+  return [':', '|', '&', ',', '<', '(', '['].includes(char);
+}
+
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
   let inReturnType = false;
   let typeDepth = 0;
   let previousSignificant = '';
+  let expectTypeOperand = false;
 
   for (let i = startIndex; i < content.length; i++) {
     const char = content[i] ?? '';
@@ -48,16 +53,22 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     if (!inReturnType) {
       if (char === '{') return i;
       if (char === ';') return -1;
-      if (char === ':') inReturnType = true;
+      if (char === ':') {
+        inReturnType = true;
+        expectTypeOperand = true;
+      }
       if (!isWhitespace) previousSignificant = char;
       continue;
     }
 
-    if (
-      char === '{' &&
-      typeDepth === 0 &&
-      ![':', '|', '&', ',', '<', '(', '['].includes(previousSignificant)
-    ) {
+    if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
+      expectTypeOperand = true;
+      previousSignificant = '>';
+      i++;
+      continue;
+    }
+
+    if (char === '{' && typeDepth === 0 && !expectTypeOperand) {
       return i;
     }
 
@@ -74,10 +85,21 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
       return -1;
     }
 
-    if (!isWhitespace) previousSignificant = char;
+    if (!isWhitespace) {
+      expectTypeOperand =
+        typeDepth === 0 &&
+        (isTypeOperandPrefix(char) || previousSignificant === '>');
+      previousSignificant = char;
+    }
   }
 
   return -1;
+}
+
+function findBlockBodyOpen(content: string, startIndex: number): number {
+  let index = startIndex;
+  while (/\s/.test(content[index] ?? '')) index++;
+  return content[index] === '{' ? index : -1;
 }
 
 function findArrowToken(content: string, startIndex: number): number {
@@ -89,9 +111,18 @@ function findArrowToken(content: string, startIndex: number): number {
   }
 
   let typeDepth = 0;
+  let previousSignificant = ':';
   for (let i = index + 1; i < content.length - 1; i++) {
     const char = content[i] ?? '';
-    if (typeDepth === 0 && char === '=' && content[i + 1] === '>') return i;
+    const isWhitespace = /\s/.test(char);
+
+    if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
+      if (previousSignificant !== ')') return i;
+      previousSignificant = '>';
+      i++;
+      continue;
+    }
+
     if (char === '<' || char === '(' || char === '[' || char === '{') {
       typeDepth++;
     } else if (
@@ -104,6 +135,8 @@ function findArrowToken(content: string, startIndex: number): number {
     } else if (char === ';' && typeDepth === 0) {
       return -1;
     }
+
+    if (!isWhitespace && typeDepth === 0) previousSignificant = char;
   }
 
   return -1;
@@ -142,7 +175,7 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
     const arrowIndex = findArrowToken(content, paramsCloseIndex + 1);
     if (arrowIndex === -1) continue;
 
-    const bodyOpenIndex = findBodyOpenAfterSignature(content, arrowIndex + 2);
+    const bodyOpenIndex = findBlockBodyOpen(content, arrowIndex + 2);
     if (bodyOpenIndex === -1) continue;
 
     const bodyCloseIndex = findMatchingDelimiter(content, bodyOpenIndex, '{', '}');
@@ -166,7 +199,8 @@ function countTopLevelParameters(params: string): number {
   let angleDepth = 0;
   let inTypeAnnotation = false;
 
-  for (const char of params) {
+  for (let i = 0; i < params.length; i++) {
+    const char = params[i] ?? '';
     const atTopLevel =
       parenDepth === 0 &&
       bracketDepth === 0 &&
@@ -175,7 +209,7 @@ function countTopLevelParameters(params: string): number {
 
     if (char === ':' && atTopLevel) {
       inTypeAnnotation = true;
-    } else if (char === '=' && atTopLevel) {
+    } else if (char === '=' && params[i + 1] !== '>' && atTopLevel) {
       inTypeAnnotation = false;
     } else if (char === '(') {
       parenDepth++;
