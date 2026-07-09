@@ -1,6 +1,17 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import type { SessionToken } from '../core/types.js';
+
+const LOCK_RETRY_MS = 10;
+const LOCK_TIMEOUT_MS = 5_000;
 
 export interface SessionTokenStoreOptions {
   /**
@@ -29,9 +40,16 @@ export class SessionTokenStore {
   }
 
   store(token: SessionToken): void {
-    this.loadPersistedTokens();
-    this.tokens.set(token.tokenId, token);
-    this.persist();
+    if (!this.persistenceFile) {
+      this.tokens.set(token.tokenId, token);
+      return;
+    }
+
+    this.withFileLock(() => {
+      this.loadPersistedTokens();
+      this.tokens.set(token.tokenId, token);
+      this.persist();
+    });
   }
 
   get(tokenId: string): SessionToken | undefined {
@@ -48,9 +66,16 @@ export class SessionTokenStore {
   }
 
   revoke(tokenId: string): void {
-    this.loadPersistedTokens();
-    this.tokens.delete(tokenId);
-    this.persist();
+    if (!this.persistenceFile) {
+      this.tokens.delete(tokenId);
+      return;
+    }
+
+    this.withFileLock(() => {
+      this.loadPersistedTokens();
+      this.tokens.delete(tokenId);
+      this.persist();
+    });
   }
 
   isValid(tokenId: string, scope?: string): boolean {
@@ -124,6 +149,39 @@ export class SessionTokenStore {
       grantedAt,
       expiresAt,
     };
+  }
+
+  private withFileLock<T>(operation: () => T): T {
+    if (!this.persistenceFile) return operation();
+
+    mkdirSync(dirname(this.persistenceFile), { recursive: true, mode: 0o700 });
+    const lockPath = `${this.persistenceFile}.lock`;
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    let lockFd: number | undefined;
+
+    while (lockFd === undefined) {
+      try {
+        lockFd = openSync(lockPath, 'wx', 0o600);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' || Date.now() >= deadline) {
+          throw err;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
+      }
+    }
+
+    try {
+      return operation();
+    } finally {
+      closeSync(lockFd);
+      try {
+        unlinkSync(lockPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+    }
   }
 
   private persist(): void {
