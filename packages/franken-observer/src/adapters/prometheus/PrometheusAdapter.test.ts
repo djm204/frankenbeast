@@ -24,6 +24,32 @@ function makeTraceNoModel() {
   return trace
 }
 
+function makeTraceWithMetadata(metadata: Record<string, unknown>) {
+  const trace = TraceContext.createTrace('metadata')
+  const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+  SpanLifecycle.setMetadata(span, metadata)
+  TraceContext.endSpan(span)
+  TraceContext.endTrace(trace)
+  return trace
+}
+
+function makeTraceWithTwoMetadataSpans(...metadataEntries: Record<string, unknown>[]) {
+  const trace = TraceContext.createTrace('metadata-batch')
+  for (const metadata of metadataEntries) {
+    const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+    SpanLifecycle.setMetadata(span, metadata)
+    TraceContext.endSpan(span)
+  }
+  TraceContext.endTrace(trace)
+  return trace
+}
+
+function expectNoInvalidPrometheusNumbers(out: string) {
+  expect(out).not.toMatch(/\s(?:NaN|Infinity|-Infinity)(?:\n|$)/)
+  expect(out).not.toMatch(/franken_observer_tokens_total\{[^}]+\}\s+-/)
+  expect(out).not.toMatch(/franken_observer_cost_usd_total\{[^}]+\}\s+-/)
+}
+
 function makeMultiSpanTrace(tokenCounts: number[]) {
   const trace = TraceContext.createTrace('multi')
   for (const [index, promptTokens] of tokenCounts.entries()) {
@@ -188,6 +214,60 @@ describe('PrometheusAdapter', () => {
       const out = adapter.scrape()
       // Token section should be absent when no token data recorded
       expect(out).not.toContain('franken_observer_tokens_total')
+    })
+
+    it.each([
+      ['promptTokens', Number.NaN],
+      ['promptTokens', Number.POSITIVE_INFINITY],
+      ['promptTokens', Number.NEGATIVE_INFINITY],
+      ['promptTokens', -1],
+      ['promptTokens', 1.5],
+      ['promptTokens', Number.MAX_SAFE_INTEGER + 1],
+      ['completionTokens', Number.NaN],
+      ['completionTokens', Number.POSITIVE_INFINITY],
+      ['completionTokens', Number.NEGATIVE_INFINITY],
+      ['completionTokens', -1],
+      ['completionTokens', 1.5],
+      ['completionTokens', Number.MAX_SAFE_INTEGER + 1],
+    ])('rejects invalid %s metadata value %s without mutating counters', async (field, value) => {
+      const adapter = new PrometheusAdapter({
+        pricingTable: { 'claude-sonnet-4-6': { promptPerMillion: 3, completionPerMillion: 15 } },
+      })
+      await adapter.flush(makeTrace('claude-sonnet-4-6', 10, 5))
+      const before = adapter.scrape()
+
+      await expect(
+        adapter.flush(
+          makeTraceWithMetadata({
+            model: 'claude-sonnet-4-6',
+            promptTokens: field === 'promptTokens' ? value : 1,
+            completionTokens: field === 'completionTokens' ? value : 1,
+          }),
+        ),
+      ).rejects.toThrow(RangeError)
+
+      const after = adapter.scrape()
+      expect(after).toBe(before)
+      expectNoInvalidPrometheusNumbers(after)
+    })
+
+    it('rejects a batch atomically when later token metadata would overflow totals', async () => {
+      const adapter = new PrometheusAdapter()
+
+      await expect(
+        adapter.flush(
+          makeTraceWithTwoMetadataSpans(
+            {
+              model: 'claude-sonnet-4-6',
+              promptTokens: Number.MAX_SAFE_INTEGER,
+              completionTokens: 0,
+            },
+            { model: 'claude-sonnet-4-6', promptTokens: 1, completionTokens: 0 },
+          ),
+        ),
+      ).rejects.toThrow(RangeError)
+
+      expect(adapter.scrape()).toBe('')
     })
   })
 
