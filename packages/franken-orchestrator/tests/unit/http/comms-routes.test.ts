@@ -14,9 +14,11 @@ vi.mock('../../../src/comms/channels/whatsapp/whatsapp-adapter.js', () => ({
   WhatsAppAdapter: vi.fn(),
 }));
 
+import { createChatApp } from '../../../src/http/chat-app.js';
 import { commsRoutes } from '../../../src/http/routes/comms-routes.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
+import { resolveSecurityConfig, type SecurityConfig } from '../../../src/middleware/security-profiles.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -365,6 +367,47 @@ describe('commsRoutes', () => {
     });
     expect(nowRequired.status).toBe(401);
     expect(await nowRequired.json()).toEqual({ error: 'Missing security headers' });
+  });
+
+  it('keeps mounted chat app webhook routes bound to the live security config', async () => {
+    let securityConfig: SecurityConfig = resolveSecurityConfig('permissive', {
+      webhookSignaturePolicy: 'local-dev-unsigned',
+    });
+    const app = createChatApp({
+      sessionStoreDir: '/tmp/franken-comms-dynamic-security-test',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'comms-dynamic-security-test',
+      commsConfig: minimalConfig({
+        channels: {
+          slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
+        },
+      }),
+      commsRuntime: mockRuntime(),
+      securityConfig: {
+        getSecurityConfig: () => securityConfig,
+        setSecurityConfig: (next) => {
+          securityConfig = { ...securityConfig, ...next };
+        },
+      },
+    });
+
+    const initiallyPermissive = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'ok' }),
+    });
+    expect(initiallyPermissive.status).toBe(200);
+    expect(await initiallyPermissive.json()).toEqual({ challenge: 'ok' });
+
+    securityConfig = resolveSecurityConfig('standard');
+    const afterProfileChange = await app.request('http://localhost/webhooks/slack/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'url_verification', challenge: 'blocked' }),
+    });
+
+    expect(afterProfileChange.status).toBe(401);
+    expect(await afterProfileChange.json()).toEqual({ error: 'Missing security headers' });
   });
 
   it.each([
