@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.44.0](https://github.com/djm204/frankenbeast/compare/v0.43.1...v0.44.0) (2026-07-08)
+
+
+### Features
+
+* **credentials:** externalize test credential placeholders ([#909](https://github.com/djm204/frankenbeast/issues/909)) ([b50ae79](https://github.com/djm204/frankenbeast/commit/b50ae797be6cbb77ea092c1ab3c8e30ed5274555)), closes [#518](https://github.com/djm204/frankenbeast/issues/518)
+
+
+### Miscellaneous
+
+* **repo:** track code comment debt markers ([#1278](https://github.com/djm204/frankenbeast/issues/1278)) ([158e522](https://github.com/djm204/frankenbeast/commit/158e522e41199286af5ff7e9d17490aa6615f534)), closes [#1077](https://github.com/djm204/frankenbeast/issues/1077)
+
+
+### Documentation
+
+* **cli:** document plain banner env toggle ([739438f](https://github.com/djm204/frankenbeast/commit/739438fb103988a06f2756cd88bf6827c7497ff9)), closes [#1264](https://github.com/djm204/frankenbeast/issues/1264)
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+* document Gemini API env keys ([1e41b8e](https://github.com/djm204/frankenbeast/commit/1e41b8edfbf37319c1f718cfe34bebf40def99f3))
+
+## [0.43.1](https://github.com/djm204/frankenbeast/compare/v0.43.0...v0.43.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* harden Beast run config snapshot permissions ([#895](https://github.com/djm204/frankenbeast/issues/895)) ([2b681cf](https://github.com/djm204/frankenbeast/commit/2b681cf5b111e883aa31001a898820ae30bf18e1))
+* **security:** pin Anthropic SDK override ([366972d](https://github.com/djm204/frankenbeast/commit/366972d6e386e7673ca059fd72614c67381be688)), closes [#587](https://github.com/djm204/frankenbeast/issues/587)
+
+
+### Documentation
+
+* record late codex follow-up lesson ([7efef5b](https://github.com/djm204/frankenbeast/commit/7efef5be68ff6a7c9da6a38e1552ccf96c9f0235))
+* refresh README project tree guides description ([#1142](https://github.com/djm204/frankenbeast/issues/1142)) ([823e5f5](https://github.com/djm204/frankenbeast/commit/823e5f5bc840149aca0ea3dcb87ebe43a745a3fc))
+
+
+### Tests
+
+* **web:** guard dev-server dependency upgrades ([#1060](https://github.com/djm204/frankenbeast/issues/1060)) ([7921136](https://github.com/djm204/frankenbeast/commit/792113659ced632c44f6208f9120cd61fa7e6632))
+
 ## [0.43.0](https://github.com/djm204/frankenbeast/compare/v0.42.0...v0.43.0) (2026-07-07)
 
 

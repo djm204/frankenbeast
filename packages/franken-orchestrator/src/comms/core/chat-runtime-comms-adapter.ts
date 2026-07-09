@@ -55,23 +55,27 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
   async processInbound(
     input: CommsInboundInput,
   ): Promise<CommsInboundResult> {
-    // Load or create session
     let session = await this.sessionStore.load(input.sessionId);
-    if (!session) {
-      session = await this.sessionStore.create(input.sessionId, {
-        channelType: input.channelType,
-      });
-    }
+    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session?.routingMetadata);
+    const principal = input.externalUserId === 'system'
+      ? `${input.channelType}:session:${input.sessionId}`
+      : `${input.channelType}:user:${input.externalUserId}`;
 
     if (this.options.chatRateLimiter && !this.options.chatRateLimiter.take(chatClientKey({
-      sessionId: input.sessionId,
       action: 'message',
-      principal: `${input.channelType}:${input.externalUserId}`,
+      principal,
     })).allowed) {
       return {
         text: 'Rate limit exceeded. Please wait before sending another chat message.',
         status: 'reply',
+        ...(routingMetadata ? { metadata: routingMetadata } : {}),
       };
+    }
+
+    if (!session) {
+      session = await this.sessionStore.create(input.sessionId, {
+        channelType: input.channelType,
+      });
     }
 
     // Build runtime state
@@ -85,7 +89,6 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
 
     // Run through ChatRuntime
     const result = await this.runtime.run(input.text, state);
-    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session.routingMetadata);
     const pendingApproval = result.pendingApproval
       ? result.pendingApprovalDescription
         ? {

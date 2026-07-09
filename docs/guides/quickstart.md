@@ -29,7 +29,9 @@ npm run audit:security
 
 ```bash
 cp .env.example .env
-# Edit .env with provider API keys or local runtime settings as needed.
+# Edit .env with provider API keys or local runtime settings as needed:
+#   ANTHROPIC_API_KEY for Claude, OPENAI_API_KEY for OpenAI,
+#   or GOOGLE_API_KEY / GEMINI_API_KEY for Gemini.
 # Before starting the full Docker stack, uncomment GRAFANA_USER=admin and set a
 # unique GRAFANA_PASSWORD; Grafana refuses the old admin/admin default pair.
 ```
@@ -87,7 +89,7 @@ npx frankenbeast issues --repo owner/repo --dry-run
 The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`). Install it persistently so both `fbeast` and the `fbeast-*` MCP server binaries stay on PATH — `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns later, so a one-shot `npx` would leave those servers unable to start:
 
 ```bash
-# Install once (global), or link from the monorepo with: npm link --workspace=packages/franken-mcp-suite
+# Install once (global), or link both local CLIs from the monorepo with: npm run local:link
 npm install -g @franken/mcp-suite
 
 # Standard MCP registration

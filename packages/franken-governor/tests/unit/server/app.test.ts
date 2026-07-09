@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGovernorApp } from '../../../src/server/app.js';
+import { createSessionToken } from '../../../src/security/session-token.js';
+import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 
 const SIGNING_FIXTURE = ['test', 'signing', 'fixture'].join('-');
 
@@ -109,8 +114,6 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/approval/respond', () => {
-    const signingFixture = SIGNING_FIXTURE;
-
     async function seedResponseApproval(
       app: ReturnType<typeof createGovernorApp>,
       requestId: string,
@@ -207,7 +210,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('verifies HMAC signature when signing secret configured', async () => {
-      const secret = signingFixture;
+      const secret = SIGNING_FIXTURE;
       const app = createGovernorApp({ signingSecret: secret });
 
       await seedResponseApproval(app, 'req-2', secret);
@@ -228,7 +231,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('verifies approval HMAC over raw body bytes including whitespace', async () => {
-      const secret = signingFixture;
+      const secret = SIGNING_FIXTURE;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-raw-spacing', secret);
 
@@ -249,7 +252,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('requires signatures to match the exact raw body instead of parsed key ordering', async () => {
-      const secret = signingFixture;
+      const secret = SIGNING_FIXTURE;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-key-order', secret);
 
@@ -271,7 +274,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('accepts normalized sha256 hex signatures through the timing-safe compare path', async () => {
-      const secret = signingFixture;
+      const secret = SIGNING_FIXTURE;
       const app = createGovernorApp({ signingSecret: secret });
       await seedResponseApproval(app, 'req-upper-hex', secret);
 
@@ -291,9 +294,9 @@ describe('Governor Hono Server', () => {
     });
 
     it('rejects invalid signature using timing-safe hex comparison', async () => {
-      const app = createGovernorApp({ signingSecret: signingFixture });
+      const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
 
-      await seedResponseApproval(app, 'req-3', signingFixture);
+      await seedResponseApproval(app, 'req-3', SIGNING_FIXTURE);
 
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
@@ -310,7 +313,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('returns a clear 401 for a malformed signature', async () => {
-      const app = createGovernorApp({ signingSecret: signingFixture });
+      const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
         headers: {
@@ -335,7 +338,7 @@ describe('Governor Hono Server', () => {
     });
 
     it('rejects missing signature when secret configured', async () => {
-      const app = createGovernorApp({ signingSecret: signingFixture });
+      const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
 
       const res = await app.request('/v1/approval/respond', {
         method: 'POST',
@@ -346,6 +349,185 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(401);
       const body = await res.json();
       expect(body.error.message).toBe('Missing signature');
+    });
+  });
+
+  describe('POST /v1/approval/session/validate', () => {
+    function makeStoredToken(store: SessionTokenStore) {
+      const token = createSessionToken({
+        approvalId: 'req-token',
+        scope: 'deploy-prod',
+        grantedBy: 'human',
+        ttlMs: 3_600_000,
+      });
+      store.store(token);
+      return token;
+    }
+
+    it('validates a stored session token', async () => {
+      const store = new SessionTokenStore();
+      const token = makeStoredToken(store);
+      const app = createGovernorApp({
+        sessionTokenStore: store,
+        allowUnsignedApprovalsForTests: true,
+      });
+
+      const res = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokenId: token.tokenId, scope: 'deploy-prod' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.valid).toBe(true);
+      expect(body.token).toMatchObject({
+        approvalId: 'req-token',
+        scope: 'deploy-prod',
+        grantedBy: 'human',
+      });
+      expect(body.token.tokenId).toBeUndefined();
+    });
+
+    it('validates tokens persisted by a separate store instance', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        const issuingStore = new SessionTokenStore({ persistenceFile });
+        const token = makeStoredToken(issuingStore);
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+
+        const res = await app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: token.tokenId }),
+        });
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.valid).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed when token validation storage is unavailable', async () => {
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+
+      const res = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokenId: 'missing-store' }),
+      });
+
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.error.message).toBe('Session token validation unavailable');
+    });
+
+    it('fails closed when persisted token storage is malformed before app startup', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        writeFileSync(persistenceFile, '{not-json');
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+
+        const health = await app.request('/health');
+        expect(health.status).toBe(200);
+
+        const res = await app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: 'token-from-bad-store' }),
+        });
+
+        expect(res.status).toBe(503);
+        const body = await res.json();
+        expect(body.error.message).toBe('Session token validation unavailable');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed when persisted token storage becomes unreadable after app startup', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        const issuingStore = new SessionTokenStore({ persistenceFile });
+        const token = makeStoredToken(issuingStore);
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+        writeFileSync(persistenceFile, '{not-json');
+
+        const res = await app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: token.tokenId }),
+        });
+
+        expect(res.status).toBe(503);
+        const body = await res.json();
+        expect(body.error.message).toBe('Session token validation unavailable');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('requires signed validation requests in production mode', async () => {
+      const store = new SessionTokenStore();
+      const token = makeStoredToken(store);
+      const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE, sessionTokenStore: store });
+      const payload = JSON.stringify({ tokenId: token.tokenId });
+
+      const missing = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
+      expect(missing.status).toBe(401);
+
+      const valid = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-governor-signature': governorSignature(payload, SIGNING_FIXTURE),
+        },
+        body: payload,
+      });
+      expect(valid.status).toBe(200);
+    });
+
+    it('rejects unknown tokens and scope mismatches', async () => {
+      const store = new SessionTokenStore();
+      const token = makeStoredToken(store);
+      const app = createGovernorApp({
+        sessionTokenStore: store,
+        allowUnsignedApprovalsForTests: true,
+      });
+
+      const wrongScope = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokenId: token.tokenId, scope: 'other-scope' }),
+      });
+      expect(wrongScope.status).toBe(401);
+      expect(await wrongScope.json()).toEqual({ valid: false });
+
+      const unknown = await app.request('/v1/approval/session/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokenId: 'missing-token' }),
+      });
+      expect(unknown.status).toBe(401);
+      expect(await unknown.json()).toEqual({ valid: false });
     });
   });
 

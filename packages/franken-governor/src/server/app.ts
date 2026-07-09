@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { RESPONSE_CODES, type ResponseCode } from '../core/types.js';
+import { RESPONSE_CODES, type ResponseCode, type SessionToken } from '../core/types.js';
 import { ApprovalWaiterRegistry } from '../gateway/approval-waiter-registry.js';
 import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
+import { SessionTokenStore } from '../security/session-token-store.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
 
@@ -24,6 +25,10 @@ export interface GovernorAppOptions {
    * `GET /health`) is available — no in-process caller can be waiting on it.
    */
   registry?: ApprovalWaiterRegistry;
+  /** Shared session token store used by the validation endpoint. */
+  sessionTokenStore?: SessionTokenStore;
+  /** JSON file used to share session tokens across governor processes. */
+  sessionTokenStorePath?: string;
 }
 
 /** Maximum age (seconds) for a Slack request timestamp before it is rejected as a replay. */
@@ -146,6 +151,14 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
+  let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
+  if (!sessionTokenStore && options.sessionTokenStorePath) {
+    try {
+      sessionTokenStore = new SessionTokenStore({ persistenceFile: options.sessionTokenStorePath });
+    } catch {
+      sessionTokenStore = undefined;
+    }
+  }
 
   // Health check
   app.get('/health', (c) => {
@@ -289,6 +302,71 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId: body.requestId,
       decision: body.decision,
       status: 'resolved',
+    });
+  });
+
+  // POST /v1/approval/session/validate — validate a session token for
+  // external callers. The endpoint fails closed when no shared token store is
+  // configured, so deployments cannot accidentally treat an unavailable
+  // validation path as success.
+  app.post('/v1/approval/session/validate', async (c) => {
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
+
+    if (!options.signingSecret) {
+      if (!options.allowUnsignedApprovalsForTests) {
+        return c.json({ error: { message: 'Signing secret required for session token validation' } }, 401);
+      }
+    } else {
+      const verification = verifyGovernorSignature(
+        c.req.header('x-governor-signature'),
+        rawBody,
+        options.signingSecret,
+      );
+      if (!verification.ok && verification.reason === 'missing') {
+        return c.json({ error: { message: 'Missing signature' } }, 401);
+      }
+      if (!verification.ok && verification.reason === 'malformed') {
+        return c.json({ error: { message: 'Malformed signature' } }, 401);
+      }
+      if (!verification.ok) {
+        return c.json({ error: { message: 'Invalid signature' } }, 401);
+      }
+    }
+
+    if (!sessionTokenStore) {
+      return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
+    }
+
+    if (typeof body.tokenId !== 'string' || body.tokenId.length === 0) {
+      return c.json({ error: { message: 'Missing required field: tokenId' } }, 400);
+    }
+    if (body.scope !== undefined && typeof body.scope !== 'string') {
+      return c.json({ error: { message: 'Invalid field: scope must be a string' } }, 400);
+    }
+
+    let token: SessionToken | undefined;
+    try {
+      token = sessionTokenStore.get(body.tokenId);
+    } catch {
+      return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
+    }
+    if (!token || (body.scope !== undefined && token.scope !== body.scope)) {
+      return c.json({ valid: false }, 401);
+    }
+
+    return c.json({
+      valid: true,
+      token: {
+        approvalId: token.approvalId,
+        scope: token.scope,
+        grantedBy: token.grantedBy,
+        grantedAt: token.grantedAt.toISOString(),
+        expiresAt: token.expiresAt.toISOString(),
+      },
     });
   });
 

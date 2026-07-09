@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.6.14](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.13...franken-critique-v0.6.14) (2026-07-08)
+
+
+### Bug Fixes
+
+* **critique:** anchor reflection severity parsing ([c846c05](https://github.com/djm204/frankenbeast/commit/c846c05bf60d009b89d3bb5813b054c4e9f54ffc))
+* **critique:** detect ghost dependencies in re-exports ([3904d36](https://github.com/djm204/frankenbeast/commit/3904d36db6cd2a3204f4e65357e350e77971b97d)), closes [#1165](https://github.com/djm204/frankenbeast/issues/1165)
+* **critique:** ignore braces in literals for complexity ([17d15ea](https://github.com/djm204/frankenbeast/commit/17d15eaa7d51fbf265134c5f558dfebcca0b3375))
+
+
+### Documentation
+
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+* **critique:** make safety timeout test deterministic ([091f602](https://github.com/djm204/frankenbeast/commit/091f60258aa44c8c29b654ed8f3f73bf118db2f4)), closes [#1216](https://github.com/djm204/frankenbeast/issues/1216)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
+## [0.6.13](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.12...franken-critique-v0.6.13) (2026-07-08)
+
+
+### Bug Fixes
+
+* **critique:** harden logic-loop syntax masking ([#925](https://github.com/djm204/frankenbeast/issues/925)) ([bf2f0dc](https://github.com/djm204/frankenbeast/commit/bf2f0dc28c5115539e627f3bb15a751c84436d29))
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
 ## [0.6.12](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.11...franken-critique-v0.6.12) (2026-07-07)
 
 

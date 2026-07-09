@@ -6,3 +6,4 @@ export type { ApprovalResponseSignaturePayloadFields } from './signature-verifie
 export { createSessionToken } from './session-token.js';
 export type { CreateSessionTokenParams } from './session-token.js';
 export { SessionTokenStore } from './session-token-store.js';
+export type { SessionTokenStoreOptions } from './session-token-store.js';

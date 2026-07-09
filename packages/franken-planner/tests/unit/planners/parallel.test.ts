@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ParallelPlanner } from '../../../src/planners/parallel';
 import { PlanGraph } from '../../../src/core/dag';
-import { CyclicDependencyError, RationaleRejectedError, RecursionDepthExceededError } from '../../../src/core/errors';
+import {
+  CyclicDependencyError,
+  RationaleRejectedError,
+  RecursionDepthExceededError,
+} from '../../../src/core/errors';
 import { createTaskId } from '../../../src/core/types';
 import type { Task, TaskId, TaskResult } from '../../../src/core/types';
 
@@ -37,6 +41,22 @@ function cyclicGraph(): PlanGraph {
   const edges = new Map<TaskId, Set<TaskId>>([
     [a.id, new Set<TaskId>([b.id])],
     [b.id, new Set<TaskId>([a.id])],
+  ]);
+
+  return PlanGraph.createWithRawEdges(nodes, edges);
+}
+
+function danglingDependencyGraph(): PlanGraph {
+  const ready = makeTask('ready');
+  const blocked = makeTask('blocked');
+  const missing = createTaskId('missing');
+  const nodes = new Map<TaskId, Task>([
+    [ready.id, ready],
+    [blocked.id, blocked],
+  ]);
+  const edges = new Map<TaskId, Set<TaskId>>([
+    [ready.id, new Set<TaskId>()],
+    [blocked.id, new Set<TaskId>([missing])],
   ]);
 
   return PlanGraph.createWithRawEdges(nodes, edges);
@@ -87,6 +107,73 @@ describe('ParallelPlanner — happy path', () => {
     expect(callOrder).toContain(createTaskId('b'));
   });
 
+  it('limits same-wave task execution to the configured concurrency', async () => {
+    const tasks = ['a', 'b', 'c', 'd'].map(makeTask);
+    const graph = tasks.reduce(
+      (currentGraph, task) => currentGraph.addTask(task),
+      PlanGraph.empty()
+    );
+    let active = 0;
+    let maxActive = 0;
+    const executor = vi.fn().mockImplementation(async (task: Task) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return success(task.id);
+    });
+
+    const result = await new ParallelPlanner({ maxWaveConcurrency: 2 }).execute(graph, {
+      executor,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledTimes(4);
+    expect(maxActive).toBe(2);
+  });
+
+  it('preserves maxExpansionDepth constructor compatibility while limiting waves', async () => {
+    const tasks = ['a', 'b', 'c'].map(makeTask);
+    const graph = tasks.reduce(
+      (currentGraph, task) => currentGraph.addTask(task),
+      PlanGraph.empty()
+    );
+    let active = 0;
+    let maxActive = 0;
+    const executor = vi.fn().mockImplementation(async (task: Task) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return success(task.id);
+    });
+
+    const result = await new ParallelPlanner(10, { maxWaveConcurrency: 1 }).execute(graph, {
+      executor,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(maxActive).toBe(1);
+  });
+
+  it('rejects invalid wave concurrency limits', () => {
+    expect(() => new ParallelPlanner({ maxWaveConcurrency: 0 })).toThrow(RangeError);
+    expect(() => new ParallelPlanner({ maxWaveConcurrency: 1.5 })).toThrow(RangeError);
+  });
+
+  it('supports maxExpansionDepth in the options object', async () => {
+    const child = makeTask('child');
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+    const executor = vi.fn().mockResolvedValueOnce(expand('parent', [child]));
+
+    await expect(
+      new ParallelPlanner({ maxExpansionDepth: 0, maxWaveConcurrency: 1 }).execute(graph, {
+        executor,
+      })
+    ).rejects.toBeInstanceOf(RecursionDepthExceededError);
+  });
+
   it('respects task dependencies — dependent runs after its prereq', async () => {
     const a = makeTask('a');
     const b = makeTask('b');
@@ -102,9 +189,7 @@ describe('ParallelPlanner — happy path', () => {
 
     await new ParallelPlanner().execute(graph, { executor });
 
-    expect(callOrder.indexOf(createTaskId('a'))).toBeLessThan(
-      callOrder.indexOf(createTaskId('b'))
-    );
+    expect(callOrder.indexOf(createTaskId('a'))).toBeLessThan(callOrder.indexOf(createTaskId('b')));
   });
 
   it('diamond A→{B,C}→D: B and C run concurrently', async () => {
@@ -118,9 +203,7 @@ describe('ParallelPlanner — happy path', () => {
       .addTask(c, [createTaskId('a')])
       .addTask(d, [createTaskId('b'), createTaskId('c')]);
 
-    const executor = vi.fn().mockImplementation((task: Task) =>
-      Promise.resolve(success(task.id))
-    );
+    const executor = vi.fn().mockImplementation((task: Task) => Promise.resolve(success(task.id)));
 
     const result = await new ParallelPlanner().execute(graph, { executor });
 
@@ -130,7 +213,8 @@ describe('ParallelPlanner — happy path', () => {
 
   it('collects all task results on full success', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1')).addTask(makeTask('t-2'));
-    const executor = vi.fn()
+    const executor = vi
+      .fn()
       .mockResolvedValueOnce(success('t-1'))
       .mockResolvedValueOnce(success('t-2'));
 
@@ -209,6 +293,35 @@ describe('ParallelPlanner — happy path', () => {
     await expect(execution).resolves.toMatchObject({ status: 'completed' });
   });
 
+  it('applies the wave concurrency cap across sibling expansion subgraphs', async () => {
+    const parent1 = makeTask('parent-1');
+    const parent2 = makeTask('parent-2');
+    const sub1 = makeTask('sub-1');
+    const sub2 = makeTask('sub-2');
+    const graph = PlanGraph.empty().addTask(parent1).addTask(parent2);
+    let active = 0;
+    let maxActive = 0;
+
+    const executor = vi.fn().mockImplementation(async (task: Task) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active -= 1;
+
+      if (task.id === createTaskId('parent-1')) return expand('parent-1', [sub1]);
+      if (task.id === createTaskId('parent-2')) return expand('parent-2', [sub2]);
+      return success(task.id);
+    });
+
+    const result = await new ParallelPlanner({ maxWaveConcurrency: 1 }).execute(graph, {
+      executor,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledTimes(4);
+    expect(maxActive).toBe(1);
+  });
+
   it('waits for sibling expansions before propagating an expansion rejection', async () => {
     const parent1 = makeTask('parent-1');
     const parent2 = makeTask('parent-2');
@@ -258,6 +371,23 @@ describe('ParallelPlanner — cycle handling', () => {
   });
 });
 
+// ─── Dangling dependency handling ─────────────────────────────────────────────
+
+describe('ParallelPlanner — dangling dependency handling', () => {
+  it('returns failed before executing tasks when a task depends on a missing task', async () => {
+    const executor = vi.fn().mockResolvedValue(success('ready'));
+
+    const result = await new ParallelPlanner().execute(danglingDependencyGraph(), { executor });
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('blocked'));
+    expect(result.error.message).toContain("depends on unknown dependency node 'missing'");
+    expect(result.taskResults).toEqual([]);
+    expect(executor).not.toHaveBeenCalled();
+  });
+});
+
 // ─── Failure handling ─────────────────────────────────────────────────────────
 
 describe('ParallelPlanner — failure handling', () => {
@@ -294,7 +424,8 @@ describe('ParallelPlanner — failure handling', () => {
       .addTask(a)
       .addTask(b, [createTaskId('a')]);
 
-    const executor = vi.fn()
+    const executor = vi
+      .fn()
       .mockResolvedValueOnce(success('a'))
       .mockResolvedValueOnce(failure('b'));
 
@@ -310,7 +441,8 @@ describe('ParallelPlanner — failure handling', () => {
     const parent = makeTask('parent');
     const sub = makeTask('sub');
     const graph = PlanGraph.empty().addTask(parent);
-    const executor = vi.fn()
+    const executor = vi
+      .fn()
       .mockResolvedValueOnce(expand('parent', [sub]))
       .mockResolvedValueOnce(failure('sub', 'sub exploded'));
 
@@ -357,7 +489,8 @@ describe('ParallelPlanner — failure handling', () => {
     const child = makeTask('child');
     const parent = makeTask('parent');
     const graph = PlanGraph.empty().addTask(parent);
-    const executor = vi.fn()
+    const executor = vi
+      .fn()
       .mockResolvedValueOnce(expand('parent', [child]))
       .mockResolvedValue(success('child'));
 
@@ -371,7 +504,8 @@ describe('ParallelPlanner — failure handling', () => {
     const b = makeTask('b');
     const graph = PlanGraph.empty().addTask(a).addTask(b);
 
-    const executor = vi.fn()
+    const executor = vi
+      .fn()
       .mockResolvedValueOnce(failure('a', 'a-failed'))
       .mockResolvedValueOnce(failure('b', 'b-failed'));
 

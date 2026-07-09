@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -16,8 +16,17 @@ import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, Beas
 const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
+const RUN_CONFIG_DIR_MODE = 0o700;
+const RUN_CONFIG_FILE_MODE = 0o600;
 
-const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhookurl)/i;
+export interface RunConfigSnapshotOwner {
+  readonly uid: number;
+  readonly gid: number;
+}
+
+type RunConfigSnapshotOwnerProvider = () => RunConfigSnapshotOwner | undefined;
+
+const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhook)/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -96,6 +105,47 @@ function redactFailureStderrTail(stderrTail: readonly string[], configuredSecret
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
 }
 
+function redactRunConfigValue(
+  input: unknown,
+  configuredSecrets: readonly string[],
+  path: readonly string[] = [],
+): unknown {
+  if (path.length > 0 && isConfiguredSecretKey(path.join('.'))) {
+    // Non-string scalar config values (e.g. numeric token budgets like
+    // `maxTotalTokens`, which matches the generic `token` key pattern) cannot
+    // carry string secrets and must keep their original type so the spawned
+    // CLI's RunConfigSchema validation still passes. Redact everything else —
+    // strings, objects, and arrays — wholesale. See PR #1064 Codex review.
+    if (input !== null && typeof input !== 'object' && typeof input !== 'string') {
+      return input;
+    }
+    return REDACTED_SECRET;
+  }
+
+  if (typeof input === 'string') {
+    return redactConfiguredSecretValues(input, configuredSecrets);
+  }
+
+  if (Array.isArray(input)) {
+    return input.map(item => redactRunConfigValue(item, configuredSecrets, path));
+  }
+
+  if (!input || typeof input !== 'object') return input;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    redacted[key] = redactRunConfigValue(value, configuredSecrets, [...path, key]);
+  }
+  return redacted;
+}
+
+function redactRunConfigSnapshot(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  configuredSecrets: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return redactRunConfigValue(configSnapshot, configuredSecrets) as Readonly<Record<string, unknown>>;
+}
+
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   if (!config) return {};
   const env: Record<string, string> = {};
@@ -161,6 +211,8 @@ export interface ProcessBeastExecutorOptions {
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
   runConfigDir?: string;
+  runConfigRoot?: string;
+  runConfigOwner?: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -173,6 +225,72 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+}
+
+function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
+  if (!owner) {
+    return;
+  }
+  const currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  if (currentUid === owner.uid) {
+    return;
+  }
+  chownSync(path, owner.uid, owner.gid);
+}
+
+function resolveRunConfigOwner(
+  owner: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider | undefined,
+): RunConfigSnapshotOwner | undefined {
+  return typeof owner === 'function' ? owner() : owner;
+}
+
+function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
+  const root = resolve(rootDir);
+  const target = resolve(configDir);
+  try {
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink()) {
+      throw new Error(`Refusing to use symlinked run config root: ${root}`);
+    }
+    if (!rootStat.isDirectory()) {
+      throw new Error(`Run config root is not a directory: ${root}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+    mkdirSync(root, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
+    applyRunConfigOwnership(root, owner);
+    chmodSync(root, RUN_CONFIG_DIR_MODE);
+  }
+
+  const relativeTarget = relative(root, target);
+  const dirs = relativeTarget !== '' && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)
+    ? relativeTarget.split(/[\\/]+/).reduce<string[]>((acc, part) => {
+      const parent = acc.at(-1) ?? root;
+      acc.push(join(parent, part));
+      return acc;
+    }, [])
+    : [target];
+
+  for (const dir of dirs) {
+    try {
+      const stat = lstatSync(dir);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Refusing to use symlinked run config directory: ${dir}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(`Run config path is not a directory: ${dir}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      mkdirSync(dir, { mode: RUN_CONFIG_DIR_MODE });
+    }
+    applyRunConfigOwnership(dir, owner);
+    chmodSync(dir, RUN_CONFIG_DIR_MODE);
+  }
 }
 
 export class ProcessBeastExecutor implements BeastExecutor {
@@ -220,13 +338,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : processSpec;
 
     // Write configSnapshot to a JSON file for the spawned process to load
-    const configDir = resolve(
-      this.options.runConfigDir ??
-      join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
-    );
-    mkdirSync(configDir, { recursive: true });
+    const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
+    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
+    ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
-    writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
+    try {
+      lstatSync(configFilePath);
+      unlinkSync(configFilePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
     this.pendingConfigFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
@@ -245,6 +369,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
       mergedSpec.env,
       spawnedSpec.env,
     );
+    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    applyRunConfigOwnership(configFilePath, runConfigOwner);
+    chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;

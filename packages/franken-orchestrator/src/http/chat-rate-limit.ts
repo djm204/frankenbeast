@@ -1,46 +1,47 @@
 import { createHash } from 'node:crypto';
-import { extractOperatorToken } from './operator-auth.js';
 import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
 
 export type ChatRateLimitOptions = BeastRateLimitOptions;
 
-export const DEFAULT_CHAT_RATE_LIMIT: ChatRateLimitOptions = {
-  windowMs: 60_000,
-  max: 30,
-};
+export const DEFAULT_CHAT_RATE_LIMIT: ChatRateLimitOptions = { windowMs: 60_000, max: 20 };
 
 export function createChatRateLimiter(options: ChatRateLimitOptions = DEFAULT_CHAT_RATE_LIMIT): InMemoryRateLimiter {
   return new InMemoryRateLimiter(options);
 }
 
-export function chatClientKey(parts: {
-  readonly sessionId: string;
-  readonly action: 'message' | 'approval';
-  readonly authorization?: string | undefined;
+export function hashChatRateLimitPrincipal(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+export function chatRateLimitPrincipalFromAddress(address: string | undefined): string {
+  const normalized = address?.trim();
+  return normalized ? `ip:${hashChatRateLimitPrincipal(normalized)}` : 'anonymous';
+}
+
+export function chatRateLimitPrincipal(parts: {
   readonly operatorToken?: string | undefined;
-  readonly cookie?: string | undefined;
   readonly remoteAddress?: string | undefined;
   readonly principal?: string | undefined;
 }): string {
-  const principal = parts.principal?.trim()
-    || credentialPrincipal('bearer', parts.authorization ? extractOperatorToken(parts.authorization) : undefined)
-    || credentialPrincipal('operator', parts.operatorToken)
-    || credentialPrincipal('cookie', parts.cookie)
-    || addressPrincipal(parts.remoteAddress)
-    || 'anonymous';
-  return `chat:${parts.action}:${parts.sessionId}:${principal}`;
+  const explicitPrincipal = parts.principal?.trim();
+  if (explicitPrincipal) {
+    return `principal:${hashChatRateLimitPrincipal(explicitPrincipal)}`;
+  }
+
+  const operatorToken = parts.operatorToken?.trim();
+  if (operatorToken) {
+    return `operator:${hashChatRateLimitPrincipal(operatorToken)}`;
+  }
+
+  return chatRateLimitPrincipalFromAddress(parts.remoteAddress);
 }
 
-function credentialPrincipal(kind: string, value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? `${kind}:${digest(trimmed)}` : undefined;
-}
-
-function addressPrincipal(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? `remote:${trimmed}` : undefined;
-}
-
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
+export function chatClientKey(parts: {
+  readonly action: 'message' | 'approval';
+  readonly sessionId?: string | undefined;
+  readonly operatorToken?: string | undefined;
+  readonly remoteAddress?: string | undefined;
+  readonly principal?: string | undefined;
+}): string {
+  return `chat:${parts.action}:${chatRateLimitPrincipal(parts)}`;
 }

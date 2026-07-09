@@ -1,9 +1,9 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput } from '../../chat/approval-input.js';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
-import type { ChatRuntime } from '../../chat/runtime.js';
+import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
@@ -16,10 +16,8 @@ import type {
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
-import { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
-import { extractOperatorToken } from '../operator-auth.js';
-import { chatClientKey } from '../chat-rate-limit.js';
-import { extractOperatorTokenCookie } from '../operator-auth.js';
+import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey, chatRateLimitPrincipal } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -60,30 +58,52 @@ function sessionResponse(
   return { ...session, socketToken };
 }
 
-export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore, chatRateLimiter } = deps;
-  const app = new Hono();
+function firstForwardedAddress(header: string | undefined): string | undefined {
+  return header?.split(',')[0]?.trim() || undefined;
+}
 
-  function enforceChatRateLimit(
+function requestAddress(c: Context): string {
+  return c.req.header('x-frankenbeast-remote-address')?.trim()
+    || firstForwardedAddress(c.req.header('x-forwarded-for'))
+    || c.req.header('x-real-ip')?.trim()
+    || c.req.header('cf-connecting-ip')?.trim()
+    || 'unknown';
+}
+
+function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
+  return chatRateLimitPrincipal({ operatorToken, remoteAddress: requestAddress(c) });
+}
+
+function chatMutationKey(sessionId: string): string {
+  return `session:${sessionId}`;
+}
+
+export function chatRoutes(deps: ChatRoutesDeps): Hono {
+  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
+  const app = new Hono();
+  const limiter = deps.chatRateLimiter;
+  const inFlightMutations = new Set<string>();
+
+  async function withChatMutationAdmission<T>(
+    c: Context,
     sessionId: string,
     action: 'message' | 'approval',
-    headers: {
-      authorization?: string | undefined;
-      operatorToken?: string | undefined;
-      cookie?: string | undefined;
-      remoteAddress?: string | undefined;
-    },
-  ): void {
-    const result = chatRateLimiter.take(chatClientKey({
-      sessionId,
-      action,
-      authorization: extractOperatorToken(headers.authorization),
-      operatorToken: headers.operatorToken,
-      cookie: extractOperatorTokenCookie(headers.cookie),
-      remoteAddress: headers.remoteAddress,
-    }));
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const principalKey = chatPrincipalKey(c, operatorToken);
+    const mutationKey = chatMutationKey(sessionId);
+    const result = limiter.take(chatClientKey({ action: 'message', principal: principalKey }));
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
+    if (inFlightMutations.has(mutationKey)) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
+    }
+    inFlightMutations.add(mutationKey);
+    try {
+      return await run();
+    } finally {
+      inFlightMutations.delete(mutationKey);
     }
   }
 
@@ -133,49 +153,54 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const body = await parseJsonBody(c);
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
-    enforceChatRateLimit(session.id, 'message', {
-      authorization: extractOperatorToken(c.req.header('authorization')),
-      operatorToken: c.req.header('x-frankenbeast-operator-token'),
-      cookie: c.req.header('cookie'),
-      remoteAddress: c.req.header('x-frankenbeast-remote-address'),
+
+    return withChatMutationAdmission(c, session.id, 'message', async () => {
+      if (session.pendingApproval || session.state === 'pending_approval') {
+        return c.json({
+          error: {
+            code: 'APPROVAL_PENDING',
+            message: 'Approval is pending. Resolve the approval request before sending another message.',
+          },
+        }, 409);
+      }
+
+      const result = await runtime.run(content, {
+        sessionId: session.id,
+        ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
+        projectId: session.projectId,
+        transcript: session.transcript,
+        ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+        ...(executionMode ? { executionMode } : {}),
+      });
+
+      session.transcript = result.transcript;
+      session.state = result.state;
+      session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
+        ? {
+            description: result.pendingApprovalDescription,
+            requestedAt: result.pendingApprovalRequestedAt ?? new Date().toISOString(),
+            ...result.pendingApprovalContext,
+          }
+        : null;
+      session.beastContext = result.beastContext ?? null;
+      session.updatedAt = new Date().toISOString();
+      sessionStore.save(session);
+
+      const outcome: TurnOutcome = result.outcome ?? {
+        kind: 'reply',
+        content: result.displayMessages.map((message) => message.content).join('\n'),
+        modelTier: result.tier ?? 'unknown',
+      };
+
+      const response = {
+        data: {
+          outcome,
+          tier: result.tier ?? 'unknown',
+          state: session.state,
+        },
+      } satisfies ApiDataEnvelope<MessageResult>;
+      return c.json(response);
     });
-
-    const result = await runtime.run(content, {
-      sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
-      projectId: session.projectId,
-      transcript: session.transcript,
-      ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
-      ...(executionMode ? { executionMode } : {}),
-    });
-
-    session.transcript = result.transcript;
-    session.state = result.state;
-    session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
-      ? {
-          description: result.pendingApprovalDescription,
-          requestedAt: new Date().toISOString(),
-          ...result.pendingApprovalContext,
-        }
-      : null;
-    session.beastContext = result.beastContext ?? null;
-    session.updatedAt = new Date().toISOString();
-    sessionStore.save(session);
-
-    const outcome: TurnOutcome = result.outcome ?? {
-      kind: 'reply',
-      content: result.displayMessages.map((message) => message.content).join('\n'),
-      modelTier: result.tier ?? 'unknown',
-    };
-
-    const response = {
-      data: {
-        outcome,
-        tier: result.tier ?? 'unknown',
-        state: session.state,
-      },
-    } satisfies ApiDataEnvelope<MessageResult>;
-    return c.json(response);
   });
 
   // Browser EventSource cannot attach Authorization headers. Authenticated
@@ -208,63 +233,59 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    if (!session.pendingApproval && session.state !== 'pending_approval') {
-      return c.json({ data: { id: session.id, approved, state: session.state } });
-    }
-
-    enforceChatRateLimit(session.id, 'approval', {
-      authorization: extractOperatorToken(c.req.header('authorization')),
-      operatorToken: c.req.header('x-frankenbeast-operator-token'),
-      cookie: c.req.header('cookie'),
-      remoteAddress: c.req.header('x-frankenbeast-remote-address'),
-    });
-
-    let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
-    if (approved) {
-      const pendingApproval = session.pendingApproval ?? null;
-      const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
-      const runtimeInput = approvalRuntimeInput(pendingApproval);
-      const originalState = session.state;
-      session.pendingApproval = null;
-      session.state = 'approved';
-      session.updatedAt = new Date().toISOString();
-      sessionStore.save(session);
-      try {
-        result = await runtime.run(runtimeInput, {
-          sessionId: session.id,
-          pendingApproval: wasPendingApproval,
-          projectId: session.projectId,
-          transcript: session.transcript,
-          ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
-        });
-      } catch (error) {
-        session.pendingApproval = pendingApproval;
-        session.state = originalState;
-        session.updatedAt = new Date().toISOString();
-        sessionStore.save(session);
-        throw error;
+    return withChatMutationAdmission(c, session.id, 'approval', async () => {
+      if (!session.pendingApproval && session.state !== 'pending_approval') {
+        return c.json({ data: { id: session.id, approved, state: session.state } });
       }
 
-      session.state = result.state === 'active' ? 'approved' : result.state;
-      session.pendingApproval = null;
-      session.beastContext = result.beastContext ?? null;
-    } else {
-      session.state = 'rejected';
-      session.pendingApproval = null;
-    }
-    session.updatedAt = new Date().toISOString();
-    sessionStore.save(session);
+      let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
+      if (approved) {
+        const pendingApproval = session.pendingApproval ?? null;
+        const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+        const runtimeInput = approvalRuntimeInput(pendingApproval);
+        const originalState = session.state;
+        session.pendingApproval = null;
+        session.state = 'approved';
+        session.updatedAt = new Date().toISOString();
+        sessionStore.save(session);
+        try {
+          result = await runtime.run(runtimeInput, {
+            sessionId: session.id,
+            pendingApproval: wasPendingApproval,
+            approvalResolved: true,
+            projectId: session.projectId,
+            transcript: session.transcript,
+            ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
+          });
+        } catch (error) {
+          session.pendingApproval = pendingApproval;
+          session.state = originalState;
+          session.updatedAt = new Date().toISOString();
+          sessionStore.save(session);
+          throw error;
+        }
 
-    return c.json({
-      data: {
-        id: session.id,
-        approved,
-        state: session.state,
-        ...(result?.outcome ? { outcome: result.outcome } : {}),
-        ...(result?.tier ? { tier: result.tier } : {}),
-        ...(result ? { displayMessages: result.displayMessages, events: result.events } : {}),
-      },
-    } satisfies ApiDataEnvelope<ApproveResult>);
+        session.state = result.state === 'active' ? 'approved' : result.state;
+        session.pendingApproval = null;
+        session.beastContext = result.beastContext ?? null;
+      } else {
+        session.state = 'rejected';
+        session.pendingApproval = null;
+      }
+      session.updatedAt = new Date().toISOString();
+      sessionStore.save(session);
+
+      return c.json({
+        data: {
+          id: session.id,
+          approved,
+          state: session.state,
+          ...(result?.outcome ? { outcome: result.outcome } : {}),
+          ...(result?.tier ? { tier: result.tier } : {}),
+          ...(result ? { displayMessages: result.displayMessages, events: result.events } : {}),
+        },
+      } satisfies ApiDataEnvelope<ApproveResult>);
+    });
   });
 
   return app;

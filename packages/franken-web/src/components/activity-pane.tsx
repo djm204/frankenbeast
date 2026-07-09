@@ -146,7 +146,7 @@ function activityLinks(data: Record<string, unknown>): ActivityLink[] {
   const artifactPath = stringValue(data, 'artifactPath') ?? stringValue(data, 'artifact');
 
   if (sessionId) {
-    links.push({ label: `Session ${sessionId}`, href: '#/sessions' });
+    links.push({ label: `Session ${sessionId}` });
   }
   if (runId) {
     links.push({ label: `Run ${runId}`, href: '#/beasts' });

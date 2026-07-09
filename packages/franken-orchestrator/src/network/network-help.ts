@@ -20,6 +20,14 @@ DESCRIPTION
   directly. Detached mode persists operator state so later commands can manage
   the same services.
 
+MANAGED CHILDREN
+  frankenbeast network sets FRANKENBEAST_NETWORK_MANAGED=1 for managed child
+  services. Treat it as a supervisor-owned marker, not a normal user toggle.
+  Managed children suppress the CLI banner, and managed chat-server fails closed
+  without an operator token even on loopback. Unset the marker for standalone
+  chat-server debugging, or provide FRANKENBEAST_BEAST_OPERATOR_TOKEN when
+  intentionally running with managed semantics.
+
 SECURITY MODES
   secure    Recommended. Uses operator-managed secret refs and stronger backends.
   insecure  Local-development convenience mode with redaction and no plaintext

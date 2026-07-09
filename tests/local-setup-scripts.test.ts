@@ -93,6 +93,9 @@ describe('local setup scripts', () => {
 
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
+    const readme = read('README.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -126,9 +129,84 @@ describe('local setup scripts', () => {
     for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
     }
+    expect(envExample).not.toMatch(/^# ── Firewall Server ──$/m);
+    expect(envExample).not.toMatch(/^#?\s*FIREWALL_PORT\s*=/m);
+    expect(envExample).not.toMatch(/frankenfirewall|firewall proxy|port 9090/i);
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('Grafana\'s built-in admin/admin default is insecure');
     expect(envExample).toContain('Generate a unique local password before uncommenting');
+    expect(envExample).toContain('Do not use VITE_BEAST_OPERATOR_TOKEN');
+    expect(envExample).not.toMatch(/^#?\s*VITE_BEAST_OPERATOR_TOKEN=/m);
+
+    for (const doc of [readme, quickstart, runCliBeastGuide]) {
+      expect(doc).toContain('ANTHROPIC_API_KEY');
+      expect(doc).toContain('OPENAI_API_KEY');
+      expect(doc).toContain('GOOGLE_API_KEY');
+      expect(doc).toContain('GEMINI_API_KEY');
+    }
+
+    expect(readme).toContain('CHROMA_URL');
+    expect(readme).toContain('http://localhost:8000');
+    expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
+    expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(readme).toContain(frankenOverride);
+    }
+  });
+
+  it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+
+    expect(runCliBeastGuide).not.toContain('OLLAMA_BASE_URL');
+    expect(runCliBeastGuide).not.toMatch(/local\s+Ollama/i);
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
+    expect(providersMatch).not.toBeNull();
+    const supportedProviders = providersMatch?.[1] ?? '';
+    for (const provider of ['anthropic-api', 'codex-cli', 'claude-cli']) {
+      expect(supportedProviders).toContain(provider);
+      expect(runCliBeastGuide).toContain(`--provider=${provider}`);
+    }
+    expect(supportedProviders).not.toContain('ollama');
+  });
+
+  it('keeps the root README provider-extension guidance on current provider surfaces', () => {
+    const readme = read('README.md');
+
+    expect(readme).not.toContain('Adding a new provider means implementing one `IAdapter` interface');
+    expect(readme).not.toContain('implement `IAdapter` in 4 steps');
+    expect(readme).not.toMatch(/firewall is a model-agnostic proxy/i);
+    expect(readme).toContain('CLI execution/chat providers implement `ICliProvider`');
+    expect(readme).toContain('API-backed clients live in the provider registry and config loading paths');
+    expect(readme).toContain(
+      'add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry',
+    );
+  });
+
+  it('keeps root AI assistant rule regeneration guidance on the supported workflow source', () => {
+    for (const docPath of ['CLAUDE.md', 'GEMINI.md']) {
+      const doc = read(docPath);
+
+      expect(doc).toContain('djm204/agent-workflow-skills');
+      expect(doc).toContain('package-level `project-outline.md` cleanup is tracked separately');
+      expect(doc).toContain('Do not regenerate the root `.cursor/rules/*.mdc` files');
+      expect(doc).not.toContain('npx @djm204/agent-skills');
+      expect(doc).not.toMatch(/Re-run to update:/i);
+    }
   });
 });

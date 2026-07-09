@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.42.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.41.1...@franken/orchestrator-v0.42.0) (2026-07-08)
+
+
+### Features
+
+* **credentials:** externalize test credential placeholders ([#909](https://github.com/djm204/frankenbeast/issues/909)) ([b50ae79](https://github.com/djm204/frankenbeast/commit/b50ae797be6cbb77ea092c1ab3c8e30ed5274555)), closes [#518](https://github.com/djm204/frankenbeast/issues/518)
+
+
+### Bug Fixes
+
+* **orchestrator:** limit comms webhook request bodies ([#1282](https://github.com/djm204/frankenbeast/issues/1282)) ([fd28a16](https://github.com/djm204/frankenbeast/commit/fd28a1653dd7484c51baa2a18e80b4835ef3c629)), closes [#573](https://github.com/djm204/frankenbeast/issues/573)
+* **orchestrator:** log cli hard-kill failures ([78f4bff](https://github.com/djm204/frankenbeast/commit/78f4bffa9328205bc5b120a5a61a5a996f13cdcf)), closes [#1213](https://github.com/djm204/frankenbeast/issues/1213)
+* **orchestrator:** rate limit websocket chat execution ([#1266](https://github.com/djm204/frankenbeast/issues/1266)) ([3e88af5](https://github.com/djm204/frankenbeast/commit/3e88af574967635e1df69631ab33bcf08c4698de)), closes [#574](https://github.com/djm204/frankenbeast/issues/574)
+* **orchestrator:** report cleanup artifact failures ([4fdfb0e](https://github.com/djm204/frankenbeast/commit/4fdfb0eb93cef1a875057790cd62237ca3d8c8d8))
+* **orchestrator:** surface beast daemon dispatch failures ([0a3480a](https://github.com/djm204/frankenbeast/commit/0a3480aa7db0ca30e983e164fb422c73ae6efde9)), closes [#1164](https://github.com/djm204/frankenbeast/issues/1164)
+
+
+### Documentation
+
+* **config:** document FRANKEN env overrides ([a818cc8](https://github.com/djm204/frankenbeast/commit/a818cc8cde8ee8d570ef01c0a5efd0f838a7a5a1)), closes [#1263](https://github.com/djm204/frankenbeast/issues/1263)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+* **orchestrator:** avoid gitleaks fixture secret match ([#1273](https://github.com/djm204/frankenbeast/issues/1273)) ([7e850a1](https://github.com/djm204/frankenbeast/commit/7e850a1ce945655afeed0af92f822c1a01e95057)), closes [#1161](https://github.com/djm204/frankenbeast/issues/1161)
+* **orchestrator:** cover HTTP approval state cleanup ([8f1fbf1](https://github.com/djm204/frankenbeast/commit/8f1fbf142b93bb0e3ce4c41e107e1650c6955e7a)), closes [#1155](https://github.com/djm204/frankenbeast/issues/1155)
+* **orchestrator:** fail config cleanup errors loudly ([#1268](https://github.com/djm204/frankenbeast/issues/1268)) ([2a9e211](https://github.com/djm204/frankenbeast/commit/2a9e211208f4fdc8707276c860a1e0201775fa28))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.13 to 0.6.14
+    * @franken/governor bumped from 0.5.11 to 0.5.12
+    * @franken/types bumped from 0.8.0 to 0.8.1
+    * @franken/observer bumped from 0.7.13 to 0.7.14
+    * @franken/planner bumped from 0.4.11 to 0.4.12
+    * @franken/brain bumped from 0.7.2 to 0.7.3
+
+## [0.41.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.41.0...@franken/orchestrator-v0.41.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* harden Beast run config snapshot permissions ([#895](https://github.com/djm204/frankenbeast/issues/895)) ([2b681cf](https://github.com/djm204/frankenbeast/commit/2b681cf5b111e883aa31001a898820ae30bf18e1))
+* **orchestrator:** add body limits to control APIs ([74a5c15](https://github.com/djm204/frankenbeast/commit/74a5c15344f09eacb514fff262cb8760b2c08c3c)), closes [#605](https://github.com/djm204/frankenbeast/issues/605)
+* **orchestrator:** allow trusted override network launches ([#1260](https://github.com/djm204/frankenbeast/issues/1260)) ([3bb95c1](https://github.com/djm204/frankenbeast/commit/3bb95c140aedbae8c18eb37132d4a504dd183c1c))
+* **orchestrator:** escape Beast metric label values ([#1024](https://github.com/djm204/frankenbeast/issues/1024)) ([72ceda4](https://github.com/djm204/frankenbeast/commit/72ceda4901693bf1da0326f821da0be0d21762d5))
+* **orchestrator:** rate limit chat REST mutations ([#1062](https://github.com/djm204/frankenbeast/issues/1062)) ([e3cd756](https://github.com/djm204/frankenbeast/commit/e3cd7566ec0a3fb2e2d56f44a806ab26404c7c6d))
+* **orchestrator:** redact beast run config snapshots ([#1064](https://github.com/djm204/frankenbeast/issues/1064)) ([f0323a5](https://github.com/djm204/frankenbeast/commit/f0323a533a75c97c75b46ef3003e860747f27268)), closes [#603](https://github.com/djm204/frankenbeast/issues/603)
+* **orchestrator:** validate network subprocess specs ([#912](https://github.com/djm204/frankenbeast/issues/912)) ([4048ca9](https://github.com/djm204/frankenbeast/commit/4048ca941d5de21784862d9c170f4420033f5df2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.12 to 0.6.13
+    * @franken/governor bumped from 0.5.10 to 0.5.11
+    * @franken/observer bumped from 0.7.12 to 0.7.13
+    * @franken/planner bumped from 0.4.10 to 0.4.11
+    * @franken/brain bumped from 0.7.1 to 0.7.2
+
 ## [0.41.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.40.0...@franken/orchestrator-v0.41.0) (2026-07-07)
 
 

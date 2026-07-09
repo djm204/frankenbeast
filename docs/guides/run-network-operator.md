@@ -6,6 +6,8 @@ This guide starts Frankenbeast through the new `frankenbeast network` operator i
 
 `frankenbeast network up` selects services from canonical config and starts the enabled request-serving surfaces.
 
+When running `network up` from a service manager or wrapper whose current directory is not the target project, pass the project root explicitly with `--base-dir /absolute/path/to/project`. The README's [Beast project-root override](../../README.md#beast-project-root-override) documents the narrower `FBEAST_ROOT` fallback for Beast service construction and built-in run configs when no explicit root is supplied; keep it aligned with `--base-dir` if both are set.
+
 Current default local surface:
 
 - `beasts-daemon` (standalone Beast control plane on `:4050`)
@@ -66,6 +68,24 @@ If the managed chat service is healthy, `frankenbeast chat` now attaches to that
 
 If the managed chat service is not healthy, `frankenbeast chat` falls back to standalone mode.
 
+## Managed Child-Process Marker
+
+`frankenbeast network` owns the internal `FRANKENBEAST_NETWORK_MANAGED=1` marker. The network supervisor sets it only for managed child services such as `chat-server`; operators normally should not export it before running standalone commands.
+
+Managed children use this marker for user-visible runtime behavior:
+
+- CLI children suppress the normal Frankenbeast startup banner so supervised logs stay focused on service output.
+- `chat-server` treats managed mode as exposed even when it binds to loopback (`127.0.0.1` or `localhost`) and fails closed unless an operator token is configured.
+
+If a standalone local `chat-server` run unexpectedly fails with an operator-token error on loopback, check for an inherited `FRANKENBEAST_NETWORK_MANAGED=1` and unset it before debugging standalone mode:
+
+```bash
+unset FRANKENBEAST_NETWORK_MANAGED
+npm --workspace @franken/orchestrator run chat-server
+```
+
+When intentionally running `chat-server` with managed semantics, keep `FRANKENBEAST_NETWORK_MANAGED=1` and provide the configured operator token, for example through `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or the repo's configured secret-store token reference.
+
 ## Config Updates
 
 Inspect current operator-facing config:
@@ -91,11 +111,23 @@ Supported mode values:
 - `secure`
 - `insecure`
 
-Current secure backend preference order:
+Current default secure backend: `local-encrypted`.
 
-1. `1Password`
-2. `Bitwarden`
-3. OS secure store
-4. local encrypted store
+Supported `network.secureBackend` values:
 
-The local encrypted store is allowed, but it is not the optimal solution.
+- `1password`
+- `bitwarden`
+- `os-keychain`
+- `local-encrypted`
+
+`frankenbeast network` and `frankenbeast init` use the configured `network.secureBackend` value. If the key is unset, the config schema defaults to `local-encrypted`, and interactive init may prompt for `FRANKENBEAST_PASSPHRASE` to create or open the local encrypted vault.
+
+For production operators, prefer a managed secret backend when available, such as `1password`, `bitwarden`, or `os-keychain`. Select one explicitly in project config instead of relying on automatic backend discovery:
+
+```bash
+node packages/franken-orchestrator/dist/cli/run.js network config --set network.secureBackend=1password
+```
+
+Choose the backend before running `frankenbeast init` when possible. Changing `network.secureBackend` later does not migrate existing secret refs or secret values; re-store or migrate referenced secrets such as `network.operatorTokenRef` into the newly selected backend before the next boot.
+
+Use `local-encrypted` for offline, CI/CD, or minimal deployments where a managed secret backend is not available.

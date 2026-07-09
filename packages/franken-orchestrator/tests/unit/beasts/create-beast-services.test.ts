@@ -52,7 +52,7 @@ describe('createBeastServices', () => {
       )?.runConfigDir === expectedRunConfigDir);
       expect(matchingCall).toBeDefined();
       const [, , supervisor, options] = matchingCall!;
-      expect(options).toMatchObject({ runConfigDir: expectedRunConfigDir });
+      expect(options).toMatchObject({ runConfigDir: expectedRunConfigDir, runConfigRoot: resolve(projectRoot) });
       expect(supervisor).toMatchObject({ options: { projectRoot: resolve(projectRoot) } });
 
       services.dispose();

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { ChatShell } from '../../src/components/chat-shell.js';
+import { ChatShell, buildInitAction } from '../../src/components/chat-shell.js';
 import { useDashboardStore } from '../../src/stores/dashboard-store.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
@@ -201,6 +201,15 @@ vi.mock('../../src/hooks/use-chat-session.js', () => ({
         timestamp: '2026-03-09T00:00:01Z',
         modelTier: 'cheap',
         streaming: false,
+      },
+      {
+        id: 'user-failed',
+        role: 'user',
+        content: 'Retry this failed request',
+        timestamp: '2026-03-09T00:00:02Z',
+        receipt: 'failed',
+        error: 'network failed',
+        canRetry: true,
       },
     ],
     status: 'idle' as const,
@@ -439,6 +448,30 @@ afterEach(() => {
   });
 });
 
+describe('buildInitAction', () => {
+  it('reads chunk-plan design doc paths from the nested wizard workflow config', () => {
+    expect(buildInitAction('chunk-plan', {
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/design.md' },
+      outputDir: 'tasks/chunks',
+      executionMode: 'process',
+    }, 'sess-1')).toMatchObject({
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/design.md',
+      chatSessionId: 'sess-1',
+    });
+  });
+
+  it('prefers normalized chunk-plan design doc paths when present', () => {
+    expect(buildInitAction('chunk-plan', {
+      workflow: { workflowType: 'chunk-plan', docPath: 'docs/from-workflow.md' },
+      designDocPath: 'docs/from-normalized.md',
+    }, undefined)).toMatchObject({
+      kind: 'chunk-plan',
+      command: '/plan --design-doc docs/from-normalized.md',
+    });
+  });
+});
+
 describe('ChatShell', () => {
   it('renders Frankenbeast branding and keeps the version in the sidebar footer', () => {
     const { container } = render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
@@ -451,8 +484,12 @@ describe('ChatShell', () => {
     expect(nav?.textContent).toContain('Overview');
     expect(nav?.textContent).toContain('Chat');
     expect(nav?.textContent).toContain('Beasts');
-    expect(nav?.textContent).toContain('Sessions');
+    expect(nav?.textContent).toContain('Network');
     expect(nav?.textContent).toContain('Analytics');
+    expect(nav?.textContent).not.toContain('Sessions');
+    expect(nav?.textContent).not.toContain('Costs');
+    expect(nav?.textContent).not.toContain('Safety');
+    expect(nav?.textContent).not.toContain('Settings');
   });
 
   it('mounts the dashboard overview as a first-class navigation route', async () => {
@@ -480,6 +517,16 @@ describe('ChatShell', () => {
     expect(screen.getByRole('textbox')).toBeDefined();
     expect(screen.getByText('Approve deploy')).toBeDefined();
     expect(screen.getByText('turn.execution.start')).toBeDefined();
+  });
+
+  it('disables normal chat input while approval is pending', () => {
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    const input = screen.getByRole('textbox');
+    expect(input.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Resend failed message' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.')).toBeDefined();
   });
 
   it('labels conversations with preview, state, message count, updated time, and a shortened id', async () => {

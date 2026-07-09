@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.0...franken-types-v0.8.1) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.7...franken-types-v0.8.0) (2026-07-07)
 
 

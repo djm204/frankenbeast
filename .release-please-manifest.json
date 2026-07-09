@@ -1,13 +1,13 @@
 {
-  ".": "0.43.0",
-  "packages/franken-brain": "0.7.1",
-  "packages/franken-critique": "0.6.12",
-  "packages/franken-governor": "0.5.10",
-  "packages/franken-observer": "0.7.12",
-  "packages/franken-orchestrator": "0.41.0",
-  "packages/franken-planner": "0.4.10",
-  "packages/franken-types": "0.8.0",
-  "packages/franken-mcp-suite": "0.2.2",
-  "packages/live-bench": "0.2.2",
-  "packages/franken-web": "0.2.2"
+  ".": "0.44.0",
+  "packages/franken-brain": "0.7.3",
+  "packages/franken-critique": "0.6.14",
+  "packages/franken-governor": "0.5.12",
+  "packages/franken-observer": "0.7.14",
+  "packages/franken-orchestrator": "0.42.0",
+  "packages/franken-planner": "0.4.12",
+  "packages/franken-types": "0.8.1",
+  "packages/franken-mcp-suite": "0.2.4",
+  "packages/live-bench": "0.2.4",
+  "packages/franken-web": "0.2.3"
 }

@@ -1,5 +1,4 @@
 import { createServer, type Server as HttpServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -337,6 +336,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     tokenSecret,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+    ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
     chatRateLimiter,
   });
 

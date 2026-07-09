@@ -45,12 +45,22 @@ describe('ReplayContentStore', () => {
       `../${ref}`,
       `/tmp/${ref}`,
       `${ref.slice(0, 32)}/${ref.slice(32)}`,
+      `${ref.slice(0, 32)}\\${ref.slice(32)}`,
       `${ref}00`,
     ];
 
     for (const invalidRef of invalidRefs) {
       expect(() => store.get(invalidRef)).toThrow(/exactly 64 lowercase sha256 hex/i);
     }
+  });
+
+  it('rejects traversal refs before reading parent-directory files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const store = new ReplayContentStore(root);
+    const ref = store.put('secret');
+    writeFileSync(join(root, ref), 'secret', 'utf8');
+
+    expect(() => store.get(`../${ref}`)).toThrow(/exactly 64 lowercase sha256 hex/i);
   });
 
   it('rejects a blobs directory symlink that escapes the replay base directory', () => {
@@ -79,6 +89,23 @@ describe('ReplayContentStore', () => {
       expect(existsSync(danglingTarget)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects existing blob symlinks before reading outside content', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const outside = mkdtempSync(join(tmpdir(), 'replay-outside-'));
+    const store = new ReplayContentStore(root);
+    const ref = hashContent('secret');
+    const outsideBlob = join(outside, ref);
+    writeFileSync(outsideBlob, 'secret', 'utf8');
+    symlinkSync(outsideBlob, join(root, 'blobs', ref));
+
+    try {
+      expect(() => store.get(ref)).toThrow(/replayBlobPath resolves outside base directory/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });
