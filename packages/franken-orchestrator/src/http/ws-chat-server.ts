@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { approvalRuntimeInput } from '../chat/approval-input.js';
-import { ChatRuntime } from '../chat/runtime.js';
+import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
@@ -16,6 +16,8 @@ import {
   type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
+import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
+import { DEFAULT_CHAT_RATE_LIMIT, chatRateLimitPrincipalFromAddress } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -24,6 +26,7 @@ export interface ChatSocketPeer {
 
 interface ConnectionState {
   sessionId: string;
+  remoteAddress?: string | undefined;
 }
 
 export interface ChatSocketControllerOptions {
@@ -32,12 +35,15 @@ export interface ChatSocketControllerOptions {
   sessionStore: ISessionStore;
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
+  chatRateLimit?: BeastRateLimitOptions;
+  chatRateLimiter?: InMemoryRateLimiter;
 }
 
 export interface ChatSocketConnectRequest {
   origin: string | null;
   sessionId: string;
   token: string | null;
+  remoteAddress?: string | undefined;
 }
 
 export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOptions {
@@ -85,9 +91,10 @@ function messageIdFromSession(session: ChatSession): string {
 function createPeerState(
   peer: ChatSocketPeer,
   sessionId: string,
+  remoteAddress: string | undefined,
   controller: ChatSocketController,
 ): ConnectionState {
-  const state = { sessionId };
+  const state = { sessionId, remoteAddress };
   controller.connections.set(peer, state);
   return state;
 }
@@ -99,6 +106,7 @@ export class ChatSocketController {
   private readonly sessionStore: ISessionStore;
   private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
+  private readonly chatRateLimiter: InMemoryRateLimiter;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
@@ -106,6 +114,7 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
+    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -149,7 +158,7 @@ export class ChatSocketController {
       return { ok: false, status: 404 };
     }
 
-    createPeerState(peer, request.sessionId, this);
+    createPeerState(peer, request.sessionId, request.remoteAddress, this);
     this.emit(peer, {
       type: 'session.ready',
       sessionId: session.id,
@@ -207,6 +216,9 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
+        if (!this.takeChatRateLimit(peer, connection)) {
+          return;
+        }
         await this.handleMessageSend(
           peer,
           session,
@@ -216,6 +228,9 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
+        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection)) {
+          return;
+        }
         await this.handleApproval(peer, session, event.approved);
         return;
       case 'message.read':
@@ -238,6 +253,16 @@ export class ChatSocketController {
     content: string,
     executionMode?: 'process' | 'container',
   ): Promise<void> {
+    if (session.pendingApproval || session.state === 'pending_approval') {
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_PENDING',
+        message: 'Approval is pending. Resolve the approval request before sending another message.',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
     this.emit(peer, {
       type: 'message.accepted',
       clientMessageId,
@@ -257,7 +282,7 @@ export class ChatSocketController {
 
     const result = await this.runtime.run(content, {
       sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
+      ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -269,7 +294,7 @@ export class ChatSocketController {
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
       ? {
           description: result.pendingApprovalDescription,
-          requestedAt: nowIso(),
+          requestedAt: result.pendingApprovalRequestedAt ?? nowIso(),
           ...result.pendingApprovalContext,
         }
       : null;
@@ -320,6 +345,24 @@ export class ChatSocketController {
         timestamp: nowIso(),
       });
     }
+  }
+
+  private takeChatRateLimit(
+    peer: ChatSocketPeer,
+    connection: ConnectionState,
+  ): boolean {
+    const principal = chatRateLimitPrincipalFromAddress(connection.remoteAddress);
+    const result = this.chatRateLimiter.take(`chat:ws:principal:${principal}`);
+    if (result.allowed) {
+      return true;
+    }
+    this.emit(peer, {
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'Rate limit exceeded',
+      timestamp: nowIso(),
+    });
+    return false;
   }
 
   private async handleApproval(
@@ -374,6 +417,7 @@ export class ChatSocketController {
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
         pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        approvalResolved: true,
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -494,6 +538,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
       origin: requestOrigin(request),
       sessionId,
       token,
+      remoteAddress: request.socket.remoteAddress,
     });
     if (!auth.ok) {
       closeUnauthorized(socket, auth.status);
@@ -507,6 +552,7 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
         origin: requestOrigin(request),
         sessionId,
         token,
+        remoteAddress: request.socket.remoteAddress,
       });
       if (!result.ok) {
         ws.close();

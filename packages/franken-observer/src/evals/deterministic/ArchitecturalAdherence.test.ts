@@ -72,6 +72,42 @@ describe('ArchitecturalAdherenceEval', () => {
       })
       expect(result.reason).toContain('TypeScript output must not use the `any` type')
     })
+
+    it('reports throwing rules by rule and continues evaluating remaining rules', async () => {
+      const evaluatedRules: string[] = []
+      const throwingRule: ADRRule = {
+        name: 'parse-adr-links',
+        description: 'ADR references must be parseable',
+        check: () => {
+          evaluatedRules.push('parse-adr-links')
+          throw new Error('ADR parser failed')
+        },
+      }
+      const passingRule: ADRRule = {
+        name: 'passing-rule',
+        description: 'A passing rule should still run after an earlier exception',
+        check: () => {
+          evaluatedRules.push('passing-rule')
+          return true
+        },
+      }
+
+      const result = await runner.run(ev, {
+        output: `const x: any = 1`,
+        rules: [throwingRule, noAnyRule, passingRule],
+      })
+
+      expect(result.status).toBe('fail')
+      expect(result.reason).toContain('[parse-adr-links] ADR references must be parseable')
+      expect(result.reason).toContain('ADR parser failed')
+      expect(result.reason).toContain('[no-any] TypeScript output must not use the `any` type')
+      expect(result.reason).not.toContain('passing-rule')
+      expect(result.details?.['violatedRules']).toEqual(['parse-adr-links', 'no-any'])
+      expect(result.details?.['ruleErrors']).toEqual([
+        { rule: 'parse-adr-links', error: 'ADR parser failed' },
+      ])
+      expect(evaluatedRules).toEqual(['parse-adr-links', 'passing-rule'])
+    })
   })
 
   describe('score', () => {

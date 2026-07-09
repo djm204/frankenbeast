@@ -48,8 +48,9 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
   }
 
   if (workflow?.workflowType === 'design-interview') {
-    if (typeof workflow.topic === 'string') {
-      config.goal = workflow.topic;
+    const goal = typeof workflow.goal === 'string' ? workflow.goal : workflow.topic;
+    if (typeof goal === 'string') {
+      config.goal = goal;
     }
     if (typeof workflow.outputPath === 'string') {
       config.outputPath = workflow.outputPath;
@@ -71,8 +72,9 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
     if (typeof workflow.objective === 'string') {
       config.objective = workflow.objective;
     }
-    if (typeof workflow.chunkDir === 'string') {
-      config.chunkDirectory = workflow.chunkDir;
+    const chunkDirectory = typeof workflow.chunkDirectory === 'string' ? workflow.chunkDirectory : workflow.chunkDir;
+    if (typeof chunkDirectory === 'string') {
+      config.chunkDirectory = chunkDirectory;
     }
   }
 

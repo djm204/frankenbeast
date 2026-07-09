@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
 import { parseOrchestratorConfig } from '../../../src/config/orchestrator-config.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
@@ -253,6 +253,32 @@ describe('dep-factory provider wiring', () => {
     optionalModuleMocks.governorError = undefined;
     traceViewerMocks.stop.mockClear();
     mockBridgeReplayManifest.length = 0;
+  });
+
+  it('reports session artifact cleanup failures instead of swallowing them', async () => {
+    const { removeSessionArtifactIfPresent } = await import('../../../src/cli/dep-factory.js');
+    const testDir = resolve(tmpdir(), `fb-cleanup-warning-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const artifactPath = resolve(testDir, 'session.checkpoint');
+    const warn = vi.fn();
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(artifactPath, 'checkpoint data');
+
+    try {
+      const removed = removeSessionArtifactIfPresent(
+        artifactPath,
+        () => { throw new Error('permission denied'); },
+        warn,
+      );
+
+      expect(removed).toBe(false);
+      expect(existsSync(artifactPath)).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to remove session artifact ${artifactPath}: permission denied`),
+        'dep-factory',
+      );
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('throws descriptive error for unknown provider name', async () => {

@@ -129,6 +129,41 @@ describe('useChatSession error banners', () => {
     ]);
   });
 
+  it('fetches a fresh socket token before reconnecting after a websocket error', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-1' })))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse({ socketToken: 'socket-token-2' })));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    expect(MockWebSocket.instances[0]!.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.socket-token-1',
+    ]);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+    });
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(MockWebSocket.instances).toHaveLength(2);
+    });
+    expect(fetch).toHaveBeenLastCalledWith(
+      'http://localhost:3000/v1/chat/sessions/session-1',
+      { credentials: 'same-origin', method: 'GET' },
+    );
+    expect(MockWebSocket.instances[1]!.protocols).toEqual([
+      'franken.chat.v1',
+      'franken.chat.token.socket-token-2',
+    ]);
+  });
+
   it('turns socket turn errors into visible retry banners', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(sessionResponse())));
     vi.stubGlobal('WebSocket', MockWebSocket);

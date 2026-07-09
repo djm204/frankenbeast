@@ -351,7 +351,7 @@ describe('AnalyticsPage', () => {
     expect(await screen.findByText('Copied JSON to clipboard.')).toBeTruthy();
   });
 
-  it('shows a manual fallback when copying full event JSON fails', async () => {
+  it('shows a manual fallback when copying full event JSON is unavailable', async () => {
     const client = mockClient();
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -364,6 +364,26 @@ describe('AnalyticsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
 
     expect(await screen.findByText('Clipboard is unavailable. Select the JSON below and copy it manually.')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Raw JSON manual copy fallback' })).toHaveProperty('value', '{\n  "decision": "denied"\n}');
+  });
+
+  it('shows a manual fallback when copying full event JSON is rejected', async () => {
+    const client = mockClient();
+    const writeText = vi.fn().mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('{\n  "decision": "denied"\n}');
+    });
+    expect(await screen.findByText('Copy failed. Select the JSON below and copy it manually.')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Raw JSON manual copy fallback' })).toHaveProperty('value', '{\n  "decision": "denied"\n}');
   });
 

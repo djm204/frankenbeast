@@ -53,6 +53,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   app.get('/comms/health', (c) => c.json({ status: 'ok' }));
   app.use('/v1/comms', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
   app.use('/v1/comms/*', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
+  app.use('/webhooks/*', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
 
   const slack = config.channels.slack;
   if (slack?.enabled && slack.token && slack.signingSecret) {

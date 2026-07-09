@@ -138,6 +138,7 @@ describe('useChatSession', () => {
       expect(result.current.sessionId).toBe('chat-1');
     });
 
+    expect(result.current.sessionState).toBe('active');
     expect(mockCreateSession).toHaveBeenCalledWith('test-proj');
     expect(mockSocketUrl).toHaveBeenCalledWith('chat-1', 'signed-token');
     expect(mockSocketProtocols).toHaveBeenCalledWith('signed-token');
@@ -263,6 +264,43 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledWith('chat-1');
     expect(socket.sent).toHaveLength(0);
     expect(result.current.status).toBe('idle');
+  });
+
+  it('refreshes approval metadata when an HTTP fallback send is blocked', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    mockSendMessage.mockRejectedValueOnce(new Error('Approval is pending. Resolve the approval request before sending another message.'));
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: {
+        description: 'Deploy the generated fix',
+        requestedAt: '2026-03-09T00:00:06Z',
+      },
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 1, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.01,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await expect(result.current.send('blocked over HTTP')).rejects.toThrow('Approval is pending');
+    });
+
+    expect(result.current.sessionState).toBe('pending_approval');
+    expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'blocked over HTTP',
+      receipt: 'failed',
+      canRetry: true,
+    }));
   });
 
   it('does not offer a retry when HTTP send succeeds but refresh fails', async () => {
@@ -783,6 +821,7 @@ describe('useChatSession', () => {
     });
 
     expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
+    expect(result.current.sessionState).toBe('pending_approval');
 
     await act(async () => {
       await result.current.approve(true);
@@ -792,6 +831,17 @@ describe('useChatSession', () => {
       type: 'approval.respond',
       approved: true,
     });
+
+    act(() => {
+      socket.message({
+        type: 'turn.approval.resolved',
+        approved: true,
+        timestamp: '2026-03-09T00:00:07Z',
+      });
+    });
+
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
   });
 
   it('falls back to HTTP approval when the websocket is not ready', async () => {
@@ -821,6 +871,7 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledWith('chat-1');
     expect(socket.sent).toHaveLength(0);
     expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('active');
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.approvalError).toBeNull();
     expect(result.current.status).toBe('idle');

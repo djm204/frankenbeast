@@ -237,6 +237,104 @@ describe('LogicLoopEvaluator', () => {
     expect(result.verdict).toBe('pass');
   });
 
+  it('masks regex literals after control-flow keywords in fallback loop scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function unfinished() { while (true) { throw /break/.test(reason); doWork(); `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('masks regex literals after keyword-prefixed await before fallback recursion scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `Analysis notes:\nfunction loop() { const helper = async () => await /if/.test(value); loop(); not javascript`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not mask division after keyword-like member names in fallback recursion scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { timer.await / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not mask division after contextual keyword-like identifiers', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { const of = 1; of / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not treat `of` after another keyword as a regex prefix in fallback scanning', async () => {
+    // `new of / loop() / 2` — `of` is an identifier here, so the slashes are
+    // division and `loop()` must stay visible as an unguarded self-call.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { new of / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('does not treat a keyword suffix of a Unicode identifier as a regex prefix', async () => {
+    // `πreturn` is a single identifier; the trailing `return` must not be read
+    // as a keyword, so `/ loop() /` is division and the self-call stays visible.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { πreturn / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('keeps division visible when await is a sloppy-mode identifier after a semicolon', async () => {
+    // `var await = 1; await / loop() / 2` — here `await` is an identifier, so
+    // the slashes are division and `loop()` must remain a visible self-call.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `function loop() { var await = 1; await / loop() / 2; bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('recognizes a regex after await at the start of a block in fallback scanning', async () => {
+    // `{ await /if/.test(value); loop(); }` — `/if/` is a regex operand of the
+    // await operator, so `if` inside it must NOT be seen as a base-case guard;
+    // the unguarded self-call `loop()` must be reported.
+    const evaluator = new LogicLoopEvaluator();
+    const content = `async function loop() { await /if/.test(value); loop(); bad(; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('recursion');
+  });
+
+  it('ignores keywords inside template interpolation strings while fallback scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { log(`${({ value: "break }" })}`); doWork(); not javascript';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
+  it('ignores keywords inside template interpolation comments while fallback scanning', async () => {
+    const evaluator = new LogicLoopEvaluator();
+    const content = 'while (true) { log(`${({ value: /* break } */ 1 })}`); doWork(); not javascript';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings[0]!.message).toContain('infinite loop');
+  });
+
   it('does not treat exits inside class methods as exits from the containing loop', async () => {
     const evaluator = new LogicLoopEvaluator();
     const content = `while (true) { class Worker { run() { return work(); } } doWork(); }`;

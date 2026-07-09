@@ -21,7 +21,11 @@ export function writeHookScripts(root: string, client: 'claude' | 'gemini' | 'co
     : join(root, '.fbeast', 'hooks');
   mkdirSync(hooksDir, { recursive: true });
 
-  const dbPath = join(root, '.fbeast', 'beast.db');
+  // Claude/Gemini hook entries can live in a global settings.json and be reused
+  // across project roots. Keep their database path cwd-relative so hooks govern
+  // the same project database as the globally registered MCP servers. Codex
+  // hooks remain project-scoped under <root>/.codex and can keep absolute paths.
+  const dbPath = client === 'codex' ? join(root, '.fbeast', 'beast.db') : join('.fbeast', 'beast.db');
 
   if (client === 'gemini') {
     return writeGeminiScripts(hooksDir, dbPath);
@@ -51,6 +55,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -104,6 +122,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -149,6 +181,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -201,6 +247,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -246,6 +306,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
@@ -299,6 +373,20 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
 fi
 
 DB_PATH=${JSON.stringify(dbPath)}
+if [[ "$DB_PATH" != /* ]]; then
+  SEARCH_DIR="$PWD"
+  while true; do
+    if [ -d "$SEARCH_DIR/.fbeast" ]; then
+      DB_PATH="$SEARCH_DIR/.fbeast/beast.db"
+      break
+    fi
+    PARENT_DIR=$(cd "$SEARCH_DIR/.." && pwd -P)
+    if [ "$PARENT_DIR" = "$SEARCH_DIR" ]; then
+      break
+    fi
+    SEARCH_DIR="$PARENT_DIR"
+  done
+fi
 NODE_BIN=${JSON.stringify(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 

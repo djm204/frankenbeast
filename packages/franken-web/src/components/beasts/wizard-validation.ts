@@ -5,12 +5,14 @@ type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 
 type WorkflowValues = {
   workflowType?: unknown;
+  goal?: unknown;
   topic?: unknown;
   outputPath?: unknown;
   docPath?: unknown;
   outputDir?: unknown;
   provider?: unknown;
   objective?: unknown;
+  chunkDirectory?: unknown;
   chunkDir?: unknown;
 };
 
@@ -42,7 +44,7 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
     }
 
     if (values.workflowType === 'design-interview') {
-      if (isBlank(values.topic)) {
+      if (isBlank(values.goal ?? values.topic)) {
         errors.topic = 'Design interview goal is required.';
       }
       if (isBlank(values.outputPath)) {
@@ -69,7 +71,7 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
       if (isBlank(values.objective)) {
         errors.objective = 'Objective is required.';
       }
-      if (isBlank(values.chunkDir)) {
+      if (isBlank(values.chunkDirectory ?? values.chunkDir)) {
         errors.chunkDir = 'Chunk directory path is required.';
       }
     }

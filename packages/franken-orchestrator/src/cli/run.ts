@@ -19,7 +19,7 @@ import { handleSecurityCommand } from './security-cli.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from './project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast, readActivePlanName, writeActivePlanName } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
@@ -815,11 +815,15 @@ export async function main(): Promise<void> {
   const planDirOverride = args.planDir ?? resumeTarget?.planDir;
 
   // Resolve project root — scope plans by name unless --plan-dir overrides
+  const shouldReuseActivePlanName = !args.designDoc && (args.subcommand === 'plan' || args.subcommand === 'run');
+  const implicitPlanName = args.designDoc
+    ? generatePlanName(args.designDoc)
+    : (shouldReuseActivePlanName ? (readActivePlanName(root) ?? generatePlanName()) : generatePlanName());
   const planName = planDirOverride
     ? undefined
     : (args.planName ?? (args.subcommand === 'issues'
       ? undefined
-      : (resumeTarget?.planName ?? generatePlanName(args.designDoc))));
+      : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
   const config = await resolveConfig(args, paths.configFile);
   const runPlanDir = planDirOverride ?? paths.plansDir;
@@ -1146,6 +1150,18 @@ export async function main(): Promise<void> {
     maxTotalTokens: config.maxTotalTokens,
     orchestratorConfig: config,
   });
+
+  const shouldPersistActivePlanName = planName && !planDirOverride && args.subcommand !== 'issues' && (
+    args.planName !== undefined
+    || args.designDoc !== undefined
+    || args.subcommand === 'interview'
+    || args.subcommand === 'plan'
+    || args.subcommand === undefined
+  );
+
+  if (shouldPersistActivePlanName) {
+    writeActivePlanName(paths, planName);
+  }
 
   // Issues subcommand dispatches to a separate flow
   if (args.subcommand === 'issues') {

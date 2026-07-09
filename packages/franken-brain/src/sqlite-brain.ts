@@ -307,11 +307,15 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
-    this.flushWorkingMemory?.();
-    const result = this.db
-      .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
-      .run(JSON.stringify(state), state.timestamp);
-    return { id: String(result.lastInsertRowid) };
+    const tx = this.db.transaction(() => {
+      this.flushWorkingMemory?.();
+      const result = this.db
+        .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
+        .run(JSON.stringify(state), state.timestamp);
+      return { id: String(result.lastInsertRowid) };
+    });
+
+    return tx() as { id: string };
   }
 
   lastCheckpoint(): ExecutionState | null {
@@ -411,14 +415,41 @@ export class SqliteBrain implements IBrain {
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
   ): SqliteBrain {
     const brain = new SqliteBrain(dbPath, workingMemoryLimits, { hydrateWorkingMemoryFromDb: false });
-    brain.working.restore(snapshot.working);
-    brain.flush();
-    for (const event of snapshot.episodic) {
-      brain.episodic.record(event);
+
+    try {
+      const insertEvent = brain.db.prepare(
+        `INSERT INTO episodic_events (type, step, summary, details, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      const insertCheckpoint = brain.db.prepare(
+        `INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`,
+      );
+
+      const restoreSnapshot = brain.db.transaction(() => {
+        brain.working.restore(snapshot.working);
+        brain.working.flushToDb();
+
+        for (const event of snapshot.episodic) {
+          insertEvent.run(
+            event.type,
+            event.step ?? null,
+            event.summary,
+            event.details ? JSON.stringify(event.details) : null,
+            event.createdAt,
+          );
+        }
+
+        if (snapshot.checkpoint) {
+          insertCheckpoint.run(JSON.stringify(snapshot.checkpoint), snapshot.checkpoint.timestamp);
+        }
+      });
+
+      restoreSnapshot();
+    } catch (error) {
+      brain.close();
+      throw error;
     }
-    if (snapshot.checkpoint) {
-      brain.recovery.checkpoint(snapshot.checkpoint);
-    }
+
     return brain;
   }
 

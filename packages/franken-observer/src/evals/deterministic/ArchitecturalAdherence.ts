@@ -28,15 +28,35 @@ export class ArchitecturalAdherenceEval implements Eval<ArchitecturalAdherenceIn
       return { evalName: this.name, status: 'pass', score: 1.0 }
     }
 
-    const violated = rules.filter(r => !r.check(output))
+    const violated: ADRRule[] = []
+    const ruleErrors: Array<{ rule: string; error: string }> = []
+
+    for (const rule of rules) {
+      try {
+        if (!rule.check(output)) {
+          violated.push(rule)
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        violated.push(rule)
+        ruleErrors.push({ rule: rule.name, error: message })
+      }
+    }
+
     const score = (rules.length - violated.length) / rules.length
 
     if (violated.length === 0) {
       return { evalName: this.name, status: 'pass', score: 1.0 }
     }
 
+    const errorsByRule = new Map(ruleErrors.map(({ rule, error }) => [rule, error]))
     const reason = violated
-      .map(r => `[${r.name}] ${r.description}`)
+      .map(r => {
+        const error = errorsByRule.get(r.name)
+        return error
+          ? `[${r.name}] ${r.description} (rule threw: ${error})`
+          : `[${r.name}] ${r.description}`
+      })
       .join('; ')
 
     return {
@@ -44,7 +64,10 @@ export class ArchitecturalAdherenceEval implements Eval<ArchitecturalAdherenceIn
       status: 'fail',
       score,
       reason,
-      details: { violatedRules: violated.map(r => r.name) },
+      details: {
+        violatedRules: violated.map(r => r.name),
+        ...(ruleErrors.length > 0 ? { ruleErrors } : {}),
+      },
     }
   }
 }

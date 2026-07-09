@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { telegramRouter } from '../../../src/comms/channels/telegram/telegram-router.js';
 import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
 import type { SessionMapper } from '../../../src/comms/core/session-mapper.js';
+import { testCredential } from '../../support/test-credentials.js';
 
 describe('telegramRouter', () => {
-  const botToken = 'test-token';
+  const botToken = testCredential('TEST_TELEGRAM_ROUTER_BOT_TOKEN');
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
@@ -13,7 +14,7 @@ describe('telegramRouter', () => {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
   } as unknown as SessionMapper;
 
-  const webhookSecretToken = 'telegram-webhook-secret';
+  const webhookSecretToken = testCredential('TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN');
   const app = telegramRouter({
     gateway,
     sessionMapper,

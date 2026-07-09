@@ -22,6 +22,9 @@ import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-po
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/http-chat');
 
@@ -57,7 +60,7 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['http://127.0.0.1:5173'],
     });
 
@@ -78,7 +81,7 @@ describe('Chat HTTP Routes', () => {
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'http://127.0.0.1:5173',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -91,7 +94,7 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['http://127.0.0.1:5173'],
     });
 
@@ -111,7 +114,7 @@ describe('Chat HTTP Routes', () => {
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'https://evil.example',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -125,14 +128,14 @@ describe('Chat HTTP Routes', () => {
       sessionStoreDir: TMP,
       llm: { complete: llmComplete },
       projectName: 'test-project',
-      operatorToken: 'operator-token',
+      operatorToken: TEST_OPERATOR_TOKEN,
       allowedOrigins: ['*'],
     });
 
     const response = await app.request('/v1/chat/sessions', {
       headers: {
         origin: 'https://dashboard.example',
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
 
@@ -261,6 +264,39 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.state).toBe('active');
   });
 
+  it('POST /v1/chat/sessions/:id/messages rejects sends while approval is pending', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const firstRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'run deployment' }),
+    });
+    expect(firstRes.status).toBe(200);
+
+    const blockedRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'send stale draft' }),
+    });
+    expect(blockedRes.status).toBe(409);
+    const blockedBody = await blockedRes.json();
+    expect(blockedBody.error).toMatchObject({
+      code: 'APPROVAL_PENDING',
+      message: expect.stringContaining('Approval is pending'),
+    });
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.state).toBe('pending_approval');
+    expect(sessionBody.data.transcript).toHaveLength(1);
+  });
+
   it('runs a Beast interview in chat and dispatches a persisted Beast run', async () => {
     const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
     const logStore = new BeastLogStore(join(TMP, 'beast-logs'));
@@ -314,7 +350,7 @@ describe('Chat HTTP Routes', () => {
         agents,
         metrics,
         security: new TransportSecurityService(),
-        operatorToken: 'operator-token',
+        operatorToken: TEST_OPERATOR_TOKEN,
         eventBus: new BeastEventBus(),
         ticketStore: new SseConnectionTicketStore(),
         rateLimit: {
@@ -326,7 +362,7 @@ describe('Chat HTTP Routes', () => {
 
     const authHeaders = {
       'Content-Type': 'application/json',
-      authorization: 'Bearer operator-token',
+      authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
     };
 
     const createRes = await app.request('/v1/chat/sessions', {
@@ -373,7 +409,7 @@ describe('Chat HTTP Routes', () => {
     expect(dispatchBody.data.outcome.content).toContain('running');
 
     const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`, {
-      headers: { authorization: 'Bearer operator-token' },
+      headers: { authorization: `Bearer ${TEST_OPERATOR_TOKEN}` },
     });
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.transcript.some((message: { content: string }) => message.content.includes('Ship Beast monitoring'))).toBe(true);
@@ -381,7 +417,7 @@ describe('Chat HTTP Routes', () => {
 
     const runsResponse = await app.request('/v1/beasts/runs', {
       headers: {
-        authorization: 'Bearer operator-token',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
       },
     });
     const runsBody = await runsResponse.json();
@@ -450,6 +486,348 @@ describe('Chat HTTP Routes', () => {
     });
 
     expect(llmComplete).toHaveBeenNthCalledWith(2, 'second');
+  });
+
+  it('rate limits repeated message submissions before invoking the runtime', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const allowed = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const limited = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows below-limit REST chat messages and rejects the over-limit request for the same client', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T00:00:00.000Z'));
+    try {
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id: 'chat-rest-rate-limit-message',
+        projectId: 'proj',
+        transcript: [],
+        state: 'active',
+        pendingApproval: null,
+        tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const sessionStore = {
+        create: vi.fn(),
+        get: vi.fn(() => session),
+        save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+        list: vi.fn(() => [session.id]),
+        listSessions: vi.fn(() => [session]),
+        delete: vi.fn(),
+      };
+      const runtime = {
+        run: vi.fn(async (content: string) => ({
+          displayMessages: [{ kind: 'reply' as const, content: `reply:${content}` }],
+          events: [],
+          pendingApproval: false,
+          state: 'active' as const,
+          tier: null,
+          transcript: [
+            ...session.transcript,
+            { role: 'user' as const, content },
+            { role: 'assistant' as const, content: `reply:${content}` },
+          ],
+        })),
+      };
+
+      app = createChatApp({
+        sessionStore,
+        engine: {} as never,
+        runtime: runtime as never,
+        turnRunner: {} as never,
+        sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+        chatRateLimit: { windowMs: 60_000, max: 2 },
+      });
+
+      const headers = { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '192.0.2.44' };
+      const first = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'first below limit' }),
+      });
+      const second = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'second below limit' }),
+      });
+      const overLimit = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: 'third over limit' }),
+      });
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(overLimit.status).toBe(429);
+      expect((await overLimit.json()).error).toMatchObject({
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded',
+      });
+      expect(runtime.run).toHaveBeenCalledTimes(2);
+      expect(runtime.run).toHaveBeenNthCalledWith(1, 'first below limit', expect.objectContaining({
+        sessionId: session.id,
+        projectId: 'proj',
+      }));
+      expect(runtime.run).toHaveBeenNthCalledWith(2, 'second below limit', expect.objectContaining({
+        sessionId: session.id,
+        projectId: 'proj',
+      }));
+      expect(session.transcript.map((message) => message.content)).toEqual([
+        'first below limit',
+        'reply:first below limit',
+        'second below limit',
+        'reply:second below limit',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the client address for unauthenticated rate limits even when auth headers vary', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const firstCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: firstSession } = await firstCreate.json();
+    const secondCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: secondSession } = await secondCreate.json();
+
+    const allowed = await app.request(`/v1/chat/sessions/${firstSession.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic attacker-controlled-a',
+        'x-frankenbeast-remote-address': '10.0.0.7',
+        'x-forwarded-for': '203.0.113.7',
+      },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const limited = await app.request(`/v1/chat/sessions/${secondSession.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic attacker-controlled-b',
+        'x-frankenbeast-operator-token': 'attacker-controlled-c',
+        'x-frankenbeast-remote-address': '10.0.0.7',
+        'x-forwarded-for': '198.51.100.9',
+      },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keys authenticated rate limits to the configured operator credential, not ignored auth headers', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      operatorToken: 'operator-a',
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const allowed = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
+      body: JSON.stringify({ content: 'hello' }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const limited = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: 'Basic ignored-attacker-value',
+        'x-frankenbeast-operator-token': 'operator-a',
+      },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one quota across message and approval mutations for the same principal', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-shared-mutation-quota',
+      projectId: 'proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'done' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const message = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '10.0.0.9' },
+      body: JSON.stringify({ content: 'first' }),
+    });
+    expect(message.status).toBe(200);
+
+    session.state = 'pending_approval';
+    session.pendingApproval = { description: 'Deploy?', requestedAt: now };
+    const approval = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': '10.0.0.9' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(approval.status).toBe(429);
+    expect((await approval.json()).error.code).toBe('RATE_LIMITED');
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(session.state).toBe('pending_approval');
+    expect(session.pendingApproval).toEqual({ description: 'Deploy?', requestedAt: now });
+  });
+
+  it('rejects concurrent chat mutations for the same session across valid auth forms', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-concurrent-message',
+      projectId: 'proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    let resolveRun: ((value: unknown) => void) | undefined;
+    const runtime = {
+      run: vi.fn(() => new Promise((resolve) => {
+        resolveRun = resolve;
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      operatorToken: 'operator-a',
+      chatRateLimit: { windowMs: 60_000, max: 20 },
+    });
+
+    const first = app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-operator-token': 'operator-a' },
+      body: JSON.stringify({ content: 'first' }),
+    });
+    await vi.waitFor(() => expect(runtime.run).toHaveBeenCalledTimes(1));
+
+    const second = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ content: 'second' }),
+    });
+
+    expect(second.status).toBe(429);
+    expect((await second.json()).error.code).toBe('RATE_LIMITED');
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+
+    resolveRun?.({
+      displayMessages: [{ kind: 'reply', content: 'done' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active',
+      tier: null,
+      transcript: [],
+    });
+    expect((await first).status).toBe(200);
   });
 
   it('POST /v1/chat/sessions/:id/messages returns 404 for unknown session', async () => {
@@ -533,6 +911,70 @@ describe('Chat HTTP Routes', () => {
     const sessionBody = await sessionRes.json();
     expect(sessionBody.data.state).toBe('approved');
     expect(sessionBody.data.pendingApproval).toBeNull();
+  });
+
+  it('rate limits approval requests before mutating pending approval state', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-rate-limit-approval',
+      projectId: 'proj',
+      transcript: [],
+      state: 'active',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'approval' as const, content: 'Approved.' }],
+        events: [],
+        pendingApproval: false,
+        state: 'approved',
+        tier: null,
+        transcript: [],
+      })),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+
+    const warmup = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ approved: false }),
+    });
+    expect(warmup.status).toBe(200);
+
+    session.state = 'pending_approval';
+    session.pendingApproval = { description: 'Deploy?', requestedAt: now };
+    const limited = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-a' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(limited.status).toBe(429);
+    expect((await limited.json()).error.code).toBe('RATE_LIMITED');
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(session.state).toBe('pending_approval');
+    expect(session.pendingApproval).toEqual({ description: 'Deploy?', requestedAt: now });
+    expect(sessionStore.save).not.toHaveBeenCalled();
   });
 
   it('POST /v1/chat/sessions/:id/approve handles state-only pending approvals', async () => {
@@ -659,7 +1101,7 @@ describe('Chat HTTP Routes', () => {
     expect(session.pendingApproval).toBeNull();
   });
 
-  it('POST /v1/chat/sessions/:id/approve does not execute duplicate HTTP approvals twice', async () => {
+  it('POST /v1/chat/sessions/:id/approve rejects concurrent HTTP approvals before duplicate execution', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {
       id: 'chat-http-duplicate-approval',
@@ -732,13 +1174,9 @@ describe('Chat HTTP Routes', () => {
     const firstRes = await first;
 
     expect(firstRes.status).toBe(200);
-    expect(duplicate.status).toBe(200);
+    expect(duplicate.status).toBe(429);
     expect(runtime.run).toHaveBeenCalledTimes(1);
-    expect((await duplicate.json()).data).toMatchObject({
-      id: session.id,
-      approved: true,
-      state: 'approved',
-    });
+    expect((await duplicate.json()).error.code).toBe('RATE_LIMITED');
     expect(session.pendingApproval).toBeNull();
   });
 
@@ -984,23 +1422,23 @@ describe('Chat HTTP Routes', () => {
     });
 
     it('rejects unauthenticated chat requests when an operator token is configured', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/v1/chat/sessions', { method: 'POST', body: '{}' });
       expect(res.status).toBe(401);
     });
 
     it('accepts chat requests with a valid bearer operator token', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/v1/chat/sessions', {
         method: 'POST',
-        headers: { authorization: 'Bearer secret-op-token', 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${TEST_OPERATOR_TOKEN}`, 'content-type': 'application/json' },
         body: '{}',
       });
       expect(res.status).not.toBe(401);
     });
 
     it('keeps /health public', async () => {
-      const app = createChatApp({ ...baseChatOpts(), operatorToken: 'secret-op-token' });
+      const app = createChatApp({ ...baseChatOpts(), operatorToken: TEST_OPERATOR_TOKEN });
       const res = await app.request('/health');
       expect(res.status).toBe(200);
     });

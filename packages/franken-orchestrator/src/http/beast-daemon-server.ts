@@ -26,6 +26,26 @@ export interface BeastDaemonHandle {
   close(): Promise<void>;
 }
 
+export interface BeastDaemonRunShutdownFailure {
+  readonly runId: string;
+  readonly stopError: unknown;
+  readonly killError: unknown;
+}
+
+export class BeastDaemonShutdownError extends Error {
+  constructor(readonly failures: readonly BeastDaemonRunShutdownFailure[]) {
+    const details = failures
+      .map((failure) => `${failure.runId} (stop: ${errorMessage(failure.stopError)}; kill: ${errorMessage(failure.killError)})`)
+      .join(', ');
+    super(`Beast daemon failed to stop or kill ${failures.length} child run(s): ${details}`);
+    this.name = 'BeastDaemonShutdownError';
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4050;
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
@@ -99,12 +119,15 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         return;
       }
       closed = true;
-      await stopLiveRuns(services);
+      const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
       if (listening) {
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();
         await closedServer;
+      }
+      if (shutdownFailures.length > 0) {
+        throw new BeastDaemonShutdownError(shutdownFailures);
       }
       await releasePidFile(pidFile);
     },
@@ -169,19 +192,22 @@ async function releasePidFile(pidFile: string): Promise<void> {
   }
 }
 
-async function stopLiveRuns(services: BeastServiceBundle): Promise<void> {
+async function stopLiveRuns(services: BeastServiceBundle): Promise<BeastDaemonRunShutdownFailure[]> {
+  const failures: BeastDaemonRunShutdownFailure[] = [];
   for (const run of services.runs.listRuns()) {
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       continue;
     }
     try {
       await services.runs.stop(run.id, 'beasts-daemon-shutdown');
-    } catch {
+    } catch (stopError) {
       try {
         await services.runs.kill(run.id, 'beasts-daemon-shutdown');
-      } catch {
+      } catch (killError) {
+        failures.push({ runId: run.id, stopError, killError });
         // Continue best-effort shutdown for remaining children.
       }
     }
   }
+  return failures;
 }

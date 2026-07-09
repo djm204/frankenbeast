@@ -54,6 +54,47 @@ describe('LLMJudgeEval', () => {
       const result = await runner.run(ev, 'borderline')
       expect(result.status).toBe('pass')
     })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative', -0.1],
+      ['greater than 1', 1.1],
+    ])('throws RangeError for invalid passThreshold %s', (_label, passThreshold) => {
+      expect(
+        () =>
+          new LLMJudgeEval({
+            name: 'invalid-threshold',
+            buildPrompt: (input) => input,
+            judge: mockJudge(0.8),
+            passThreshold,
+          }),
+      ).toThrow(RangeError)
+    })
+  })
+
+  describe('judge score validation', () => {
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative', -0.1],
+      ['greater than 1', 1.1],
+    ])('returns an explicit failure for invalid judge score %s', async (_label, score) => {
+      const ev = new LLMJudgeEval({
+        name: 'invalid-score',
+        buildPrompt: (input) => input,
+        judge: mockJudge(score),
+      })
+
+      const result = await runner.run(ev, 'input')
+
+      expect(result).toMatchObject({
+        evalName: 'invalid-score',
+        status: 'fail',
+        reason: 'Judge returned invalid score: expected a finite number between 0 and 1',
+      })
+      expect(result.score).toBeUndefined()
+    })
   })
 
   describe('prompt building', () => {

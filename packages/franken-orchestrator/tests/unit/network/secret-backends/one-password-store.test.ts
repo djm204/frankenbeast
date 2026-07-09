@@ -1,6 +1,11 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { OnePasswordStore } from '../../../../src/network/secret-backends/one-password-store.js';
 import type { CliResult } from '../../../../src/network/secret-backends/cli-runner.js';
+import { testCredential } from '../../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const UPDATED_SLACK_BOT_TOKEN = testCredential('UPDATED_SLACK_BOT_TOKEN');
+const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 function createMockRunner() {
   const calls: Array<{ command: string; args: string[] }> = [];
@@ -46,7 +51,7 @@ describe('OnePasswordStore', () => {
       mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
       mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', 'xoxb-test');
+      await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const createCall = mock.calls.find(c => c.args.includes('create'));
       expect(createCall).toBeDefined();
     });
@@ -55,15 +60,15 @@ describe('OnePasswordStore', () => {
       mock.responses.set('item get', { stdout: '{"id":"abc123"}', stderr: '', exitCode: 0 });
       mock.responses.set('item edit', { stdout: '{}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', 'xoxb-updated');
+      await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
       const editCall = mock.calls.find(c => c.args.includes('edit'));
       expect(editCall).toBeDefined();
     });
 
     it('resolves a stored secret via op read', async () => {
-      mock.responses.set('read', { stdout: 'xoxb-resolved', stderr: '', exitCode: 0 });
+      mock.responses.set('read', { stdout: RESOLVED_SLACK_BOT_TOKEN, stderr: '', exitCode: 0 });
       const value = await store.resolve('comms.slack.botTokenRef');
-      expect(value).toBe('xoxb-resolved');
+      expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
     });
 
     it('returns undefined when secret not found', async () => {

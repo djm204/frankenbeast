@@ -1,6 +1,6 @@
 {
   "name": "frankenbeast",
-  "version": "0.42.0",
+  "version": "0.44.0",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -13,7 +13,10 @@
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "check:package-manager": "node scripts/check-package-manager.mjs",
     "lint:any": "node scripts/audit-explicit-any.mjs",
-    "lint:security": "node scripts/check-plain-http.mjs",
+    "lint:security": "node scripts/check-plain-http.mjs && node scripts/check-hardcoded-secrets.mjs && node scripts/audit-todo-markers.mjs",
+    "audit:todos": "node scripts/audit-todo-markers.mjs",
+    "local:link": "npm run build && npm link --workspace=@franken/mcp-suite --workspace=@franken/orchestrator",
+    "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
     "test": "turbo run test",
     "test:root": "vitest run",
     "test:root:watch": "vitest",
@@ -35,6 +38,7 @@
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
   "overrides": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "esbuild": "^0.28.1",
     "hono": "^4.12.27",
     "protobufjs": "^7.6.5",
