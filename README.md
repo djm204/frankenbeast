@@ -389,7 +389,7 @@ npm --workspace @franken/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
-If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
+If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; setting a browser-facing backend URL can turn `/v1` and `/api` calls into cross-origin requests that fail CORS instead of flowing through the dev proxy.
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
