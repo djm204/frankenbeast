@@ -278,10 +278,11 @@ npm run local:verify-cli
 
 **`fbeast-proxy` / `fbeast-memory` not found after `fbeast mcp init`**
 
-Use the same repo-root repair path; `local:link` links the workspace that owns the `fbeast-*` binaries before `local:verify-cli` checks them:
+Use the same repo-root repair path; `local:link` links the workspace that owns the `fbeast-*` binaries, and `local:verify-cli` checks the primary `fbeast` / `frankenbeast` entrypoints:
 ```bash
 npm run local:link
 npm run local:verify-cli
+command -v fbeast-proxy fbeast-memory
 ```
 
 **Beast fails to start with "binary not found"**
