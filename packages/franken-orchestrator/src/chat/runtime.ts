@@ -59,10 +59,6 @@ export interface ChatRuntimeOptions {
   turnRunner: TurnRunner;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 function stateFromRunResult(runResult: TurnRunResult): string {
   switch (runResult.status) {
     case 'pending_approval':
@@ -96,6 +92,17 @@ export class ChatRuntime {
       if (command && SLASH_COMMANDS.has(command)) {
         return this.runSlashCommand(command, trimmed, state, options);
       }
+    }
+
+    if (state.pendingApproval) {
+      return this.result(state, [
+        {
+          kind: 'approval',
+          content: 'Approval is pending. Resolve the approval request before sending another message.',
+        },
+      ], {
+        state: 'pending_approval',
+      });
     }
 
     return this.runTurn(trimmed, state, options);

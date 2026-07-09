@@ -711,6 +711,14 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     getSidebarFocusableElements(sidebar).at(-1)?.focus();
   }
 
+  const composerDisabled = status === 'connecting'
+    || status === 'sending'
+    || status === 'streaming'
+    || Boolean(pendingApproval);
+  const composerDisabledReason = pendingApproval
+    ? 'Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.'
+    : undefined;
+
   return (
     <div className={`dashboard-shell ${isSidebarOpen ? 'dashboard-shell--nav-open' : ''}`}>
       <button
@@ -926,7 +934,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 key={composerSessionKey}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
-                disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
+                disabled={composerDisabled}
+                disabledReasonText={composerDisabledReason}
                 onReconnect={reconnect}
                 onSend={send}
                 status={status}

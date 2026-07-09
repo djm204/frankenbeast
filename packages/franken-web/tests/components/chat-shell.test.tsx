@@ -486,6 +486,15 @@ describe('ChatShell', () => {
     expect(screen.getByText('turn.execution.start')).toBeDefined();
   });
 
+  it('disables normal chat input while approval is pending', () => {
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    const input = screen.getByRole('textbox');
+    expect(input.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toHaveProperty('disabled', true);
+    expect(screen.getByText('Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.')).toBeDefined();
+  });
+
   it('labels conversations with preview, state, message count, updated time, and a shortened id', async () => {
     mockListSessions.mockResolvedValue([
       {

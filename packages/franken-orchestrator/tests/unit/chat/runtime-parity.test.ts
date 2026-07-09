@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { createChatRuntime } from '../../../src/chat/chat-runtime-factory.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
@@ -78,7 +79,7 @@ describe('chat runtime parity', () => {
             approvalRequired: true,
           },
         }),
-      } as any,
+      } as unknown as ConversationEngine,
       turnRunner: new TurnRunner({ execute: vi.fn() }),
     });
 
@@ -97,5 +98,50 @@ describe('chat runtime parity', () => {
       risk: expect.stringContaining('Requires explicit approval'),
       sessionId: 'session-1',
     }));
+  });
+
+  it('blocks normal chat turns while approval is pending', async () => {
+    const engine = { processTurn: vi.fn() };
+    const runner = new TurnRunner({ execute: vi.fn() });
+    const runtime = new ChatRuntime({
+      engine: engine as unknown as ConversationEngine,
+      turnRunner: runner,
+    });
+    const transcript = [
+      { role: 'assistant' as const, content: 'approval required: deploy staging', timestamp: '2026-07-09T00:00:00.000Z' },
+    ];
+
+    const result = await runtime.run('please continue anyway', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      projectId: 'test-project',
+      transcript,
+    });
+
+    expect(result.state).toBe('pending_approval');
+    expect(result.pendingApproval).toBe(true);
+    expect(result.transcript).toBe(transcript);
+    expect(result.displayMessages[0]).toMatchObject({
+      kind: 'approval',
+      content: expect.stringContaining('Approval is pending'),
+    });
+    expect(engine.processTurn).not.toHaveBeenCalled();
+  });
+
+  it('still allows slash commands while approval is pending', async () => {
+    const runtime = createChatRuntime({
+      chatLlm: { complete: vi.fn().mockResolvedValue('ignored') },
+      projectName: 'test-project',
+    });
+
+    const result = await runtime.runtime.run('/status', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(result.displayMessages[0]?.content).toContain('project=test-project');
+    expect(result.state).toBe('active');
   });
 });

@@ -44,6 +44,22 @@ describe('Composer', () => {
     expect(screen.getByText('Dispatch is disabled while Frankenbeast is responding.')).toBeTruthy();
   });
 
+  it('uses a pending-approval disabled reason when provided', () => {
+    render(
+      <Composer
+        onSend={vi.fn()}
+        disabled={true}
+        disabledReasonText="Dispatch is disabled while an approval request is pending."
+        connectionStatus="connected"
+        status="idle"
+      />,
+    );
+
+    const input = screen.getByRole('textbox');
+    expect(input.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByText('Dispatch is disabled while an approval request is pending.')).toBeTruthy();
+  });
+
   it('announces connection and session states in a live status region', () => {
     render(<Composer onSend={vi.fn()} disabled={false} connectionStatus="reconnecting" status="idle" />);
 
