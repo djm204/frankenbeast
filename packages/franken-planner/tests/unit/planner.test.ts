@@ -4,12 +4,16 @@ import { LinearPlanner } from '../../src/planners/linear';
 import { StubHITLGate } from '../../src/hitl/stub-hitl-gate';
 import { RecoveryController } from '../../src/recovery/recovery-controller';
 import { PlanGraph } from '../../src/core/dag';
-import { MaxRecoveryAttemptsError } from '../../src/core/errors';
+import {
+  CyclicDependencyError,
+  MaxRecoveryAttemptsError,
+  RecursionDepthExceededError,
+} from '../../src/core/errors';
 import { createTaskId } from '../../src/core/types';
 import type { Task, TaskResult, Intent, KnownError, TaskId } from '../../src/core/types';
 import type { GuardrailsModule } from '../../src/modules/mod01';
 import type { SelfCritiqueModule } from '../../src/modules/mod07';
-import type { GraphBuilder, TaskExecutor } from '../../src/planners/types';
+import type { GraphBuilder, PlanningStrategy, TaskExecutor } from '../../src/planners/types';
 import type { HITLGate } from '../../src/hitl/types';
 import type { MemoryModule } from '../../src/modules/mod03';
 import type { TaskModification } from '../../src/hitl/types';
@@ -58,6 +62,7 @@ interface PlannerOptions {
   memory?: MemoryModule;
   selfCritique?: SelfCritiqueModule;
   maxRecoveryAttempts?: number;
+  strategy?: PlanningStrategy;
   recovery?: {
     recover(failedTaskId: TaskId, error: Error, graph: PlanGraph, attempt: number): Promise<PlanGraph>;
   };
@@ -83,7 +88,7 @@ function buildPlanner(opts: PlannerOptions = {}): {
     graphBuilder,
     executor,
     hitlGate,
-    new LinearPlanner(),
+    opts.strategy ?? new LinearPlanner(),
     recovery,
     opts.selfCritique
   );
@@ -304,6 +309,51 @@ describe('Planner — self-correction loop', () => {
     const result = await planner.plan('do something');
 
     expect(result.status).toBe('failed');
+  });
+});
+
+describe('Planner — strategy domain exceptions', () => {
+  it('converts cyclic dependency errors from strategies into failed plan results', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new CyclicDependencyError('Graph contains a cycle');
+    const strategy: PlanningStrategy = {
+      name: 'linear',
+      execute: vi.fn().mockRejectedValue(error),
+    };
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, strategy, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
+    expect(result.taskResults).toEqual([
+      {
+        status: 'failure',
+        taskId: createTaskId('planner-domain-error'),
+        error,
+      },
+    ]);
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
+  it('converts recursion depth errors from strategies into failed plan results', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new RecursionDepthExceededError(11);
+    const strategy: PlanningStrategy = {
+      name: 'linear',
+      execute: vi.fn().mockRejectedValue(error),
+    };
+
+    const { planner } = buildPlanner({ graph, strategy });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
   });
 });
 
