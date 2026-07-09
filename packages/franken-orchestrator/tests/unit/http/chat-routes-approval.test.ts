@@ -98,7 +98,12 @@ describe('chat approval route persistence', () => {
       body: JSON.stringify({ content: 'start something else' }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: 'APPROVAL_PENDING',
+      message: expect.stringContaining('Approval is pending'),
+    });
     const stored = sessionStore.get(session.id);
     expect(stored?.state).toBe('pending_approval');
     expect(stored?.pendingApproval).toEqual(expect.objectContaining({
@@ -129,7 +134,7 @@ describe('chat approval route persistence', () => {
       body: JSON.stringify({ content: 'start something else' }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     expect(llm.complete).not.toHaveBeenCalled();
     const stored = sessionStore.get(session.id);
     expect(stored?.state).toBe('pending_approval');

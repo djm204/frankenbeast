@@ -676,6 +676,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setActivity((current) => [...current, payload]);
           return;
         case 'turn.approval.requested':
+          setSessionState('pending_approval');
           setPendingApproval({
             description: payload.description,
             requestedAt: payload.timestamp,
@@ -705,6 +706,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setStatus('idle');
           return;
         case 'turn.approval.resolved':
+          setSessionState(payload.approved ? 'approved' : 'rejected');
           setPendingApproval(null);
           setApprovalError(null);
           updateApprovalResolving(false);
@@ -718,6 +720,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ]);
           return;
         case 'turn.error':
+          if (payload.code === 'APPROVAL_PENDING') {
+            void refreshSession();
+          }
           updateApprovalResolving(false);
           setApprovalError(payload.message);
           setActivity((current) => [
@@ -844,6 +849,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             refreshed,
           ));
           setPendingApproval(refreshed.pendingApproval ?? null);
+          setSessionState(refreshed.state);
           setTokenTotals(refreshed.tokenTotals);
           setCostUsd(refreshed.costUsd);
           setStatus('idle');
@@ -867,6 +873,19 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       } catch (error) {
         if (!sessionStillCurrent(sessionId)) {
           return;
+        }
+        try {
+          const refreshed = await clientRef.current.getSession(sessionId);
+          if (sessionStillCurrent(sessionId)) {
+            readyRef.current = true;
+            setMessages((current) => mergeSessionSnapshot(current, refreshed));
+            setPendingApproval(refreshed.pendingApproval ?? null);
+            setSessionState(refreshed.state);
+            setTokenTotals(refreshed.tokenTotals);
+            setCostUsd(refreshed.costUsd);
+          }
+        } catch {
+          // Preserve the original send failure while keeping the draft retryable.
         }
         const sendError = error instanceof Error
           ? error
@@ -952,6 +971,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           }), withSnapshot);
         });
         setPendingApproval(refreshed.pendingApproval ?? null);
+        setSessionState(refreshed.state);
         setActivity((current) => [
           ...current,
           ...activityEventsFromApproveResult(approvalResult, approved),

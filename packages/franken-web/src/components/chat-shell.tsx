@@ -948,9 +948,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
               <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
-                pending={Boolean(pendingApproval)}
+                pending={hasPendingApproval}
                 approval={pendingApproval}
-                description={pendingApproval?.description ?? ''}
+                description={pendingApproval?.description ?? (hasPendingApproval ? 'Approval is pending. Approve or reject it before sending another message.' : '')}
                 resolving={approvalResolving}
                 error={approvalError}
                 sessionId={activeSessionId}
