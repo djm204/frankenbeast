@@ -96,6 +96,14 @@ describe('AuditTrail', () => {
     expect(restored.getAll()).toEqual(json);
   });
 
+  it('fromJSON rejects non-array input', () => {
+    expect(() => AuditTrail.fromJSON({})).toThrow(/events must be an array/i);
+  });
+
+  it('fromJSON rejects events missing required fields', () => {
+    expect(() => AuditTrail.fromJSON([{}])).toThrow(/events\[0\]: eventId must be a non-empty string/i);
+  });
+
   it('verify() passes with correct hashes', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });

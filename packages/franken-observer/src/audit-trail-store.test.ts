@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AuditTrail, createAuditEvent } from './audit-event.js';
@@ -67,6 +67,59 @@ describe('AuditTrailStore', () => {
     expect(raw.runId).toBe('run-1');
     expect(raw.createdAt).toBeTruthy();
     expect(raw.events).toHaveLength(4);
+  });
+
+  it('rejects persisted artifacts with an unsupported version', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.version = 2;
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/invalid persisted audit trail: version must be 1/i);
+  });
+
+  it('rejects persisted artifacts with missing events', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    delete raw.events;
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events must be an array/i);
+  });
+
+  it('rejects persisted artifacts with non-array events', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.events = {};
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events must be an array/i);
+  });
+
+  it('rejects persisted events missing required identity and type fields', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.events = [{ phase: 'planning', provider: 'claude-cli', type: 'phase.start', payload: {} }];
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events\[0\]: eventId must be a non-empty string/i);
+  });
+
+  it('rejects persisted events missing payload', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.events = [
+      {
+        eventId: 'event-1',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        phase: 'planning',
+        provider: 'claude-cli',
+        type: 'phase.start',
+      },
+    ];
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events\[0\]: payload is required/i);
   });
 
   it('writes a replay manifest next to the audit trail when provided', () => {

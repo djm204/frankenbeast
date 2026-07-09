@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { AuditTrail } from './audit-event.js';
+import { AuditTrail, assertAuditEventArray } from './audit-event.js';
 import type { ReplayRecord } from './replay/replay-record.js';
 
 export interface PersistedAuditTrail {
@@ -8,6 +8,26 @@ export interface PersistedAuditTrail {
   runId: string;
   createdAt: string;
   events: import('./audit-event.js').AuditEvent[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertPersistedAuditTrail(value: unknown): asserts value is PersistedAuditTrail {
+  if (!isRecord(value)) {
+    throw new Error('Invalid persisted audit trail: expected object');
+  }
+  if (value.version !== 1) {
+    throw new Error('Invalid persisted audit trail: version must be 1');
+  }
+  if (typeof value.runId !== 'string' || value.runId.length === 0) {
+    throw new Error('Invalid persisted audit trail: runId must be a non-empty string');
+  }
+  if (typeof value.createdAt !== 'string' || value.createdAt.length === 0) {
+    throw new Error('Invalid persisted audit trail: createdAt must be a non-empty string');
+  }
+  assertAuditEventArray(value.events, 'events');
 }
 
 /**
@@ -79,7 +99,8 @@ export class AuditTrailStore {
     if (!existsSync(filePath)) {
       throw new Error(`Audit trail not found: ${filePath}`);
     }
-    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedAuditTrail;
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+    assertPersistedAuditTrail(raw);
     return AuditTrail.fromJSON(raw.events);
   }
 

@@ -13,6 +13,53 @@ export interface AuditEvent {
   parentEventId?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireStringField(record: Record<string, unknown>, field: keyof AuditEvent, context: string): void {
+  if (typeof record[field] !== 'string' || record[field].length === 0) {
+    throw new Error(`Invalid audit event at ${context}: ${String(field)} must be a non-empty string`);
+  }
+}
+
+function requireOptionalStringField(
+  record: Record<string, unknown>,
+  field: keyof AuditEvent,
+  context: string,
+): void {
+  if (record[field] !== undefined && typeof record[field] !== 'string') {
+    throw new Error(`Invalid audit event at ${context}: ${String(field)} must be a string when present`);
+  }
+}
+
+export function assertAuditEvent(value: unknown, context = 'event'): asserts value is AuditEvent {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid audit event at ${context}: expected object`);
+  }
+
+  requireStringField(value, 'eventId', context);
+  requireStringField(value, 'timestamp', context);
+  requireStringField(value, 'phase', context);
+  requireStringField(value, 'provider', context);
+  requireStringField(value, 'type', context);
+
+  if (!Object.prototype.hasOwnProperty.call(value, 'payload')) {
+    throw new Error(`Invalid audit event at ${context}: payload is required`);
+  }
+
+  requireOptionalStringField(value, 'inputHash', context);
+  requireOptionalStringField(value, 'outputHash', context);
+  requireOptionalStringField(value, 'parentEventId', context);
+}
+
+export function assertAuditEventArray(value: unknown, context = 'events'): asserts value is AuditEvent[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid audit trail: ${context} must be an array`);
+  }
+  value.forEach((event, index) => assertAuditEvent(event, `${context}[${index}]`));
+}
+
 export interface CreateAuditEventOptions {
   phase: string;
   provider: string;
@@ -79,7 +126,8 @@ export class AuditTrail {
     return [...this.events];
   }
 
-  static fromJSON(events: AuditEvent[]): AuditTrail {
+  static fromJSON(events: unknown): AuditTrail {
+    assertAuditEventArray(events);
     const trail = new AuditTrail();
     for (const event of events) {
       trail.append(event);
