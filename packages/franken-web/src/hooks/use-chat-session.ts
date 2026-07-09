@@ -453,9 +453,16 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
-    void clientRef.current.getSession(sessionId)
+    const capturedSessionId = sessionId;
+    void clientRef.current.getSession(capturedSessionId)
       .then(async (refreshed) => {
+        if (!sessionStillCurrent(capturedSessionId) || refreshed.id !== capturedSessionId) {
+          return;
+        }
         const ticket = await clientRef.current.createSocketTicket(refreshed.id);
+        if (!sessionStillCurrent(refreshed.id)) {
+          return;
+        }
         setSocketToken(ticket);
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
