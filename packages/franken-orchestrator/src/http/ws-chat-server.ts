@@ -253,6 +253,33 @@ export class ChatSocketController {
     content: string,
     executionMode?: 'process' | 'container',
   ): Promise<void> {
+    if (session.pendingApproval || session.state === 'pending_approval') {
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_PENDING',
+        message: 'Approval is pending. Resolve the approval request before sending another message.',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
+    this.emit(peer, {
+      type: 'message.accepted',
+      clientMessageId,
+      sessionId: session.id,
+      timestamp: nowIso(),
+    });
+    this.emit(peer, {
+      type: 'message.delivered',
+      clientMessageId,
+      timestamp: nowIso(),
+    });
+    this.emit(peer, {
+      type: 'message.read',
+      clientMessageId,
+      timestamp: nowIso(),
+    });
+
     const result = await this.runtime.run(content, {
       sessionId: session.id,
       ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
@@ -261,33 +288,6 @@ export class ChatSocketController {
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
       ...(executionMode ? { executionMode } : {}),
     });
-
-    const turnAccepted = result.transcript !== session.transcript;
-    if (turnAccepted) {
-      this.emit(peer, {
-        type: 'message.accepted',
-        clientMessageId,
-        sessionId: session.id,
-        timestamp: nowIso(),
-      });
-      this.emit(peer, {
-        type: 'message.delivered',
-        clientMessageId,
-        timestamp: nowIso(),
-      });
-      this.emit(peer, {
-        type: 'message.read',
-        clientMessageId,
-        timestamp: nowIso(),
-      });
-    } else if (result.state === 'pending_approval' && result.pendingApproval) {
-      this.emit(peer, {
-        type: 'turn.error',
-        code: 'APPROVAL_PENDING',
-        message: 'Approval is pending. Resolve the approval request before sending another message.',
-        timestamp: nowIso(),
-      });
-    }
 
     session.transcript = result.transcript;
     session.state = result.state;

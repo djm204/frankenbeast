@@ -308,6 +308,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     retryMessage,
     send,
     sessionId: activeSessionId,
+    sessionState,
     showTypingIndicator,
     status,
     tier,
@@ -711,11 +712,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     getSidebarFocusableElements(sidebar).at(-1)?.focus();
   }
 
+  const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
   const composerDisabled = status === 'connecting'
     || status === 'sending'
     || status === 'streaming'
-    || Boolean(pendingApproval);
-  const composerDisabledReason = pendingApproval
+    || hasPendingApproval;
+  const composerDisabledReason = hasPendingApproval
     ? 'Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.'
     : undefined;
 
@@ -927,7 +929,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   }).catch(() => undefined);
                 }}
                 resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`}
-                retryDisabled={Boolean(pendingApproval) || (status !== 'idle' && status !== 'error')}
+                retryDisabled={hasPendingApproval || (status !== 'idle' && status !== 'error')}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer

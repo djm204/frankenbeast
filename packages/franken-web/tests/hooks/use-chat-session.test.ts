@@ -138,6 +138,7 @@ describe('useChatSession', () => {
       expect(result.current.sessionId).toBe('chat-1');
     });
 
+    expect(result.current.sessionState).toBe('active');
     expect(mockCreateSession).toHaveBeenCalledWith('test-proj');
     expect(mockSocketUrl).toHaveBeenCalledWith('chat-1', 'signed-token');
     expect(mockSocketProtocols).toHaveBeenCalledWith('signed-token');

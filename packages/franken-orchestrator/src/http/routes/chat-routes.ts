@@ -161,6 +161,15 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const session = getSessionOrThrow(sessionStore, id);
 
     return withChatMutationAdmission(c, session.id, async () => {
+      if (session.pendingApproval || session.state === 'pending_approval') {
+        return c.json({
+          error: {
+            code: 'APPROVAL_PENDING',
+            message: 'Approval is pending. Resolve the approval request before sending another message.',
+          },
+        }, 409);
+      }
+
       const result = await runtime.run(content, {
         sessionId: session.id,
         ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),

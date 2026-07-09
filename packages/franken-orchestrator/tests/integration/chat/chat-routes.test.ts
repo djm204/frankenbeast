@@ -264,6 +264,39 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.state).toBe('active');
   });
 
+  it('POST /v1/chat/sessions/:id/messages rejects sends while approval is pending', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const firstRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'run deployment' }),
+    });
+    expect(firstRes.status).toBe(200);
+
+    const blockedRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'send stale draft' }),
+    });
+    expect(blockedRes.status).toBe(409);
+    const blockedBody = await blockedRes.json();
+    expect(blockedBody.error).toMatchObject({
+      code: 'APPROVAL_PENDING',
+      message: expect.stringContaining('Approval is pending'),
+    });
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.state).toBe('pending_approval');
+    expect(sessionBody.data.transcript).toHaveLength(1);
+  });
+
   it('runs a Beast interview in chat and dispatches a persisted Beast run', async () => {
     const repository = new SQLiteBeastRepository(join(TMP, 'beasts.db'));
     const logStore = new BeastLogStore(join(TMP, 'beast-logs'));
