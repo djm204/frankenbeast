@@ -2,13 +2,13 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const NON_PORT_IDENTIFIER_EXCLUSIONS = String.raw`[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?\w*|[Ii]mports?\w*|[Ee]xports?\w*|[Ii]mportant\w*|REPORT\w*|IMPORT\w*|EXPORT\w*|IMPORTANT\w*)|[Aa]irports?\w*|[Pp]assports?\w*|[Ss]ports?\w*`;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:${NON_PORT_IDENTIFIER_EXCLUSIONS})\w*)\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
+const NON_PORT_IDENTIFIER_EXCLUSIONS = String.raw`(?:[Dd]efault)?[Vv]iew_?[Pp]orts?\w*|(?:DEFAULT_)?VIEW_PORTS?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|view_?ports?|View_?Ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?(?![Pp]ort)\w*|[Ii]mports?(?![Pp]ort)\w*|[Ee]xports?(?![Pp]ort)\w*|[Ii]mportant(?![Pp]ort)\w*|REPORT(?!_?PORT)\w*|IMPORT(?!_?PORT)\w*|EXPORT(?!_?PORT)\w*|IMPORTANT(?!_?PORT)\w*)|[Aa]irports?\w*|[Pp]assports?\w*|[Ss]ports?\w*`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:${NON_PORT_IDENTIFIER_EXCLUSIONS})(?![\w$]))\w*[Pp][Oo][Rr][Tt][Ss]?(?=$|[^a-z0-9_$]|[A-Z0-9_])\w*(?![\w$])`;
 const PORT_CONFIG_KEY_PATTERN = PORT_IDENTIFIER_PATTERN;
 const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+[-.])*[Pp][Oo][Rr][Tt](?:[-.][A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
-const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|[^=;\n]*<[^=;\n]*>[^=;\n]*))?`;
+const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|[^=;\n<>]*<[^=;]*>[^=;\n]*))?`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
@@ -154,7 +154,10 @@ export class ScalabilityEvaluator implements Evaluator {
       const containerKey = match[1] ?? '';
       const containerStart = matchIndex + match[0].lastIndexOf(match[2] ?? '');
       const normalizedContainerKey = this.normalizePortKey(containerKey);
-      if (!/[Pp][Oo][Rr][Tt][Ss](?:$|[^A-Za-z0-9_])/.test(normalizedContainerKey) && !/[Pp][Oo][Rr][Tt][Ss]$/.test(normalizedContainerKey)) {
+      if (this.isInTypeOnlyRange(ignoredRanges, containerStart)) {
+        continue;
+      }
+      if (!/[Pp][Oo][Rr][Tt][Ss](?:$|[^a-z0-9_]|[A-Z])/.test(normalizedContainerKey)) {
         continue;
       }
       if (this.isInTypeOnlyRange(typeOnlyRanges, matchIndex) ||
@@ -209,9 +212,26 @@ export class ScalabilityEvaluator implements Evaluator {
     return -1;
   }
 
+  private isNonPortArrayValueInContainer(prefix: string, arrayStart: number): boolean {
+    const beforeArray = prefix.slice(0, arrayStart);
+    const keyStart = Math.max(beforeArray.lastIndexOf(','), beforeArray.lastIndexOf('{'), beforeArray.lastIndexOf('[')) + 1;
+    const keyPrefix = beforeArray.slice(keyStart);
+    if (!/:\s*$/.test(keyPrefix)) {
+      return false;
+    }
+    const key = keyPrefix.replace(/:\s*$/, '').trim();
+    return !new RegExp(String.raw`^(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])$`).test(key);
+  }
+
   private isNonPortObjectValueInContainer(content: string, containerStart: number, portNumberIndex: number): boolean {
     const prefix = content.slice(containerStart + 1, portNumberIndex);
-    const valueStart = Math.max(prefix.lastIndexOf(','), prefix.lastIndexOf('{'), prefix.lastIndexOf('[')) + 1;
+    const lastComma = prefix.lastIndexOf(',');
+    const lastBrace = prefix.lastIndexOf('{');
+    const lastBracket = prefix.lastIndexOf('[');
+    const valueStart = Math.max(lastComma, lastBrace, lastBracket) + 1;
+    if (lastBracket > prefix.lastIndexOf(']') && this.isNonPortArrayValueInContainer(prefix, lastBracket)) {
+      return true;
+    }
     const valuePrefix = prefix.slice(valueStart);
     if (!/:\s*$/.test(valuePrefix)) {
       return false;
@@ -357,7 +377,7 @@ export class ScalabilityEvaluator implements Evaluator {
   }
 
   private startsTypeOnlyBrace(content: string, openBraceIndex: number): boolean {
-    const prefix = content.slice(Math.max(0, openBraceIndex - 2000), openBraceIndex);
+    const prefix = content.slice(0, openBraceIndex);
     const semicolonStart = prefix.lastIndexOf(';') + 1;
     const newlineStart = prefix.lastIndexOf('\n') + 1;
     let statementStart = Math.max(semicolonStart, newlineStart);
@@ -369,17 +389,22 @@ export class ScalabilityEvaluator implements Evaluator {
     if (/\?[^;{}]*:\s*$/s.test(prefix) && !/[\w$]\?\s*:\s*$/s.test(prefix)) {
       return false;
     }
-    if (/^\s*$/.test(statementPrefix)) {
-      const boundaryStart = Math.max(prefix.lastIndexOf(';'), prefix.lastIndexOf('}')) + 1;
-      const previousStatementPrefix = prefix.slice(boundaryStart);
-      if (/(?:^|[;\n])\s*(?:export\s+|declare\s+)*(?:type\s+\w+[\s\S]*=|interface\s+\w+[\s\S]*)\s*$/s.test(previousStatementPrefix)) {
-        statementStart = boundaryStart;
-        statementPrefix = prefix.slice(statementStart);
-      }
+    const boundaryStart = Math.max(prefix.lastIndexOf(';'), prefix.lastIndexOf('}')) + 1;
+    const previousStatementPrefix = prefix.slice(boundaryStart);
+    if (!/\n\s*(?:const|let|var|function|class)\b/s.test(previousStatementPrefix) &&
+      (/^\s*$/.test(statementPrefix) || !/(?:^|[;\n])\s*(?:export\s+|declare\s+)*(?:type\s+\w+|interface\s+\w+)/s.test(statementPrefix)) &&
+      /(?:^|[;\n])\s*(?:export\s+|declare\s+)*(?:type\s+\w+[\s\S]*=|interface\s+\w+[\s\S]*)\s*$/s.test(previousStatementPrefix)) {
+      statementStart = boundaryStart;
+      statementPrefix = prefix.slice(statementStart);
+    }
+    if (!/\n\s*(?:const|let|var|function|class)\b/s.test(previousStatementPrefix) &&
+      (/^\s*(?:export\s+|declare\s+)*interface\s+\w+[\s\S]*$/s.test(previousStatementPrefix) ||
+        /^\s*(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*$/s.test(previousStatementPrefix))) {
+      return true;
     }
     const typeAliasContext = /^\s*(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=[^;]*$/s.test(statementPrefix);
     return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[^{}]*)$/s.test(statementPrefix) ||
-      /(?:^|[;\n{])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+)?\s*$/s.test(prefix) ||
+      /(?:^|[;\n{])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+)?\s*$/s.test(statementPrefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:export\s+|declare\s+)*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /\(\s*\w+\??\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
@@ -580,7 +605,7 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:await|case|return|throw|yield|delete|typeof|void|else|do)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:await|case|return|throw|yield|delete|typeof|void|else|do|of|in)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {

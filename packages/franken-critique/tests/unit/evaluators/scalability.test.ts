@@ -538,6 +538,45 @@ do /{ port: 8443 }/.test(input); while (x);`;
     ]);
   });
 
+  it('covers current-head Codex port scanner edge cases', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const cleanContent = `const cfg = { ports: [{ port: process.env.PORT, weights: [10, 20] }] };
+// { ports: [
+const values = [8080];
+const labels = { opportunity: 8080, portable: 8443, proportion: 9000 };
+for (const match of /{ port: 8080 }/.exec(input) ?? []) {}
+for (const key in /{ port: 8443 }/.exec(input) ?? []) {}`;
+
+    const cleanResult = await evaluator.evaluate(createInput(cleanContent));
+
+    expect(cleanResult.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+
+    const foundResult = await evaluator.evaluate(createInput(`const cfg = { serverPortsByName: { http: 8080 }, portsByProtocol: { https: 8443 } };
+const REPORT_PORT = 9000;
+const importPort = 3000;
+const cfg2 = { exportPort: 5000 };
+const port: Brand<
+  number
+> = 7000;`));
+
+    expect(foundResult.findings.map((f) => f.message)).toEqual([
+      'Found hardcoded port number: 9000. Use environment variables or config.',
+      'Found hardcoded port number: 3000. Use environment variables or config.',
+      'Found hardcoded port number: 7000. Use environment variables or config.',
+      'Found hardcoded port number: 5000. Use environment variables or config.',
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+    ]);
+  });
+
+  it('preserves long interface declarations as type-only', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const longExtends = Array.from({ length: 260 }, (_, index) => `Base${index}`).join(' & ');
+    const result = await evaluator.evaluate(createInput(`interface GeneratedConfig extends ${longExtends} { port: 3000 }`));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
   it('uses env-focused guidance for config-shape hardcoded ports', async () => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput('const cfg = { port: 8080 };'));
