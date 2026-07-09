@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 
 const originalArgv = process.argv;
 const originalCwd = process.cwd();
+const originalHome = process.env.HOME;
 
 function tmpDir(): string {
   const dir = join(tmpdir(), `fbeast-uninstall-entrypoint-${randomUUID()}`);
@@ -19,6 +20,11 @@ describe('fbeast-uninstall entrypoint', () => {
   afterEach(() => {
     process.argv = originalArgv;
     process.chdir(originalCwd);
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
     vi.restoreAllMocks();
     vi.resetModules();
     vi.doUnmock('../shared/is-main.js');
@@ -65,6 +71,33 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(settings.mcpServers['other-server']).toBeDefined();
     expect(hasFbeast(before)).toBe(false);
     expect(hasFbeast(after)).toBe(false);
+  });
+
+  it('falls back to legacy home Claude settings on uninstall when project settings do not exist', async () => {
+    const root = tmpDir();
+    const home = tmpDir();
+    dirs.push(root, home);
+    process.env.HOME = home;
+
+    const homeClaudeDir = join(home, '.claude');
+    mkdirSync(homeClaudeDir, { recursive: true });
+    writeFileSync(join(homeClaudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'fbeast-memory': { command: 'fbeast-memory' },
+        'other-server': { command: 'other-server' },
+      },
+    }));
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=claude', '--purge'];
+
+    await import('./uninstall.js');
+
+    const homeSettings = JSON.parse(readFileSync(join(homeClaudeDir, 'settings.json'), 'utf-8'));
+    expect(homeSettings.mcpServers['fbeast-memory']).toBeUndefined();
+    expect(homeSettings.mcpServers['other-server']).toBeDefined();
+    expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
   });
 
   it('honors an explicit Codex client argument', async () => {

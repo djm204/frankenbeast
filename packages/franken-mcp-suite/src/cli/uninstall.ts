@@ -338,12 +338,23 @@ function pruneFbeastFromEntry(entry: unknown): unknown | null {
   return entry;
 }
 
+function resolveUninstallClientConfigDir(client: McpClient, root: string): string {
+  const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  if (client === 'codex') return projectDir;
+
+  const homeDir = join(homedir(), client === 'claude' ? '.claude' : '.gemini');
+  if (!existsSync(join(projectDir, 'settings.json')) && existsSync(join(homeDir, 'settings.json'))) {
+    return homeDir;
+  }
+  return projectDir;
+}
+
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
-  const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  const claudeDir = resolveUninstallClientConfigDir(client, root);
   const purge = process.argv.includes('--purge') ? true : undefined;
   runUninstall({ root, claudeDir, client, purge }).catch((err) => {
     console.error('fbeast-uninstall failed:', err);

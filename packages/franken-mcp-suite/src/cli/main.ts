@@ -6,7 +6,7 @@ function printLine(...args: unknown[]): void {
 
 import { existsSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
-import { win32 } from 'node:path';
+import { join, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
@@ -95,6 +95,17 @@ function resolveCommand(command: string, args: string[]): ResolvedCommand {
 function resolveClient(): McpClient {
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   return clientArg ?? detectMcpClient({ cwd: process.cwd(), homeDir: homedir(), exists: existsSync });
+}
+
+function resolveUninstallClientConfigDir(client: McpClient, root: string): string {
+  const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  if (client === 'codex') return projectDir;
+
+  const homeDir = join(homedir(), client === 'claude' ? '.claude' : '.gemini');
+  if (!existsSync(join(projectDir, 'settings.json')) && existsSync(join(homeDir, 'settings.json'))) {
+    return homeDir;
+  }
+  return projectDir;
 }
 
 function reportMcpInitError(error: unknown): never {
@@ -199,7 +210,7 @@ switch (subcommand) {
     const { runUninstall } = await import('./uninstall.js');
     const root = process.cwd();
     const client = resolveClient();
-    const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+    const claudeDir = resolveUninstallClientConfigDir(client, root);
     const purge = process.argv.includes('--purge') ? true : undefined;
     await runUninstall({ root, claudeDir, client, purge });
     break;
