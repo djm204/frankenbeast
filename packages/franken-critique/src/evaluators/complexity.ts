@@ -14,22 +14,31 @@ const FUNCTION_PATTERN = /function\s+\w+\s*\(([^)]*)\)\s*\{([\s\S]*?)\}/g;
 const ARROW_FUNCTION_PATTERN =
   /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
 const PARAMETER_LIST_START_PATTERNS = [
-  /function\s+\w+\s*\(/g,
-  /(?:const|let|var)\s+\w+\s*=\s*\(/g,
+  { pattern: /function\s+\w+\s*\(/g, requiresArrow: false },
+  { pattern: /(?:const|let|var)\s+\w+\s*=\s*\(/g, requiresArrow: true },
 ];
+
+type ParameterList = {
+  params: string;
+  closeParenIndex: number;
+};
 
 function extractParameterLists(content: string): string[] {
   const parameterLists: string[] = [];
 
-  for (const pattern of PARAMETER_LIST_START_PATTERNS) {
+  for (const { pattern, requiresArrow } of PARAMETER_LIST_START_PATTERNS) {
     for (const match of content.matchAll(pattern)) {
       const openParenIndex = (match.index ?? 0) + match[0].length - 1;
       const parameterList = readBalancedParenthesizedContent(
         content,
         openParenIndex,
       );
-      if (parameterList !== null) {
-        parameterLists.push(parameterList);
+      if (
+        parameterList !== null &&
+        (!requiresArrow ||
+          hasArrowAfterParameterList(content, parameterList.closeParenIndex))
+      ) {
+        parameterLists.push(parameterList.params);
       }
     }
   }
@@ -40,7 +49,7 @@ function extractParameterLists(content: string): string[] {
 function readBalancedParenthesizedContent(
   content: string,
   openParenIndex: number,
-): string | null {
+): ParameterList | null {
   let depth = 0;
 
   for (let index = openParenIndex + 1; index < content.length; index++) {
@@ -49,13 +58,69 @@ function readBalancedParenthesizedContent(
       depth++;
     } else if (char === ')') {
       if (depth === 0) {
-        return content.slice(openParenIndex + 1, index);
+        return {
+          params: content.slice(openParenIndex + 1, index),
+          closeParenIndex: index,
+        };
       }
       depth--;
     }
   }
 
   return null;
+}
+
+function hasArrowAfterParameterList(
+  content: string,
+  closeParenIndex: number,
+): boolean {
+  const afterParams = content.slice(closeParenIndex + 1);
+  return /^\s*(?::\s*[^=]+?)?=>/.test(afterParams);
+}
+
+function hasGenericCloseBeforeTopLevelComma(
+  params: string,
+  startIndex: number,
+): boolean {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+
+  for (let index = startIndex + 1; index < params.length; index++) {
+    const char = params[index];
+    if (char === undefined) continue;
+
+    if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (
+      char === ',' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      return false;
+    } else if (
+      char === '>' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      params[index - 1] !== '='
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function countTopLevelParameters(params: string): number {
@@ -87,7 +152,10 @@ function countTopLevelParameters(params: string): number {
       bracketDepth++;
     } else if (char === ']') {
       bracketDepth = Math.max(0, bracketDepth - 1);
-    } else if (char === '<') {
+    } else if (
+      char === '<' &&
+      hasGenericCloseBeforeTopLevelComma(params, index)
+    ) {
       angleDepth++;
     } else if (char === '>' && previousChar !== '=') {
       angleDepth = Math.max(0, angleDepth - 1);

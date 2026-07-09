@@ -155,6 +155,26 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('does not let default comparison expressions hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, a, b, c, d, e) { return limit; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('does not count parenthesized variable expressions as arrow parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const value = (a, b, c, d, e, f);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
   it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;
