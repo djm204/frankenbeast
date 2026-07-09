@@ -122,6 +122,11 @@ describe('AuditTrail', () => {
     expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
   });
 
+  it('fromJSON rejects impossible timestamp dates', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), timestamp: '2026-02-31T00:00:00.000Z' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
   it('verify() passes with correct hashes', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });

@@ -30,6 +30,22 @@ function assertPersistedAuditTrail(value: unknown): asserts value is PersistedAu
   assertAuditEventArray(value.events, 'events');
 }
 
+function normalizePersistedAuditTrail(value: unknown): unknown {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.events)) {
+    return value;
+  }
+
+  return {
+    ...value,
+    events: value.events.map((event) => {
+      if (!isRecord(event) || Object.prototype.hasOwnProperty.call(event, 'payload')) {
+        return event;
+      }
+      return { ...event, payload: null };
+    }),
+  };
+}
+
 /**
  * Allowed run ID characters. Restricting to a single safe filename segment
  * prevents path traversal (`../`), absolute paths, and separator injection
@@ -99,7 +115,7 @@ export class AuditTrailStore {
     if (!existsSync(filePath)) {
       throw new Error(`Audit trail not found: ${filePath}`);
     }
-    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+    const raw = normalizePersistedAuditTrail(JSON.parse(readFileSync(filePath, 'utf-8')) as unknown);
     assertPersistedAuditTrail(raw);
     return AuditTrail.fromJSON(raw.events);
   }

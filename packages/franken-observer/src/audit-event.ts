@@ -49,7 +49,7 @@ function requireOptionalHashField(record: Record<string, unknown>, field: keyof 
 function requireIsoTimestamp(record: Record<string, unknown>, context: string): void {
   const timestamp = requireStringField(record, 'timestamp', context);
   const parsed = Date.parse(timestamp);
-  if (!ISO_TIMESTAMP_PATTERN.test(timestamp) || Number.isNaN(parsed)) {
+  if (!ISO_TIMESTAMP_PATTERN.test(timestamp) || Number.isNaN(parsed) || new Date(parsed).toISOString() !== timestamp) {
     throw new Error(`Invalid audit event at ${context}: timestamp must be an ISO timestamp`);
   }
 }

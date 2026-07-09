@@ -105,7 +105,7 @@ describe('AuditTrailStore', () => {
     expect(() => store.load('run-1')).toThrow(/events\[0\]: eventId must be a non-empty string/i);
   });
 
-  it('rejects persisted events missing payload', () => {
+  it('normalizes legacy persisted events missing payload to null', () => {
     const filePath = store.save('run-1', sampleTrail());
     const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
     raw.events = [
@@ -119,7 +119,7 @@ describe('AuditTrailStore', () => {
     ];
     writeFileSync(filePath, JSON.stringify(raw));
 
-    expect(() => store.load('run-1')).toThrow(/events\[0\]: payload is required/i);
+    expect(store.load('run-1').getAll()[0]!.payload).toBeNull();
   });
 
   it('round-trips events whose original payload was undefined', () => {
