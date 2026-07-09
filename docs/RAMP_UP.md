@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`: the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md) and ADR-031 for the earlier consolidation history; do not treat the deleted pre-consolidation MCP package as the current MCP suite.
+A deterministic guardrails framework for AI agents organized as an **npm workspaces monorepo with Turborepo** for build orchestration. The current workspace contains **10 first-party packages** under `packages/`, matching the canonical inventories in [README.md](../README.md#current-workspace-packages) and [docs/guides/quickstart.md](guides/quickstart.md#project-structure): the consolidated core packages, `franken-mcp-suite` (`@franken/mcp-suite`), and `live-bench` (`@franken/live-bench`). Cross-package dependencies use workspace references (e.g., `@franken/types`). See [ADR-011](adr/011-monorepo-migration.md) and ADR-031 for the earlier consolidation history; the historical `franken-mcp` package was removed, while the current `@franken/mcp-suite` workspace remains active.
 
 ## Modules
 
