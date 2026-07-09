@@ -20,7 +20,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:live": "FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live",
+    "test:live": "npm run build && FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {

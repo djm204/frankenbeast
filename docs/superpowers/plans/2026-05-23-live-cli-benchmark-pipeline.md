@@ -490,6 +490,8 @@ Each adapter should:
 
 `tests/live/*.live.test.ts` should skip unless `FBEAST_LIVE_BENCH_E2E=1` and the required binary exists. Live tests should run a tiny fixture with a short timeout and assert evidence files exist, not exact model output.
 
+The package-local `test:live` target currently discovers checked-in smoke coverage under `packages/live-bench/tests/live/`; keep that directory populated whenever the script remains published, and extend it with the Codex/Gemini adapter live tests as those adapters land.
+
 **Step 4: Verify default suite**
 
 ```bash
