@@ -184,4 +184,17 @@ describe('local setup scripts', () => {
     }
     expect(supportedProviders).not.toContain('ollama');
   });
+
+  it('keeps the root README provider-extension guidance on current provider surfaces', () => {
+    const readme = read('README.md');
+
+    expect(readme).not.toContain('Adding a new provider means implementing one `IAdapter` interface');
+    expect(readme).not.toContain('implement `IAdapter` in 4 steps');
+    expect(readme).not.toMatch(/firewall is a model-agnostic proxy/i);
+    expect(readme).toContain('CLI execution/chat providers implement `ICliProvider`');
+    expect(readme).toContain('API-backed clients live in the provider registry and config loading paths');
+    expect(readme).toContain(
+      'add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry',
+    );
+  });
 });
