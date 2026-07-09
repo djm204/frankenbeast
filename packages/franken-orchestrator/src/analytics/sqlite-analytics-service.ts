@@ -513,22 +513,37 @@ function matchesFilters(event: AnalyticsEvent, filters: AnalyticsFilters): boole
     }
   }
   const cutoff = cutoffFor(filters.timeWindow);
-  if (cutoff && parseAnalyticsTimestamp(event.timestamp) < cutoff.getTime()) {
-    return false;
+  if (cutoff) {
+    const parsedTimestamp = parseAnalyticsTimestamp(event.timestamp);
+    if (parsedTimestamp === null || parsedTimestamp < cutoff.getTime()) {
+      return false;
+    }
   }
   return true;
 }
 
 function compareTimestampsDesc(left: string, right: string): number {
-  const delta = parseAnalyticsTimestamp(right) - parseAnalyticsTimestamp(left);
+  const leftTimestamp = parseAnalyticsTimestamp(left);
+  const rightTimestamp = parseAnalyticsTimestamp(right);
+  if (leftTimestamp === null && rightTimestamp === null) {
+    return right.localeCompare(left);
+  }
+  if (leftTimestamp === null) {
+    return 1;
+  }
+  if (rightTimestamp === null) {
+    return -1;
+  }
+  const delta = rightTimestamp - leftTimestamp;
   return delta === 0 ? right.localeCompare(left) : delta;
 }
 
-function parseAnalyticsTimestamp(timestamp: string): number {
+function parseAnalyticsTimestamp(timestamp: string): number | null {
   const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(timestamp)
     ? `${timestamp.replace(' ', 'T')}Z`
     : timestamp;
-  return Date.parse(normalized);
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function cutoffFor(timeWindow: string | undefined): Date | null {

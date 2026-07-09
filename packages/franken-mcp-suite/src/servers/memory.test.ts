@@ -23,6 +23,35 @@ describe('Memory Server', () => {
     expect(storeTool.description).toBe('Store key/value in working or episodic memory');
   });
 
+  it('limits memory type enums to working and episodic', () => {
+    const storeTool = createMemoryServer({
+      brain: {
+        query: vi.fn(),
+        store: vi.fn(),
+        frontload: vi.fn(),
+        forget: vi.fn(),
+      },
+    }).tools.find((t) => t.name === 'fbeast_memory_store')!;
+
+    const queryTool = createMemoryServer({
+      brain: {
+        query: vi.fn(),
+        store: vi.fn(),
+        frontload: vi.fn(),
+        forget: vi.fn(),
+      },
+    }).tools.find((t) => t.name === 'fbeast_memory_query')!;
+
+    expect(storeTool.inputSchema.properties?.type).toMatchObject({
+      enum: ['working', 'episodic'],
+      description: 'Memory type: working or episodic',
+    });
+    expect(queryTool.inputSchema.properties?.type).toMatchObject({
+      enum: ['working', 'episodic'],
+      description: 'Filter by type: working or episodic',
+    });
+  });
+
   it('delegates memory store/query/frontload/forget to the brain adapter', async () => {
     const brain = {
       query: vi.fn().mockResolvedValue([

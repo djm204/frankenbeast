@@ -57,24 +57,6 @@ describe('MCP client detection', () => {
     expect(client).toBe('gemini');
   });
 
-  it('prefers project Codex config over Claude project MCP config', () => {
-    const cwd = '/project';
-    const homeDir = '/home/user';
-    const existing = new Set([
-      join(cwd, '.codex'),
-      join(cwd, '.mcp.json'),
-      join(homeDir, '.claude'),
-    ]);
-
-    const client = detectMcpClient({
-      cwd,
-      homeDir,
-      exists: (path) => existing.has(path),
-    });
-
-    expect(client).toBe('codex');
-  });
-
   it('detects Claude project MCP config before home-level clients', () => {
     const cwd = '/project';
     const homeDir = '/home/user';

@@ -435,12 +435,7 @@ describe('fbeast init', () => {
     expect(keys).toEqual(['fbeast-proxy']);
     expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({
       command: 'fbeast-proxy',
-      args: [
-        '--db',
-        '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
-        '--config',
-        '${CLAUDE_PROJECT_DIR}/.fbeast/config.json',
-      ],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
   });
@@ -473,12 +468,7 @@ describe('fbeast init', () => {
     });
     expect(mcpConfig.mcpServers['fbeast-firewall']).toEqual({
       command: 'fbeast-firewall',
-      args: [
-        '--db',
-        '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
-        '--config',
-        '${CLAUDE_PROJECT_DIR}/.fbeast/config.json',
-      ],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });

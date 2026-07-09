@@ -252,6 +252,46 @@ describe('createSqliteAnalyticsService', () => {
     expect(result.events.map((event) => event.id)).toEqual(['cost:1', 'beast-run:run-early']);
   });
 
+  it('quarantines malformed Analytics timestamps from finite windows and sorts them last otherwise', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-28T12:00:00.000Z'));
+    workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
+    const dbPath = join(workDir, 'beast.db');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE cost_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+    `);
+    const insertCost = db.prepare(`
+      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertCost.run('session-recent', 'gpt-5.4', 1, 1, 0.01, '2026-04-28T11:59:00.000Z');
+    insertCost.run('session-invalid', 'gpt-5.4', 1, 1, 0.01, 'not-a-date');
+    insertCost.run('session-sqlite', 'gpt-5.4', 1, 1, 0.01, '2026-04-28 10:30:00');
+    db.close();
+
+    const service = createSqliteAnalyticsService({ dbPath });
+
+    await expect(service.listEvents({ timeWindow: '24h' })).resolves.toMatchObject({
+      total: 2,
+      events: [
+        expect.objectContaining({ id: 'cost:1', sessionId: 'session-recent' }),
+        expect.objectContaining({ id: 'cost:3', sessionId: 'session-sqlite' }),
+      ],
+    });
+
+    const allEvents = await service.listEvents({ timeWindow: 'all' });
+    expect(allEvents.events.map((event) => event.id)).toEqual(['cost:1', 'cost:3', 'cost:2']);
+  });
+
   it('reads failed Beast runs directly from the daemon database without service handles', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-analytics-'));
     const dbPath = join(workDir, 'beast.db');

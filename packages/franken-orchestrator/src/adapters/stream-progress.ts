@@ -61,6 +61,7 @@ export function createStreamProgressHandler(
   let lastToolName = '';
   let showedThinking = false;
   let textAccumulator = '';
+  let toolInputAccumulator = '';
   const seenChunkIds = new Set<string>();
 
   return (line: string) => {
@@ -91,6 +92,10 @@ export function createStreamProgressHandler(
 
       if (block['type'] === 'tool_use') {
         lastToolName = block['name'] as string;
+        toolInputAccumulator = '';
+      } else {
+        lastToolName = '';
+        toolInputAccumulator = '';
       }
 
       // Reset text accumulator for new text blocks
@@ -108,12 +113,14 @@ export function createStreamProgressHandler(
       if (delta['type'] === 'input_json_delta' && lastToolName) {
         const partial = delta['partial_json'] as string | undefined;
         if (partial) {
-          const pathMatch = partial.match(/"file_path"\s*:\s*"([^"]+)"/);
+          toolInputAccumulator += partial;
+          const pathMatch = toolInputAccumulator.match(/"file_path"\s*:\s*"([^"]+)"/);
           if (pathMatch?.[1]) {
             const action = toolAction(lastToolName);
             const shortPath = shortenPath(pathMatch[1]);
             write(`  ${ANSI.dim}${action} ${shortPath}${ANSI.reset}\n`);
             lastToolName = ''; // Only show once per tool use
+            toolInputAccumulator = '';
           }
         }
       }

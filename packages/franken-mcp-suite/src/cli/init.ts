@@ -110,7 +110,7 @@ function initJsonClient(options: {
   pruneFbeastMcpServerEntries(mcpConfig);
   const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db' : join('.fbeast', 'beast.db');
-  const configPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/config.json' : join('.fbeast', 'config.json');
+  const configPath = join('.fbeast', 'config.json');
   const proxyArgs = ['--db', dbPath, '--config', configPath];
   const standardServerArgs = (srv: FbeastServer) => srv === 'firewall'
     ? ['--db', dbPath, '--config', configPath]
