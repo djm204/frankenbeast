@@ -51,6 +51,8 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
       .mockReturnValueOnce({ run: upsertTraceRun })
       .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
     const adapter = new SQLiteAdapter('/tmp/traces.db')
@@ -76,12 +78,19 @@ describe('SQLiteAdapter', () => {
     await adapter.flush(clonedTrace)
     expect(upsertSpanRun).toHaveBeenCalledTimes(1)
 
+    first.metadata.step = 3
+    await adapter.flush(trace)
+    expect(upsertSpanRun).toHaveBeenCalledTimes(2)
+    expect(upsertSpanRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: first.id, metadata: JSON.stringify({ step: 3 }) }),
+    )
+
     const second = TraceContext.startSpan(trace, { name: 'second' })
     SpanLifecycle.setMetadata(second, { step: 2 })
     TraceContext.endSpan(second)
     await adapter.flush(trace)
 
-    expect(upsertSpanRun).toHaveBeenCalledTimes(2)
+    expect(upsertSpanRun).toHaveBeenCalledTimes(3)
     expect(upsertSpanRun).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: second.id, metadata: JSON.stringify({ step: 2 }) }),
     )
@@ -116,5 +125,33 @@ describe('SQLiteAdapter', () => {
     expect(upsertSpanRun).toHaveBeenCalledTimes(4)
     expect(upsertSpanRun.mock.calls[2]?.[0]).toEqual(expect.objectContaining({ id: first.id }))
     expect(upsertSpanRun.mock.calls[3]?.[0]).toEqual(expect.objectContaining({ id: second.id }))
+  })
+
+  it('bounds flushed-span snapshots by evicting older trace groups', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi.fn()
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db', { maxFlushedSpanSnapshots: 1 })
+    const firstTrace = TraceContext.createTrace('first')
+    const firstSpan = TraceContext.startSpan(firstTrace, { name: 'first' })
+    TraceContext.endSpan(firstSpan)
+    const secondTrace = TraceContext.createTrace('second')
+    const secondSpan = TraceContext.startSpan(secondTrace, { name: 'second' })
+    TraceContext.endSpan(secondSpan)
+
+    await adapter.flush(firstTrace)
+    await adapter.flush(secondTrace)
+    await adapter.flush(firstTrace)
+
+    expect(upsertSpanRun).toHaveBeenCalledTimes(3)
+    expect(upsertSpanRun.mock.calls[2]?.[0]).toEqual(expect.objectContaining({ id: firstSpan.id }))
   })
 })

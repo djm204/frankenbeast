@@ -15,6 +15,11 @@ interface TokenCounts {
   completion: number
 }
 
+interface FlushedSpanEntry {
+  traceId: string
+  spanId: string
+}
+
 function escapePrometheusLabelValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"')
 }
@@ -34,7 +39,9 @@ export class PrometheusAdapter implements ExportAdapter {
   private tokenCounters = new Map<string, TokenCounts>()
   private spanCounters = new Map<string, number>()
   private costCounters = new Map<string, number>()
-  private flushedSpanIds = new Map<string, undefined>()
+  private flushedSpanIdsByTrace = new Map<string, Set<string>>()
+  private flushedSpanInsertionOrder = new Map<string, FlushedSpanEntry>()
+  private flushedSpanIdCount = 0
 
   constructor(options: PrometheusAdapterOptions = {}) {
     this.pricingTable = options.pricingTable
@@ -43,9 +50,11 @@ export class PrometheusAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
+    const flushedSpanIds = this.flushedSpanIdsByTrace.get(trace.id)
+    const newlyFlushedSpanIds: string[] = []
+
     for (const span of trace.spans) {
-      const spanKey = `${trace.id}\u0000${span.id}`
-      if (this.flushedSpanIds.has(spanKey) || span.status === 'active') continue
+      if (flushedSpanIds?.has(span.id) || span.status === 'active') continue
 
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)
@@ -79,17 +88,56 @@ export class PrometheusAdapter implements ExportAdapter {
         }
       }
 
-      this.rememberFlushedSpan(spanKey)
+      newlyFlushedSpanIds.push(span.id)
     }
+
+    this.rememberFlushedSpans(trace.id, newlyFlushedSpanIds)
   }
 
-  private rememberFlushedSpan(spanKey: string): void {
-    if (this.maxDedupeSpans === 0) return
-    this.flushedSpanIds.set(spanKey, undefined)
-    while (this.flushedSpanIds.size > this.maxDedupeSpans) {
-      const oldest = this.flushedSpanIds.keys().next().value as string | undefined
-      if (oldest === undefined) break
-      this.flushedSpanIds.delete(oldest)
+  private rememberFlushedSpans(traceId: string, spanIds: string[]): void {
+    if (this.maxDedupeSpans === 0 || spanIds.length === 0) return
+
+    let flushedSpanIds = this.flushedSpanIdsByTrace.get(traceId)
+    if (flushedSpanIds === undefined) {
+      flushedSpanIds = new Set<string>()
+      this.flushedSpanIdsByTrace.set(traceId, flushedSpanIds)
+    }
+
+    for (const spanId of spanIds) {
+      if (flushedSpanIds.has(spanId)) continue
+      const spanKey = `${traceId}\u0000${spanId}`
+      flushedSpanIds.add(spanId)
+      this.flushedSpanInsertionOrder.set(spanKey, { traceId, spanId })
+      this.flushedSpanIdCount += 1
+    }
+
+    this.pruneFlushedSpans(traceId)
+  }
+
+  private pruneFlushedSpans(currentTraceId: string): void {
+    while (this.flushedSpanIdCount > this.maxDedupeSpans) {
+      let pruned = false
+
+      for (const [spanKey, entry] of this.flushedSpanInsertionOrder) {
+        // Keep the trace currently being flushed intact so a retry of a large
+        // trace does not evict the next span immediately before it is checked and
+        // double-count the trace. Older individual span ids from other traces are
+        // pruned first; a single large current trace may temporarily exceed the
+        // configured cap until another trace is flushed.
+        if (entry.traceId === currentTraceId) continue
+
+        this.flushedSpanInsertionOrder.delete(spanKey)
+        const traceSpanIds = this.flushedSpanIdsByTrace.get(entry.traceId)
+        traceSpanIds?.delete(entry.spanId)
+        if (traceSpanIds?.size === 0) {
+          this.flushedSpanIdsByTrace.delete(entry.traceId)
+        }
+        this.flushedSpanIdCount -= 1
+        pruned = true
+        break
+      }
+
+      if (!pruned) break
     }
   }
 
@@ -140,7 +188,9 @@ export class PrometheusAdapter implements ExportAdapter {
     this.tokenCounters.clear()
     this.spanCounters.clear()
     this.costCounters.clear()
-    this.flushedSpanIds.clear()
+    this.flushedSpanIdsByTrace.clear()
+    this.flushedSpanInsertionOrder.clear()
+    this.flushedSpanIdCount = 0
   }
 
   async queryByTraceId(_traceId: string): Promise<Trace | null> {

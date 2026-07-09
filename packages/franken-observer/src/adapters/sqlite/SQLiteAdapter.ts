@@ -55,6 +55,11 @@ interface FlushedSpanState {
   thoughtBlocksJson: string
 }
 
+export interface SQLiteAdapterOptions {
+  /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
+  maxFlushedSpanSnapshots?: number
+}
+
 /**
  * Parse a JSON column, returning a fallback instead of throwing when the
  * stored value is corrupt. A single bad row must not poison the whole trace
@@ -92,10 +97,16 @@ function rowToSpan(row: SpanRow): Span {
  */
 export class SQLiteAdapter implements ExportAdapter {
   private readonly db: Database.Database
+  private readonly maxFlushedSpanSnapshots: number
   private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
+  private flushedSpanSnapshotCount = 0
 
-  constructor(filePath: string) {
+  constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
     this.db = new Database(filePath)
+    this.maxFlushedSpanSnapshots = Math.max(
+      0,
+      Math.floor(options.maxFlushedSpanSnapshots ?? 10_000),
+    )
     this.db.pragma('busy_timeout = 5000')
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
@@ -164,26 +175,23 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   private metadataChanged(previous: FlushedSpanState, span: Span): boolean {
-    const keyCount = Object.keys(span.metadata).length
-    if (previous.metadata === span.metadata && previous.metadataKeyCount === keyCount) return false
     return previous.metadataJson !== JSON.stringify(span.metadata)
   }
 
   private thoughtBlocksChanged(previous: FlushedSpanState, span: Span): boolean {
-    if (
-      previous.thoughtBlocks === span.thoughtBlocks &&
-      previous.thoughtBlockCount === span.thoughtBlocks.length
-    ) {
-      return false
-    }
     return previous.thoughtBlocksJson !== JSON.stringify(span.thoughtBlocks)
   }
 
   private rememberFlushedSpan(span: Span): void {
+    if (this.maxFlushedSpanSnapshots === 0) return
+
     let byTrace = this.flushedSpans.get(span.traceId)
     if (byTrace === undefined) {
       byTrace = new Map<string, FlushedSpanState>()
       this.flushedSpans.set(span.traceId, byTrace)
+    }
+    if (!byTrace.has(span.id)) {
+      this.flushedSpanSnapshotCount += 1
     }
     byTrace.set(span.id, {
       status: span.status,
@@ -197,6 +205,30 @@ export class SQLiteAdapter implements ExportAdapter {
       thoughtBlockCount: span.thoughtBlocks.length,
       thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
     })
+    this.pruneFlushedSpanSnapshots(span.traceId)
+  }
+
+  private pruneFlushedSpanSnapshots(currentTraceId: string): void {
+    while (this.flushedSpanSnapshotCount > this.maxFlushedSpanSnapshots) {
+      const oldestTraceId = this.flushedSpans.keys().next().value as string | undefined
+      if (oldestTraceId === undefined) break
+
+      // Do not evict snapshots for the trace currently being flushed: doing so
+      // would make a large retry walk miss the next span and re-upsert the trace.
+      // Prune older trace groups first; a single large current trace may exceed
+      // the cap until the adapter sees another trace.
+      if (oldestTraceId === currentTraceId) {
+        if (this.flushedSpans.size === 1) break
+        const current = this.flushedSpans.get(oldestTraceId)
+        this.flushedSpans.delete(oldestTraceId)
+        this.flushedSpans.set(oldestTraceId, current ?? new Map<string, FlushedSpanState>())
+        continue
+      }
+
+      const pruned = this.flushedSpans.get(oldestTraceId)
+      this.flushedSpanSnapshotCount -= pruned?.size ?? 0
+      this.flushedSpans.delete(oldestTraceId)
+    }
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {

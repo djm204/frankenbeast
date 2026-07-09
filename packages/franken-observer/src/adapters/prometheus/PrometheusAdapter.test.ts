@@ -24,6 +24,21 @@ function makeTraceNoModel() {
   return trace
 }
 
+function makeMultiSpanTrace(tokenCounts: number[]) {
+  const trace = TraceContext.createTrace('multi')
+  for (const [index, promptTokens] of tokenCounts.entries()) {
+    const span = TraceContext.startSpan(trace, { name: `llm-call-${index}` })
+    SpanLifecycle.recordTokenUsage(span, {
+      promptTokens,
+      completionTokens: 0,
+      model: 'claude-sonnet-4-6',
+    })
+    TraceContext.endSpan(span)
+  }
+  TraceContext.endTrace(trace)
+  return trace
+}
+
 describe('PrometheusAdapter', () => {
   describe('scrape() — token metrics', () => {
     it('returns a non-empty string after a flush', async () => {
@@ -100,6 +115,53 @@ describe('PrometheusAdapter', () => {
       const out = adapter.scrape()
       expect(out).toMatch(
         /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+300/,
+      )
+    })
+
+    it('does not evict the next cached span while retrying a large trace', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 2 })
+      const trace = makeMultiSpanTrace([100, 200, 300])
+
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+600/,
+      )
+    })
+
+    it('prunes oldest span ids without dropping newly flushed spans from the same trace', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 3 })
+      const first = TraceContext.createTrace('first')
+      const firstSpan = TraceContext.startSpan(first, { name: 'llm-call' })
+      SpanLifecycle.recordTokenUsage(firstSpan, {
+        promptTokens: 100,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(firstSpan)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+      const third = makeTrace('claude-sonnet-4-6', 300, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+
+      const appended = TraceContext.startSpan(first, { name: 'llm-call-appended' })
+      SpanLifecycle.recordTokenUsage(appended, {
+        promptTokens: 400,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(appended)
+      TraceContext.endTrace(first)
+      await adapter.flush(first)
+      await adapter.flush(third)
+      await adapter.flush(first)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+1100/,
       )
     })
 
